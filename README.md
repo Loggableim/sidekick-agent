@@ -30,6 +30,21 @@ hermes --help                # Same binary as sidekick
 
 ## Screenshots
 
+### WebUI Chat / Dashboard
+
+| View | Screenshot |
+|------|-----------|
+| **Dashboard** — chat interface with session list and action buttons | ![Dashboard](docs/screenshots/webui-dashboard.png) |
+| **Session** — active conversation with message history | ![Session](docs/screenshots/webui-session.png) |
+| **Appstore** — browse and install tools/apps | ![Appstore](docs/screenshots/webui-appstore.png) |
+| **Settings** — theme, skin, TTS, language preferences | ![Settings](docs/screenshots/webui-settings.png) |
+| **Agents** — manage agent profiles and configurations | ![Agents](docs/screenshots/webui-agents.png) |
+| **Skills** — browse installed and available skills | ![Skills](docs/screenshots/webui-skills.png) |
+| **Memory** — memory provider status and configuration | ![Memory](docs/screenshots/webui-memory.png) |
+| **Insights** — usage analytics and session statistics | ![Insights](docs/screenshots/webui-insights.png) |
+| **Kanban** — multi-agent collaboration board | ![Kanban](docs/screenshots/webui-kanban.png) |
+| **CLI Doctor** — full console output | [`doctor-output.txt`](docs/screenshots/doctor-output.txt) |
+
 ### `sidekick doctor` — System health check
 
 ```
@@ -37,41 +52,20 @@ hermes --help                # Same binary as sidekick
 │                 🩺 Sidekick Doctor                      │
 └─────────────────────────────────────────────────────────┘
 
-◆ Python Environment
-  ✓ Python 3.12.10
-  ✓ Virtual environment active
-
-◆ Required Packages
-  ✓ OpenAI SDK  ✓ Rich (terminal UI)  ✓ PyYAML  ✓ HTTPX
-
-◆ Configuration Files
-  ✓ ~/.sidekick/.env file exists
-  ✓ API key or custom endpoint configured
-  ✓ ~/.sidekick/config.yaml exists
-
-◆ Auth Providers
-  ✓ OpenAI Codex (logged in)    ⚠ Nous Portal (not logged in)
-  ✓ 26 provider connectivity checks (--check-providers)
-
-◆ Memory Provider
-  ✓ Built-in memory active
-
-◆ Session State
-  ✓ 10 sessions, 3 workspaces, 0 stale streams
+◆ Python Environment         ✓ Python 3.12.10
+◆ Required Packages          ✓ OpenAI SDK  ✓ Rich  ✓ PyYAML
+◆ Configuration Files        ✓ .env  ✓ config.yaml
+◆ Auth Providers             ✓ OpenAI Codex  ⚠ Nous Portal
 ```
 
-### WebUI Dashboard
-
-The WebUI runs at `http://127.0.0.1:8787` after `sidekick dashboard`:
-
-- **Session panel** — create, select, rename, delete sessions
-- **Chat interface** — real-time SSE streaming with message history
-- **Workspace browser** — switch between active workspaces
-- **Model/provider selector** — configure model per session
-- **Settings panel** — theme, skin, TTS, language preferences
-
 **Known working:** `/health` (200), session CRUD, workspace browsing,
-streaming chat, static asset serving, SSE heartbeats (5s interval).
+streaming chat, static asset serving, SSE heartbeats (5s interval), TUI import.
+
+### TUI (Terminal UI)
+
+`sidekick --tui` starts the prompt_toolkit-based terminal interface.
+Import-verified via smoke test (19/19 green). Interactive testing requires
+a terminal with curses support.
 
 ## Repository layout
 

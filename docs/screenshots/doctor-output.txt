@@ -1,0 +1,118 @@
+
+┌─────────────────────────────────────────────────────────┐
+│                 🩺 Sidekick Doctor                      │
+└─────────────────────────────────────────────────────────┘
+
+◆ Python Environment
+  ✓ Python 3.12.10
+  ✓ Virtual environment active
+
+◆ Required Packages
+  ✓ OpenAI SDK
+  ✓ Rich (terminal UI)
+  ✓ python-dotenv
+  ✓ PyYAML
+  ✓ HTTPX
+  ✓ Croniter (cron expressions) (optional)
+  ✓ python-telegram-bot (optional)
+  ✓ discord.py (optional)
+
+◆ Configuration Files
+  ✓ C:\HermesPortable\home/.env file exists
+  ✓ API key or custom endpoint configured
+  ✓ C:\HermesPortable\home/config.yaml exists
+  ✓ Config version up to date (v23)
+
+◆ Auth Providers
+  ⚠ Nous Portal auth (not logged in)
+  ✓ OpenAI Codex auth (logged in)
+  ⚠ Google Gemini OAuth (not logged in)
+  ⚠ MiniMax OAuth (not logged in)
+  ✓ codex CLI
+
+◆ Directory Structure
+  ✓ C:\HermesPortable\home directory exists
+  ✓ C:\HermesPortable\home/cron/ exists
+  ✓ C:\HermesPortable\home/sessions/ exists
+  ✓ C:\HermesPortable\home/logs/ exists
+  ✓ C:\HermesPortable\home/skills/ exists
+  ✓ C:\HermesPortable\home/memories/ exists
+  ✓ C:\HermesPortable\home/SOUL.md exists (persona configured)
+  ✓ C:\HermesPortable\home/memories/ directory exists
+  ✓ MEMORY.md exists (2069 chars)
+  ✓ USER.md exists (1352 chars)
+  ✓ C:\HermesPortable\home/state.db exists (7498 sessions)
+    → WAL file is 15 MB (normal for active sessions)
+
+◆ External Tools
+  ✓ git
+  ✓ ripgrep (rg) (faster file search)
+  ⚠ docker not found (optional)
+  ✓ Node.js
+  ⚠ agent-browser not installed (run: npm install)
+
+◆ API Connectivity
+  Running 26 connectivity checks in parallel…                                                                        ✓ OpenRouter API
+  ✓ MiniMax             
+  ✓ OpenCode Go          (key configured)
+  ✗ gemini               (invalid API key)
+  ✓ ollama-cloud        
+
+◆ Submodules
+  ⚠ tinker-atropos not found (run: git submodule update --init --recursive)
+
+◆ Tool Availability
+  ✓ browser
+  ✓ clarify
+  ✓ code_execution
+  ✓ cronjob
+  ✓ terminal
+  ✓ delegation
+  ✓ discord
+  ✓ discord_admin
+  ✓ file
+  ✓ memory
+  ✓ moa
+  ✓ skills
+  ✓ todo
+  ✓ tts
+  ✓ vision
+  ✓ video
+  ✓ kanban (runtime-gated; loaded only for dispatcher-spawned workers)
+  ⚠ browser-cdp (system dependency not met)
+  ⚠ computer_use (system dependency not met)
+  ⚠ feishu_doc (system dependency not met)
+  ⚠ feishu_drive (system dependency not met)
+  ⚠ homeassistant (system dependency not met)
+  ⚠ image_gen (system dependency not met)
+  ⚠ rl (missing TINKER_API_KEY, WANDB_API_KEY)
+  ⚠ session_search (system dependency not met)
+  ⚠ web (missing EXA_API_KEY, PARALLEL_API_KEY, TAVILY_API_KEY, FIRECRAWL_API_KEY, FIRECRAWL_API_URL, FIRECRAWL_GATEWAY_URL, TOOL_GATEWAY_DOMAIN, TOOL_GATEWAY_SCHEME, TOOL_GATEWAY_USER_TOKEN)
+  ⚠ sidekick-yuanbao (system dependency not met)
+
+◆ Skills Hub
+  ⚠ Skills Hub directory not initialized (run: sidekick skills list)
+  ⚠ No GITHUB_TOKEN (60 req/hr rate limit — set in C:\HermesPortable\home/.env for better rates)
+
+◆ Memory Provider
+  ✓ Built-in memory active (no external provider configured — this is fine)
+
+◆ Profiles
+  ✓ 8 profile(s) found
+  ✓   backend-dev: deepseek-v4-flash, no .env, no alias
+  ✓   content-filler: deepseek-v4-flash, no .env, no alias
+  ✓   feat-builder: deepseek-v4-flash, no .env, no alias
+  ✓   frontend-dev: deepseek-v4-flash, no .env, no alias
+  ✓   hub-scanner: deepseek-v4-flash, no .env, no alias
+  ✓   integrator: deepseek-v4-flash, no .env, no alias
+  ✓   polish-dev: deepseek-v4-flash, no .env, no alias
+  ✓   seo-architect: deepseek-v4-flash, no .env, no alias
+
+────────────────────────────────────────────────────────────
+  Found 2 issue(s) to address:
+
+  1. Check GOOGLE_API_KEY in .env
+  2. Run 'sidekick setup' to configure missing API keys for full tool access
+
+  Tip: run 'sidekick doctor --fix' to auto-fix what's possible.
+
