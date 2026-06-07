@@ -371,7 +371,8 @@ def build_or_headers(or_config: dict | None = None) -> dict:
 
 # Vercel AI Gateway app attribution headers. HTTP-Referer maps to
 # referrerUrl and X-Title maps to appName in the gateway's analytics.
-from sidekick_cli import __version__ as _SIDEKICK_VERSION
+import sidekick_cli as _sidekick_cli_mod
+_SIDEKICK_VERSION = getattr(_sidekick_cli_mod, "__version__", "0.1.0-migration")
 
 _AI_GATEWAY_HEADERS = {
     "HTTP-Referer": "https://hermes-agent.nousresearch.com",

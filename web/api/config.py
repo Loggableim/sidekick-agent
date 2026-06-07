@@ -85,39 +85,33 @@ def clear_session_dir() -> None:
         pass
 
 
-# ── Nova agent directory discovery ─────────────────────────────────────────
+# ── Agent directory discovery ─────────────────────────────────────────
 def _discover_agent_dir() -> Path:
     """
-    Locate the hermes-agent checkout using a multi-strategy search.
+    Locate the agent checkout.
+
+    In the monorepo, ``run_agent.py`` lives at the repo root.  The old
+    split-repo search path (scanning sibling ``hermes-agent`` directories)
+    is preserved as a fallback for transitional setups.
 
     Priority:
-      1. HERMES_WEBUI_AGENT_DIR env var  -- explicit override always wins
-      2. HERMES_HOME / hermes-agent      -- e.g. ~/.hermes/hermes-agent
-      3. Sibling of this repo            -- ../hermes-agent
-      4. Parent of this repo             -- ../../hermes-agent (nested layout)
-      5. Common install paths            -- ~/.hermes/hermes-agent (again as fallback)
-      6. HOME / hermes-agent             -- ~/hermes-agent (simple flat layout)
+      1. SIDEKICK_WEBUI_AGENT_DIR / HERMES_WEBUI_AGENT_DIR env var
+      2. This repo root (monorepo — run_agent.py is in-repo)
+      3. Sidekick home / hermes-agent   -- e.g. ~/.sidekick/hermes-agent
+      4. Sibling of this repo            -- ../hermes-agent
+      5. HOME / hermes-agent             -- ~/hermes-agent
     """
     candidates = []
 
-    # 1. Explicit env var
-    if os.getenv("HERMES_WEBUI_AGENT_DIR"):
-        candidates.append(
-            Path(os.getenv("HERMES_WEBUI_AGENT_DIR")).expanduser().resolve()
-        )
+    # 1. Explicit env var (both new and legacy)
+    explicit = os.getenv("SIDEKICK_WEBUI_AGENT_DIR") or os.getenv("HERMES_WEBUI_AGENT_DIR")
+    if explicit:
+        candidates.append(Path(explicit).expanduser().resolve())
 
-    # 2. HERMES_HOME / hermes-agent
-    hermes_home = os.getenv("HERMES_HOME", str(HOME / ".hermes"))
-    candidates.append(Path(hermes_home).expanduser() / "hermes-agent")
+    # 2. Monorepo — ourselves
+    candidates.append(Path(__file__).resolve().parent.parent.parent)
 
-    # 3. Sibling: <repo-root>/../hermes-agent
-    candidates.append(REPO_ROOT.parent / "hermes-agent")
-
-    # 4. Parent is the agent repo itself (repo cloned inside hermes-agent/)
-    if (REPO_ROOT.parent / "run_agent.py").exists():
-        candidates.append(REPO_ROOT.parent)
-
-    # 5. ~/.hermes/hermes-agent (explicit common path)
+    # 3. Sidekick home / hermes-agent
     candidates.append(HOME / ".hermes" / "hermes-agent")
 
     # 6. ~/hermes-agent

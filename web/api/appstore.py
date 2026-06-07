@@ -51,19 +51,22 @@ def _invalidate_manifest_cache() -> None:
 # ---------------------------------------------------------------------------
 # Paths (computed relative to this file's location in the repo)
 # ---------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parent.parent  # cids-hermes-webui/
-_PARENT_DIR = _REPO_ROOT.parent  # HermesPortable/
-
-_HERMES_HOME = Path(
-    os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # sidekick/
+_SIDEKICK_HOME = Path(
+    os.environ.get("SIDEKICK_HOME")
+    or os.environ.get("HERMES_HOME")
+    or Path.home() / ".sidekick"
 )
-_APPS_DIR = _PARENT_DIR / "home" / "appstore"
+_HOME_DIR = _SIDEKICK_HOME
+_APPS_DIR = _HOME_DIR / "appstore"
 _INSTALLED_FILE = _APPS_DIR / ".installed.json"
-_ENV_FILE = _HERMES_HOME / ".env"
-_CONFIG_FILE = _HERMES_HOME / "config.yaml"
+_ENV_FILE = _SIDEKICK_HOME / ".env"
+_CONFIG_FILE = _SIDEKICK_HOME / "config.yaml"
 
-_VENV_PYTHON = _PARENT_DIR / "venv" / "Scripts" / "python.exe"
-_AGENT_DIR = _PARENT_DIR / "cids-hermes-agent"
+_VENV_PYTHON = _REPO_ROOT / ".venv" / "Scripts" / "python.exe"
+if not _VENV_PYTHON.exists():
+    _VENV_PYTHON = _REPO_ROOT / "venv" / "Scripts" / "python.exe"
+_AGENT_DIR = _REPO_ROOT  # run_agent.py is in-repo now
 
 
 # ---------------------------------------------------------------------------

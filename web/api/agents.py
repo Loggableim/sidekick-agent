@@ -942,7 +942,7 @@ def _call_llm(messages: list, timeout: int = 15) -> Optional[str]:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/Loggableim/cids-hermes-webui",
+        "HTTP-Referer": "https://github.com/Loggableim/sidekick-agent",
         "X-Title": "Sidekick Agents",
     }
 
