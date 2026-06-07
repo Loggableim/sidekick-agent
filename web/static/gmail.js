@@ -965,7 +965,7 @@ function gmailSaveSplitPos() {
   if (svRect.height > 0) {
     const pct = (listPane.getBoundingClientRect().height / svRect.height) * 100;
     try {
-      localStorage.setItem('hermes-gmail-split-pos', String(Math.round(pct)));
+      localStorage.setItem('sidekick-gmail-split-pos', String(Math.round(pct)));
     } catch {}
   }
 }
@@ -974,7 +974,7 @@ function gmailRestoreSplitPos() {
   const listPane = document.getElementById('gmailMainListPane');
   if (!listPane) return;
   try {
-    const saved = localStorage.getItem('hermes-gmail-split-pos');
+    const saved = localStorage.getItem('sidekick-gmail-split-pos');
     if (saved) {
       const pct = parseFloat(saved);
       if (pct >= 20 && pct <= 80) {
@@ -1147,11 +1147,11 @@ function gmailAdjustReadingPane(delta) {
 
 let _gmailCurrentEmailId = null;
 let _gmailSummaryAborted = false;
-let _gmailAIModel = localStorage.getItem('hermes-gmail-ai-model') || 'llama3.2:latest';
+let _gmailAIModel = localStorage.getItem('sidekick-gmail-ai-model') || 'llama3.2:latest';
 
 function gmailAISetModel(model) {
   _gmailAIModel = model;
-  try { localStorage.setItem('hermes-gmail-ai-model', model); } catch {}
+  try { localStorage.setItem('sidekick-gmail-ai-model', model); } catch {}
 }
 
 // ── Universal AI Summarize (Chat or Email) ──

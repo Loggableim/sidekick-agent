@@ -8,7 +8,7 @@ let _browserMovePending = null;
 let _browserClickFlashTimer = null;
 let _browserFrameLoaded = false;
 let _browserPendingSessionSwitch = false;
-let _browserDrawerOpen = localStorage.getItem('hermes-browser-drawer-open') === '1';
+let _browserDrawerOpen = localStorage.getItem('sidekick-browser-drawer-open') === '1';
 let _browserActionTrace = [];
 let _browserActionTraceSessionId = '';
 let _browserActionTraceKey = '';
@@ -26,7 +26,7 @@ let _browserResearchQuestionsBySession = {};
 let _browserResearchResearchPromptBySession = {};
 let _browserResearchModeBySession = {};
 let _browserPermissionMode = 'none';
-let _browserFullscreen = localStorage.getItem('hermes-browser-fullscreen') === '1';
+let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
 let _browserDrawerHost = null;
 let _browserDrawerHostNext = null;
 
@@ -43,7 +43,7 @@ function _browserCurrentSessionId() {
     if (activeRow && activeRow.dataset && activeRow.dataset.sid) return String(activeRow.dataset.sid);
   } catch (_) {}
   try {
-    const saved = localStorage.getItem('hermes-webui-session');
+    const saved = localStorage.getItem('sidekick-webui-session');
     if (saved) return String(saved);
   } catch (_) {}
   return '';
@@ -368,7 +368,7 @@ function _browserSyncFullscreenButton(active) {
 function _browserSetFullscreen(open) {
   const next = !!open;
   _browserFullscreen = next;
-  try { localStorage.setItem('hermes-browser-fullscreen', next ? '1' : '0'); } catch (_) {}
+  try { localStorage.setItem('sidekick-browser-fullscreen', next ? '1' : '0'); } catch (_) {}
   document.body.classList.toggle('browser-maximized', next);
   _browserSyncFullscreenButton(next);
   if (next) {
@@ -853,7 +853,7 @@ function browserSetDrawerOpen(open, opts = {}) {
   const nextOpen = !!open;
   const prevOpen = _browserDrawerOpen;
   _browserDrawerOpen = nextOpen;
-  localStorage.setItem('hermes-browser-drawer-open', nextOpen ? '1' : '0');
+  localStorage.setItem('sidekick-browser-drawer-open', nextOpen ? '1' : '0');
   document.body.classList.toggle('browser-drawer-open', nextOpen);
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
@@ -1798,14 +1798,14 @@ function _websearchExtractDomain(url) {
 // ── History (localStorage) ─────────────────────
 function _websearchGetHistory() {
   try {
-    const raw = localStorage.getItem('hermes-websearch-history');
+    const raw = localStorage.getItem('sidekick-websearch-history');
     return raw ? JSON.parse(raw) : [];
   } catch (_) { return []; }
 }
 
 function _websearchClearHistory() {
   try {
-    localStorage.removeItem('hermes-websearch-history');
+    localStorage.removeItem('sidekick-websearch-history');
   } catch (_) {}
   _websearchRenderHistory();
 }
@@ -1821,7 +1821,7 @@ function _websearchSaveToHistory(query, answer, results) {
   // Keep last 50
   if (history.length > 50) history.length = 50;
   try {
-    localStorage.setItem('hermes-websearch-history', JSON.stringify(history));
+    localStorage.setItem('sidekick-websearch-history', JSON.stringify(history));
   } catch (_) {}
   _websearchRenderHistory();
 }

@@ -8,7 +8,7 @@ function _activeWorkspaceSlug() {
     }
   } catch (_) {}
   try {
-    const fallback = (localStorage.getItem('hermes-active-workspace') || '').trim();
+    const fallback = (localStorage.getItem('sidekick-active-workspace') || '').trim();
     if (fallback) return fallback;
   } catch (_) {}
   return 'default';
@@ -131,7 +131,7 @@ function _isCurrentLoadDir(loadRev, sessionId) {
 
 function _wsExpandKey(){
   const ws=S.session&&S.session.workspace;
-  return ws?'hermes-webui-expanded:'+ws:null;
+  return ws?'sidekick-webui-expanded:'+ws:null;
 }
 function _saveExpandedDirs(){
   const key=_wsExpandKey();if(!key)return;

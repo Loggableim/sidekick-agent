@@ -33,7 +33,7 @@ async function fetchJson(path,opts={}){
 window.hermesApiUrl=hermesApiUrl;
 window.fetchJson=fetchJson;
 // ── Prompt History (Arrow-Up/Down) ──────────────────────────────────────────
-const _promptHistoryKey='hermes-webui-prompt-history';
+const _promptHistoryKey='sidekick-webui-prompt-history';
 const _promptHistoryMax=50;
 let _promptHistory=(()=>{try{const d=localStorage.getItem(_promptHistoryKey);return d?JSON.parse(d):[];}catch(_){return [];}})();
 let _promptHistoryIndex=-1;
@@ -225,7 +225,7 @@ function queueSessionMessage(sid, payload){
     while (q.length >= 50) q.shift(); // cap at 50 (problem #30)
   q.push(entry);
   // Persist to sessionStorage so the queue survives page refresh
-  try{ sessionStorage.setItem('hermes-queue-'+sid, JSON.stringify(q)); }catch(e){ if (e.name === 'QuotaExceededError') { try { sessionStorage.clear(); } catch(_2){} } }
+  try{ sessionStorage.setItem('sidekick-queue-'+sid, JSON.stringify(q)); }catch(e){ if (e.name === 'QuotaExceededError') { try { sessionStorage.clear(); } catch(_2){} } }
   return q.length;
 }
 function shiftQueuedSessionMessage(sid){
@@ -234,9 +234,9 @@ function shiftQueuedSessionMessage(sid){
   const next=q.shift();
   if(!q.length){
     delete SESSION_QUEUES[sid];
-    try{ sessionStorage.removeItem('hermes-queue-'+sid); }catch(_){}
+    try{ sessionStorage.removeItem('sidekick-queue-'+sid); }catch(_){}
   } else {
-    try{ sessionStorage.setItem('hermes-queue-'+sid, JSON.stringify(q)); }catch(e){ if (e.name === 'QuotaExceededError') { try { sessionStorage.clear(); } catch(_2){} } }
+    try{ sessionStorage.setItem('sidekick-queue-'+sid, JSON.stringify(q)); }catch(e){ if (e.name === 'QuotaExceededError') { try { sessionStorage.clear(); } catch(_2){} } }
   }
   return next;
 }
@@ -728,7 +728,7 @@ const _CSV_EXTS=/\.csv$/i;
 const _EXCALIDRAW_EXTS=/\.excalidraw$/i;
 // ── Media playback speed controls ─────────────────────────────────────────
 const MEDIA_PLAYBACK_RATES=[0.5,0.75,1,1.25,1.5,2];
-const MEDIA_PLAYBACK_STORAGE_KEY='hermes-media-playback-rate';
+const MEDIA_PLAYBACK_STORAGE_KEY='sidekick-media-playback-rate';
 function _getStoredMediaPlaybackRate(){
   try{
     const raw=localStorage.getItem(MEDIA_PLAYBACK_STORAGE_KEY);
@@ -822,7 +822,7 @@ setTimeout(_initMediaPlaybackObserver,0);
 // Dynamic model labels -- populated by populateModelDropdown(), fallback to static map
 let _dynamicModelLabels={};
 window._configuredModelBadges=window._configuredModelBadges||{};
-const MODEL_STATE_KEY='hermes-webui-model-state';
+const MODEL_STATE_KEY='sidekick-webui-model-state';
 
 // ── Smart model resolver ────────────────────────────────────────────────────
 // Finds the best matching option value in a <select> for a given model ID.
@@ -870,7 +870,7 @@ function _readPersistedModelState(){
       }
     }
   }catch(_){}
-  const legacy=localStorage.getItem('hermes-webui-model');
+  const legacy=localStorage.getItem('sidekick-webui-model');
   if(!legacy) return null;
   return {model:legacy,model_provider:_providerFromModelValue(legacy)||null};
 }
@@ -878,17 +878,17 @@ function _writePersistedModelState(model, modelProvider){
   const value=String(model||'').trim();
   const provider=modelProvider?String(modelProvider).trim():(_providerFromModelValue(value)||null);
   if(!value){
-    localStorage.removeItem('hermes-webui-model');
+    localStorage.removeItem('sidekick-webui-model');
     localStorage.removeItem(MODEL_STATE_KEY);
     return;
   }
-  localStorage.setItem('hermes-webui-model', value);
+  localStorage.setItem('sidekick-webui-model', value);
   try{
     localStorage.setItem(MODEL_STATE_KEY, JSON.stringify({model:value,model_provider:provider||null}));
   }catch(_){}
 }
 function _clearPersistedModelState(){
-  localStorage.removeItem('hermes-webui-model');
+  localStorage.removeItem('sidekick-webui-model');
   localStorage.removeItem(MODEL_STATE_KEY);
 }
 function _findModelInDropdown(modelId, sel, preferredProviderId){
@@ -1021,7 +1021,7 @@ async function populateModelDropdown(){
       sel.appendChild(og);
     }
     // Set default model from server if no localStorage preference
-    if(data.default_model && !(typeof _readPersistedModelState==='function'&&_readPersistedModelState()) && !localStorage.getItem('hermes-webui-model')){
+    if(data.default_model && !(typeof _readPersistedModelState==='function'&&_readPersistedModelState()) && !localStorage.getItem('sidekick-webui-model')){
       _applyModelToDropdown(data.default_model, sel, data.active_provider||null);
     }
     if(typeof syncModelChip==='function') syncModelChip();
@@ -3572,13 +3572,13 @@ function setComposerBusyMode(mode){
     api('/api/settings',{method:'POST',body:JSON.stringify({busy_input_mode:mode})});
   }catch(_){}
   // Also persist locally for fast reload
-  try{localStorage.setItem('hermes-busy-input-mode',mode);}catch(_){}
+  try{localStorage.setItem('sidekick-busy-input-mode',mode);}catch(_){}
 }
 
 function setChatMode(mode){
   if(!mode||(mode!=='chat'&&mode!=='code')) mode='chat';
   S.mode=mode;
-  try{localStorage.setItem('hermes-webui-chat-mode',mode);}catch(_){}
+  try{localStorage.setItem('sidekick-webui-chat-mode',mode);}catch(_){}
   const layout=$('chatSplitLayout');
   if(layout){
     layout.classList.remove('mode-chat','mode-code');
@@ -3600,7 +3600,7 @@ function setChatMode(mode){
 async function setComposerMode(mode){
   if(!mode||(mode!=='plan'&&mode!=='action')) mode='action';
   window._composerMode=mode;
-  try{localStorage.setItem('hermes-webui-composer-mode',mode);}catch(_){}
+  try{localStorage.setItem('sidekick-webui-composer-mode',mode);}catch(_){}
   const btns=document.querySelectorAll('.mode-btn');
   for(const btn of btns){
     const active=btn.dataset.mode===mode;
@@ -3618,12 +3618,12 @@ function toggleCompactLayout(){
   const active=chat.classList.toggle('chat-compact');
   const btn=document.getElementById('compactToggleBtn');
   if(btn) btn.classList.toggle('active',active);
-  try{localStorage.setItem('hermes-webui-compact-chat',active?'1':'');}catch(_){}
+  try{localStorage.setItem('sidekick-webui-compact-chat',active?'1':'');}catch(_){}
 }
 function _initCompactLayout(){
   const chat=document.getElementById('mainChat');
   if(!chat){ setTimeout(_initCompactLayout,100); return; }
-  const active=localStorage.getItem('hermes-webui-compact-chat')==='1';
+  const active=localStorage.getItem('sidekick-webui-compact-chat')==='1';
   chat.classList.toggle('chat-compact',active);
   const btn=document.getElementById('compactToggleBtn');
   if(btn) btn.classList.toggle('active',active);
@@ -3840,10 +3840,10 @@ function _editQueuedMessageInComposer(sid, entry) {
   // Persist queue changes
   if (!q.length) {
     delete SESSION_QUEUES[sid];
-    try { sessionStorage.removeItem('hermes-queue-' + sid); } catch (_) {}
+    try { sessionStorage.removeItem('sidekick-queue-' + sid); } catch (_) {}
   } else {
     SESSION_QUEUES[sid] = [...q];
-    try { sessionStorage.setItem('hermes-queue-' + sid, JSON.stringify(q)); } catch (_) {}
+    try { sessionStorage.setItem('sidekick-queue-' + sid, JSON.stringify(q)); } catch (_) {}
   }
 
   // Set composer text
@@ -3919,8 +3919,8 @@ function _renderQueueChips(sid){
 
   function _saveAndRefresh(){
     const liveQ=_getSessionQueue(sid,false);
-    if(!liveQ.length){delete SESSION_QUEUES[sid];try{sessionStorage.removeItem('hermes-queue-'+sid);}catch(_){}}
-    else{SESSION_QUEUES[sid]=[...liveQ];try{sessionStorage.setItem('hermes-queue-'+sid,JSON.stringify(liveQ));}catch(_){}}
+    if(!liveQ.length){delete SESSION_QUEUES[sid];try{sessionStorage.removeItem('sidekick-queue-'+sid);}catch(_){}}
+    else{SESSION_QUEUES[sid]=[...liveQ];try{sessionStorage.setItem('sidekick-queue-'+sid,JSON.stringify(liveQ));}catch(_){}}
     delete _queueRenderKeys[sid];
     updateQueueBadge(sid);
   }
@@ -3947,7 +3947,7 @@ function _renderQueueChips(sid){
         const firstFiles=(snapshot.find(e=>e&&Array.isArray(e.files)&&e.files.length)||{files:[]}).files;
         liveQ.length=0;liveQ.push({text:combined,files:firstFiles,model:first.model||'',model_provider:first.model_provider||null,_queued_at:Date.now()});
         SESSION_QUEUES[sid]=liveQ;
-        try{sessionStorage.setItem('hermes-queue-'+sid,JSON.stringify(liveQ));}catch(_){}
+        try{sessionStorage.setItem('sidekick-queue-'+sid,JSON.stringify(liveQ));}catch(_){}
         delete _queueRenderKeys[sid];
         updateQueueBadge(sid);
       };
@@ -4055,8 +4055,8 @@ function _renderQueueChips(sid){
       const liveQ=_getSessionQueue(sid,false);
       const idx=_entryTs!=null?liveQ.findIndex(e=>e&&e._queued_at===_entryTs):i;
       if(idx!==-1) liveQ.splice(idx,1);
-      if(!liveQ.length){delete SESSION_QUEUES[sid];try{sessionStorage.removeItem('hermes-queue-'+sid);}catch(_){}}
-      else{SESSION_QUEUES[sid]=[...liveQ];try{sessionStorage.setItem('hermes-queue-'+sid,JSON.stringify(liveQ));}catch(_){}}
+      if(!liveQ.length){delete SESSION_QUEUES[sid];try{sessionStorage.removeItem('sidekick-queue-'+sid);}catch(_){}}
+      else{SESSION_QUEUES[sid]=[...liveQ];try{sessionStorage.setItem('sidekick-queue-'+sid,JSON.stringify(liveQ));}catch(_){}}
       delete _queueRenderKeys[sid];
       updateQueueBadge(sid);
     };
@@ -4407,7 +4407,7 @@ function speakMessage(btn){
   const utter=new SpeechSynthesisUtterance(clean);
 
   // Apply saved voice preference
-  const savedVoice=localStorage.getItem('hermes-tts-voice');
+  const savedVoice=localStorage.getItem('sidekick-tts-voice');
   const voices=speechSynthesis.getVoices();
   if(savedVoice&&voices.length){
     const match=voices.find(v=>v.name===savedVoice);
@@ -4415,9 +4415,9 @@ function speakMessage(btn){
   }
 
   // Apply saved rate/pitch
-  const savedRate=parseFloat(localStorage.getItem('hermes-tts-rate'));
+  const savedRate=parseFloat(localStorage.getItem('sidekick-tts-rate'));
   if(!isNaN(savedRate)) utter.rate= Math.min(2,Math.max(0.5,savedRate));
-  const savedPitch=parseFloat(localStorage.getItem('hermes-tts-pitch'));
+  const savedPitch=parseFloat(localStorage.getItem('sidekick-tts-pitch'));
   if(!isNaN(savedPitch)) utter.pitch=Math.min(2,Math.max(0,savedPitch));
 
   _ttsCurrentUtterance=utter;
@@ -4442,7 +4442,7 @@ function stopTTS(){
 
 function autoReadLastAssistant(){
   if(!('speechSynthesis' in window)) return;
-  const pref=localStorage.getItem('hermes-tts-auto-read');
+  const pref=localStorage.getItem('sidekick-tts-auto-read');
   if(pref!=='true') return;
   // Find the last assistant message segment in the DOM
   const rows=document.querySelectorAll('.msg-row[data-role="assistant"], .assistant-segment[data-raw-text]');
@@ -4454,23 +4454,23 @@ function autoReadLastAssistant(){
   if(!clean) return;
 
   const utter=new SpeechSynthesisUtterance(clean);
-  const savedVoice=localStorage.getItem('hermes-tts-voice');
+  const savedVoice=localStorage.getItem('sidekick-tts-voice');
   const voices=speechSynthesis.getVoices();
   if(savedVoice&&voices.length){
     const match=voices.find(v=>v.name===savedVoice);
     if(match) utter.voice=match;
   }
-  const savedRate=parseFloat(localStorage.getItem('hermes-tts-rate'));
+  const savedRate=parseFloat(localStorage.getItem('sidekick-tts-rate'));
   if(!isNaN(savedRate)) utter.rate=Math.min(2,Math.max(0.5,savedRate));
-  const savedPitch=parseFloat(localStorage.getItem('hermes-tts-pitch'));
+  const savedPitch=parseFloat(localStorage.getItem('sidekick-tts-pitch'));
   if(!isNaN(savedPitch)) utter.pitch=Math.min(2,Math.max(0,savedPitch));
 
   speechSynthesis.speak(utter);
 }
 
 // ── Reconnect banner (B4/B5: reload resilience) ──
-const INFLIGHT_KEY = 'hermes-webui-inflight'; // localStorage key for in-flight session tracking
-const INFLIGHT_STATE_KEY = 'hermes-webui-inflight-state'; // localStorage snapshots for mid-stream reload recovery
+const INFLIGHT_KEY = 'sidekick-webui-inflight'; // localStorage key for in-flight session tracking
+const INFLIGHT_STATE_KEY = 'sidekick-webui-inflight-state'; // localStorage snapshots for mid-stream reload recovery
 
 function _readInflightStateMap(){
   try{
@@ -4796,7 +4796,7 @@ function _showUpdateBanner(data){
 }
 function dismissUpdate(){
   const b=$('updateBanner');if(b)b.classList.remove('visible');
-  sessionStorage.setItem('hermes-update-dismissed','1');
+  sessionStorage.setItem('sidekick-update-dismissed','1');
 }
 function _isUpdateApplyNetworkError(error){
   if(error && error.status) return false;
@@ -4842,8 +4842,8 @@ async function applyUpdates(){
       }
     }
     showToast('Update applied — restarting…');
-    sessionStorage.removeItem('hermes-update-checked');
-    sessionStorage.removeItem('hermes-update-dismissed');
+    sessionStorage.removeItem('sidekick-update-checked');
+    sessionStorage.removeItem('sidekick-update-dismissed');
     _waitForServerThenReload();
   }catch(e){
     const msg=_formatUpdateApplyExceptionMessage(e);
@@ -4890,8 +4890,8 @@ async function forceUpdate(btn){
       return;
     }
     showToast('Force update applied — restarting…');
-    sessionStorage.removeItem('hermes-update-checked');
-    sessionStorage.removeItem('hermes-update-dismissed');
+    sessionStorage.removeItem('sidekick-update-checked');
+    sessionStorage.removeItem('sidekick-update-dismissed');
     _waitForServerThenReload();
   }catch(e){
     if(errEl){errEl.textContent='Force update failed: '+e.message;errEl.style.display='block';}
@@ -5196,7 +5196,7 @@ function toggleReasoningAccordion(btn){
 // finalized into a settled assistant turn (the live attribute is removed in
 // _convertLiveActivityGroupToSettled / when liveAssistantTurn loses its id).
 let _liveActivityUserExpanded;
-const _activityDisclosureStoragePrefix='hermes-activity-disclosure:';
+const _activityDisclosureStoragePrefix='sidekick-activity-disclosure:';
 function _activityDisclosureStorageKey(activityKey){
   if(!activityKey||!S.session||!S.session.session_id) return null;
   return _activityDisclosureStoragePrefix+S.session.session_id+':'+activityKey;
@@ -8278,11 +8278,11 @@ function _syncWorkspaceHiddenToggle(){
 }
 function toggleWorkspaceHiddenFiles(value){
   S.showHiddenWorkspaceFiles=!!value;
-  try{localStorage.setItem('hermes-workspace-show-hidden-files',S.showHiddenWorkspaceFiles?'1':'0');}catch(_){}
+  try{localStorage.setItem('sidekick-workspace-show-hidden-files',S.showHiddenWorkspaceFiles?'1':'0');}catch(_){}
   _syncWorkspaceHiddenToggle();
   renderFileTree();
 }
-try{S.showHiddenWorkspaceFiles=localStorage.getItem('hermes-workspace-show-hidden-files')==='1';}catch(_){}
+try{S.showHiddenWorkspaceFiles=localStorage.getItem('sidekick-workspace-show-hidden-files')==='1';}catch(_){}
 
 // ── Workspace preferences kebab menu (#1793 UX refinement) ───────────────
 // The "Show hidden files" toggle used to live as a permanent inline row
@@ -9005,14 +9005,14 @@ function initSplitPane(){
       document.body.classList.remove('resizing');
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
-      try{localStorage.setItem('hermes-rightpanel-width',panel.style.flex);}catch(_){}
+      try{localStorage.setItem('sidekick-rightpanel-width',panel.style.flex);}catch(_){}
     };
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
     e.preventDefault();
   });
   try{
-    const saved=localStorage.getItem('hermes-rightpanel-width');
+    const saved=localStorage.getItem('sidekick-rightpanel-width');
     if(saved) panel.style.flex=saved;
   }catch(_){}
 }
@@ -9300,7 +9300,7 @@ function _bindComposerModeToggle(){
     e.preventDefault();
     setComposerMode(btn.dataset.mode);
   });
-  syncComposerModeButtons(window._composerMode||localStorage.getItem('hermes-webui-composer-mode')||'action');
+  syncComposerModeButtons(window._composerMode||localStorage.getItem('sidekick-webui-composer-mode')||'action');
 }
 if(document.readyState==='loading'){
   document.addEventListener('DOMContentLoaded',_bindComposerModeToggle,{once:true});

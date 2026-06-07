@@ -219,9 +219,9 @@ function syncAppTitlebar() {
 
 function _beginSettingsPanelSession() {
   _settingsDirty = false;
-  _settingsThemeOnOpen = localStorage.getItem('hermes-theme') || 'dark';
-  _settingsSkinOnOpen = localStorage.getItem('hermes-skin') || 'default';
-  _settingsFontSizeOnOpen = localStorage.getItem('hermes-font-size') || 'default';
+  _settingsThemeOnOpen = localStorage.getItem('sidekick-theme') || 'dark';
+  _settingsSkinOnOpen = localStorage.getItem('sidekick-skin') || 'default';
+  _settingsFontSizeOnOpen = localStorage.getItem('sidekick-font-size') || 'default';
   _pendingSettingsTargetPanel = null;
   if (_settingsAppearanceAutosaveTimer) {
     clearTimeout(_settingsAppearanceAutosaveTimer);
@@ -2685,7 +2685,7 @@ function loadTodos() {
 // a menu listing every board (current first, with task counts), plus
 // actions to create / rename / archive.
 
-const KANBAN_BOARD_LS_KEY = 'hermes-kanban-active-board';
+const KANBAN_BOARD_LS_KEY = 'sidekick-kanban-active-board';
 
 function _kanbanGetSavedBoard(){
   try { return localStorage.getItem(KANBAN_BOARD_LS_KEY) || null; } catch(_) { return null; }
@@ -4183,13 +4183,13 @@ window.toggleFileTreePanel = function(){
   const minimized = panel.classList.contains('file-tree-panel--minimized');
   if(minimized){
     // Restore — read saved width from localStorage
-    const saved = parseInt(localStorage.getItem('hermes-file-tree-w')) || 260;
+    const saved = parseInt(localStorage.getItem('sidekick-file-tree-w')) || 260;
     root.style.setProperty('--file-tree-width', saved + 'px');
     panel.classList.remove('file-tree-panel--minimized');
   }else{
     // Save current width before collapsing
     const curW = parseInt(root.style.getPropertyValue('--file-tree-width')) || panel.getBoundingClientRect().width || 260;
-    if(curW > 0) localStorage.setItem('hermes-file-tree-w', curW);
+    if(curW > 0) localStorage.setItem('sidekick-file-tree-w', curW);
     root.style.setProperty('--file-tree-width', '0px');
     panel.classList.add('file-tree-panel--minimized');
   }
@@ -5275,7 +5275,7 @@ async function switchToProfile(name) {
     // populateModelDropdown hits /api/models; loadWorkspaceList hits /api/workspaces.
     // They are fully independent — run both simultaneously to cut switch time ~50%.
     if(typeof _clearPersistedModelState==='function') _clearPersistedModelState();
-    else localStorage.removeItem('hermes-webui-model');
+    else localStorage.removeItem('sidekick-webui-model');
     _skillsData = null;
     _workspaceList = null;
     await Promise.all([populateModelDropdown(), loadWorkspaceList()]);
@@ -5562,7 +5562,7 @@ function _syncSidekickPanelSessionActions(){
   const hasSession=!!S.session;
   const visibleMessages=hasSession?(S.messages||[]).filter(m=>m&&m.role&&m.role!=='tool').length:0;
   const title=hasSession?(S.session.title||t('untitled')):t('active_conversation_none');
-  const meta=$('hermesSessionMeta');
+  const meta=$('sidekickSessionMeta');
   if(meta){
     meta.textContent=hasSession
       ? t('active_conversation_meta', title, visibleMessages)
@@ -5658,9 +5658,9 @@ function _applyTtsEnabled(enabled){
 
 function _appearancePayloadFromUi(){
   return {
-    theme: ($('settingsTheme')||{}).value || localStorage.getItem('hermes-theme') || 'dark',
-    skin: ($('settingsSkin')||{}).value || localStorage.getItem('hermes-skin') || 'default',
-    font_size: ($('settingsFontSize')||{}).value || localStorage.getItem('hermes-font-size') || 'default',
+    theme: ($('settingsTheme')||{}).value || localStorage.getItem('sidekick-theme') || 'dark',
+    skin: ($('settingsSkin')||{}).value || localStorage.getItem('sidekick-skin') || 'default',
+    font_size: ($('settingsFontSize')||{}).value || localStorage.getItem('sidekick-font-size') || 'default',
     session_jump_buttons: !!($('settingsSessionJumpButtons')||{}).checked,
     session_endless_scroll: !!($('settingsSessionEndlessScroll')||{}).checked,
   };
@@ -5686,9 +5686,9 @@ function _setAppearanceAutosaveStatus(state){
 
 function _rememberAppearanceSaved(payload){
   if(!payload) return;
-  _settingsThemeOnOpen=payload.theme||localStorage.getItem('hermes-theme')||'dark';
-  _settingsSkinOnOpen=payload.skin||localStorage.getItem('hermes-skin')||'default';
-  _settingsFontSizeOnOpen=payload.font_size||localStorage.getItem('hermes-font-size')||'default';
+  _settingsThemeOnOpen=payload.theme||localStorage.getItem('sidekick-theme')||'dark';
+  _settingsSkinOnOpen=payload.skin||localStorage.getItem('sidekick-skin')||'default';
+  _settingsFontSizeOnOpen=payload.font_size||localStorage.getItem('sidekick-font-size')||'default';
 }
 
 function _scheduleAppearanceAutosave(){
@@ -5708,7 +5708,7 @@ async function _autosaveAppearanceSettings(payload){
     _settingsAppearanceAutosaveRetryPayload=null;
     _rememberAppearanceSaved(payload);
     if(saved&&saved.font_size){
-      localStorage.setItem('hermes-font-size',saved.font_size);
+      localStorage.setItem('sidekick-font-size',saved.font_size);
     }
     if(saved){
       window._sessionJumpButtonsEnabled=!!saved.session_jump_buttons;
@@ -5787,8 +5787,8 @@ function _setPreferencesAutosaveStatus(state){
 
 function _rememberPreferencesSaved(payload){
   if(!payload) return;
-  if(payload.send_key!==undefined) localStorage.setItem('hermes-pref-send_key',payload.send_key);
-  if(payload.language!==undefined) localStorage.setItem('hermes-pref-language',payload.language);
+  if(payload.send_key!==undefined) localStorage.setItem('sidekick-pref-send_key',payload.send_key);
+  if(payload.language!==undefined) localStorage.setItem('sidekick-pref-language',payload.language);
 }
 
 function _schedulePreferencesAutosave(){
@@ -5867,13 +5867,13 @@ async function loadSettingsPanel(){
     const skinSel=$('settingsSkin');
     if(skinSel) skinSel.value=skinVal;
     if(typeof _buildSkinPicker==='function') _buildSkinPicker(skinVal);
-    const fontSizeVal=settings.font_size||localStorage.getItem('hermes-font-size')||'default';
-    localStorage.setItem('hermes-font-size',fontSizeVal);
+    const fontSizeVal=settings.font_size||localStorage.getItem('sidekick-font-size')||'default';
+    localStorage.setItem('sidekick-font-size',fontSizeVal);
     if(typeof _applyFontSize==='function') _applyFontSize(fontSizeVal);
     const fontSizeSel=$('settingsFontSize');
     if(fontSizeSel) fontSizeSel.value=fontSizeVal;
     if(typeof _syncFontSizePicker==='function') _syncFontSizePicker(fontSizeVal);
-    const syntaxThemeVal=localStorage.getItem('hermes-syntax-theme')||'';
+    const syntaxThemeVal=localStorage.getItem('sidekick-syntax-theme')||'';
     const syntaxThemeSel=$('settingsSyntaxTheme');
     if(syntaxThemeSel) syntaxThemeSel.value=syntaxThemeVal;
     if(typeof _syncSyntaxThemePicker==='function') _syncSyntaxThemePicker(syntaxThemeVal);
@@ -5891,10 +5891,10 @@ async function loadSettingsPanel(){
     // File tree panel default-open toggle (localStorage-backed)
     const wsPanelCb=$('settingsWorkspacePanelOpen');
     if(wsPanelCb){
-      wsPanelCb.checked=localStorage.getItem('hermes-webui-workspace-panel-pref')!=='closed';
+      wsPanelCb.checked=localStorage.getItem('sidekick-webui-workspace-panel-pref')!=='closed';
       wsPanelCb.onchange=function(){
         const open=this.checked;
-        localStorage.setItem('hermes-webui-workspace-panel-pref',open?'open':'closed');
+        localStorage.setItem('sidekick-webui-workspace-panel-pref',open?'open':'closed');
         // Toggle the file tree panel in chat to match preference
         const panel=$('chatFileTreePanel');
         if(panel){
@@ -5916,8 +5916,8 @@ async function loadSettingsPanel(){
       };
     }
     const resolvedLanguage=(typeof resolvePreferredLocale==='function')
-      ? resolvePreferredLocale(settings.language, localStorage.getItem('hermes-lang'))
-      : (settings.language || localStorage.getItem('hermes-lang') || 'en');
+      ? resolvePreferredLocale(settings.language, localStorage.getItem('sidekick-lang'))
+      : (settings.language || localStorage.getItem('sidekick-lang') || 'en');
     // Keep settings modal and current page strings in sync with the resolved locale.
     if(typeof setLocale==='function'){
       setLocale(resolvedLanguage);
@@ -5998,17 +5998,17 @@ async function loadSettingsPanel(){
     if(soundCb){soundCb.checked=!!settings.sound_enabled;soundCb.addEventListener('change',_schedulePreferencesAutosave,{once:false});}
     // TTS settings (localStorage-only, no server round-trip needed)
     const ttsEnabledCb=$('settingsTtsEnabled');
-    if(ttsEnabledCb){ttsEnabledCb.checked=localStorage.getItem('hermes-tts-enabled')==='true';ttsEnabledCb.onchange=function(){localStorage.setItem('hermes-tts-enabled',this.checked?'true':'false');_applyTtsEnabled(this.checked);};}
+    if(ttsEnabledCb){ttsEnabledCb.checked=localStorage.getItem('sidekick-tts-enabled')==='true';ttsEnabledCb.onchange=function(){localStorage.setItem('sidekick-tts-enabled',this.checked?'true':'false');_applyTtsEnabled(this.checked);};}
     const ttsAutoReadCb=$('settingsTtsAutoRead');
-    if(ttsAutoReadCb){ttsAutoReadCb.checked=localStorage.getItem('hermes-tts-auto-read')==='true';ttsAutoReadCb.onchange=function(){localStorage.setItem('hermes-tts-auto-read',this.checked?'true':'false');};}
+    if(ttsAutoReadCb){ttsAutoReadCb.checked=localStorage.getItem('sidekick-tts-auto-read')==='true';ttsAutoReadCb.onchange=function(){localStorage.setItem('sidekick-tts-auto-read',this.checked?'true':'false');};}
     // Voice-mode button visibility (#1488). localStorage-only; no server round-trip.
     // Toggling re-applies immediately via the boot.js helper so the user sees
     // the audio-waveform button appear/disappear without a reload.
     const voiceModeCb=$('settingsVoiceModeEnabled');
     if(voiceModeCb){
-      voiceModeCb.checked=localStorage.getItem('hermes-voice-mode-button')==='true';
+      voiceModeCb.checked=localStorage.getItem('sidekick-voice-mode-button')==='true';
       voiceModeCb.onchange=function(){
-        localStorage.setItem('hermes-voice-mode-button',this.checked?'true':'false');
+        localStorage.setItem('sidekick-voice-mode-button',this.checked?'true':'false');
         if(typeof window._applyVoiceModePref==='function') window._applyVoiceModePref();
       };
     }
@@ -6017,7 +6017,7 @@ async function loadSettingsPanel(){
     if(ttsVoiceSel&&'speechSynthesis' in window){
       const populateVoices=()=>{
         const voices=speechSynthesis.getVoices();
-        const current=localStorage.getItem('hermes-tts-voice')||'';
+        const current=localStorage.getItem('sidekick-tts-voice')||'';
         ttsVoiceSel.innerHTML='<option value="">Default system voice</option>';
         voices.forEach(v=>{
           const opt=document.createElement('option');
@@ -6028,24 +6028,24 @@ async function loadSettingsPanel(){
       };
       populateVoices();
       speechSynthesis.addEventListener('voiceschanged',populateVoices,{once:true});
-      ttsVoiceSel.onchange=function(){localStorage.setItem('hermes-tts-voice',this.value);};
+      ttsVoiceSel.onchange=function(){localStorage.setItem('sidekick-tts-voice',this.value);};
     }
     // TTS rate/pitch sliders
     const ttsRateSlider=$('settingsTtsRate');
     const ttsRateValue=$('settingsTtsRateValue');
     if(ttsRateSlider){
-      const savedRate=localStorage.getItem('hermes-tts-rate');
+      const savedRate=localStorage.getItem('sidekick-tts-rate');
       ttsRateSlider.value=savedRate||'1';
       if(ttsRateValue) ttsRateValue.textContent=parseFloat(ttsRateSlider.value).toFixed(1)+'x';
-      ttsRateSlider.oninput=function(){if(ttsRateValue)ttsRateValue.textContent=parseFloat(this.value).toFixed(1)+'x';localStorage.setItem('hermes-tts-rate',this.value);};
+      ttsRateSlider.oninput=function(){if(ttsRateValue)ttsRateValue.textContent=parseFloat(this.value).toFixed(1)+'x';localStorage.setItem('sidekick-tts-rate',this.value);};
     }
     const ttsPitchSlider=$('settingsTtsPitch');
     const ttsPitchValue=$('settingsTtsPitchValue');
     if(ttsPitchSlider){
-      const savedPitch=localStorage.getItem('hermes-tts-pitch');
+      const savedPitch=localStorage.getItem('sidekick-tts-pitch');
       ttsPitchSlider.value=savedPitch||'1';
       if(ttsPitchValue) ttsPitchValue.textContent=parseFloat(ttsPitchSlider.value).toFixed(1);
-      ttsPitchSlider.oninput=function(){if(ttsPitchValue)ttsPitchValue.textContent=parseFloat(this.value).toFixed(1);localStorage.setItem('hermes-tts-pitch',this.value);};
+      ttsPitchSlider.oninput=function(){if(ttsPitchValue)ttsPitchValue.textContent=parseFloat(this.value).toFixed(1);localStorage.setItem('sidekick-tts-pitch',this.value);};
     }
     const notifCb=$('settingsNotificationsEnabled');
     if(notifCb){notifCb.checked=!!settings.notifications_enabled;notifCb.addEventListener('change',_schedulePreferencesAutosave,{once:false});}
@@ -7596,7 +7596,7 @@ async function _appstoreSaveGmailSettings(btn) {
         body: JSON.stringify({ slug, gmail: { ...gmail, enabled: true, accounts } }),
       });
     }
-    localStorage.setItem('hermes-app-gmail-enabled', '1');
+    localStorage.setItem('sidekick-app-gmail-enabled', '1');
     if (status) status.textContent = 'Gmail gespeichert und für ' + selected.length + ' Space(s) aktiviert.';
     if (typeof gmailToast === 'function') gmailToast('Gmail-App gespeichert', 'success');
   } catch (e) {
@@ -7692,7 +7692,7 @@ async function _appstoreSaveDiscordSettings(btn) {
         body: JSON.stringify({ slug, discord: { ...discord, enabled: true, active_bot: botId, bots } }),
       });
     }
-    localStorage.setItem('hermes-app-discord-enabled', '1');
+    localStorage.setItem('sidekick-app-discord-enabled', '1');
     if (status) status.textContent = 'Discord gespeichert und für ' + selected.length + ' Space(s) aktiviert.';
     if (typeof gmailToast === 'function') gmailToast('Discord-App gespeichert', 'success');
   } catch (e) {
@@ -8256,7 +8256,7 @@ function _applySavedSettingsUi(saved, body, opts){
   _settingsDirty=false;
   _settingsThemeOnOpen=theme;
   _settingsSkinOnOpen=skin||'default';
-  _settingsFontSizeOnOpen=fontSize||localStorage.getItem('hermes-font-size')||'default';
+  _settingsFontSizeOnOpen=fontSize||localStorage.getItem('sidekick-font-size')||'default';
   const bar=$('settingsUnsavedBar');
   if(bar) bar.style.display='none';
   _settingsSidekickDefaultModelOnOpen=body.default_model||_settingsSidekickDefaultModelOnOpen||'';
@@ -8329,7 +8329,7 @@ async function saveSettings(andClose){
   const pw=($('settingsPassword')||{}).value;
   const theme=($('settingsTheme')||{}).value||'dark';
   const skin=($('settingsSkin')||{}).value||'default';
-  const fontSize=($('settingsFontSize')||{}).value||localStorage.getItem('hermes-font-size')||'default';
+  const fontSize=($('settingsFontSize')||{}).value||localStorage.getItem('sidekick-font-size')||'default';
   const language=($('settingsLanguage')||{}).value||'en';
   const sidebarDensity=($('settingsSidebarDensity')||{}).value==='detailed'?'detailed':'compact';
   const busyInputMode=($('settingsBusyInputMode')||{}).value||'queue';

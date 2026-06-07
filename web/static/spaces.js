@@ -19,7 +19,7 @@ function _shouldTrustUnscopedSessionsForSpace(slug) {
   const s = String(slug || '').toLowerCase();
   return s === DEFAULT_SPACE_SLUG || s === LEGACY_DEFAULT_SPACE_SLUG;
 }
-let _activeSpace = localStorage.getItem('hermes-active-workspace') || DEFAULT_SPACE_SLUG;
+let _activeSpace = localStorage.getItem('sidekick-active-workspace') || DEFAULT_SPACE_SLUG;
 let _spacesCache = [];
 window._hermesSpaceSwitchRev = Number(window._hermesSpaceSwitchRev || 0);
 let _spacesPanelRenderRev = 0;
@@ -78,7 +78,7 @@ async function loadSpaces() {
       const preferred = _spacesCache.find(s => s && s.slug === DEFAULT_SPACE_SLUG) || _spacesCache[0];
       if (preferred && preferred.slug) {
         _activeSpace = preferred.slug;
-        try { localStorage.setItem('hermes-active-workspace', _activeSpace); } catch (_) {}
+        try { localStorage.setItem('sidekick-active-workspace', _activeSpace); } catch (_) {}
       }
     }
     updateTitlebarSpace();
@@ -193,7 +193,7 @@ async function selectSpace(slug) {
     }
     _activeSpace = slug;
     const switchRev = _beginSpaceSwitch();
-    localStorage.setItem('hermes-active-workspace', slug);
+    localStorage.setItem('sidekick-active-workspace', slug);
     _showSpaceSwitchLoading(slug);
     _syncSpacesPanelActiveState(slug);
     // ── Space Default Config laden ──
@@ -318,7 +318,7 @@ async function deleteSpace(slug) {
     const wasActive = _activeSpace === slug;
     if (wasActive) {
       _activeSpace = DEFAULT_SPACE_SLUG;
-      try { localStorage.setItem('hermes-active-workspace', DEFAULT_SPACE_SLUG); } catch (_) {}
+      try { localStorage.setItem('sidekick-active-workspace', DEFAULT_SPACE_SLUG); } catch (_) {}
     }
     await api('/api/space/delete', {
       method: 'POST',
@@ -724,7 +724,7 @@ function renderSpacesPanel() {
     const active = _spaceBySlug(_activeSpace) || spaces.find(s => s && s.slug === _activeSpace) || spaces[0] || null;
     if (active && active.slug !== _activeSpace) {
       _activeSpace = active.slug;
-      localStorage.setItem('hermes-active-workspace', active.slug);
+      localStorage.setItem('sidekick-active-workspace', active.slug);
     }
     if (renderRev !== _spacesPanelRenderRev) return;
     renderSpaceDetail(active);
@@ -1237,12 +1237,12 @@ console.log('[spaces] loaded. Active:', _activeSpace);
 // Default: expanded (labels visible). Collapsed = icons only.
 
 function getSidebarNavState() {
-  return localStorage.getItem('hermes-webui-rail-expanded') === '1' ? 'expanded' : 'collapsed';
+  return localStorage.getItem('sidekick-webui-rail-expanded') === '1' ? 'expanded' : 'collapsed';
 }
 
 function setSidebarNavState(state) {
   const expand = state === 'expanded';
-  localStorage.setItem('hermes-webui-rail-expanded', expand ? '1' : '0');
+  localStorage.setItem('sidekick-webui-rail-expanded', expand ? '1' : '0');
   try { document.documentElement.removeAttribute('data-sidebar-nav'); } catch (_) {}
   const layout = document.querySelector('.layout');
   if (layout) layout.classList.toggle('rail-expanded', expand);

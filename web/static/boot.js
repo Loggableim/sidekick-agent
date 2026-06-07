@@ -1,3 +1,18 @@
+// ── localStorage key migration: hermes-* → sidekick-* ──────────────────────
+(function(){
+  if(localStorage.getItem('sidekick-migrated-v1')) return;
+  var keys=[], i;
+  for(i=0;i<localStorage.length;i++){
+    var k=localStorage.key(i);
+    if(k && k.startsWith('hermes-')) keys.push(k);
+  }
+  for(i=0;i<keys.length;i++){
+    var v=localStorage.getItem(keys[i]);
+    if(v!==null) localStorage.setItem(keys[i].replace('hermes-','sidekick-'), v);
+  }
+  try{localStorage.setItem('sidekick-migrated-v1','1');}catch(_){}
+})();
+
 async function cancelStream(){
   const streamId = S.activeStreamId;
   if(!streamId) return;
@@ -84,7 +99,7 @@ function _syncWorkspacePanelInlineWidth(){
     return;
   }
 
-  const saved = localStorage.getItem('hermes-panel-w');
+  const saved = localStorage.getItem('sidekick-panel-w');
   if(!saved) return;
   const parsed = parseInt(saved, 10);
   if(Number.isNaN(parsed) || parsed <= 0) return;
@@ -114,7 +129,7 @@ function _setWorkspacePanelMode(mode){
   // Persist open/closed across refreshes (browse/preview → open; closed → closed)
   // Do NOT overwrite the user's "keep open" preference — only track runtime state
   // so that toggleWorkspacePanel(false) from the toolbar doesn't clear the setting.
-  localStorage.setItem('hermes-webui-workspace-panel', open ? 'open' : 'closed');
+  localStorage.setItem('sidekick-webui-workspace-panel', open ? 'open' : 'closed');
   layout.classList.toggle('workspace-panel-collapsed',!open);
   if(_isCompactWorkspaceViewport()){
     panel.classList.toggle('mobile-open',open);
@@ -190,8 +205,8 @@ window.syncWorkspacePanelForActivePanel=syncWorkspacePanelForActivePanel;
  * Opens the file tree panel if the user prefers it open, minimizes if closed.
  */
 function _applyFileTreePanelPref(){
-  const pref = localStorage.getItem('hermes-webui-workspace-panel-pref') !== 'closed'
-    || localStorage.getItem('hermes-webui-workspace-panel') === 'open';
+  const pref = localStorage.getItem('sidekick-webui-workspace-panel-pref') !== 'closed'
+    || localStorage.getItem('sidekick-webui-workspace-panel') === 'open';
   const panel = $('chatFileTreePanel');
   if(!panel) return;
   if(pref && panel.classList.contains('file-tree-panel--minimized')){
@@ -199,7 +214,7 @@ function _applyFileTreePanelPref(){
   }else if(!pref && !panel.classList.contains('file-tree-panel--minimized')){
     const root = document.documentElement;
     const curW = parseInt(root.style.getPropertyValue('--file-tree-width')) || panel.getBoundingClientRect().width || 260;
-    if(curW > 0) localStorage.setItem('hermes-file-tree-w', curW);
+    if(curW > 0) localStorage.setItem('sidekick-file-tree-w', curW);
     root.style.setProperty('--file-tree-width', '0px');
     panel.classList.add('file-tree-panel--minimized');
   }
@@ -300,7 +315,7 @@ const windowControls={
     this._call('maximize').then(ok=>{
       if(ok)return;
       try{
-        const key='hermes-window-restore-rect';
+        const key='sidekick-window-restore-rect';
         const stored=sessionStorage.getItem(key);
         if(stored){
           const rect=JSON.parse(stored);
@@ -386,7 +401,7 @@ else initWindowControls();
 // Mobile is unaffected: the sidebar is an overlay there, and every collapse
 // code path is gated on `_isDesktopWidth()` (min-width:641px).
 // State is persisted via localStorage and survives reloads + bfcache.
-const _RAIL_EXPANDED_KEY='hermes-webui-rail-expanded';
+const _RAIL_EXPANDED_KEY='sidekick-webui-rail-expanded';
 
 function _isDesktopWidth(){
   try{return window.matchMedia('(min-width:641px)').matches;}catch(_){return true;}
@@ -739,7 +754,7 @@ window._micPendingSend=window._micPendingSend||false;
   // a power-user surface; explicit opt-in avoids the visual confusion
   // of two near-identical mic icons.
   function _voiceModePrefEnabled(){
-    try{ return localStorage.getItem('hermes-voice-mode-button')==='true'; }
+    try{ return localStorage.getItem('sidekick-voice-mode-button')==='true'; }
     catch(_){ return false; }
   }
   let _voiceModeActive=false;
@@ -903,15 +918,15 @@ window._micPendingSend=window._micPendingSend||false;
     const utter=new SpeechSynthesisUtterance(clean);
 
     // Apply saved voice preferences
-    const savedVoice=localStorage.getItem('hermes-tts-voice');
+    const savedVoice=localStorage.getItem('sidekick-tts-voice');
     const voices=speechSynthesis.getVoices();
     if(savedVoice&&voices.length){
       const match=voices.find(v=>v.name===savedVoice);
       if(match) utter.voice=match;
     }
-    const savedRate=parseFloat(localStorage.getItem('hermes-tts-rate'));
+    const savedRate=parseFloat(localStorage.getItem('sidekick-tts-rate'));
     if(!isNaN(savedRate)) utter.rate=Math.min(2,Math.max(0.5,savedRate));
-    const savedPitch=parseFloat(localStorage.getItem('hermes-tts-pitch'));
+    const savedPitch=parseFloat(localStorage.getItem('sidekick-tts-pitch'));
     if(!isNaN(savedPitch)) utter.pitch=Math.min(2,Math.max(0,savedPitch));
 
     utter.onend=()=>{
@@ -1094,7 +1109,7 @@ $('modelSelect').onchange=async()=>{
     : {model:selectedModel,model_provider:null};
   if(typeof closeModelDropdown==='function') closeModelDropdown();
   if(typeof _writePersistedModelState==='function') _writePersistedModelState(modelState.model,modelState.model_provider);
-  else try{localStorage.setItem('hermes-webui-model',modelState.model)}catch{}
+  else try{localStorage.setItem('sidekick-webui-model',modelState.model)}catch{}
   await api('/api/session/update',{method:'POST',body:JSON.stringify({
     session_id:S.session.session_id,
     workspace:S.session.workspace,
@@ -1358,7 +1373,7 @@ window.addEventListener('resize',()=>{
     if(!handle || !targetEl) return;
 
     // Restore saved width
-    if(storageKey === 'hermes-panel-w'){
+    if(storageKey === 'sidekick-panel-w'){
       _syncWorkspacePanelInlineWidth();
     }else{
       const saved = localStorage.getItem(storageKey);
@@ -1403,7 +1418,7 @@ window.addEventListener('resize',()=>{
   window._initResizePanels = function(){
     const sidebar    = document.querySelector('.sidebar');
     const rightpanel = document.querySelector('.rightpanel');
-    initResize('sidebarResize',    sidebar,    'right', SIDEBAR_MIN, SIDEBAR_MAX, 'hermes-sidebar-w');
+    initResize('sidebarResize',    sidebar,    'right', SIDEBAR_MIN, SIDEBAR_MAX, 'sidekick-sidebar-w');
     // Rightpanel resize is handled by initSplitPane() via #chatSplitResize
   };
 
@@ -1412,7 +1427,7 @@ window.addEventListener('resize',()=>{
     const layout=$('chatSplitLayout');
     if(!handle||!layout)return;
     const MIN_H=100, MAX_H=600;
-    const STORAGE_KEY='hermes-webui-terminal-height';
+    const STORAGE_KEY='sidekick-webui-terminal-height';
     const saved=localStorage.getItem(STORAGE_KEY);
     if(saved) layout.style.setProperty('--terminal-pane-height',saved+'px');
     let startY=0, startH=0;
@@ -1501,7 +1516,7 @@ function _syncThemeColorMeta(){
   try{
     const bg=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
     if(!bg) return;
-    const known=document.getElementById('hermes-theme-color');
+    const known=document.getElementById('sidekick-theme-color');
     if(known){
       known.setAttribute('content',bg);
       known.removeAttribute('media');
@@ -1527,7 +1542,7 @@ const _SYNTAX_THEMES = {
 };
 
 function _applySyntaxTheme(override){
-  const saved = override || localStorage.getItem('hermes-syntax-theme') || '';
+  const saved = override || localStorage.getItem('sidekick-syntax-theme') || '';
   const link = document.getElementById('prism-theme');
   if(!link) return;
   const isDark = document.documentElement.classList.contains('dark');
@@ -1546,7 +1561,7 @@ function _applySyntaxTheme(override){
 }
 
 function _pickSyntaxTheme(name){
-  localStorage.setItem('hermes-syntax-theme', name);
+  localStorage.setItem('sidekick-syntax-theme', name);
   _applySyntaxTheme(name);
   _syncSyntaxThemePicker(name);
   // Sync settings hidden input if the settings panel is open
@@ -1583,10 +1598,10 @@ function _applySkin(name){
 }
 
 function _pickTheme(name){
-  const currentSkin=localStorage.getItem('hermes-skin');
+  const currentSkin=localStorage.getItem('sidekick-skin');
   const appearance=_normalizeAppearance(name,currentSkin);
-  localStorage.setItem('hermes-theme',appearance.theme);
-  localStorage.setItem('hermes-skin',appearance.skin);
+  localStorage.setItem('sidekick-theme',appearance.theme);
+  localStorage.setItem('sidekick-skin',appearance.skin);
   _applyTheme(appearance.theme);
   _applySkin(appearance.skin);
   _syncThemePicker(appearance.theme);
@@ -1599,9 +1614,9 @@ function _pickTheme(name){
 }
 
 function _pickSkin(name){
-  const appearance=_normalizeAppearance(localStorage.getItem('hermes-theme'),name);
-  localStorage.setItem('hermes-theme',appearance.theme);
-  localStorage.setItem('hermes-skin',appearance.skin);
+  const appearance=_normalizeAppearance(localStorage.getItem('sidekick-theme'),name);
+  localStorage.setItem('sidekick-theme',appearance.theme);
+  localStorage.setItem('sidekick-skin',appearance.skin);
   _applyTheme(appearance.theme);
   _applySkin(appearance.skin);
   _syncThemePicker(appearance.theme);
@@ -1638,7 +1653,7 @@ function _applyFontSize(size){
 }
 
 function _pickFontSize(size){
-  localStorage.setItem('hermes-font-size',size);
+  localStorage.setItem('sidekick-font-size',size);
   _applyFontSize(size);
   _syncFontSizePicker(size);
   const hidden=$('settingsFontSize');
@@ -1746,7 +1761,7 @@ function applyBotName(){
  */
 async function _loadActiveSpaceConfig() {
   const slug = (typeof _activeSpace !== 'undefined' ? _activeSpace : null)
-    || localStorage.getItem('hermes-active-workspace')
+    || localStorage.getItem('sidekick-active-workspace')
     || 'nova';
   try {
     const resp = await api('/api/space/config?slug=' + encodeURIComponent(slug));
@@ -1775,7 +1790,7 @@ async function _loadActiveSpaceConfig() {
     window._sidebarDensity=(s.sidebar_density==='detailed'?'detailed':'compact');
     window._busyInputMode=(s.busy_input_mode||'queue');
     window._composerMode=(s.composer_mode||'action');
-    try{localStorage.setItem('hermes-webui-composer-mode',window._composerMode);}catch(_){}
+    try{localStorage.setItem('sidekick-webui-composer-mode',window._composerMode);}catch(_){}
     window._sessionEndlessScrollEnabled=!!s.session_endless_scroll;
     window._botName=s.bot_name||'Nova';
     if(s.default_model) window._defaultModel=s.default_model;
@@ -1784,23 +1799,23 @@ async function _loadActiveSpaceConfig() {
     if(s.default_workspace) S._profileDefaultWorkspace=s.default_workspace;
     window._sessionJumpButtonsEnabled=!!s.session_jump_buttons;
     const appearance=_normalizeAppearance(s.theme,s.skin);
-    localStorage.setItem('hermes-theme',appearance.theme);
+    localStorage.setItem('sidekick-theme',appearance.theme);
     _applyTheme(appearance.theme);
-    localStorage.setItem('hermes-skin',appearance.skin);
+    localStorage.setItem('sidekick-skin',appearance.skin);
     _applySkin(appearance.skin);
-    const fontSize=(s.font_size||localStorage.getItem('hermes-font-size')||'default');
-    localStorage.setItem('hermes-font-size',fontSize);
+    const fontSize=(s.font_size||localStorage.getItem('sidekick-font-size')||'default');
+    localStorage.setItem('sidekick-font-size',fontSize);
     _applyFontSize(fontSize);
     if(typeof setLocale==='function'){
       const _lang=typeof resolvePreferredLocale==='function'
-        ? resolvePreferredLocale(s.language, localStorage.getItem('hermes-lang'))
-        : (s.language || localStorage.getItem('hermes-lang') || 'en');
+        ? resolvePreferredLocale(s.language, localStorage.getItem('sidekick-lang'))
+        : (s.language || localStorage.getItem('sidekick-lang') || 'en');
       setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
     applyBotName();
     // TTS: apply enabled state on boot so buttons show/hide correctly (#499)
-    if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('hermes-tts-enabled')==='true');
+    if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('sidekick-tts-enabled')==='true');
   }catch(e){
     window._sendKey='enter';
     window._showTokenUsage=false;
@@ -1818,20 +1833,20 @@ async function _loadActiveSpaceConfig() {
     _bootSettings={check_for_updates:false};
     if(typeof setLocale==='function'){
       const _lang=typeof resolvePreferredLocale==='function'
-        ? resolvePreferredLocale(null, localStorage.getItem('hermes-lang'))
-        : (localStorage.getItem('hermes-lang') || 'en');
+        ? resolvePreferredLocale(null, localStorage.getItem('sidekick-lang'))
+        : (localStorage.getItem('sidekick-lang') || 'en');
       setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
     applyBotName();
-    if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('hermes-tts-enabled')==='true');
+    if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('sidekick-tts-enabled')==='true');
   }
   // Non-blocking update check (fire-and-forget, once per tab session)
   // ?test_updates=1 in URL forces banner display for testing (bypasses sessionStorage guards)
   const _testUpdates=new URLSearchParams(location.search).get('test_updates')==='1';
-  if(_testUpdates||(_bootSettings.check_for_updates!==false&&!sessionStorage.getItem('hermes-update-checked')&&!sessionStorage.getItem('hermes-update-dismissed'))){
+  if(_testUpdates||(_bootSettings.check_for_updates!==false&&!sessionStorage.getItem('sidekick-update-checked')&&!sessionStorage.getItem('sidekick-update-dismissed'))){
     const _checkUrl='api/updates/check'+(_testUpdates?'?simulate=1':'');
-    api(_checkUrl).then(d=>{if(!_testUpdates)sessionStorage.setItem('hermes-update-checked','1');if((d.webui&&d.webui.behind>0)||(d.agent&&d.agent.behind>0))_showUpdateBanner(d);}).catch(()=>{});
+    api(_checkUrl).then(d=>{if(!_testUpdates)sessionStorage.setItem('sidekick-update-checked','1');if((d.webui&&d.webui.behind>0)||(d.agent&&d.agent.behind>0))_showUpdateBanner(d);}).catch(()=>{});
   }
   // Fetch active profile
   try{const p=await api('/api/profile/active');S.activeProfile=p.name||'default';}catch(e){S.activeProfile='default';}
@@ -1844,7 +1859,7 @@ async function _loadActiveSpaceConfig() {
   const _modelDropdownReady=populateModelDropdown().then(()=>{
     const savedState=(typeof _readPersistedModelState==='function')
       ? _readPersistedModelState()
-      : (localStorage.getItem('hermes-webui-model')?{model:localStorage.getItem('hermes-webui-model'),model_provider:null}:null);
+      : (localStorage.getItem('sidekick-webui-model')?{model:localStorage.getItem('sidekick-webui-model'),model_provider:null}:null);
     const savedModel=savedState&&savedState.model;
     if(savedModel && $('modelSelect')){
       const applied=(typeof _applyModelToDropdown==='function')
@@ -1854,7 +1869,7 @@ async function _loadActiveSpaceConfig() {
       // If the value didn't take (model not in list), clear the bad pref
       if(!applied&&$('modelSelect').value!==savedModel){
         if(typeof _clearPersistedModelState==='function') _clearPersistedModelState();
-        else localStorage.removeItem('hermes-webui-model');
+        else localStorage.removeItem('sidekick-webui-model');
       }
       else if(typeof syncModelChip==='function') syncModelChip();
     }
@@ -1871,7 +1886,7 @@ async function _loadActiveSpaceConfig() {
   await _loadActiveSpaceConfig();
   await loadOnboardingWizard();
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
-  const savedLocal=localStorage.getItem('hermes-webui-session');
+  const savedLocal=localStorage.getItem('sidekick-webui-session');
   const saved=urlSession||savedLocal;
   let _bootSavedSessionLoadPromise = null;
   if (urlSession && saved) {
@@ -1918,8 +1933,8 @@ async function _loadActiveSpaceConfig() {
         S._bootReady=true;
         // Restore panel pref before syncing so the workspace panel stays visible
         // even though there is no active session (#workspace-persist).
-        const _ephPanelPref=localStorage.getItem('hermes-webui-workspace-panel-pref')==='open'
-          || localStorage.getItem('hermes-webui-workspace-panel')==='open';
+        const _ephPanelPref=localStorage.getItem('sidekick-webui-workspace-panel-pref')==='open'
+          || localStorage.getItem('sidekick-webui-workspace-panel')==='open';
         if(_ephPanelPref) _workspacePanelMode='browse';
         // Sync file tree panel state in chat layout
         _applyFileTreePanelPref();
@@ -1931,8 +1946,8 @@ async function _loadActiveSpaceConfig() {
       // Restore the panel from localStorage when the session has a workspace.
       // Preference key takes priority over runtime state so that closing
       // the panel via toolbar X doesn't suppress the "keep open" setting.
-      const panelPref=localStorage.getItem('hermes-webui-workspace-panel-pref')==='open'
-        || localStorage.getItem('hermes-webui-workspace-panel')==='open';
+      const panelPref=localStorage.getItem('sidekick-webui-workspace-panel-pref')==='open'
+        || localStorage.getItem('sidekick-webui-workspace-panel')==='open';
       if(S.session&&S.session.workspace&&panelPref){
         _workspacePanelMode='browse';
       }
@@ -1940,15 +1955,15 @@ async function _loadActiveSpaceConfig() {
       _applyFileTreePanelPref();
       S._bootReady=true;
       syncTopbar();syncWorkspacePanelState();await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();await checkInflightOnBoot(saved);return;}
-    catch(e){localStorage.removeItem('hermes-webui-session');}
+    catch(e){localStorage.removeItem('sidekick-webui-session');}
   }
   // no saved session - show empty state, wait for user to hit +
   S._bootReady=true;
   syncTopbar();
   // Restore panel pref so the workspace panel stays visible on a fresh load if the
   // user had it open during their last session (#workspace-persist).
-  const _freshPanelPref=localStorage.getItem('hermes-webui-workspace-panel-pref')==='open'
-    || localStorage.getItem('hermes-webui-workspace-panel')==='open';
+  const _freshPanelPref=localStorage.getItem('sidekick-webui-workspace-panel-pref')==='open'
+    || localStorage.getItem('sidekick-webui-workspace-panel')==='open';
   if(_freshPanelPref) _workspacePanelMode='browse';
   // Sync file tree panel state in chat layout
   _applyFileTreePanelPref();
@@ -1964,7 +1979,7 @@ async function _loadActiveSpaceConfig() {
   // Init mode toggle from loaded settings
   if(typeof syncComposerModeButtons==='function') syncComposerModeButtons(window._composerMode||'action');
   // Init chat/code mode toggle from localStorage
-  const savedChatMode=localStorage.getItem('hermes-webui-chat-mode');
+  const savedChatMode=localStorage.getItem('sidekick-webui-chat-mode');
   if(savedChatMode&&typeof setChatMode==='function') setChatMode(savedChatMode);
   // Init terminal pane vertical resize
   if(typeof _initChatVerticalResize==='function') _initChatVerticalResize();
@@ -1975,14 +1990,14 @@ async function _loadActiveSpaceConfig() {
   // appear even when the user is on a different session/space/panel.
   if(typeof _startGlobalApprovalPoll==='function') _startGlobalApprovalPoll();
   // Init sandbox toggle from localStorage
-  const _savedSandboxDisabled = localStorage.getItem('hermes-sandbox-disabled');
+  const _savedSandboxDisabled = localStorage.getItem('sidekick-sandbox-disabled');
   window._sandboxDisabled = _savedSandboxDisabled === 'true';
   const _sandboxToggle = document.getElementById('sandboxToggle');
   if (_sandboxToggle) {
     _sandboxToggle.checked = !window._sandboxDisabled;
     _sandboxToggle.addEventListener('change', function() {
       window._sandboxDisabled = !this.checked;
-      localStorage.setItem('hermes-sandbox-disabled', window._sandboxDisabled ? 'true' : 'false');
+      localStorage.setItem('sidekick-sandbox-disabled', window._sandboxDisabled ? 'true' : 'false');
       const _label = document.getElementById('sandboxToggleLabel');
       if (_label) {
         const _icon = _label.querySelector('.sandbox-toggle-icon');
@@ -2044,7 +2059,7 @@ window.addEventListener('pageshow', async (event) => {
   // frozen DOM but another tab may have toggled the rail in the meantime.
   if (typeof _isSidebarCollapsed === 'function' && typeof toggleSidebar === 'function') {
     try {
-      const _wantExpanded = localStorage.getItem('hermes-webui-rail-expanded') === '1';
+      const _wantExpanded = localStorage.getItem('sidekick-webui-rail-expanded') === '1';
       const _haveExpanded = !_isSidebarCollapsed();
       if (_wantExpanded !== _haveExpanded) toggleSidebar(!_wantExpanded);
       if (typeof _syncSidebarAria === 'function') _syncSidebarAria();

@@ -277,7 +277,7 @@ async function send(){
     if(startData.effective_model && S.session){
       S.session.model=startData.effective_model;
       S.session.model_provider=startData.effective_model_provider||S.session.model_provider||null;
-      localStorage.setItem('hermes-webui-model', startData.effective_model);
+      localStorage.setItem('sidekick-webui-model', startData.effective_model);
       if(typeof _writePersistedModelState==='function') _writePersistedModelState(startData.effective_model,S.session.model_provider||null);
       if($('modelSelect')) _applyModelToDropdown(startData.effective_model, $('modelSelect'),S.session.model_provider||null);
       if(typeof syncTopbar==='function') syncTopbar();
@@ -394,7 +394,7 @@ function _renderGoalBanner(){
   // Space-scoping: nur anzeigen wenn Goal in diesem Space gesetzt wurde
   if(gs.space){
     const currentSpace=typeof _activeSpace!=='undefined'?_activeSpace:
-      localStorage.getItem('hermes-active-workspace')||'nova';
+      localStorage.getItem('sidekick-active-workspace')||'nova';
     if(gs.space!==currentSpace){
       banner.style.display='none';
       return;
@@ -440,16 +440,16 @@ function _updateGoalState(state){
     paused_reason:state.paused_reason||null,
     session_id:state.session_id||activeSid||null,
     space:state.space||(typeof _activeSpace!=='undefined'?_activeSpace:
-      localStorage.getItem('hermes-active-workspace')||null),
+      localStorage.getItem('sidekick-active-workspace')||null),
   };
   window._goalState=gs;
-  try{localStorage.setItem('hermes-webui-goal-state',JSON.stringify(gs));}catch(_){}
+  try{localStorage.setItem('sidekick-webui-goal-state',JSON.stringify(gs));}catch(_){}
   _renderGoalBanner();
 }
 
 function _clearGoalState(){
   window._goalState=null;
-  try{localStorage.removeItem('hermes-webui-goal-state');}catch(_){}
+  try{localStorage.removeItem('sidekick-webui-goal-state');}catch(_){}
   _renderGoalBanner();
 }
 
@@ -499,20 +499,20 @@ function _submitGoal(){
 // On init: load persisted goal state from localStorage
 (function _initGoalState(){
   try{
-    const saved=localStorage.getItem('hermes-webui-goal-state');
+    const saved=localStorage.getItem('sidekick-webui-goal-state');
     if(saved){
       const parsed=JSON.parse(saved);
       // Migration: alte Einträge ohne space-Feld korrigieren
       if(parsed&&parsed.goal&&parsed.status&&parsed.status!=='cleared'){
         if(!parsed.space){
           // Altes Format ohne Space → verwerfen, wird beim nächsten /goal neu gesetzt
-          localStorage.removeItem('hermes-webui-goal-state');
+          localStorage.removeItem('sidekick-webui-goal-state');
           window._goalState=null;
         }else{
           window._goalState=parsed;
         }
       }else{
-        localStorage.removeItem('hermes-webui-goal-state');
+        localStorage.removeItem('sidekick-webui-goal-state');
       }
     }
   }catch(_){}
@@ -1492,7 +1492,7 @@ source.addEventListener('done',e=>{
         const _prevCost=(S.session&&S.session.estimated_cost)||0;
         S.session=d.session;S.messages=d.session.messages||[];if(typeof _messagesTruncated!=='undefined')_messagesTruncated=!!d.session._messages_truncated;
         if(S.session&&S.session.session_id){
-          localStorage.setItem('hermes-webui-session',S.session.session_id);
+          localStorage.setItem('sidekick-webui-session',S.session.session_id);
           if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(S.session.session_id);
         }
         if(
@@ -1888,7 +1888,7 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
         clearLiveToolCards();if(!assistantText)removeThinking();
         S.session=session;S.messages=(session.messages||[]).filter(m=>m&&m.role);
         if(S.session&&S.session.session_id){
-          localStorage.setItem('hermes-webui-session',S.session.session_id);
+          localStorage.setItem('sidekick-webui-session',S.session.session_id);
           if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(S.session.session_id);
         }
         const hasMessageToolMetadata=S.messages.some(m=>{
@@ -2763,7 +2763,7 @@ function _stashClarifyDraft(reason) {
   const draft = String((input && input.value) || "").trim();
   if (!draft) return false;
   const sid = _clarifySessionId || (S.session && S.session.session_id) || "unknown";
-  const key = `hermes-clarify-draft-${sid}-${_clarifySignature || "unknown"}`;
+  const key = `sidekick-clarify-draft-${sid}-${_clarifySignature || "unknown"}`;
   try {
     sessionStorage.setItem(key, JSON.stringify({
       draft,

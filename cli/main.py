@@ -33,7 +33,7 @@ Usage:
     sidekick honcho tokens --dialectic N     # Set dialectic result char cap
     sidekick honcho identity                 # Show AI peer identity representation
     sidekick honcho identity <file>          # Seed AI peer identity from a file (SOUL.md etc.)
-    sidekick honcho migrate                  # Step-by-step migration guide: OpenClaw native → Hermes + Honcho
+    sidekick honcho migrate                  # Step-by-step migration guide: OpenClaw native → Sidekick + Honcho
     sidekick version             Show version
     sidekick update              Update to latest version
     sidekick uninstall           Uninstall Sidekick Agent
@@ -5295,7 +5295,7 @@ def cmd_config(args):
 
 
 def cmd_backup(args):
-    """Back up Hermes home directory to a zip file."""
+    """Back up Sidekick home directory to a zip file."""
     if getattr(args, "quick", False):
         from cli.backup import run_quick_backup
 
@@ -5307,7 +5307,7 @@ def cmd_backup(args):
 
 
 def cmd_import(args):
-    """Restore a Hermes backup from a zip file."""
+    """Restore a Sidekick backup from a zip file."""
     from cli.backup import run_import
 
     run_import(args)
@@ -9127,7 +9127,7 @@ def cmd_completion(args, parser=None):
 
 
 def cmd_logs(args):
-    """View and filter Hermes log files."""
+    """View and filter Sidekick log files."""
     from cli.logs import tail_log, list_logs
 
     log_name = getattr(args, "log_name", "agent") or "agent"
@@ -10172,8 +10172,8 @@ Examples:
     # =========================================================================
     backup_parser = subparsers.add_parser(
         "backup",
-        help="Back up Hermes home directory to a zip file",
-        description="Create a zip archive of your entire Hermes configuration, "
+        help="Back up Sidekick home directory to a zip file",
+        description="Create a zip archive of your entire Sidekick configuration, "
         "skills, sessions, and data (excludes the hermes-agent codebase). "
         "Use --quick for a fast snapshot of just critical state files.",
     )
@@ -10879,19 +10879,19 @@ Examples:
     # =========================================================================
     mcp_parser = subparsers.add_parser(
         "mcp",
-        help="Manage MCP servers and run Hermes as an MCP server",
+        help="Manage MCP servers and run Sidekick as an MCP server",
         description=(
-            "Manage MCP server connections and run Hermes as an MCP server.\n\n"
+            "Manage MCP server connections and run Sidekick as an MCP server.\n\n"
             "MCP servers provide additional tools via the Model Context Protocol.\n"
             "Use 'sidekick mcp add' to connect to a new server, or\n"
-            "'sidekick mcp serve' to expose Hermes conversations over MCP."
+            "'sidekick mcp serve' to expose Sidekick conversations over MCP."
         ),
     )
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_action")
 
     mcp_serve_p = mcp_sub.add_parser(
         "serve",
-        help="Run Hermes as an MCP server (expose conversations to other agents)",
+        help="Run Sidekick as an MCP server (expose conversations to other agents)",
     )
     mcp_serve_p.add_argument(
         "-v",
@@ -11231,14 +11231,14 @@ Examples:
     claw_parser = subparsers.add_parser(
         "claw",
         help="OpenClaw migration tools",
-        description="Migrate settings, memories, skills, and API keys from OpenClaw to Hermes",
+        description="Migrate settings, memories, skills, and API keys from OpenClaw to Sidekick",
     )
     claw_subparsers = claw_parser.add_subparsers(dest="claw_action")
 
     # claw migrate
     claw_migrate = claw_subparsers.add_parser(
         "migrate",
-        help="Migrate from OpenClaw to Hermes",
+        help="Migrate from OpenClaw to Sidekick",
         description="Import settings, memories, skills, and API keys from an OpenClaw installation. "
         "Always shows a preview before making changes.",
     )
@@ -11407,7 +11407,7 @@ Examples:
     # =========================================================================
     profile_parser = subparsers.add_parser(
         "profile",
-        help="Manage profiles — multiple isolated Hermes instances",
+        help="Manage profiles — multiple isolated Sidekick instances",
     )
     profile_subparsers = profile_parser.add_subparsers(dest="profile_action")
 
@@ -11630,7 +11630,7 @@ Examples:
     # =========================================================================
     logs_parser = subparsers.add_parser(
         "logs",
-        help="View and filter Hermes log files",
+        help="View and filter Sidekick log files",
         description="View, tail, and filter agent.log / errors.log / gateway.log",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\

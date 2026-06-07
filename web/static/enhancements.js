@@ -68,8 +68,8 @@
   };
 
   const state = {
-    sidebarWidth: LS('hermes-webui-sidebar-width', 300),
-    favoriteSessions: new Set(LS('hermes-webui-fav-sessions', [])),
+    sidebarWidth: LS('sidekick-webui-sidebar-width', 300),
+    favoriteSessions: new Set(LS('sidekick-webui-fav-sessions', [])),
     selectedSessions: new Set(),
     bulkMode: false,
     showFavoritesOnly: false,
@@ -129,7 +129,7 @@
       state.sidebarWidth = w;
     }
     function onUp() {
-      LSS('hermes-webui-sidebar-width', state.sidebarWidth);
+      LSS('sidekick-webui-sidebar-width', state.sidebarWidth);
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     }
@@ -154,7 +154,7 @@
       { name: 'charizard', label: 'Charizard', desc: 'Fire red', bg: '#1A0808', fg: '#FFD4C0', accent: '#EF4444' },
     ];
 
-    const currentTheme = LS('hermes-theme', 'dark');
+    const currentTheme = LS('sidekick-theme', 'dark');
 
     const grid = EL('div', {
       className: 'theme-grid-modal',
@@ -204,7 +204,7 @@
           transition: 'all 0.2s',
         },
         onClick: () => {
-          try { localStorage.setItem('hermes-theme', t.name); } catch {}
+          try { localStorage.setItem('sidekick-theme', t.name); } catch {}
           location.reload();
         },
       }, [
@@ -490,7 +490,7 @@
     } else {
       state.favoriteSessions.add(id);
     }
-    LSS('hermes-webui-fav-sessions', [...state.favoriteSessions]);
+    LSS('sidekick-webui-fav-sessions', [...state.favoriteSessions]);
     // Update filter if active
     if (state.showFavoritesOnly) filterSessions();
   }
@@ -1070,14 +1070,14 @@
         const layout = document.querySelector('.layout');
         if (layout) {
           layout.dataset.layoutVariant = layout.dataset.layoutVariant === 'codex' ? 'standard' : 'codex';
-          LSS('hermes-webui-layout-variant', layout.dataset.layoutVariant);
+          LSS('sidekick-webui-layout-variant', layout.dataset.layoutVariant);
         }
       },
     });
 
     document.body.appendChild(toggle);
     // Restore saved layout
-    const savedLayout = LS('hermes-webui-layout-variant', '');
+    const savedLayout = LS('sidekick-webui-layout-variant', '');
     if (savedLayout) {
       const layout = document.querySelector('.layout');
       if (layout) layout.dataset.layoutVariant = savedLayout;

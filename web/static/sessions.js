@@ -176,9 +176,9 @@ function _clearComposerDraft(sid) {
   }).catch(() => {});
 }
 
-const SESSION_VIEWED_COUNTS_KEY = 'hermes-session-viewed-counts';
-const SESSION_COMPLETION_UNREAD_KEY = 'hermes-session-completion-unread';
-const SESSION_OBSERVED_STREAMING_KEY = 'hermes-session-observed-streaming';
+const SESSION_VIEWED_COUNTS_KEY = 'sidekick-session-viewed-counts';
+const SESSION_COMPLETION_UNREAD_KEY = 'sidekick-session-completion-unread';
+const SESSION_OBSERVED_STREAMING_KEY = 'sidekick-session-observed-streaming';
 let _sessionViewedCounts = null;
 let _sessionCompletionUnread = null;
 let _sessionObservedStreaming = null;
@@ -504,7 +504,7 @@ async function newSession(flash, options={}){
   S.session=data.session;S.messages=data.session.messages||[];
   S.lastUsage={...(data.session.last_usage||{})};
   if(flash)S.session._flash=true;
-  localStorage.setItem('hermes-webui-session',S.session.session_id);
+  localStorage.setItem('sidekick-webui-session',S.session.session_id);
   _setActiveSessionUrl(S.session.session_id);
   _setSessionViewedCount(S.session.session_id, S.session.message_count || 0);
   // Sync chat-header dropdown to the session's model so the UI reflects
@@ -613,8 +613,8 @@ async function loadSession(sid, options){
         // If this 404 was for the saved active-session ID (not a click-into request),
         // wipe the stale localStorage value and rethrow so boot can fall through to
         // the empty-state instead of sticking to a broken "Session not available" view.
-        if(!currentSid&&localStorage.getItem('hermes-webui-session')===sid){
-          localStorage.removeItem('hermes-webui-session');
+        if(!currentSid&&localStorage.getItem('sidekick-webui-session')===sid){
+          localStorage.removeItem('sidekick-webui-session');
           if (_loadingSessionId === sid) _loadingSessionId = null;
           throw e;
         }
@@ -646,7 +646,7 @@ async function loadSession(sid, options){
   }
   if (loadedSessionSpace && typeof _activeSpace !== 'undefined' && loadedSessionSpace !== _activeSpace) {
     _activeSpace = loadedSessionSpace;
-    try { localStorage.setItem('hermes-active-workspace', loadedSessionSpace); } catch (_) {}
+    try { localStorage.setItem('sidekick-active-workspace', loadedSessionSpace); } catch (_) {}
     try { if (typeof _loadActiveSpaceConfig === 'function') await _loadActiveSpaceConfig(); } catch (_) {}
     try { if (typeof loadSpaces === 'function') await loadSpaces(); } catch (_) {}
     try { if (typeof updateTitlebarSpace === 'function') updateTitlebarSpace(); } catch (_) {}
@@ -685,7 +685,7 @@ async function loadSession(sid, options){
   if(typeof syncTopbar==='function') syncTopbar();
   _setSessionViewedCount(S.session.session_id, Number(data.session.message_count || 0));
   _clearSessionCompletionUnread(S.session.session_id);
-  localStorage.setItem('hermes-webui-session',S.session.session_id);
+  localStorage.setItem('sidekick-webui-session',S.session.session_id);
   _setActiveSessionUrl(S.session.session_id);
 
   const activeStreamId=S.session.active_stream_id||null;
@@ -782,7 +782,7 @@ async function loadSession(sid, options){
     // Restore any queued message that survived page refresh via sessionStorage.
     if(typeof queueSessionMessage==='function'){
       try{
-        const _storedQ=sessionStorage.getItem('hermes-queue-'+sid);
+        const _storedQ=sessionStorage.getItem('sidekick-queue-'+sid);
         if(_storedQ){
           const _entries=JSON.parse(_storedQ);
           if(Array.isArray(_entries)&&_entries.length){
@@ -798,15 +798,15 @@ async function loadSession(sid, options){
                 if(typeof autoResize==='function') autoResize();
                 if(typeof showToast==='function') showToast((_fresh.length>1?`${_fresh.length} queued messages restored (showing first)`:'Queued message restored')+' — review and send when ready');
               }
-              sessionStorage.removeItem('hermes-queue-'+sid);
+              sessionStorage.removeItem('sidekick-queue-'+sid);
             } else {
-              sessionStorage.removeItem('hermes-queue-'+sid);
+              sessionStorage.removeItem('sidekick-queue-'+sid);
             }
           } else {
-            sessionStorage.removeItem('hermes-queue-'+sid);
+            sessionStorage.removeItem('sidekick-queue-'+sid);
           }
         }
-      }catch(_){sessionStorage.removeItem('hermes-queue-'+sid);}
+      }catch(_){sessionStorage.removeItem('sidekick-queue-'+sid);}
     }
 
     // Reconstruct tool calls from message metadata, or fall back to session-level summary.
@@ -1700,7 +1700,7 @@ function _renderBatchActionBar(){
       const retainedCount=_worktreeResponseCount(results);
       ids.forEach(_clearHandoffStorageForSession);
       if(S.session&&ids.includes(S.session.session_id)){
-        S.session=null;S.messages=[];S.entries=[];localStorage.removeItem('hermes-webui-session');
+        S.session=null;S.messages=[];S.entries=[];localStorage.removeItem('sidekick-webui-session');
         const remaining=await api(_spaceScopedApiPath('/api/sessions'));
         if(remaining.sessions&&remaining.sessions.length){await loadSession(remaining.sessions[0].session_id);}
         else{$('msgInner').innerHTML='';$('emptyState').style.display='';}
@@ -2805,8 +2805,8 @@ function renderSessionListFromCache(){
   const now=_serverNowMs();
   // Collapse state persisted in localStorage
   let _groupCollapsed={};
-  try{_groupCollapsed=JSON.parse(localStorage.getItem('hermes-date-groups-collapsed')||'{}');}catch(e){}
-  const _saveCollapsed=()=>{try{localStorage.setItem('hermes-date-groups-collapsed',JSON.stringify(_groupCollapsed));}catch(e){}};
+  try{_groupCollapsed=JSON.parse(localStorage.getItem('sidekick-date-groups-collapsed')||'{}');}catch(e){}
+  const _saveCollapsed=()=>{try{localStorage.setItem('sidekick-date-groups-collapsed',JSON.stringify(_groupCollapsed));}catch(e){}};
   // Group sessions by date
   const groups=[];
   let curLabel=null,curItems=[];
@@ -3404,7 +3404,7 @@ el.dataset.sid = s.session_id;
 }
 
 async function _handleActiveSessionStorageEvent(e){
-  if(!e || e.key !== 'hermes-webui-session') return;
+  if(!e || e.key !== 'sidekick-webui-session') return;
   // Do not treat localStorage as a global active-session bus. Each tab owns its
   // active conversation via its URL (/session/<id>), so another tab switching
   // sessions must not force this tab to navigate away from an in-flight turn.
@@ -3451,7 +3451,7 @@ async function deleteSession(sid){
   _sessionVisibleSidebarIds=(_sessionVisibleSidebarIds||[]).filter(id=>id!==sid);
   if(S.session&&S.session.session_id===sid){
     S.session=null;S.messages=[];S.entries=[];
-    localStorage.removeItem('hermes-webui-session');
+    localStorage.removeItem('sidekick-webui-session');
     // load the most recent remaining session, or show blank if none left
     const remaining=await api(_spaceScopedApiPath('/api/sessions'));
     if(remaining.sessions&&remaining.sessions.length){
@@ -3712,7 +3712,7 @@ async function _confirmDeleteProject(proj){
 }
 
 // Re-render session list on language switch so dynamic strings update
-document.addEventListener('hermes-locale-change', () => {
+document.addEventListener('sidekick-locale-change', () => {
   renderSessionListFromCache();
 });
 

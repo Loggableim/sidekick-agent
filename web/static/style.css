@@ -2542,7 +2542,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .topbar-chips{flex-wrap:nowrap;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;}
     .topbar-chips .chip,.topbar-chips .ws-chip,.topbar-chips button{font-size:11px!important;padding:4px 8px!important;white-space:nowrap;}
     .settings-main{padding:18px 16px;}
-    .hermes-action-grid{grid-template-columns:1fr;}
+    .sidekick-action-grid{grid-template-columns:1fr;}
     .messages-inner{padding:12px 10px 20px;}
     .msg-body{padding-left:0;max-width:100%;}
     .msg-role{font-size:12px;}
@@ -3729,7 +3729,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 #mainSettings select:disabled{opacity:.6;cursor:not-allowed;}
 
 /* Quick-action grid in Conversation pane â€” outlined card buttons. */
-.hermes-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:18px;}
+.sidekick-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:18px;}
 .settings-action-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--sidebar);color:var(--text);font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;}
 .settings-action-btn:hover{background:var(--accent-bg);border-color:var(--accent-bg-strong);color:var(--accent-text);}
 .settings-action-btn.danger{color:var(--error,#e05);border-color:color-mix(in srgb,var(--error,#e05) 30%,transparent);}
@@ -3824,7 +3824,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 @media (max-width: 768px){
   .settings-main{padding:16px 12px;}
   .settings-section-title{font-size:16px;}
-  .hermes-action-grid{grid-template-columns:1fr;}
+  .sidekick-action-grid{grid-template-columns:1fr;}
   #mainSettings .settings-field{padding:14px;}
 }
 

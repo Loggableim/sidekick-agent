@@ -503,7 +503,7 @@ async function _saveOnboardingDefaults(){
     slug:(window.DEFAULT_SPACE_SLUG||'nova'),
     nova:{enabled:true,character:novaCharacter,source_space:'nova',communication_mode:'pingpong'}
   })});
-  try{localStorage.setItem('hermes-webui-model',model)}catch{}
+  try{localStorage.setItem('sidekick-webui-model',model)}catch{}
   if($('modelSelect')) _applyModelToDropdown(model,$('modelSelect'));
 }
 

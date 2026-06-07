@@ -10863,7 +10863,7 @@ function t(key, ...args) {
 function setLocale(lang) {
   const resolved = resolveLocale(lang) || 'en';
   _locale = LOCALES[resolved];
-  localStorage.setItem('hermes-lang', resolved);
+  localStorage.setItem('sidekick-lang', resolved);
   document.documentElement.lang = _locale._speech || resolved;
 }
 
@@ -10872,7 +10872,7 @@ function setLocale(lang) {
  * Server-persisted preference is applied later in loadSettingsPanel().
  */
 function loadLocale() {
-  setLocale(resolvePreferredLocale(null, localStorage.getItem('hermes-lang')));
+  setLocale(resolvePreferredLocale(null, localStorage.getItem('sidekick-lang')));
 }
 
 /**
@@ -10959,7 +10959,7 @@ function switchLang(code) {
   const dd = document.getElementById('langDropdown');
   if (dd) dd.hidden = true;
   // Notify dynamic components to refresh their i18n
-  document.dispatchEvent(new CustomEvent('hermes-locale-change', { detail: { lang: code } }));
+  document.dispatchEvent(new CustomEvent('sidekick-locale-change', { detail: { lang: code } }));
 }
 
 window.toggleLangDropdown = toggleLangDropdown;
@@ -10968,7 +10968,7 @@ window.getFlagForLocale = getFlagForLocale;
 
 // Sync flag on boot after DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-  const saved = localStorage.getItem('hermes-lang') || 'en';
+  const saved = localStorage.getItem('sidekick-lang') || 'en';
   const flagEl = document.getElementById('currentLangFlag');
   if (flagEl) flagEl.textContent = getFlagForLocale(saved);
 });

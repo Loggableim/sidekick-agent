@@ -446,7 +446,7 @@ async function _runManualCompression(focusTopic){
         S.messages=data.session.messages||[];
         S.toolCalls=data.session.tool_calls||[];
         clearLiveToolCards();
-        localStorage.setItem('hermes-webui-session',S.session.session_id);
+        localStorage.setItem('sidekick-webui-session',S.session.session_id);
         if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(S.session.session_id);
         syncTopbar();
         renderMessages();
@@ -532,10 +532,10 @@ async function cmdTheme(args){
   if(themes.includes(val)||legacyThemes.includes(val)){
     const appearance=_normalizeAppearance(
       val,
-      legacyThemes.includes(val)?null:localStorage.getItem('hermes-skin')
+      legacyThemes.includes(val)?null:localStorage.getItem('sidekick-skin')
     );
-    localStorage.setItem('hermes-theme',appearance.theme);
-    localStorage.setItem('hermes-skin',appearance.skin);
+    localStorage.setItem('sidekick-theme',appearance.theme);
+    localStorage.setItem('sidekick-skin',appearance.skin);
     _applyTheme(appearance.theme);
     _applySkin(appearance.skin);
     try{await api('/api/settings',{method:'POST',body:JSON.stringify({theme:appearance.theme,skin:appearance.skin})});}catch(e){}
@@ -550,9 +550,9 @@ async function cmdTheme(args){
   }
   // Check if it's a skin
   if(skins.includes(val)){
-    const appearance=_normalizeAppearance(localStorage.getItem('hermes-theme'),val);
-    localStorage.setItem('hermes-theme',appearance.theme);
-    localStorage.setItem('hermes-skin',appearance.skin);
+    const appearance=_normalizeAppearance(localStorage.getItem('sidekick-theme'),val);
+    localStorage.setItem('sidekick-theme',appearance.theme);
+    localStorage.setItem('sidekick-skin',appearance.skin);
     _applyTheme(appearance.theme);
     _applySkin(appearance.skin);
     try{await api('/api/settings',{method:'POST',body:JSON.stringify({theme:appearance.theme,skin:appearance.skin})});}catch(e){}
