@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Local state and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+auth.json
+secrets.json
+tokens.json
+credentials.json
+
+# Sidekick runtime state
+.sidekick/
+.hermes/
+state/
+logs/
+sessions/
+memories/
+workspaces/
+profiles/
+
+# Local/private content that must never enter the consolidated repo
+home/
+spaces/
+bewusstsein/
+datasets/
+tmp/
+temp/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
