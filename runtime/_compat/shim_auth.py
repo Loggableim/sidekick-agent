@@ -111,6 +111,19 @@ def resolve_codex_runtime_credentials() -> dict[str, str] | None:
     return _read_codex_tokens()
 
 
+def _save_provider_state(state: dict[str, Any]) -> None:
+    """Stub — saves provider state (real implementation coming in next pass)."""
+    store = _load_auth_store()
+    store["provider_state"] = state
+    _save_auth_store(store)
+
+
+def read_credential_pool(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Read credential pool from auth store."""
+    store = _load_auth_store()
+    return store.get("credential_pool", {})
+
+
 def suppress_credential_source(source: str) -> bool:
     """Stub — always returns False."""
     return False

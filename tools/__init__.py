@@ -1,27 +1,25 @@
-"""Minimal tools stub package for the monorepo migration.
+#!/usr/bin/env python3
+"""Tools package namespace.
 
-The real tools/ package (60+ modules, ~80K LOC) lives in
-cids-hermes-agent/tools/ and will be ported in a follow-up phase.
-This stub prevents ImportError crashes from lazy imports in CLI/WebUI.
+Keep package import side effects minimal. Importing ``tools`` should not
+eagerly import the full tool stack, because several subsystems load tools while
+``hermes_cli.config`` is still initializing.
+
+Callers should import concrete submodules directly, for example:
+
+    import tools.web_tools
+    from tools import browser_tool
+
+Python will resolve those submodules via the package path without needing them
+to be re-exported here.
 """
-from __future__ import annotations
 
-# Tools registry stub
-class _RegistryStub:
-    tools: dict = {}
-    tool_handlers: dict = {}
-    def register(self, name, schema, handler, **kw):
-        self.tools[name] = schema
-        self.tool_handlers[name] = handler
-    def dispatch(self, name, args, **kw):
-        return f"[stub] tool {name} not available in migration"
-    def has_tool(self, name):
-        return False
 
-registry = _RegistryStub()
+def check_file_requirements():
+    """File tools only require terminal backend availability."""
+    from .terminal_tool import check_terminal_requirements
 
-def discover_builtin_tools(*args, **kwargs):
-    """Stub — tools not ported yet."""
-    pass
+    return check_terminal_requirements()
 
-__all__ = ["registry", "discover_builtin_tools"]
+
+__all__ = ["check_file_requirements"]
