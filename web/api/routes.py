@@ -2784,22 +2784,20 @@ def _run_lifecycle_health() -> dict:
     """Return active worker-run state independent of SSE stream presence."""
     # Import the module rather than relying only on imported scalar aliases so
     # LAST_RUN_FINISHED_AT stays fresh after unregister_active_run() updates it.
-    from api import config as _live_config
+    from web.api import config as _live_config
 
     now = time.time()
-    with _live_config.ACTIVE_RUNS_LOCK:
-        runs = []
-        for stream_id, raw in (_live_config.ACTIVE_RUNS or {}).items():
-            item = dict(raw or {})
-            started_at = item.get("started_at")
-            try:
-                age = max(0.0, now - float(started_at))
-            except Exception:
-                age = 0.0
-            item.setdefault("stream_id", stream_id)
-            item["age_seconds"] = round(age, 1)
-            runs.append(item)
-        last_finished = _live_config.LAST_RUN_FINISHED_AT
+    for stream_id, raw in (_live_config.ACTIVE_RUNS or {}).items():
+        item = dict(raw or {})
+        started_at = item.get("started_at")
+        try:
+            age = max(0.0, now - float(started_at))
+        except Exception:
+            age = 0.0
+        item.setdefault("stream_id", stream_id)
+        item["age_seconds"] = round(age, 1)
+        runs.append(item)
+    last_finished = _live_config.LAST_RUN_FINISHED_AT
     runs.sort(key=lambda item: float(item.get("started_at") or 0.0))
     payload = {
         "active_runs": len(runs),
@@ -3386,13 +3384,13 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, _load_nova_route_status())
 
     if parsed.path == "/api/dashboard/status":
-        from api import dashboard_probe
+        from web.api import dashboard_probe
 
         j(handler, dashboard_probe.get_dashboard_status())
         return True
 
     if parsed.path == "/api/dashboard/config":
-        from api import dashboard_probe
+        from web.api import dashboard_probe
 
         try:
             j(handler, dashboard_probe.get_dashboard_config())
@@ -4073,7 +4071,7 @@ def handle_get(handler, parsed) -> bool:
         stream_id = parse_qs(parsed.query).get("stream_id", [""])[0]
         payload = {"active": stream_id in STREAMS, "stream_id": stream_id}
         try:
-            from api import config as _live_config
+            from web.api import config as _live_config
             with _live_config.ACTIVE_RUNS_LOCK:
                 run = dict((_live_config.ACTIVE_RUNS or {}).get(stream_id) or {})
             if run:
@@ -4950,7 +4948,7 @@ def handle_post(handler, parsed) -> bool:
 
     # ── Dashboard config ───────────────────────────────────────────────────
     if parsed.path == "/api/dashboard/config":
-        from api import dashboard_probe
+        from web.api import dashboard_probe
 
         try:
             j(handler, dashboard_probe.save_dashboard_config(body))
@@ -5131,11 +5129,11 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/admin/reload":
         # Hot-reload api.models module to pick up code changes without restart.
         import importlib
-        from api import models as _models
+        from web.api import models as _models
         importlib.reload(_models)
         # Also re-expose get_session from the reloaded module so routes.py
         # continues to work (routes.py imported it at module level).
-        import api.routes as _routes
+        import web.api.routes as _routes
         _routes.get_session = _models.get_session
         _routes.Session = _models.Session
         _routes.compact = _models.compact
@@ -7015,7 +7013,7 @@ def _handle_sse_stream(handler, parsed):
     def _heartbeat_payload():
         payload = {"stream_id": stream_id, "active": stream_id in STREAMS}
         try:
-            from api import config as _live_config
+            from web.api import config as _live_config
             with _live_config.ACTIVE_RUNS_LOCK:
                 run = dict((_live_config.ACTIVE_RUNS or {}).get(stream_id) or {})
             if run:
@@ -10260,7 +10258,7 @@ def _handle_session_compress(handler, body):
                     focus_topic,
                 )
 
-        import api.config as _cfg
+        import web.api.config as _cfg
         from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
         import hermes_cli.runtime_provider as _runtime_provider
         import run_agent as _run_agent
@@ -10878,7 +10876,7 @@ def _handle_handoff_summary(handler, body):
 
         # Call LLM for summary.
     try:
-        import api.config as _cfg
+        import web.api.config as _cfg
         from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
         import hermes_cli.runtime_provider as _runtime_provider
         import run_agent as _run_agent

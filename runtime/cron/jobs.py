@@ -21,7 +21,7 @@ from typing import Optional, Dict, List, Any, Union
 
 logger = logging.getLogger(__name__)
 
-from sidekick_time import now as _hermes_now
+from runtime._compat.shim_time import now as _hermes_now
 from shared.utils import atomic_replace
 
 try:

@@ -3,9 +3,10 @@ Compat shim — placeholder for ``sidekick_state`` that defines the minimal
 interface agent modules actually import.
 
 Agent modules import these names from ``sidekick_state`` (found via grep):
-  - SessionDB          — the main SQLite session store class
+  - SessionDB                     — the main SQLite session store class
   - format_session_db_unavailable  — user-facing error formatting
   - apply_wal_with_fallback        — WAL-journal fallback helper
+  - SQL_STATE_EXISTS               — sentinel indicating state table initialised
 
 This shim provides stub/no-op implementations so that code can be imported
 without crashing.  The actual port of the SQLite state store lives elsewhere.
@@ -32,6 +33,10 @@ _WAL_INCOMPAT_MARKERS = (
     "not authorized",
     "disk i/o error",
 )
+
+# Sentinel constant used by cron/gateway to indicate the SQL state table
+# structure has been initialised.  Always ``True`` for the in-memory shim.
+SQL_STATE_EXISTS = True
 
 
 def _set_last_init_error(msg: str | None) -> None:
@@ -231,6 +236,7 @@ class SessionDB:
 
 __all__ = [
     "SessionDB",
+    "SQL_STATE_EXISTS",
     "apply_wal_with_fallback",
     "format_session_db_unavailable",
     "get_last_init_error",

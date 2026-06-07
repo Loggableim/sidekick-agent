@@ -37,7 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from runtime._compat.shim_constants import get_sidekick_home
 from runtime._compat.shim_cli.config import load_config, _expand_env_vars
-from sidekick_time import now as _hermes_now
+from runtime._compat.shim_time import now as _hermes_now
 
 logger = logging.getLogger(__name__)
 

@@ -1481,7 +1481,7 @@ def _clean_provider_key_from_config(provider_id: str) -> None:
         # config module's path resolver after api.providers has already been
         # imported; using the stale imported reference can clean the wrong
         # config.yaml.
-        import api.config as _config
+        import web.api.config as _config
         config_path = _config._get_config_path()
     except Exception:
         return

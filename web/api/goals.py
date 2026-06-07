@@ -34,7 +34,7 @@ _DB_CACHE: dict[str, Any] = {}
 def _default_max_turns() -> int:
     """Return the configured /goal turn budget, defaulting to Hermes' 20 turns."""
     try:
-        from api import config as _config
+        from web.api import config as _config
 
         cfg = getattr(_config, "cfg", {}) or {}
         goals_cfg = cfg.get("goals", {}) if isinstance(cfg, dict) else {}

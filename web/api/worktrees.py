@@ -231,7 +231,7 @@ def find_git_repo_root(workspace: str | Path) -> Path:
 
 def _setup_agent_worktree(repo_root: str) -> dict:
     try:
-        import api.config  # noqa: F401  # ensure Nova dir is on sys.path
+        import web.api.config  # noqa: F401  # ensure Nova dir is on sys.path
         from cli import _setup_worktree
     except Exception as exc:
         raise RuntimeError("Nova worktree helper is unavailable") from exc

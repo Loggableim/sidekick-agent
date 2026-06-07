@@ -4340,7 +4340,7 @@ def _handle_chat_steer(handler, body: dict) -> bool:
     "stream_id": str|None}.
     """
     from web.api.helpers import j, bad
-    from api import config as _cfg
+    from web.api import config as _cfg
 
     sid = str((body or {}).get("session_id", "") or "").strip()
     text = str((body or {}).get("text", "") or "").strip()
@@ -4402,7 +4402,7 @@ def cancel_stream(stream_id: str) -> bool:
     a safe no-op. Session cleanup runs outside STREAMS_LOCK to preserve lock
     ordering (streaming thread does LOCK → STREAMS_LOCK; inverting would deadlock).
     """
-    from api import config as _live_config
+    from web.api import config as _live_config
 
     # Use module-level aliases (imported from api.config at startup).
     # In production these are always the same objects as api.config.STREAMS etc.

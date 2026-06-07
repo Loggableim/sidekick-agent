@@ -148,7 +148,7 @@ def save_dashboard_config(payload: dict) -> dict:
     if raw_url:
         _host, _port, _scheme, normalized_url = normalize_dashboard_url(raw_url)
 
-    from api import config as webui_config
+    from web.api import config as webui_config
 
     config_path = webui_config._get_config_path()
     config_data = webui_config._load_yaml_config_file(config_path)

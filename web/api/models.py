@@ -11,7 +11,7 @@ import uuid
 from contextlib import closing
 from pathlib import Path
 
-import api.config as _cfg
+import web.api.config as _cfg
 from web.api.config import (
     SESSIONS, SESSIONS_MAX,
     LOCK, STREAMS, STREAMS_LOCK, DEFAULT_WORKSPACE, DEFAULT_MODEL, PROJECTS_FILE, HOME,
