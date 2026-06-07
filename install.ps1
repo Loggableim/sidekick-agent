@@ -5,7 +5,7 @@
 # Uses uv for fast Python provisioning and package management.
 #
 # Usage:
-#   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
 #
 # Or download and run with options:
 #   .\install.ps1 -NoVenv -SkipSetup
@@ -21,6 +21,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# ============================================================================
+# Exit Code Schema
+# ============================================================================
+# 0  Success
+# 1  Generic failure (unhandled exception)
+# 2  Missing prerequisite (Python/Git/uv install failed)
+# 3  Network/download failure (timeout, DNS, HTTP)
+# 4  Git/update failure (clone, fetch, checkout)
+# 5  Install/venv failure (pip install, dependency install)
+# 6  Verification failure (doctor/smoke check failed)
+# ============================================================================
 
 # ============================================================================
 # Configuration
@@ -96,7 +108,7 @@ function Install-Uv {
     # Install uv
     Write-Info "Installing uv (fast Python package manager)..."
     try {
-        powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" 2>&1 | Out-Null
+        powershell -ExecutionPolicy ByPass -c "Invoke-WebRequest -TimeoutSec 60 'https://astral.sh/uv/install.ps1' | iex" 2>&1 | Out-Null
         
         # Find the installed binary
         $uvExe = "$env:USERPROFILE\.local\bin\uv.exe"
@@ -252,7 +264,7 @@ function Install-Git {
         }
 
         $releaseApi = "https://api.github.com/repos/git-for-windows/git/releases/latest"
-        $release = Invoke-RestMethod -Uri $releaseApi -UseBasicParsing -Headers @{ "User-Agent" = "sidekick-installer" }
+        $release = Invoke-RestMethod -Uri $releaseApi -UseBasicParsing -TimeoutSec 60 -Headers @{ "User-Agent" = "sidekick-installer" }
 
         if ($arch -eq "32-bit-mingit") {
             Write-Warn "32-bit Windows detected — PortableGit is 64-bit only.  Installing MinGit 32-bit as a last resort; bash-dependent Sidekick features (terminal tool, agent-browser) will not work on this machine."
@@ -278,7 +290,7 @@ function Install-Git {
         $gitDir = "$SidekickHome\git"
 
         Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 60
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
@@ -594,12 +606,12 @@ function Install-Repository {
             Write-Info "Existing installation found, updating..."
             Push-Location $InstallDir
             try {
-                git -c windows.appendAtomically=false fetch origin
-                if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit $LASTEXITCODE)" }
+                git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch origin
+                if ($LASTEXITCODE -ne 0) { Write-Err "git fetch failed (exit $LASTEXITCODE)" ; exit 4 }
                 git -c windows.appendAtomically=false checkout $Branch
-                if ($LASTEXITCODE -ne 0) { throw "git checkout $Branch failed (exit $LASTEXITCODE)" }
-                git -c windows.appendAtomically=false pull origin $Branch
-                if ($LASTEXITCODE -ne 0) { throw "git pull failed (exit $LASTEXITCODE)" }
+                if ($LASTEXITCODE -ne 0) { Write-Err "git checkout $Branch failed (exit $LASTEXITCODE)" ; exit 4 }
+                git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 pull origin $Branch
+                if ($LASTEXITCODE -ne 0) { Write-Err "git pull failed (exit $LASTEXITCODE)" ; exit 4 }
             } finally {
                 Pop-Location
             }
@@ -617,7 +629,7 @@ function Install-Repository {
                 Write-Err "Could not remove $InstallDir : $_"
                 Write-Info "Close any programs that might be using files in $InstallDir (editors,"
                 Write-Info "terminals, running sidekick processes) and try again."
-                throw
+                exit 4
             }
         }
     }
@@ -639,7 +651,7 @@ function Install-Repository {
         Write-Info "Trying SSH clone..."
         $env:GIT_SSH_COMMAND = "ssh -o BatchMode=yes -o ConnectTimeout=5"
         try {
-            git -c windows.appendAtomically=false clone --branch $Branch --recurse-submodules $RepoUrlSsh $InstallDir
+            git -c windows.appendAtomically=false clone --depth 1 --branch $Branch --recurse-submodules $RepoUrlSsh $InstallDir
             if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
         } catch { }
         $env:GIT_SSH_COMMAND = $null
@@ -648,7 +660,7 @@ function Install-Repository {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
             Write-Info "SSH failed, trying HTTPS..."
             try {
-                git -c windows.appendAtomically=false clone --branch $Branch --recurse-submodules $RepoUrlHttps $InstallDir
+                git -c windows.appendAtomically=false clone --depth 1 --branch $Branch --recurse-submodules $RepoUrlHttps $InstallDir
                 if ($LASTEXITCODE -eq 0) { $cloneSuccess = $true }
             } catch { }
         }
@@ -662,7 +674,7 @@ function Install-Repository {
                 $zipPath = "$env:TEMP\sidekick-agent-$Branch.zip"
                 $extractPath = "$env:TEMP\sidekick-agent-extract"
 
-                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
+                Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
                 if (Test-Path $extractPath) { Remove-Item -Recurse -Force $extractPath }
                 Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
@@ -693,7 +705,8 @@ function Install-Repository {
         }
 
         if (-not $cloneSuccess) {
-            throw "Failed to download repository (tried git clone SSH, HTTPS, and ZIP)"
+            Write-Err "Failed to download repository (tried git clone SSH, HTTPS, and ZIP)"
+            exit 4
         }
     }
 
@@ -781,7 +794,8 @@ function Install-Dependencies {
         Write-Warn "Tier '$($tier.Name)' failed (exit $LASTEXITCODE). Trying next tier..."
     }
     if (-not $installed) {
-        throw "Failed to install sidekick-agent package even with no extras. Inspect the uv pip install output above."
+        Write-Err "Failed to install sidekick-agent package even with no extras. Inspect the uv pip install output above."
+        exit 5
     }
 
     # Verify the dashboard deps specifically — they're the most common thing
@@ -1402,9 +1416,9 @@ function Main {
         }
     } catch {}
 
-    if (-not (Install-Uv)) { throw "uv installation failed — cannot continue" }
-    if (-not (Test-Python)) { throw "Python $PythonVersion not available — cannot continue" }
-    if (-not (Install-Git)) { throw "Git not available and auto-install failed — install from https://git-scm.com/download/win then re-run" }
+    if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" ; exit 2 }
+    if (-not (Test-Python)) { Write-Err "Python $PythonVersion not available — cannot continue" ; exit 2 }
+    if (-not (Install-Git)) { Write-Err "Git not available and auto-install failed — install from https://git-scm.com/download/win then re-run" ; exit 2 }
     # Test-Node always returns $true (sets $script:HasNode on success, emits a
     # warning on failure and continues so non-browser installs still work).
     # Cast to [void] so the bare return value doesn't print "True" to the
@@ -1466,6 +1480,8 @@ function Main {
         Write-Warn "Could not auto-start WebUI: $_"
         Write-Info "Start it manually: sidekick dashboard"
     }
+
+    exit 0
 }
 
 # Wrap in try/catch so errors don't kill the terminal when run via:
@@ -1478,7 +1494,8 @@ try {
     Write-Err "Installation failed: $_"
     Write-Host ""
     Write-Info "If the error is unclear, try downloading and running the script directly:"
-    Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/scripts/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
-    Write-Host "  .\install.ps1" -ForegroundColor Yellow
+    Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
+    Write-Host "  .\\install.ps1" -ForegroundColor Yellow
     Write-Host ""
+    exit 1
 }
