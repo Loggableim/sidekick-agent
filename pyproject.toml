@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Standalone assistant monorepo foundation for Sidekick"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0,<7"]
+dependencies = ["PyYAML>=6.0,<7", "rich>=13.0", "prompt_toolkit>=3.0", "wcwidth>=0.2"]
 
 [project.scripts]
 sidekick = "sidekick_app.__main__:main"
@@ -19,7 +19,7 @@ include-package-data = true
 py-modules = ["sidekick_constants", "bootstrap"]
 
 [tool.setuptools.packages.find]
-include = ["cli", "shared", "tests", "web", "sidekick_app"]
+include = ["cli", "runtime", "runtime.*", "runtime._compat", "shared", "tests", "web", "web.*", "web.api", "sidekick_app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

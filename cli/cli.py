@@ -670,6 +670,13 @@ from rich.text import Text as _RichText
 import fire
 
 # Import the agent and tool systems
+# run_agent bridge — the real AIAgent (15K LOC) lives in cids-hermes-agent/run_agent.py
+# and will be ported as runtime/agent.py in a follow-up. This shim provides
+# enough for the CLI to boot.
+import runtime._compat.run_agent as _run_agent_stub  # noqa: E402
+import sys  # noqa: E402
+sys.modules["run_agent"] = _run_agent_stub
+
 from run_agent import AIAgent
 from model_tools import get_tool_definitions, get_toolset_for_tool
 
