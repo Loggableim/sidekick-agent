@@ -15,11 +15,14 @@ PASS = 0
 FAIL = 0
 
 
-def test(name: str, cmd: list[str], expect_ok: bool = True, grep: str | None = None):
+def test(name: str, cmd: list[str], expect_ok: bool = True, grep: str | None = None, valid_exit_codes: set[int] | None = None):
     global PASS, FAIL
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=REPO)
-        ok = (r.returncode == 0) == expect_ok
+        if valid_exit_codes is not None:
+            ok = r.returncode in valid_exit_codes
+        else:
+            ok = (r.returncode == 0) == expect_ok
         if ok and grep:
             ok = grep in r.stdout + r.stderr
         status = "✓" if ok else "✗"
@@ -71,7 +74,7 @@ test("sidekick --help", ["sidekick", "--help"], grep="usage: sidekick")
 
 test("sidekick --version", ["sidekick", "--version"], grep="Sidekick Agent")
 
-test("sidekick doctor", ["sidekick", "doctor"], grep="Sidekick Doctor")
+test("sidekick doctor", ["sidekick", "doctor"], grep="Sidekick Doctor", valid_exit_codes={0, 1})
 
 # ── Import smoke ──
 print("\n── Import smoke ──")
@@ -229,6 +232,22 @@ _ensure_self_first(); _bootstrap_aliases()
 import cli.curses_ui
 print('OK')""",
     grep="OK"
+)
+
+# ── WebUI smoke test ──
+print("\n── WebUI http smoke ──")
+
+test_code(
+    "webui smoke (tests/smoke_webui.py)",
+    """import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath('')))
+from tests.smoke_webui import main as webui_smoke
+try:
+    webui_smoke()
+except SystemExit as e:
+    sys.exit(e.code)
+""",
+    grep="passed",
 )
 
 # ─── CI output ───

@@ -15,9 +15,36 @@ def require(body: dict, *fields) -> None:
         raise ValueError(f"Missing required field(s): {', '.join(missing)}")
 
 
+def error_response(handler, message, code: str = "error", status: int = 400, details=None):
+    """Return a standardized JSON error response.
+
+    Format::
+
+        {"ok": false, "error": {"code": "...", "message": "...", "details": ...}}
+
+    The code field is a machine-readable short string (e.g. "not_found").
+    The message field is a human-readable description, sanitised of
+    internal paths and secrets.
+    The details field is optional additional context (never secrets).
+
+    All callers SHOULD use this function instead of constructing ad-hoc
+    error dicts to ensure consistent client-side error handling.
+    """
+    payload = {
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": _sanitize_error(message) if isinstance(message, Exception) else str(message),
+        }
+    }
+    if details is not None:
+        payload["error"]["details"] = details
+    return j(handler, payload, status=status)
+
+
 def bad(handler, msg, status: int=400):
-    """Return a clean JSON error response."""
-    return j(handler, {'error': msg}, status=status)
+    """Return a clean JSON error response. Legacy wrapper."""
+    return error_response(handler, msg, status=status)
 
 
 def _sanitize_error(e: Exception) -> str:

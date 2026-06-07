@@ -2782,11 +2782,10 @@ def _streams_lock_health(timeout_seconds: float = 0.5) -> dict:
 
 def _run_lifecycle_health() -> dict:
     """Return active worker-run state independent of SSE stream presence."""
-    # Import the module rather than relying only on imported scalar aliases so
-    # LAST_RUN_FINISHED_AT stays fresh after unregister_active_run() updates it.
     from web.api import config as _live_config
 
     now = time.time()
+    runs = []
     for stream_id, raw in (_live_config.ACTIVE_RUNS or {}).items():
         item = dict(raw or {})
         started_at = item.get("started_at")
@@ -3061,7 +3060,7 @@ def _handle_cockpit_settings_get(handler, parsed) -> bool:
             if isinstance(data, dict):
                 defaults.update({k: v for k, v in data.items() if k in defaults})
         except Exception as exc:
-            return j(handler, {"success": False, "error": str(exc)}, status=500)
+            return error_response(handler, exc, status=500)
     return j(handler, defaults)
 
 
@@ -3395,7 +3394,7 @@ def handle_get(handler, parsed) -> bool:
         try:
             j(handler, dashboard_probe.get_dashboard_config())
         except ValueError as exc:
-            bad(handler, str(exc), status=400)
+            bad(handler, exc, status=400)
         return True
 
     # ── Providers (GET) ──
@@ -3474,7 +3473,7 @@ def handle_get(handler, parsed) -> bool:
 
             return j(handler, {"status": worktree_status_for_session(s)})
         except ValueError as exc:
-            return bad(handler, str(exc), status=400)
+            return bad(handler, exc, status=400)
         except Exception as exc:
             logger.exception("failed to read worktree status for session %s", sid)
             return bad(handler, _sanitize_error(exc), status=500)
@@ -3779,7 +3778,7 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, "Session not found", 404)
         except Exception as exc:
             logger.exception("Session context-info failed for %s", sid)
-            return j(handler, {"error": str(exc)}, status=500)
+            return error_response(handler, exc, status=500)
 
     if parsed.path == "/api/background/status":
         sid = parse_qs(parsed.query).get("session_id", [""])[0]
@@ -4350,7 +4349,7 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, str(e))
         except Exception as e:
             logger.exception("rollback/list failed")
-            return bad(handler, str(e), status=500)
+            return bad(handler, e, status=500)
 
     if parsed.path == "/api/rollback/diff":
         qs = parse_qs(parsed.query)
@@ -4365,7 +4364,7 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, str(e))
         except Exception as e:
             logger.exception("rollback/diff failed")
-            return bad(handler, str(e), status=500)
+            return bad(handler, e, status=500)
 
     # ── Terminal stream (SSE) ──
     if parsed.path == "/api/terminal/stream":
@@ -4562,7 +4561,7 @@ def _handle_apply_code(handler, body) -> bool:
         return j(handler, {"ok": False, "error": f"Kann Datei nicht schreiben: {e}"}, status=500)
     except Exception as e:
         logger.exception("Apply-code failed for %s", file_path)
-        return j(handler, {"ok": False, "error": str(e)}, status=500)
+        return error_response(handler, e, status=500)
 
 
 # ── System shutdown/reboot helper ──────────────────────────────────────────
@@ -4803,7 +4802,7 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, status=status)
         except Exception as exc:
             logger.exception("browser agent control failed")
-            return j(handler, {"ok": False, "error": str(exc)}, status=400)
+            return error_response(handler, exc, status=400)
 
     if parsed.path == "/api/browser/action":
         try:
@@ -4828,7 +4827,7 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, status=status)
         except Exception as exc:
             logger.exception("browser action v1 failed")
-            return j(handler, {"ok": False, "error": str(exc)}, status=400)
+            return error_response(handler, exc, status=400)
 
     if parsed.path == "/api/session/recovery/repair-safe":
         from web.api.session_recovery import repair_safe_session_recovery
@@ -4953,10 +4952,10 @@ def handle_post(handler, parsed) -> bool:
         try:
             j(handler, dashboard_probe.save_dashboard_config(body))
         except ValueError as exc:
-            bad(handler, str(exc), status=400)
+            bad(handler, exc, status=400)
         except Exception as exc:
             logger.exception("dashboard config save failed")
-            bad(handler, str(exc), status=500)
+            bad(handler, exc, status=500)
         return True
 
     if parsed.path == "/api/session/new":
@@ -4984,7 +4983,7 @@ def handle_post(handler, parsed) -> bool:
                 worktree_info = create_worktree_for_workspace(base_workspace)
                 workspace = worktree_info["path"]
             except (TypeError, ValueError) as e:
-                return bad(handler, str(e), status=400)
+                return bad(handler, e, status=400)
             except Exception as e:
                 logger.exception("failed to create worktree-backed session")
                 return bad(handler, f"Failed to create worktree: {e}", status=500)
@@ -6260,7 +6259,7 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, str(e))
         except Exception as e:
             logger.exception("rollback/restore failed")
-            return bad(handler, str(e), status=500)
+            return bad(handler, e, status=500)
 
     # ── Error Logging API (POST) ──
     if parsed.path == "/api/errors/log":
@@ -6283,7 +6282,7 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, {"success": True, "id": rid})
         except Exception as exc:
             logger.exception("Error logging endpoint failed")
-            return j(handler, {"success": False, "error": str(exc)}, status=500)
+            return error_response(handler, exc, status=500)
 
     if parsed.path == "/api/errors/clear":
         from web.api.error_logger import clear_errors
@@ -6356,7 +6355,7 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, status=status)
         except Exception as exc:
             logger.exception("Appstore install failed")
-            return j(handler, {"success": False, "error": str(exc)}, status=500)
+            return error_response(handler, exc, status=500)
 
     if parsed.path == "/api/appstore/uninstall":
         try:
@@ -6368,7 +6367,7 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, status=status)
         except Exception as exc:
             logger.exception("Appstore uninstall failed")
-            return j(handler, {"success": False, "error": str(exc)}, status=500)
+            return error_response(handler, exc, status=500)
 
     if parsed.path == "/api/cockpit/settings":
         return _handle_cockpit_settings_post(handler, body)
@@ -6394,7 +6393,7 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, status=status)
         except Exception as exc:
             logger.exception("Appstore submit failed")
-            return j(handler, {"success": False, "error": str(exc)}, status=500)
+            return error_response(handler, exc, status=500)
 
     return False  # 404
 
@@ -6692,7 +6691,7 @@ def _handle_agents_post(handler, parsed, body):
         except FileNotFoundError:
             return bad(handler, "sidekick CLI not found in PATH", status=500)
         except Exception as e:
-            return bad(handler, str(e), status=500)
+            return bad(handler, e, status=500)
 
     # POST /api/agents/create
     if path == "/api/agents/create":
@@ -7844,7 +7843,7 @@ def _handle_browser_state(handler, parsed):
         state = browser_state(sid)
     except Exception as exc:
         logger.exception("browser state failed")
-        return j(handler, {"error": str(exc)}, status=503)
+        return error_response(handler, exc, status=503)
     return j(handler, {"state": state})
 
 
@@ -7858,7 +7857,7 @@ def _handle_browser_permission_status(handler, parsed):
         permission = browser_permission_status(sid)
     except Exception as exc:
         logger.exception("browser permission status failed")
-        return j(handler, {"error": str(exc)}, status=503)
+        return error_response(handler, exc, status=503)
     return j(handler, {"permission": permission})
 
 
@@ -7887,7 +7886,7 @@ def _handle_browser_action(handler, parsed):
         result = browser_action_v1(session_id, payload=body, origin_host=handler.headers.get("Host", ""))
     except Exception as exc:
         logger.exception("browser action v1 failed")
-        return j(handler, {"ok": False, "error": str(exc)}, status=400)
+        return error_response(handler, exc, status=400)
     status = 200 if result.get("ok", True) else (403 if result.get("code") == "browser_permission_required" else 400)
     return j(handler, result, status=status)
 
@@ -7902,7 +7901,7 @@ def _handle_browser_frame(handler, parsed):
         data, mime = browser_frame_bytes(sid)
     except Exception as exc:
         logger.exception("browser frame failed")
-        return j(handler, {"error": str(exc)}, status=503)
+        return error_response(handler, exc, status=503)
     return _serve_binary(handler, data, mime)
 
 
@@ -7916,7 +7915,7 @@ def _handle_browser_sse_stream(handler, parsed):
         q, initial_state = browser_subscribe(sid)
     except Exception as exc:
         logger.exception("browser subscribe failed")
-        return j(handler, {"error": str(exc)}, status=503)
+        return error_response(handler, exc, status=503)
 
     handler.send_response(200)
     handler.send_header('Content-Type', 'text/event-stream; charset=utf-8')
@@ -8255,7 +8254,7 @@ def _handle_cron_run_detail(handler, parsed):
         return j(handler, {"job_id": job_id, "filename": filename,
                            "content": content, "snippet": snippet})
     except Exception as e:
-        return j(handler, {"error": str(e)}, status=500)
+        return error_response(handler, e, status=500)
 
 
 def _cron_output_snippet(text: str, limit: int = 600) -> str:

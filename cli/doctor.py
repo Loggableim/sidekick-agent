@@ -25,6 +25,11 @@ load_hermes_dotenv(hermes_home=_env_path.parent, project_env=PROJECT_ROOT / ".en
 
 from cli.colors import Colors, color
 from cli.models import _HERMES_USER_AGENT
+
+# Exit code tracking: module-level counters set by check_warn / check_fail.
+# run_doctor() resets them at the start and uses the counts to choose an exit code.
+_warning_count = 0
+_fail_count = 0
 from cli.vercel_auth import describe_vercel_auth
 from runtime._compat.shim_constants import OPENROUTER_MODELS_URL
 from shared.utils import base_url_host_matches
@@ -156,9 +161,13 @@ def check_ok(text: str, detail: str = ""):
     print(f"  {color('✓', Colors.GREEN)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_warn(text: str, detail: str = ""):
+    global _warning_count
+    _warning_count += 1
     print(f"  {color('⚠', Colors.YELLOW)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_fail(text: str, detail: str = ""):
+    global _fail_count
+    _fail_count += 1
     print(f"  {color('✗', Colors.RED)} {text}" + (f" {color(detail, Colors.DIM)}" if detail else ""))
 
 def check_info(text: str):
@@ -296,6 +305,9 @@ def _build_apikey_providers_list() -> list:
 
 def run_doctor(args):
     """Run diagnostic checks."""
+    global _warning_count, _fail_count
+    _warning_count = 0
+    _fail_count = 0
     should_fix = getattr(args, 'fix', False)
 
     # Doctor runs from the interactive CLI, so CLI-gated tool availability
@@ -1771,3 +1783,14 @@ def run_doctor(args):
         print(color("  All checks passed! 🎉", Colors.GREEN, Colors.BOLD))
     
     print()
+    
+    # Determine exit code:
+    #   2 = critical issues (check_fail was called)
+    #   1 = warnings only (check_warn was called)
+    #   0 = all clear
+    if _fail_count > 0:
+        sys.exit(2)
+    elif _warning_count > 0:
+        sys.exit(1)
+    else:
+        sys.exit(0)
