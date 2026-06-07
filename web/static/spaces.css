@@ -1,0 +1,483 @@
+/* ── Spaces Panel Styles ──────────────────────────────────────────────────── */
+
+/* Space selector in sidebar */
+.space-selector-container {
+  padding: 4px 8px 0;
+}
+
+.space-selector {
+  position: relative;
+  font-size: 12px;
+}
+
+.space-selector-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: var(--input-bg, rgba(128,128,128,0.08));
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.15s;
+}
+
+.space-selector-current:hover {
+  background: var(--hover-bg, rgba(128,128,128,0.15));
+}
+
+.space-selector-current::after {
+  content: '\u25BE';
+  margin-left: auto;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.space-selector-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: var(--bg, #1a1a2e);
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  overflow: hidden;
+  margin-top: 2px;
+}
+
+.space-selector-item {
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+  transition: background 0.1s;
+}
+
+.space-selector-item:hover {
+  background: var(--hover-bg, rgba(128,128,128,0.12));
+}
+
+.space-selector-item.active {
+  background: var(--accent-bg, rgba(99,102,241,0.12));
+  color: var(--accent, #6366f1);
+  font-weight: 500;
+}
+
+.space-selector-manage {
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* Spaces panel (panelWorkspaces) */
+.spaces-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spaces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.space-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.space-item:hover {
+  background: var(--hover-bg, rgba(128,128,128,0.1));
+}
+
+.space-item.active {
+  background: var(--accent-bg, rgba(99,102,241,0.12));
+}
+
+.space-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+}
+
+.space-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.space-item-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.space-item-meta {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.space-item-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--accent-bg, rgba(99,102,241,0.15));
+  color: var(--accent, #6366f1);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* Actions row */
+.spaces-actions {
+  padding: 8px 0;
+}
+
+.spaces-btn {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255,255,255,0.12));
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.spaces-btn:hover {
+  background: var(--hover-bg, rgba(128,128,128,0.1));
+}
+
+.spaces-btn-danger {
+  color: var(--danger, #e74c3c);
+  border-color: var(--danger, #e74c3c);
+  margin-top: 8px;
+}
+
+.spaces-btn-danger:hover {
+  background: rgba(231, 76, 60, 0.1);
+}
+
+/* Config section */
+.space-config-section {
+  padding: 8px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+
+.space-config-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.space-config-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.space-config-row span:last-child {
+  color: var(--muted);
+  text-align: right;
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Sidebar-nav labels (expand/collapse) ────────────────────────────────── */
+
+/* Make the sidebar-nav always visible on desktop (override mobile-only default) */
+/* Desktop: sidebar-nav visible only when rail is expanded */
+@media (min-width: 641px) {
+  [data-sidebar-nav="expanded"] .sidebar > .sidebar-nav {
+    display: none !important;
+  }
+  .sidebar > .sidebar-nav { display: none !important; }
+}
+
+/* Sidebar-nav buttons: horizontal layout (icon + label) */
+.sidebar-nav .nav-tab {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  border-bottom: none;
+}
+
+.sidebar-nav .nav-tab.active::before {
+  display: none; /* hide the bottom active indicator, use accent color instead */
+}
+
+.sidebar-nav .nav-tab.active {
+  color: var(--accent-text);
+}
+
+/* The text label — visible when expanded, hidden when collapsed */
+.nav-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 0.2s, width 0.2s, margin 0.2s;
+  opacity: 1;
+  width: auto;
+  margin-left: 0;
+}
+
+/* Collapsed state: hide all nav-labels */
+[data-sidebar-nav="collapsed"] .nav-label {
+  opacity: 0;
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* In collapsed mode, center the icons again */
+[data-sidebar-nav="collapsed"] .sidebar-nav .nav-tab {
+  justify-content: center;
+  padding: 8px 4px;
+}
+
+/* Toggle button arrow animation */
+#railSidebarToggle svg {
+  transition: transform 0.25s ease;
+}
+
+/* When collapsed → show right arrow (pointing to expanded side) */
+[data-sidebar-nav="collapsed"] #railSidebarToggle svg {
+  transform: rotate(180deg);
+}
+
+/* ── Brand-colored nav-label text ───────────────────────────────────────────
+   Font color of each nav-label matches its icon color but slightly muted. */
+.sidebar-nav .nav-tab[data-panel="chat"]       .nav-label { color: #7FCFF7; }
+.sidebar-nav .nav-tab[data-panel="tasks"]      .nav-label { color: #FFC77D; }
+.sidebar-nav .nav-tab[data-panel="kanban"]     .nav-label { color: #D9A3E8; }
+.sidebar-nav .nav-tab[data-panel="skills"]     .nav-label { color: #A1D7A4; }
+.sidebar-nav .nav-tab[data-panel="agents"]     .nav-label { color: #7DD8E1; }
+.sidebar-nav .nav-tab[data-panel="memory"]     .nav-label { color: #F082A2; }
+.sidebar-nav .nav-tab[data-panel="workspaces"] .nav-label { color: #B1979F; }
+.sidebar-nav .nav-tab[data-panel="profiles"]   .nav-label { color: #C8E5A1; }
+.sidebar-nav .nav-tab[data-panel="todos"]      .nav-label { color: #FFAA85; }
+.sidebar-nav .nav-tab[data-panel="insights"]   .nav-label { color: #7DC6BC; }
+.sidebar-nav .nav-tab[data-panel="dashboard"]  .nav-label { color: #FFE57A; }
+.sidebar-nav .nav-tab[data-panel="logs"]       .nav-label { color: #B0B4BE; }
+.sidebar-nav .nav-tab[data-panel="settings"]   .nav-label { color: #C0C4CE; }
+
+/* ── Rail nav-label layout ────────────────────────────────────────────────
+   Collapsed (default, narrow rail): icon above label, tiny text.
+   Expanded (wide rail):            icon + text side by side, larger.          */
+
+/* ── COLLAPSED RAIL (default, 48px) ───────────────────────────────────── */
+/* Base .rail-btn: column layout icon-above-label with tiny visible text */
+.rail-btn {
+  flex-direction: column;
+  height: auto;
+  min-height: 36px;
+  gap: 2px;
+  padding: 5px 0 4px;
+}
+
+/* Tiny label under icon in collapsed mode */
+.rail-btn .nav-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 44px;
+  transition: opacity 0.2s, height 0.2s;
+  opacity: 1;
+  height: auto;
+}
+
+/* Explicit collapsed attribute — hide labels, revert to icon-only 36x36 */
+[data-sidebar-nav="collapsed"] .rail-btn {
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  gap: 0;
+}
+[data-sidebar-nav="collapsed"] .rail-btn .nav-label {
+  opacity: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Toggle button never shows a label */
+#railSidebarToggle .nav-label { display: none !important; }
+
+/* ── EXPANDED RAIL (wide, 160px) ───────────────────────────────────────── */
+[data-sidebar-nav="expanded"] .rail {
+  width: 160px;
+  align-items: stretch;
+  padding: 8px 0;
+}
+
+[data-sidebar-nav="expanded"] .rail-btn {
+  flex-direction: row;
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 0;
+  margin: 0;
+}
+
+[data-sidebar-nav="expanded"] .rail-btn .nav-label {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: none;
+  height: auto;
+  opacity: 1;
+  overflow: visible;
+  pointer-events: auto;
+  display: block;
+}
+
+[data-sidebar-nav="expanded"] .rail-btn svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+/* Active indicator sits at rail left edge in expanded mode */
+[data-sidebar-nav="expanded"] .rail .nav-tab.active::before {
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  transform: none;
+  height: auto;
+  width: 3px;
+}
+
+/* Hide hover-tooltips in expanded mode (text is already visible) */
+[data-sidebar-nav="expanded"] .rail .has-tooltip::after {
+  display: none !important;
+}
+
+/* Adjust Gmail unread dot for wider rail */
+[data-sidebar-nav="expanded"] .gmail-badge-dot {
+  top: 6px;
+  right: 10px;
+}
+
+/* ── Toggle button styling ─────────────────────────────────────────────── */
+/* More vibrant toggle icon */
+#railSidebarToggle {
+  color: var(--accent, #6366f1);
+}
+#railSidebarToggle:hover {
+  color: var(--accent-text);
+  background: var(--accent-bg);
+}
+#railSidebarToggle svg {
+  transition: transform 0.25s ease;
+}
+/* Collapsed → arrow points right (click to expand) */
+[data-sidebar-nav="collapsed"] #railSidebarToggle svg {
+  transform: rotate(180deg);
+}
+/* Primary rail expand/collapse (boot.js system) */
+.layout.rail-expanded #railSidebarToggle svg {
+  transform: rotate(0deg);
+}
+
+/* ── Rail nav-label brand colors (muted to match icon tints) ────────────── */
+.rail-btn[data-panel="chat"]       .nav-label { color: #7FCFF7; }
+.rail-btn[data-panel="tasks"]      .nav-label { color: #FFC77D; }
+.rail-btn[data-panel="kanban"]     .nav-label { color: #D9A3E8; }
+.rail-btn[data-panel="skills"]     .nav-label { color: #A1D7A4; }
+.rail-btn[data-panel="agents"]     .nav-label { color: #7DD8E1; }
+.rail-btn[data-panel="memory"]     .nav-label { color: #F082A2; }
+.rail-btn[data-panel="workspaces"] .nav-label { color: #B1979F; }
+.rail-btn[data-panel="profiles"]   .nav-label { color: #C8E5A1; }
+.rail-btn[data-panel="todos"]      .nav-label { color: #FFAA85; }
+.rail-btn[data-panel="insights"]   .nav-label { color: #7DC6BC; }
+.rail-btn[data-panel="dashboard"]  .nav-label { color: #FFE57A; }
+.rail-btn[data-panel="logs"]       .nav-label { color: #B0B4BE; }
+.rail-btn[data-panel="gmail"]      .nav-label { color: #E57373; }
+.rail-btn[data-panel="discord"]    .nav-label { color: #7986CB; }
+.rail-btn[data-panel="settings"]   .nav-label { color: #C0C4CE; }
+
+/* ── Workspace name bar (sidebar header) ────────────────────────────────── */
+.workspace-name-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent, #4FC3F7);
+  margin: 4px 0 2px;
+  background: var(--hover-bg, rgba(128,128,128,0.06));
+  cursor: default;
+  user-select: none;
+  transition: border-left-color 0.3s, background 0.15s;
+}
+.workspace-name-bar:hover {
+  background: var(--hover-bg, rgba(128,128,128,0.12));
+}
+.workspace-name-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent, #4FC3F7);
+  transition: background 0.3s;
+  box-shadow: 0 0 6px rgba(79,195,247,0.3);
+}
+.workspace-name-text {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+
+/* Color picker swatches (create dialog) */
+.space-color-swatch:hover {
+  transform: scale(1.15);
+  border-color: rgba(255,255,255,0.5) !important;
+}
