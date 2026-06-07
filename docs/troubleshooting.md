@@ -6,7 +6,53 @@ Common issues, their root causes, and how to fix them.
 
 ## Installation
 
-### `pip install -e .` fails or missing dependencies
+### Windows PowerShell installer
+
+**One-liner:**
+```powershell
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+```
+
+**What it does:**
+- Installs Sidekick under `%LOCALAPPDATA%\sidekick\`
+- Installs Python 3.11+ via `uv` (if not found) — no admin needed
+- Installs Portable Git (if not found) — no admin needed
+- Creates a Python virtual environment and installs Sidekick + all dependencies
+- Creates a **desktop shortcut** for the WebUI dashboard
+- **Opens the WebUI dashboard** in your default browser
+- Sets `SIDEKICK_HOME` and `SIDEKICK_GIT_BASH_PATH` user environment variables
+
+**Requirements:**
+- Windows 10+ / Windows Server 2019+
+- PowerShell 5.1+ (comes with Windows 10+)
+- Internet connection
+
+**No admin rights required.** The installer installs everything under your user profile.
+
+**Common failures:**
+- **PowerShell execution policy:** If you see a security error, run:
+  ```powershell
+  Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+  ```
+- **Antivirus blocking `iex`:** Download and run locally:
+  ```powershell
+  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1' -OutFile install.ps1
+  .\install.ps1
+  ```
+- **Git clone fails:** Check your internet connection or proxy settings.
+- **uv install fails:** The installer falls back to system Python. Ensure Python 3.11+ is installed from [python.org](https://python.org).
+
+**To update an existing install:**
+```powershell
+.\install.ps1 -UpdateOnly
+```
+
+**To skip post-install health check:**
+```powershell
+.\install.ps1 -NoDoctor
+```
+
+### `pip install -e .` (macOS / Linux / manual)
 
 ```bash
 # Install the project in editable mode

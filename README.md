@@ -6,6 +6,17 @@
 
 ## Quick start
 
+### Windows (PowerShell one-liner)
+
+```powershell
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+```
+
+This installs Sidekick under `%LOCALAPPDATA%\sidekick\`, creates a desktop shortcut,
+and opens the WebUI dashboard in your browser. No admin rights required.
+
+### macOS / Linux
+
 ```bash
 git clone https://github.com/Loggableim/sidekick-agent.git
 cd sidekick-agent
