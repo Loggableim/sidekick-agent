@@ -35,6 +35,15 @@ from runtime._compat.shim_constants import OPENROUTER_MODELS_URL
 from shared.utils import base_url_host_matches
 
 
+# Provider URLs for connectivity checks
+_PROVIDER_CHECK_URLS = {
+    "openai": "https://api.openai.com/v1/models",
+    "anthropic": "https://api.anthropic.com/v1/models",
+    "openrouter": "https://openrouter.ai/api/v1/models",
+    "deepseek": "https://api.deepseek.com/v1/models",
+    "google": "https://generativelanguage.googleapis.com/v1beta/models",
+}
+
 _PROVIDER_ENV_HINTS = (
     "OPENROUTER_API_KEY",
     "OPENAI_API_KEY",
@@ -301,6 +310,120 @@ def _build_apikey_providers_list() -> list:
     except Exception:
         pass
     return _static
+
+
+import urllib.request
+import urllib.error
+import time as _time
+
+
+def _check_providers_connectivity() -> None:
+    """Check reachability of the configured provider via HTTP HEAD/GET.
+
+    Uses urllib.request with a 5-second timeout.  Warnings only — never
+    a hard failure.
+    """
+    print()
+    print(color("◆ Provider Connectivity", Colors.CYAN, Colors.BOLD))
+
+    # Determine the configured provider from config.yaml or env vars
+    from cli.config import load_config
+    cfg = load_config()
+    model_cfg = cfg.get("model", {})
+    if isinstance(model_cfg, dict):
+        provider = (model_cfg.get("provider") or "").strip().lower()
+    elif isinstance(model_cfg, str):
+        provider = model_cfg.strip().lower()
+    else:
+        provider = ""
+
+    if not provider:
+        # Check env for common provider keys as fallback
+        for key, url in _PROVIDER_CHECK_URLS.items():
+            if key == "openai":
+                if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_BASE_URL"):
+                    provider = key
+                    break
+            elif key == "anthropic":
+                if os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_TOKEN"):
+                    provider = key
+                    break
+            elif key == "openrouter":
+                if os.getenv("OPENROUTER_API_KEY"):
+                    provider = key
+                    break
+            elif key == "deepseek":
+                if os.getenv("DEEPSEEK_API_KEY"):
+                    provider = key
+                    break
+            elif key == "google":
+                if os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"):
+                    provider = key
+                    break
+
+    if not provider or provider == "auto":
+        check_info("No provider configured — skip connectivity check")
+        return
+
+    # Resolve the provider to a canonical ID for URL lookup
+    try:
+        from cli.auth import resolve_provider as _resolve_auth_provider
+        canon = _resolve_auth_provider(provider)
+    except Exception:
+        canon = provider
+
+    # Determine the URL to check
+    check_url = _PROVIDER_CHECK_URLS.get(canon) or _PROVIDER_CHECK_URLS.get(provider)
+    if not check_url:
+        # For custom providers, try to read base_url from config
+        base_url = model_cfg.get("base_url", "") if isinstance(model_cfg, dict) else ""
+        if base_url:
+            check_url = base_url.rstrip("/") + "/models"
+        else:
+            check_info(f"Provider '{provider}' has no predefined check URL — skip connectivity check")
+            return
+
+    # Perform the connectivity check
+    req = urllib.request.Request(check_url, method="HEAD")
+    start = _time.time()
+    try:
+        resp = urllib.request.urlopen(req, timeout=5)
+        elapsed = int((_time.time() - start) * 1000)
+        # 4xx is also reachable (we just don't have auth) — only timeouts/refusals matter
+        check_ok(
+            f"Provider reachable: {provider}",
+            f"({resp.status} in {elapsed}ms)"
+        )
+    except urllib.error.HTTPError as e:
+        elapsed = int((_time.time() - start) * 1000)
+        # 4xx means the endpoint is reachable (we just lack credentials)
+        if 400 <= e.code < 500:
+            check_ok(
+                f"Provider reachable: {provider}",
+                f"(HTTP {e.code} in {elapsed}ms — expected without auth)"
+            )
+        else:
+            check_warn(
+                f"Provider unreachable: {provider}",
+                f"(HTTP {e.code} after {elapsed}ms)"
+            )
+    except urllib.error.URLError as e:
+        elapsed = int((_time.time() - start) * 1000)
+        if isinstance(e.reason, TimeoutError):
+            check_warn(
+                f"Provider unreachable: {provider}",
+                f"(timeout after {elapsed}ms)"
+            )
+        else:
+            check_warn(
+                f"Provider unreachable: {provider}",
+                f"({e.reason})"
+            )
+    except OSError as e:
+        check_warn(
+            f"Provider unreachable: {provider}",
+            f"({e})"
+        )
 
 
 def run_doctor(args):
@@ -732,6 +855,12 @@ def run_doctor(args):
             "codex CLI not installed "
             "(optional — only required to import tokens from an existing Codex CLI login)"
         )
+
+    # =========================================================================
+    # Check: Provider connectivity (--check-providers / -p only)
+    # =========================================================================
+    if getattr(args, 'check_providers', False):
+        _check_providers_connectivity()
 
     # =========================================================================
     # Check: Directory structure

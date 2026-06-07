@@ -10085,6 +10085,12 @@ def main():
     doctor_parser.add_argument(
         "--fix", action="store_true", help="Attempt to fix issues automatically"
     )
+    doctor_parser.add_argument(
+        "-p", "--check-providers",
+        action="store_true",
+        default=False,
+        help="Check provider connectivity (online reachability test)"
+    )
     doctor_parser.set_defaults(func=cmd_doctor)
 
     # =========================================================================

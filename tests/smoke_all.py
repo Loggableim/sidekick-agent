@@ -222,6 +222,29 @@ print(f'count={len(all_s)}')""",
     grep="count="
 )
 
+# ── Session integrity test ──
+test_code(
+    "shared.sessions: session integrity (JSON on disk)",
+    """from shared.sessions import new_session, append_message, sessions_dir
+import json
+s = new_session(title='integrity-all')
+s = append_message(s.session_id, role='user', content='hello integrity')
+s = append_message(s.session_id, role='assistant', content='check passed')
+sess_dir = sessions_dir()
+found = list(sess_dir.glob('*.json'))
+ok = False
+for f in found:
+    if s.session_id in f.name or s.session_id[:8] in f.name:
+        with open(f, encoding='utf-8') as fh:
+            data = json.load(fh)
+        msgs = data.get('messages', data.get('history', []))
+        if any('hello integrity' in str(m) for m in msgs) and any('check passed' in str(m) for m in msgs):
+            ok = True
+            break
+print('OK' if ok else f'MISSING: session_id={s.session_id} files={[str(f.name) for f in found[:5]]}')""",
+    grep="OK"
+)
+
 # ── TUI import smoke ──
 print("\n── TUI smoke ──")
 

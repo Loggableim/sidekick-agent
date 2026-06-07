@@ -8,10 +8,16 @@ on:
 
 jobs:
   smoke:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12"]
+        exclude:
+          # macOS only runs Python 3.12 to reduce CI time
+          - os: macos-latest
+            python-version: "3.11"
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -61,7 +67,43 @@ jobs:
           print('SESSION TESTS OK')
           "
 
+      - name: Session integrity test
+        run: |
+          python -c "
+          from shared.sessions import new_session, append_message, sessions_dir
+          import json
+          s = new_session(title='integrity-test')
+          s = append_message(s.session_id, role='user', content='hello integrity')
+          s = append_message(s.session_id, role='assistant', content='check passed')
+          sess_dir = sessions_dir()
+          json_files = list(sess_dir.glob('*.json'))
+          found = [f for f in json_files if s.session_id in f.name or s.session_id[:8] in f.name]
+          assert found, f'No session JSON file found for {s.session_id}'
+          with open(found[0], encoding='utf-8') as f:
+              data = json.load(f)
+          msgs = data.get('messages', data.get('history', []))
+          assert any('hello integrity' in str(m) for m in msgs), f'Expected message not found in {msgs}'
+          assert any('check passed' in str(m) for m in msgs), f'Expected response not found in {msgs}'
+          print('SESSION INTEGRITY OK')
+          "
+
+      - name: Path/env priority test
+        run: |
+          python -c "
+          import os
+          os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-test'
+          os.environ['HERMES_HOME'] = '/tmp/hermes-prio-test'
+          from shared.paths import sidekick_home
+          h = sidekick_home()
+          os.environ.pop('SIDEKICK_HOME', None)
+          os.environ.pop('HERMES_HOME', None)
+          assert 'sk-prio-test' in str(h), f'Expected SIDEKICK_HOME priority, got {h}'
+          print('PATH/ENV PRIORITY OK')
+          "
+
+      # ── Ubuntu-only: full test suite ──
       - name: Gateway import (no warnings)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           python -c "
           import io, logging
@@ -80,6 +122,7 @@ jobs:
           "
 
       - name: Env alias tests
+        if: matrix.os == 'ubuntu-latest'
         run: |
           python -c "
           # SIDEKICK_HOME has priority

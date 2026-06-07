@@ -108,6 +108,35 @@ try:
          f"status={resp.status} id={session_id[:20] if session_id else 'NONE'}")
 except Exception as e:
     test("Session created", False, str(e))
+    session_id = ""
+
+# ── Session integrity: verify session via WebUI API ──
+if session_id:
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import urllib.request as _ur2
+    _url2 = f"http://127.0.0.1:{port}/api/session?session_id={session_id}"
+    try:
+        _resp2 = _ur2.urlopen(_url2, timeout=10)
+        _data2 = json.loads(_resp2.read().decode())
+        _session = _data2.get("session", {})
+        _msgs = _session.get("messages", [])
+        integrity_ok = isinstance(_session, dict) and "session_id" in _session
+        test("Session integrity (API load)", integrity_ok,
+             f"session_id={session_id[:16]} msgs={len(_msgs)}")
+    except Exception as _e:
+        test("Session integrity (API load)", False, str(_e))
+
+# ── Path/env priority test (bootstrapped context) ──
+import os as _os
+_os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-webui'
+_os.environ['HERMES_HOME'] = '/tmp/hermes-prio-webui'
+from shared.paths import sidekick_home as _sk_home
+_h = _sk_home()
+_os.environ.pop('SIDEKICK_HOME', None)
+_os.environ.pop('HERMES_HOME', None)
+test("Path/env SIDEKICK_HOME priority", 'sk-prio-webui' in str(_h),
+     f"sidekick_home={_h}")
 
 # ── Sessions list ──
 code, data = http_get(port, "/api/sessions")
