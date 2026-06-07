@@ -257,6 +257,26 @@ print('OK')""",
     grep="OK"
 )
 
+# ── Branding regression: no user-facing Hermes/NousResearch ──
+print("\n── Branding audit ──")
+
+test_code(
+    "Branding: no user-facing Hermes in help text",
+    """import subprocess, sys
+r = subprocess.run([sys.executable, '-m', 'sidekick_app', '--help'],
+    capture_output=True, text=True, timeout=15)
+lines = r.stdout + r.stderr
+# Allowed: HERMES_ prefix for env-var docs (legacy compat)
+# Blocked: 'Hermes' as product name in subcommand descriptions
+import re
+hits = [l for l in lines.split('\\n') if 'Hermes' in l and 'HERMES_' not in l]
+if hits:
+    print('FAIL: user-facing Hermes found:', hits[:3])
+    exit(1)
+print('OK')""",
+    grep="OK"
+)
+
 # ── WebUI smoke test ──
 print("\n── WebUI http smoke ──")
 
