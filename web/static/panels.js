@@ -3395,6 +3395,16 @@ function _renderInsights(d, box, wikiStatus) {
       </div>
     </div>`;
 
+// Data source indicator + warnings
+  const sourceLabel = d.data_source === 'state_db' ? 'Analytics DB' : d.data_source === 'index_json_fallback' ? 'Session Index' : d.data_source === 'empty' ? 'Empty' : d.data_source || 'Unknown';
+  const sourceColor = d.data_source === 'state_db' ? 'ok' : 'warn';
+  const warningsHtml = Array.isArray(d.warnings) && d.warnings.length
+    ? d.warnings.map(w => `<div class="insights-warning" style="color:var(--accent);font-size:11px;margin-bottom:4px">⚠ ${esc(w)}</div>`).join('')
+    : '';
+  const sourceBadge = d.data_source
+    ? `<span class="wiki-status-badge ${sourceColor}" style="font-size:9px;padding:2px 6px;margin-left:auto">${esc(sourceLabel)}</span>`
+    : '';
+
   box.innerHTML = `
     <div class="insights-layout">
       <aside class="insights-left-column">
@@ -3406,6 +3416,7 @@ function _renderInsights(d, box, wikiStatus) {
       </aside>
       <section class="insights-main-column">
         ${_renderLlmWikiStatus(wikiStatus)}
+        ${warningsHtml}
         ${dailyHtml}
         <div class="insights-row insights-row--responsive">
           ${modelsHtml}
@@ -3414,7 +3425,10 @@ function _renderInsights(d, box, wikiStatus) {
         ${hodHtml}
       </section>
     </div>
-    <div style="text-align:center;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">${esc(t('insights_footer').replace('{days}', d.period_days))}</div>
+    <div style="display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">
+      ${esc(t('insights_footer').replace('{days}', d.period_days))}
+      ${sourceBadge}
+    </div>
   `;
 }
 
