@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test suite for the Sidekick monorepo baseline.
+"""Smoke test suite for the Sidekick monorepo — v0.3.0 expanded.
 
 Run with: python tests/smoke_all.py
 
@@ -8,10 +8,12 @@ Exits 0 if all tests pass, non-zero on first failure.
 import subprocess
 import sys
 import os
+import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASS = 0
 FAIL = 0
+
 
 def test(name: str, cmd: list[str], expect_ok: bool = True, grep: str | None = None):
     global PASS, FAIL
@@ -33,73 +35,202 @@ def test(name: str, cmd: list[str], expect_ok: bool = True, grep: str | None = N
         FAIL += 1
         print(f"  ✗ {name}: {e}")
 
-print("=== Sidekick Monorepo Baseline Smoke Tests ===\n")
 
-# 1. pip install -e .
-test("pip install", [sys.executable, "-m", "pip", "install", "-e", "."])
+def test_code(name: str, code: str, grep: str | None = None):
+    """Run Python code inline and check for expected output."""
+    global PASS, FAIL
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, timeout=15, cwd=REPO,
+            env={**os.environ, "PYTHONPATH": REPO},
+        )
+        ok = r.returncode == 0 and (not grep or grep in r.stdout + r.stderr)
+        status = "✓" if ok else "✗"
+        if ok:
+            PASS += 1
+        else:
+            FAIL += 1
+        print(f"  {status} {name}")
+        if not ok:
+            detail = (r.stderr or r.stdout)[:200]
+            print(f"    → {detail}")
+    except Exception as e:
+        FAIL += 1
+        print(f"  ✗ {name}: {e}")
 
-# 2. sidekick --help
+
+print("=== Sidekick Monorepo Smoke Tests v0.3.0 ===\n")
+
+# ── Core bootstrap ──
+print("── Core bootstrap ──")
+
+test("pip install -e .", [sys.executable, "-m", "pip", "install", "-e", "."])
+
 test("sidekick --help", ["sidekick", "--help"], grep="usage: sidekick")
 
-# 3. sidekick --version
 test("sidekick --version", ["sidekick", "--version"], grep="Sidekick Agent")
 
-# 4. sidekick doctor (first 3 lines)
 test("sidekick doctor", ["sidekick", "doctor"], grep="Sidekick Doctor")
 
-# 5. CLI module import test
-test("CLI import", [sys.executable, "-c", """
-import sys; sys.path.insert(0, '.')
+# ── Import smoke ──
+print("\n── Import smoke ──")
+
+test_code(
+    "CLI import (cli.cli)",
+    """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
 import cli.cli
-print('cli.cli OK')
-"""], grep="cli.cli OK")
+print('OK')""",
+    grep="OK"
+)
 
-# 6. run_agent import (inside bootstrapped context)
-test("run_agent import", [sys.executable, "-c", """
-from sidekick_app.__main__ import _bootstrap_aliases, _ensure_self_first
-_ensure_self_first()
-_bootstrap_aliases()
+test_code(
+    "run_agent import (AIAgent)",
+    """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
 import run_agent
-print(f'run_agent AIAgent: {hasattr(run_agent, \"AIAgent\")}')
-"""], grep="AIAgent")
+print(f'AIAgent: {hasattr(run_agent, "AIAgent")}')""",
+    grep="AIAgent"
+)
 
-# 7. tool registry
-test("tools registry", [sys.executable, "-c", """
-import sys; sys.path.insert(0, '.')
-from runtime._compat import shim_cli, shim_constants, shim_state
-sys.modules['sidekick_cli'] = shim_cli
-sys.modules['sidekick_constants'] = shim_constants
-sys.modules['sidekick_state'] = shim_state
+test_code(
+    "tools registry",
+    """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
 from tools.registry import registry
-n = len(registry._snapshot_entries())
-print(f'OK tools={n}')
-"""], grep="tools=")
+print(f'tools={len(registry._snapshot_entries())}')""",
+    grep="tools="
+)
 
-# 8. web.server import
-test("web.server import", [sys.executable, "-c", """
-import sys; sys.path.insert(0, '.')
-from runtime._compat import shim_cli, shim_constants, shim_state
-sys.modules['sidekick_cli'] = shim_cli
-sys.modules['sidekick_constants'] = shim_constants
-sys.modules['sidekick_state'] = shim_state
+test_code(
+    "web.server import",
+    """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
 import web.server
-print('OK')
-"""], grep="OK")
+print('OK')""",
+    grep="OK"
+)
 
-# 9. shared sessions
-test("shared sessions", [sys.executable, "-c", """
-import sys; sys.path.insert(0, '.')
-from shared.sessions import new_session, list_sessions
-s = new_session(title='smoke-test')
-print(f'OK session={s.session_id}')
-"""], grep="session=")
+test_code(
+    "gateway.run import (0 warnings)",
+    """import sys
+from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
+import io, logging
+log = io.StringIO()
+logging.basicConfig(stream=log)
+import runtime.gateway.run
+warnings = log.getvalue()
+if 'Warning' in warnings or 'cannot import' in warnings:
+    print('WARNINGS:', warnings[:200])
+else:
+    print('OK')""",
+    grep="OK"
+)
 
-# 10. config load
-test("config load", [sys.executable, "-c", """
-import sys; sys.path.insert(0, '.')
-from sidekick_app.__main__ import main
-print('config bootstrap OK')
-"""], grep="OK")
+# ── Config / Env / Paths ──
+print("\n── Config / Env / Paths ──")
 
-print(f"\n=== Ergebnis: {PASS} passed, {FAIL} failed ===")
+test_code(
+    "shared.paths: sidekick_home resolution",
+    """import os
+from shared.paths import sidekick_home
+h = sidekick_home()
+# Should be an absolute path with 'sidekick' or current SIDEKICK_HOME
+print(f'home={h}')""",
+    grep="home="
+)
+
+test_code(
+    "shared.paths: env var priority (SIDEKICK > HERMES)",
+    """import os
+os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-test'
+os.environ['HERMES_HOME'] = '/tmp/hermes-prio-test'
+from shared.paths import sidekick_home
+h = sidekick_home()
+os.environ.pop('SIDEKICK_HOME', None)
+os.environ.pop('HERMES_HOME', None)
+# SIDEKICK_HOME should win
+assert 'sk-prio-test' in str(h), f'Expected sk-prio-test, got {h}'
+print('OK')""",
+    grep="OK"
+)
+
+# ── Session layer ──
+print("\n── Session layer ──")
+
+test_code(
+    "shared.sessions: create/append/retry/undo",
+    """from shared.sessions import *
+s = new_session(title='smoke-v030')
+s = append_message(s.session_id, role='user', content='hello')
+s = append_message(s.session_id, role='assistant', content='world')
+s = append_message(s.session_id, role='user', content='question2')
+s = append_message(s.session_id, role='assistant', content='answer2')
+assert len(s.messages) == 4
+# retry removes from last user onwards (2 items: question2 + answer2)
+r = retry_last(s.session_id)
+assert r['removed_count'] == 2, f'expected 2, got {r[\"removed_count\"]}'
+s2 = load_session(s.session_id)
+assert len(s2.messages) == 2
+# undo removes from last user onwards
+r2 = undo_last(s.session_id)
+assert r2['removed_count'] == 2
+s3 = load_session(s.session_id)
+assert len(s3.messages) == 0
+print('OK')""",
+    grep="OK"
+)
+
+test_code(
+    "web.api.session_ops: delegation",
+    """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
+from shared.sessions import new_session, append_message
+import web.api.session_ops as sw
+s = new_session(title='web-delegation-test')
+s = append_message(s.session_id, role='user', content='hi')
+s = append_message(s.session_id, role='assistant', content='there')
+s = append_message(s.session_id, role='user', content='q2')
+s = append_message(s.session_id, role='assistant', content='a2')
+r = sw.retry_last(s.session_id)
+assert r['removed_count'] == 2, f'expected 2, got {r[\"removed_count\"]}'
+print('OK')""",
+    grep="OK"
+)
+
+test_code(
+    "shared.sessions: legacy migration mock",
+    """import os, tempfile
+from pathlib import Path
+from shared.sessions import migrate_legacy_sessions
+n = migrate_legacy_sessions()
+print(f'migrated={n}')""",
+    grep="migrated="
+)
+
+test_code(
+    "shared.sessions: list_sessions",
+    """from shared.sessions import new_session, list_sessions
+s = new_session(title='list-test')
+all_s = list_sessions()
+print(f'count={len(all_s)}')""",
+    grep="count="
+)
+
+# ── TUI import smoke ──
+print("\n── TUI smoke ──")
+
+test_code(
+    "TUI module import (curses_ui)",
+    """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
+_ensure_self_first(); _bootstrap_aliases()
+import cli.curses_ui
+print('OK')""",
+    grep="OK"
+)
+
+# ─── CI output ───
+print(f"\n─── Ergebnis: {PASS} passed, {FAIL} failed ───")
 raise SystemExit(0 if FAIL == 0 else 1)
