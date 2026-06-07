@@ -119,7 +119,7 @@ function Install-Uv {
     # Install uv
     Write-Info "Installing uv (fast Python package manager)..."
     try {
-        powershell -ExecutionPolicy ByPass -c "Invoke-WebRequest -TimeoutSec 60 'https://astral.sh/uv/install.ps1' | iex" 2>&1 | Out-Null
+        powershell -ExecutionPolicy ByPass -c "Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 'https://astral.sh/uv/install.ps1' | iex" 2>&1 | Out-Null
         
         # Find the installed binary
         $uvExe = "$env:USERPROFILE\.local\bin\uv.exe"
