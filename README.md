@@ -12,8 +12,19 @@
 irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
 ```
 
-This installs Sidekick under `%LOCALAPPDATA%\sidekick\`, creates a desktop shortcut,
-and opens the WebUI dashboard in your browser. No admin rights required.
+**After install:**
+```powershell
+sidekick doctor           # Health check (works without API key)
+sidekick dashboard        # Open WebUI at http://127.0.0.1:8787
+```
+
+**Key facts:**
+- 🚫 **No admin rights** — installs under `%LOCALAPPDATA%\sidekick\`
+- 🏠 **Desktop shortcut** — `Sidekick.lnk` starts the dashboard
+- 🌐 **WebUI opens automatically** in your default browser
+- 🔄 **Update** by running the same command again (idempotent)
+- 🔑 **No API key required** to start — configure via `sidekick setup`
+- 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
 
 ### macOS / Linux
 
