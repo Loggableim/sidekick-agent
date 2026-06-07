@@ -1,84 +1,77 @@
 # Sidekick
 
-Sidekick is the single canonical repository for the standalone assistant product.
-This repo is replacing the historical split between `cids-hermes-agent` and
-`cids-hermes-webui`.
+**Sidekick** is a unified assistant monorepo combining CLI, TUI, and WebUI in one installable package. This repo replaces the historical split between `cids-hermes-agent` and `cids-hermes-webui`.
 
-## Current consolidation goals
+## Quick start
 
-- one repo for `CLI + Agent + WebUI`
-- canonical product naming under `Sidekick`
-- `SIDEKICK_*` configuration as the primary interface
-- strict protection against committing local secrets or private space content
+```bash
+git clone https://github.com/sidekick-ai/sidekick.git
+cd sidekick
+python -m pip install -e .
+sidekick --help
+sidekick doctor
+```
+
+### WebUI
+
+```bash
+sidekick dashboard
+# Opens http://127.0.0.1:8787
+```
 
 ## Repository layout
 
-```text
+```
 sidekick/
-  cli/        command entrypoints
-  shared/     shared config, paths, env compatibility
-  tests/      focused regression tests for shared behavior
-  docs/       consolidation and migration docs
+├── cli/         Command-line interface (REPL, TUI, setup wizard, auth)
+├── runtime/     Agent runtime (providers, memory, cron, gateway)
+├── web/         WebUI server, API routes, static assets
+├── shared/      Config, paths, sessions, logging, utils
+├── tools/       Tool implementations (registry, files, browser, terminal, ...)
+├── docs/        Architecture and migration documentation
+├── tests/       Regression tests
+└── sidekick_app/  Package entrypoint with legacy-import bootstrap
 ```
 
-## Guardrails
+## Commands
 
-- local state belongs under `~/.sidekick`, not in the repo
-- `HERMES_*` env vars are read only as legacy aliases during migration
-- private directories such as `home/`, `spaces/`, `.hermes/`, and
-  `bewusstsein/` are explicitly ignored
-- use `.env.example` as the only committed env file template
+| Command | Description |
+|---------|-------------|
+| `sidekick` | Interactive chat with the agent |
+| `sidekick doctor` | System health check |
+| `sidekick dashboard` | Start the WebUI |
+| `sidekick setup` | Interactive setup wizard |
+| `sidekick --tui` | Terminal UI (TUI) mode |
+| `sidekick status` | Show component status |
+| `sidekick model` | Select default model/provider |
+| `sidekick login` | Authenticate with an inference provider |
+| `sidekick cron` | Cron job management |
+| `sidekick gateway` | Messaging gateway management |
+| `sidekick --help` | Full command reference |
 
-## Source repos
+## Configuration
 
-The current migration sources are local-only:
+Config lives under `~/.sidekick/` (or `$SIDEKICK_HOME`):
 
-- `C:\HermesPortable\cids-hermes-agent`
-- `C:\HermesPortable\cids-hermes-webui`
+- `~/.sidekick/config.yaml` — Settings
+- `~/.sidekick/.env` — API keys
+- `~/.sidekick/skills/` — Installed skills
 
-Only selected code should be ported forward. Runtime state, secrets, generated
-content, backups, and personal space data must not be copied.
+Legacy `HERMES_HOME` and `HERMES_*` env vars are still read as fallbacks during migration.
 
-## Install
+## Migration
 
-### Recommended
+This repo absorbs code from:
+- `cids-hermes-agent` — agent runtime, CLI, tools, cron, gateway
+- `cids-hermes-webui` — WebUI server and frontend assets
 
-```bash
-python -m pip install .
-python -m sidekick_app doctor
-python -m sidekick_app web serve
-```
+See `docs/consolidation.md` for the migration map and naming conventions.
 
-### Local development
+## Install from source
 
 ```bash
 python -m pip install -e .
-python -m sidekick_app doctor
-./start.sh doctor
-```
-
-On Windows:
-
-```powershell
-python -m pip install -e .
-python -m sidekick_app doctor
-.\start.ps1 doctor
-```
-
-If an older global `sidekick` command already exists on your PATH, prefer
-`python -m sidekick_app ...` until the standalone install is the command your
-shell resolves.
-
-## Baseline commands
-
-```bash
-python -m sidekick_app doctor
-python -m sidekick_app paths
-python -m sidekick_app config-summary
-python -m sidekick_app config show
-python -m sidekick_app config get webui.port
-python -m sidekick_app logs-path
-python -m sidekick_app web info
-python -m sidekick_app web sessions
-python -m sidekick_app audit-repo
+# With optional dependencies:
+python -m pip install -e ".[web]"   # WebUI extras
+python -m pip install -e ".[all]"   # Everything
 ```

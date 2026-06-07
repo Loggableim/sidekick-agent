@@ -5,21 +5,62 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sidekick"
 version = "0.1.0"
-description = "Standalone assistant monorepo foundation for Sidekick"
+description = "Standalone assistant — CLI, TUI, and WebUI in one installable repo"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0,<7", "rich>=13.0", "prompt_toolkit>=3.0", "wcwidth>=0.2"]
+dependencies = [
+    "PyYAML>=6.0",
+    "rich>=13.0",
+    "prompt_toolkit>=3.0",
+    "fire>=0.5",
+    "wcwidth>=0.2",
+]
+
+[project.optional-dependencies]
+web = [
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "cryptography>=41.0",
+]
+all = [
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "cryptography>=41.0",
+    "openai>=1.0",
+    "requests>=2.31",
+    "packaging>=23.0",
+    "pillow>=10.0",
+    "tiktoken>=0.5",
+    "croniter>=2.0",
+    "beautifulsoup4>=4.12",
+]
 
 [project.scripts]
 sidekick = "sidekick_app.__main__:main"
 hermes = "sidekick_app.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/sidekick-ai/sidekick"
+Documentation = "https://docs.sidekick-agent.dev"
 
 [tool.setuptools]
 include-package-data = true
 py-modules = ["sidekick_constants", "bootstrap"]
 
 [tool.setuptools.packages.find]
-include = ["cli", "runtime", "runtime.*", "runtime._compat", "shared", "tests", "web", "web.*", "web.api", "sidekick_app"]
+include = [
+    "cli", "cli.*",
+    "runtime", "runtime.*", "runtime._compat", "runtime.cron", "runtime.cron.*",
+    "runtime.gateway", "runtime.gateway.*",
+    "shared", "shared.*",
+    "tests", "tests.*",
+    "tools", "tools.*", "tools.environments", "tools.environments.*",
+    "tools.web_providers", "tools.web_providers.*",
+    "tools.computer_use", "tools.computer_use.*",
+    "tools.browser_providers", "tools.browser_providers.*",
+    "web", "web.*", "web.api",
+    "sidekick_app",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
