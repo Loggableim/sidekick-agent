@@ -2577,47 +2577,295 @@ def _handle_llm_wiki_status(handler, parsed) -> bool:
     return True
 
 
-def _handle_insights(handler, parsed) -> bool:
-    """Return usage analytics from local WebUI session data."""
-    import collections
-    import time as _time
+# ── Insights / Usage Analytics shared helpers ──────────────────────────────────
 
-    query = parse_qs(parsed.query)
+
+def _normalize_insights_days(parsed) -> int:
+    """Parse and clamp 'days' from query string (1..365, default 30)."""
+    query = parse_qs(getattr(parsed, 'query', '') or '')
     try:
-        days = min(max(int(query.get("days", ["30"])[0]), 1), 365)
+        return min(max(int(query.get("days", ["30"])[0]), 1), 365)
     except (ValueError, TypeError):
-        days = 30
+        return 30
 
+
+def _calendar_window_ts(days: int) -> tuple[float, float, float]:
+    """Return (cutoff_ts, today_midnight_ts, day_secs) for a calendar-day window."""
+    import time as _time
     now = _time.time()
     today = _time.localtime(now)
-    today_midnight = _time.mktime((today.tm_year, today.tm_mon, today.tm_mday, 0, 0, 0, today.tm_wday, today.tm_yday, today.tm_isdst))
+    today_midnight = _time.mktime(
+        (today.tm_year, today.tm_mon, today.tm_mday, 0, 0, 0,
+         today.tm_wday, today.tm_yday, today.tm_isdst)
+    )
     day_secs = 86400
     first_day_ts = today_midnight - ((days - 1) * day_secs)
-    cutoff = first_day_ts
+    return first_day_ts, today_midnight, day_secs
 
-    def _safe_usage_int(value) -> int:
-        try:
-            return max(int(float(value or 0)), 0)
-        except (TypeError, ValueError):
-            return 0
 
-    def _safe_cost_float(value) -> float:
-        if value is None:
-            return 0.0
-        try:
-            if isinstance(value, str):
-                value = value.strip().replace("$", "").replace(",", "")
-                if not value:
-                    return 0.0
-            return max(float(value), 0.0)
-        except (TypeError, ValueError):
-            return 0.0
+def _empty_insights_payload(days: int, data_source: str, warnings: list[str] | None = None) -> dict:
+    """Return a UI-compatible empty insights payload."""
+    import time as _time
+    cutoff_ts, _midnight, _day_secs = _calendar_window_ts(days)
+    dow_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    payload: dict = {
+        "period_days": days,
+        "data_source": data_source,
+        "window_type": "calendar_days",
+        "cutoff_ts": cutoff_ts,
+        "total_sessions": 0,
+        "total_messages": 0,
+        "total_input_tokens": 0,
+        "total_output_tokens": 0,
+        "total_tokens": 0,
+        "total_cost": 0.0,
+        "models": [],
+        "daily_tokens": [
+            {
+                "date": _time.strftime("%Y-%m-%d", _time.localtime(cutoff_ts + (i * 86400))),
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "sessions": 0,
+                "cost": 0.0,
+            }
+            for i in range(days)
+        ],
+        "activity_by_day": [{"day": dow_labels[i], "sessions": 0} for i in range(7)],
+        "activity_by_hour": [{"hour": h, "sessions": 0} for h in range(24)],
+    }
+    if warnings:
+        payload["warnings"] = warnings
+    return payload
+
+
+def _safe_usage_int(value) -> int:
+    try:
+        return max(int(float(value or 0)), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_cost_float(value) -> float:
+    if value is None:
+        return 0.0
+    try:
+        if isinstance(value, str):
+            value = value.strip().replace("$", "").replace(",", "")
+            if not value:
+                return 0.0
+        return max(float(value), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_insights_from_state_db(days: int) -> dict | None:
+    """Build insights payload from state.db (SessionDB / SQLITE).
+
+    Returns None if state.db is unavailable or the import fails — caller
+    falls through to the _index.json fallback.
+    """
+    import time as _time
+    import collections
+
+    try:
+        from runtime._compat.shim_state import SessionDB
+    except Exception:
+        return None
+
+    # Build calendar-day cutoff — use midnight logic so daily_chart buckets align.
+    cutoff_ts, _midnight, day_secs = _calendar_window_ts(days)
+
+    try:
+        db = SessionDB()
+    except Exception:
+        return None
+
+    try:
+        # ── single query: aggregate everything from one pass ──
+        # We build the model stats, daily_tokens, and activity data from the DB.
+        # First: get all rows in the window (limited to reduce memory pressure).
+        import time as _time_module
+
+        rows_raw = db._conn.execute(
+            """SELECT
+                started_at, model,
+                COALESCE(input_tokens, 0) AS input_tokens,
+                COALESCE(output_tokens, 0) AS output_tokens,
+                COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
+                COALESCE(reasoning_tokens, 0) AS reasoning_tokens,
+                COALESCE(estimated_cost_usd, 0) AS estimated_cost,
+                COALESCE(actual_cost_usd, 0) AS actual_cost,
+                COALESCE(message_count, 0) AS message_count
+            FROM sessions
+            WHERE COALESCE(started_at, updated_at, created_at) >= ?
+            ORDER BY started_at ASC
+            """,
+            (cutoff_ts,),
+        )
+        rows = rows_raw.fetchall()
+    except Exception as exc:
+        db.close()
+        logger.debug("_build_insights_from_state_db query failed: %s", exc)
+        return None
+
+    if not rows:
+        db.close()
+        # Return empty payload with correct shape so UI doesn't break.
+        payload = _empty_insights_payload(days, "state_db")
+        payload["warnings"] = ["No session data found in analytics database for this period."]
+        return payload
+
+    total_sessions = len(rows)
+    total_messages = 0
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cache_read_tokens = 0
+    total_reasoning_tokens = 0
+    total_estimated_cost = 0.0
+    total_actual_cost = 0.0
+    model_stats: dict[str, dict] = {}
+    daily_tokens: dict[str, dict] = {}
+    dow_activity = collections.Counter()
+    hod_activity = collections.Counter()
+
+    for row in rows:
+        r = dict(row)
+        input_tokens = int(r.get("input_tokens", 0))
+        output_tokens = int(r.get("output_tokens", 0))
+        cache_read_tokens = int(r.get("cache_read_tokens", 0))
+        reasoning_tokens = int(r.get("reasoning_tokens", 0))
+        estimated_cost = float(r.get("estimated_cost", 0.0))
+        actual_cost = float(r.get("actual_cost", 0.0))
+        message_count = int(r.get("message_count", 0))
+
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
+        total_cache_read_tokens += cache_read_tokens
+        total_reasoning_tokens += reasoning_tokens
+        total_estimated_cost += estimated_cost
+        total_actual_cost += actual_cost
+        total_messages += message_count
+
+        model = r.get("model") or "unknown"
+        bucket = model_stats.setdefault(model, {
+            "sessions": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost": 0.0,
+        })
+        bucket["sessions"] += 1
+        bucket["input_tokens"] += input_tokens
+        bucket["output_tokens"] += output_tokens
+        bucket["cost"] += estimated_cost or actual_cost
+
+        # Activity patterns
+        ts = r.get("started_at") or 0
+        if ts:
+            try:
+                dt = _time.localtime(float(ts))
+                day_key = _time.strftime("%Y-%m-%d", dt)
+                daily_bucket = daily_tokens.setdefault(day_key, {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "sessions": 0,
+                    "cost": 0.0,
+                })
+                daily_bucket["input_tokens"] += input_tokens
+                daily_bucket["output_tokens"] += output_tokens
+                daily_bucket["sessions"] += 1
+                daily_bucket["cost"] += estimated_cost or actual_cost
+                dow_activity[dt.tm_wday] += 1
+                hod_activity[dt.tm_hour] += 1
+            except Exception:
+                pass
+
+    db.close()
+
+    # Build display-friendly cost (prefer actual_cost, fallback estimated)
+    display_cost = total_actual_cost if total_actual_cost else total_estimated_cost
+    total_tokens = total_input_tokens + total_output_tokens  # billable tokens
+    total_all_tokens = total_tokens + total_cache_read_tokens + total_reasoning_tokens
+
+    # Model breakdown
+    models_breakdown = []
+    for model, stats in sorted(model_stats.items(), key=lambda x: (-(x[1]["cost"] or x[1]["input_tokens"]), x[0])):
+        row_total_tokens = stats["input_tokens"] + stats["output_tokens"]
+        row_cost = round(stats["cost"], 6)
+        models_breakdown.append({
+            "model": model,
+            "sessions": stats["sessions"],
+            "input_tokens": stats["input_tokens"],
+            "output_tokens": stats["output_tokens"],
+            "total_tokens": row_total_tokens,
+            "cost": row_cost,
+            "session_share": int(round((stats["sessions"] / total_sessions) * 100)) if total_sessions else 0,
+            "token_share": int(round((row_total_tokens / total_tokens) * 100)) if total_tokens else 0,
+            "cost_share": int(round((row_cost / display_cost) * 100)) if display_cost else 0,
+        })
+
+    # Daily series — fill empty days with zeros for the calendar window
+    first_ts, _midnight, _day_secs = _calendar_window_ts(days)
+    daily_series = []
+    for i in range(days):
+        day_ts = first_ts + (i * _day_secs)
+        day_key = _time.strftime("%Y-%m-%d", _time.localtime(day_ts))
+        bucket = daily_tokens.get(day_key, {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "sessions": 0,
+            "cost": 0.0,
+        })
+        daily_series.append({
+            "date": day_key,
+            "input_tokens": bucket["input_tokens"],
+            "output_tokens": bucket["output_tokens"],
+            "sessions": bucket["sessions"],
+            "cost": round(bucket["cost"], 6),
+        })
+
+    dow_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    dow_data = [{"day": dow_labels[i], "sessions": dow_activity.get(i, 0)} for i in range(7)]
+    hod_data = [{"hour": h, "sessions": hod_activity.get(h, 0)} for h in range(24)]
+
+    return {
+        "period_days": days,
+        "data_source": "state_db",
+        "window_type": "calendar_days",
+        "cutoff_ts": cutoff_ts,
+        "total_sessions": total_sessions,
+        "total_messages": total_messages,
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
+        "total_cache_read_tokens": total_cache_read_tokens,
+        "total_reasoning_tokens": total_reasoning_tokens,
+        "total_tokens": total_tokens,
+        "total_billable_tokens": total_tokens,
+        "total_all_tokens": total_all_tokens,
+        "total_estimated_cost": round(total_estimated_cost, 6),
+        "total_actual_cost": round(total_actual_cost, 6),
+        "total_cost": round(display_cost, 6),
+        "models": models_breakdown,
+        "daily_tokens": daily_series,
+        "activity_by_day": dow_data,
+        "activity_by_hour": hod_data,
+    }
+
+
+def _build_insights_from_index(days: int) -> dict:
+    """Build insights payload from _index.json (legacy fallback).
+
+    This preserves the original behaviour exactly — reads session index JSON,
+    aggregates by calendar window. The frontend expects exact field names so
+    we map back to the base shape.
+    """
+    import time as _time
+    import collections
+
+    cutoff_ts, _midnight, day_secs = _calendar_window_ts(days)
 
     def _session_usage_ts(session: dict) -> float:
-        return session.get("updated_at", session.get("created_at", 0)) or session.get("created_at", 0) or 0
+        return session.get("updated_at", session.get("created_at", 0)) or 0
 
-    # Walk session index (fast, no full JSON parse)
-    sessions_data = []
     idx_path = get_session_dir() / "_index.json"
     if idx_path.exists():
         try:
@@ -2627,15 +2875,12 @@ def _handle_insights(handler, parsed) -> bool:
     else:
         idx = []
 
+    sessions_data = []
     for entry in idx:
-        created = entry.get("created_at", 0) or 0
-        updated = entry.get("updated_at", 0) or 0
-        # Session is relevant if it was created or updated within the calendar window.
-        if max(created, updated) < cutoff:
-            continue
-        sessions_data.append(entry)
+        ts = max(entry.get("created_at", 0) or 0, entry.get("updated_at", 0) or 0)
+        if ts >= cutoff_ts:
+            sessions_data.append(entry)
 
-    # Aggregate
     total_sessions = len(sessions_data)
     total_messages = 0
     total_input_tokens = 0
@@ -2643,9 +2888,7 @@ def _handle_insights(handler, parsed) -> bool:
     total_cost = 0.0
     model_stats: dict[str, dict] = {}
     daily_tokens: dict[str, dict] = {}
-    # Activity by day of week (0=Mon .. 6=Sun)
     dow_activity = collections.Counter()
-    # Activity by hour of day (0-23)
     hod_activity = collections.Counter()
 
     for s in sessions_data:
@@ -2669,7 +2912,6 @@ def _handle_insights(handler, parsed) -> bool:
         bucket["output_tokens"] += output_tokens
         bucket["cost"] += cost_value
 
-        # Activity patterns
         ts = _session_usage_ts(s)
         if ts:
             try:
@@ -2690,10 +2932,9 @@ def _handle_insights(handler, parsed) -> bool:
             except Exception:
                 pass
 
-    # Build model breakdown
     total_tokens = total_input_tokens + total_output_tokens
     models_breakdown = []
-    for model, stats in model_stats.items():
+    for model, stats in sorted(model_stats.items(), key=lambda x: (-x[1]["cost"], -x[1]["sessions"], x[0])):
         row_total_tokens = stats["input_tokens"] + stats["output_tokens"]
         row_cost = round(stats["cost"], 6)
         models_breakdown.append({
@@ -2707,11 +2948,10 @@ def _handle_insights(handler, parsed) -> bool:
             "token_share": int(round((row_total_tokens / total_tokens) * 100)) if total_tokens else 0,
             "cost_share": int(round((row_cost / total_cost) * 100)) if total_cost else 0,
         })
-    models_breakdown.sort(key=lambda r: (-r["cost"], -r["sessions"], r["model"]))
 
     daily_series = []
     for i in range(days):
-        day_ts = first_day_ts + (i * day_secs)
+        day_ts = cutoff_ts + (i * day_secs)
         day_key = _time.strftime("%Y-%m-%d", _time.localtime(day_ts))
         bucket = daily_tokens.get(day_key, {
             "input_tokens": 0,
@@ -2727,15 +2967,15 @@ def _handle_insights(handler, parsed) -> bool:
             "cost": round(bucket["cost"], 6),
         })
 
-    # Day-of-week labels
     dow_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     dow_data = [{"day": dow_labels[i], "sessions": dow_activity.get(i, 0)} for i in range(7)]
-
-    # Hour-of-day data
     hod_data = [{"hour": h, "sessions": hod_activity.get(h, 0)} for h in range(24)]
 
-    return j(handler, {
+    payload: dict = {
         "period_days": days,
+        "data_source": "index_json_fallback",
+        "window_type": "calendar_days",
+        "cutoff_ts": cutoff_ts,
         "total_sessions": total_sessions,
         "total_messages": total_messages,
         "total_input_tokens": total_input_tokens,
@@ -2746,7 +2986,38 @@ def _handle_insights(handler, parsed) -> bool:
         "daily_tokens": daily_series,
         "activity_by_day": dow_data,
         "activity_by_hour": hod_data,
-    })
+    }
+    if not total_sessions:
+        payload["warnings"] = ["No session data found in _index.json for this period."]
+    return payload
+
+
+def _handle_insights(handler, parsed) -> bool:
+    """Return usage analytics — prefers state.db, falls back to _index.json.
+
+    Payload shape matches what _renderInsights() expects in panels.js, with
+    extra metadata fields (data_source, window_type, cutoff_ts, warnings).
+    """
+    days = _normalize_insights_days(parsed)
+
+    # 1. Try state.db (primary data source)
+    try:
+        result = _build_insights_from_state_db(days)
+        if result is not None:
+            return j(handler, result)
+    except Exception as exc:
+        logger.exception("_build_insights_from_state_db raised; falling back to _index.json")
+
+    # 2. Fallback to _index.json
+    try:
+        result = _build_insights_from_index(days)
+        return j(handler, result)
+    except Exception as exc:
+        logger.exception("_build_insights_from_index also failed")
+        # Safe fallback — empty payload with error source flag.
+        payload = _empty_insights_payload(days, "error_fallback")
+        payload["warnings"] = [f"Both analytics data sources failed. See logs for details."]
+        return j(handler, payload)
 
 
 # ── GET routes ────────────────────────────────────────────────────────────────
@@ -4433,10 +4704,6 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path.startswith("/api/agents/"):
         return _handle_agents_get(handler, parsed)
-
-    # ── Analytics / usage (mirrors the official Dashboard's /api/analytics/usage) ──
-    if parsed.path == "/api/analytics/usage":
-        return _handle_analytics_usage(handler, parsed)
 
     # ── Claude Jobs (dashboard compatibility) ──
     if parsed.path == "/api/claude-jobs":
