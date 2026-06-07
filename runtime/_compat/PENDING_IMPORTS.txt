@@ -1,0 +1,73 @@
+Modules with sidekick_cli imports that still need porting
+============================================================
+
+These are modules in runtime/ that import from sidekick_cli. They need
+compat shims (runtime._compat.shim_cli.*) before they can work without
+the sidekick_cli package.
+
+NEWLY COPIED FILES (from agend/* to runtime/):
+---------------------------------------------------
+account_usage.py:
+    from sidekick_cli.auth import _read_codex_tokens, resolve_codex_runtime_credentials
+    from sidekick_cli.runtime_provider import resolve_runtime_provider
+
+image_gen_registry.py:
+    from sidekick_cli.config import load_config
+
+plugin_llm.py:
+    from sidekick_cli.config import load_config
+
+prompt_builder.py:
+    from sidekick_cli.nous_subscription import get_nous_subscription_features
+    from sidekick_cli.config import ensure_sidekick_home
+
+
+PRE-EXISTING RUNTIME FILES (copied by copy_runtime_modules.py):
+------------------------------------------------------------------
+credential_sources.py:
+    from sidekick_cli.config import get_env_path, remove_env_value
+    from sidekick_cli.auth import (
+    from sidekick_cli.auth import suppress_credential_source  (×3)
+
+curator_backup.py:
+    from sidekick_cli.config import load_config
+
+display.py:
+    from sidekick_cli.skin_engine import get_active_skin  (×2)
+
+i18n.py:
+    from sidekick_cli.config import load_config
+
+models_dev.py:
+    from sidekick_cli.models import normalize_provider
+
+model_metadata.py:
+    from sidekick_cli.config import get_custom_provider_context_length
+    from sidekick_cli.models import get_copilot_model_context
+
+shell_hooks.py:
+    from sidekick_cli.plugins import get_plugin_manager
+    from sidekick_cli.plugins import VALID_HOOKS
+
+skill_preprocessing.py:
+    from sidekick_cli.config import load_config
+
+
+KNOWN MODULES THAT IMPORT sidekick_cli DIRECTLY (NOT COPIED):
+------------------------------------------------------------------
+These were identified as heavily dependent on sidekick_cli and skipped:
+  - agent/credential_pool.py     (imports sidekick_cli.auth, sidekick_cli.config)
+  - agent/auxiliary_client.py    (imports sidekick_cli, credential_pool)
+  - agent/context_compressor.py  (imports agent.auxiliary_client -> needs credential_pool)
+  - agent/curator.py             (imports 'agent' as a package)
+
+
+ADDITIONAL NOTES:
+------------------
+- title_generator.py and plugin_llm.py were copied but import
+  auxiliary_client, which itself depends on credential_pool.
+  These need shims for auxiliary_client before they can work.
+- pre-existing runtime/ files listed above were copied by the first
+  copy_runtime_modules.py pass but still have sidekick_cli lazy imports.
+- A shim_cli.py exists at runtime/_compat/shim_cli.py as a placeholder
+  but doesn't yet implement any of the actual submodule interfaces.

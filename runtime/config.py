@@ -1,0 +1,95 @@
+"""Minimal Sidekick CLI config shim for runtime migration.
+
+Provides the load_config(), ensure_sidekick_home(), and cfg_get() interfaces
+that runtime modules need, delegating to shared.config where possible.
+"""
+from __future__ import annotations
+
+import copy
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+from shared.config import ensure_sidekick_home as _shared_ensure_home
+from shared.config import get_config_value, load_config as _shared_load_config
+from shared.constants import get_config_path, get_env_path, get_sidekick_home
+
+logger = logging.getLogger(__name__)
+
+# Re-export
+ensure_sidekick_home = _shared_ensure_home
+
+
+def load_config() -> dict[str, Any]:
+    """Load merged config (defaults + user config.yaml).
+
+    Wraps shared.config.load_config() with the same interface signature
+    that sidekick_cli.config.load_config() exposed.
+    """
+    return _shared_load_config()
+
+
+def cfg_get(cfg: dict[str, Any] | None, *keys: str, default: Any = None) -> Any:
+    """Safely traverse a nested dict by a dotted key path."""
+    if cfg is None:
+        return default
+    cursor: Any = cfg
+    for key in keys:
+        if not isinstance(cursor, dict):
+            return default
+        cursor = cursor.get(key)
+        if cursor is None:
+            return default
+    return cursor
+
+
+def edit_config(key: str, value: Any) -> None:
+    """Set a config value and persist to disk."""
+    from shared.config import set_config_value
+    set_config_value(key, str(value))
+
+
+def get_sidekick_home_path() -> Path:
+    return get_sidekick_home()
+
+
+def remove_env_value(key: str) -> bool:
+    """Remove a key from the .env file."""
+    env_path = get_env_path()
+    if not env_path.exists():
+        return False
+    try:
+        lines = env_path.read_text(encoding="utf-8-sig").splitlines()
+        kept = [l for l in lines if not l.strip().startswith(key + "=") and not l.strip().startswith("#")]
+        if len(kept) == len(lines):
+            return False
+        env_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def get_custom_provider_context_length(provider_name: str) -> int | None:
+    """Return custom provider context_length from config, or None."""
+    cfg = load_config()
+    providers = cfg_get(cfg, "custom_providers") or {}
+    if not isinstance(providers, dict):
+        providers = {}
+    for entry in providers.values():
+        if isinstance(entry, dict) and entry.get("name") == provider_name:
+            return entry.get("context_length")
+    return None
+
+
+__all__ = [
+    "ensure_sidekick_home",
+    "load_config",
+    "cfg_get",
+    "edit_config",
+    "get_sidekick_home_path",
+    "remove_env_value",
+    "get_custom_provider_context_length",
+    "get_env_path",
+    "get_config_path",
+]
