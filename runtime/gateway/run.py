@@ -15176,7 +15176,10 @@ class GatewayRunner:
             _approval_session_token = set_current_session_key(_approval_session_key)
             register_gateway_notify(_approval_session_key, _approval_notify_sync)
             # Acquire agent pool slot before running
-            _pool_acquired = await self._agent_pool.acquire(session_key or "", runtime_kwargs.get("provider", ""))
+            _pool_acquired = asyncio.run_coroutine_threadsafe(
+                self._agent_pool.acquire(session_key or "", runtime_kwargs.get("provider", "")),
+                _loop_for_step,
+            ).result(timeout=30)
             try:
                 # If _prepare_inbound_message_text buffered image paths for native
                 # attachment, wrap the user turn as an OpenAI-style multimodal
@@ -15214,7 +15217,10 @@ class GatewayRunner:
                 # Always release pool slot — even on exception — to prevent semaphore leaks
                 if _pool_acquired and runtime_kwargs:
                     provider_name = runtime_kwargs.get("provider", "")
-                    await self._agent_pool.release(session_key or "", provider_name)
+                    asyncio.run_coroutine_threadsafe(
+                        self._agent_pool.release(session_key or "", provider_name),
+                        _loop_for_step,
+                    )
                 unregister_gateway_notify(_approval_session_key)
                 reset_current_session_key(_approval_session_token)
             result_holder[0] = result
