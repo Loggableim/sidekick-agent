@@ -247,7 +247,7 @@ function Main {
     Write-Host ""
     Write-Host "To reinstall, run:" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex" -ForegroundColor Green
+    Write-Host "  irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Green
     Write-Host ""
 
     exit $script:ExitCode
@@ -264,7 +264,7 @@ try {
     Write-Err "Uninstall failed: $_"
     Write-Host ""
     Write-Info "Try running the script directly instead of via iex:"
-    Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/uninstall.ps1' -OutFile uninstall.ps1" -ForegroundColor Yellow
+    Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/uninstall.ps1' -OutFile uninstall.ps1" -ForegroundColor Yellow
     Write-Host "  .\uninstall.ps1" -ForegroundColor Yellow
     Write-Host ""
     exit 1

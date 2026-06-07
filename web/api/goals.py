@@ -401,22 +401,32 @@ def _goal_decision_payload(
     if status == "done":
         return {
             **decision,
+            "turns_used": turns_used,
+            "max_turns": max_turns,
             "message_key": "goal_achieved",
             "message_args": [reason],
         }
     if status == "paused":
         return {
             **decision,
+            "turns_used": turns_used,
+            "max_turns": max_turns,
             "message_key": "goal_paused_budget_exhausted",
             "message_args": [turns_used, max_turns],
         }
     if decision.get("should_continue"):
         return {
             **decision,
+            "turns_used": turns_used,
+            "max_turns": max_turns,
             "message_key": "goal_continuing",
             "message_args": [turns_used, max_turns, reason],
         }
-    return decision
+    return {
+        **decision,
+        "turns_used": turns_used,
+        "max_turns": max_turns,
+    }
 
 
 def goal_state_snapshot(session_id: str, *, profile_home: str | Path | None = None) -> Any:

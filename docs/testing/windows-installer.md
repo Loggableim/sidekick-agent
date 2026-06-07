@@ -44,7 +44,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 1. Öffne **PowerShell** als Standard-User (nicht als Admin)
 2. Führe den One-Liner aus:
    ```powershell
-   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
    ```
 3. Warte auf Completion (ca. 2–5 Minuten, abhängig von Internetgeschwindigkeit)
 4. Schließe das sich öffnende Browser-Fenster
@@ -376,7 +376,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 3. Wenn fehlschlägt, versuche den Workaround aus dem Troubleshooting:
    ```powershell
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 -OutFile install.ps1
+   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 -OutFile install.ps1
    .\install.ps1
    ```
 

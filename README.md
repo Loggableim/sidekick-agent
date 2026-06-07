@@ -9,7 +9,7 @@
 ### Windows (PowerShell one-liner)
 
 ```powershell
-irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
 ```
 
 **After install:**
@@ -30,7 +30,7 @@ sidekick dashboard        # Open WebUI at http://127.0.0.1:8787
 
 ```powershell
 # Re-run the installer (idempotent — updates to latest version)
-irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
 
 # Or if already downloaded:
 .\install.ps1 -UpdateOnly

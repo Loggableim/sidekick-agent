@@ -52,7 +52,7 @@ git push origin master --tags
 **Test in a clean VM or fresh user profile:**
 
 ```powershell
-irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
 ```
 
 Verify:
@@ -77,7 +77,7 @@ Verify:
 Then re-run the installer (should update idempotently):
 
 ```powershell
-irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
 ```
 
 ## 8. Config / State Migration Check

@@ -1377,6 +1377,7 @@ source.addEventListener('goal',e=>{
         const goalEvaluatingMessage=t('goal_evaluating_progress');
         if(goalState==='evaluating'){
           setComposerStatus(goalEvaluatingMessage);
+          showToast('⏳ ' + goalEvaluatingMessage, 3000);
           return;
         }
         const msg=_resolveGoalMessage(d);

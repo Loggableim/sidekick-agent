@@ -10,7 +10,7 @@ Common issues, their root causes, and how to fix them.
 
 **One-liner:**
 ```powershell
-irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
 ```
 
 **What it does:**
@@ -36,7 +36,7 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1
   ```
 - **Antivirus blocking `iex`:** Download and run locally:
   ```powershell
-  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1' -OutFile install.ps1
+  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1' -OutFile install.ps1
   .\install.ps1
   ```
 - **Git clone fails:** Check your internet connection or proxy settings.
@@ -57,7 +57,7 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1
 **Update Sidekick:**
 ```powershell
 # Re-run the one-liner (idempotent)
-irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
 
 # Or if already downloaded:
 .\install.ps1 -UpdateOnly
