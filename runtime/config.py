@@ -146,6 +146,25 @@ def _expand_env_vars(obj: Any) -> Any:
     return obj
 
 
+def print_config_warnings(config: dict[str, Any] | None = None) -> None:
+    """Stub — config validation warnings (ported from sidekick_cli.config).
+
+    In the monorepo, config structure validation is covered by
+    ``sidekick doctor``.  This no-op prevents ImportError in gateway startup.
+    """
+    pass
+
+
+def warn_deprecated_cwd_env_vars(config: dict[str, Any] | None = None) -> None:
+    """Stub — deprecated env var warning (ported from sidekick_cli.config).
+
+    MESSAGING_CWD and TERMINAL_CWD are deprecated.  In the monorepo the
+    canonical setting is terminal.cwd in config.yaml.  This no-op prevents
+    ImportError in gateway startup.
+    """
+    pass
+
+
 __all__ = [
     "ensure_sidekick_home",
     "load_config",
@@ -159,4 +178,6 @@ __all__ = [
     "get_config_path",
     "load_env",
     "_expand_env_vars",
+    "print_config_warnings",
+    "warn_deprecated_cwd_env_vars",
 ]
