@@ -52,6 +52,38 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1
 .\install.ps1 -NoDoctor
 ```
 
+### Update / Repair / Uninstall
+
+**Update Sidekick:**
+```powershell
+# Re-run the one-liner (idempotent)
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+
+# Or if already downloaded:
+.\install.ps1 -UpdateOnly
+```
+
+**Repair a broken install (venv, deps, or git repo):**
+```powershell
+# Running the installer again performs a clean reinstall
+# while preserving your ~/.sidekick configuration.
+.\install.ps1
+```
+
+**Uninstall Sidekick:**
+```powershell
+# Remove app files, keep ~/.sidekick config
+.\uninstall.ps1
+
+# Remove everything including user data (with 5-second warning)
+.\uninstall.ps1 -RemoveUserData
+```
+
+**Find installer logs:**
+```
+%LOCALAPPDATA%\sidekick\logs\install-YYYYMMDD-HHmmss.log
+```
+
 ### `pip install -e .` (macOS / Linux / manual)
 
 ```bash

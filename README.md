@@ -26,6 +26,26 @@ sidekick dashboard        # Open WebUI at http://127.0.0.1:8787
 - 🔑 **No API key required** to start — configure via `sidekick setup`
 - 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
 
+### Update / Repair
+
+```powershell
+# Re-run the installer (idempotent — updates to latest version)
+irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1 | iex
+
+# Or if already downloaded:
+.\install.ps1 -UpdateOnly
+```
+
+### Uninstall
+
+```powershell
+# Remove Sidekick (keeps ~/.sidekick config)
+.\uninstall.ps1
+
+# Remove everything including user data
+.\uninstall.ps1 -RemoveUserData
+```
+
 ### macOS / Linux
 
 ```bash

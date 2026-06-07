@@ -23,6 +23,13 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
+# Log file setup
+# ============================================================================
+$LogDir = "$env:LOCALAPPDATA\sidekick\logs"
+$LogFile = "$LogDir\install-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+
+# ============================================================================
 # Exit Code Schema
 # ============================================================================
 # 0  Success
@@ -59,21 +66,25 @@ function Write-Banner {
 function Write-Info {
     param([string]$Message)
     Write-Host "→ $Message" -ForegroundColor Cyan
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] → $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Success {
     param([string]$Message)
     Write-Host "✓ $Message" -ForegroundColor Green
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   ✓ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Warn {
     param([string]$Message)
     Write-Host "⚠ $Message" -ForegroundColor Yellow
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] ⚠ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Err {
     param([string]$Message)
     Write-Host "✗ $Message" -ForegroundColor Red
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 # ============================================================================
@@ -1496,6 +1507,8 @@ try {
     Write-Info "If the error is unclear, try downloading and running the script directly:"
     Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/main/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
     Write-Host "  .\\install.ps1" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Info "→ Log file: $LogFile"
     Write-Host ""
     exit 1
 }
