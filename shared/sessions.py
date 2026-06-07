@@ -1,6 +1,28 @@
+"""Canonical Session model — shared by CLI, TUI, and WebUI.
+
+JSON-file-backed session storage.  Each session is one JSON file under
+``~/.sidekick/state/webui/sessions/`` (shared path with legacy WebUI).
+
+Fields
+------
+session_id : str
+    Unique session identifier (hex).
+title : str
+    Human-readable title, auto-set from first user message.
+workspace : str
+    Active workspace path.
+model : str
+    Active model identifier.
+messages : list[dict]
+    Conversation history as OpenAI-format message dicts.
+created_at / updated_at : float
+    Unix timestamps.
+"""
+
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import time
@@ -11,6 +33,8 @@ from typing import Any
 
 from shared.config import get_default_workspace
 from shared.runtime import web_state_dir
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -128,7 +152,7 @@ def append_message(
 
 def list_sessions() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for path in sessions_dir().glob("*.json"):
+    for path in sorted(sessions_dir().glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
@@ -136,7 +160,6 @@ def list_sessions() -> list[dict[str, Any]]:
             rows.append(session.compact())
         except Exception:
             continue
-    rows.sort(key=lambda row: row.get("updated_at", 0), reverse=True)
     return rows
 
 
@@ -157,3 +180,111 @@ def new_session(
     )
     save_session(session)
     return session
+
+
+# ── Session manipulation helpers (retry, undo, status) ─────────────────────
+# Shared across CLI, TUI, and WebUI surfaces.
+
+def _extract_text(content: Any) -> str:
+    """Extract plain text from mixed content (list of parts or plain string)."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [p.get("text", "") if isinstance(p, dict) else str(p) for p in content]
+        return "".join(texts)
+    return str(content or "")
+
+
+def _truncate_at_last_user(history: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+    """Return history up to (not including) the last user message."""
+    if not history:
+        return None
+    last_user_idx = None
+    for i in range(len(history) - 1, -1, -1):
+        if history[i].get("role") == "user":
+            last_user_idx = i
+            break
+    if last_user_idx is None:
+        return None
+    return history[:last_user_idx]
+
+
+def retry_last(session_id: str) -> dict[str, Any]:
+    """Remove the last assistant response — leaves the user's prompt in place.
+
+    Returns:\n        dict with keys ``last_user_text`` and ``removed_count``.
+
+    Raises:
+        KeyError: session not found.
+        ValueError: no user message in transcript.
+    """
+    session = load_session(session_id)
+    if session is None:
+        raise KeyError(session_id)
+    history = session.messages or []
+    last_user_idx = None
+    for i in range(len(history) - 1, -1, -1):
+        if history[i].get("role") == "user":
+            last_user_idx = i
+            break
+    if last_user_idx is None:
+        raise ValueError("No previous message to retry.")
+    last_user_text = _extract_text(history[last_user_idx].get("content", ""))
+    removed_count = len(history) - last_user_idx
+    session.messages = history[:last_user_idx]
+    session.updated_at = time.time()
+    save_session(session)
+    return {"last_user_text": last_user_text, "removed_count": removed_count}
+
+
+def undo_last(session_id: str) -> dict[str, Any]:
+    """Remove the most recent user message and everything after it.
+
+    Returns:\n        dict with keys ``removed_count`` and ``removed_preview``.
+
+    Raises:
+        KeyError: session not found.
+        ValueError: no user message in transcript.
+    """
+    session = load_session(session_id)
+    if session is None:
+        raise KeyError(session_id)
+    history = session.messages or []
+    last_user_idx = None
+    for i in range(len(history) - 1, -1, -1):
+        if history[i].get("role") == "user":
+            last_user_idx = i
+            break
+    if last_user_idx is None:
+        raise ValueError("Nothing to undo.")
+    removed_text = _extract_text(history[last_user_idx].get("content", ""))
+    removed_count = len(history) - last_user_idx
+    session.messages = history[:last_user_idx]
+    session.updated_at = time.time()
+    save_session(session)
+    preview = (removed_text[:40] + "...") if len(removed_text) > 40 else removed_text
+    return {"removed_count": removed_count, "removed_preview": preview}
+
+
+def session_status(session_id: str) -> dict[str, Any]:
+    """Return a metadata snapshot for a session.
+
+    Returns dict with keys: session_id, title, model, message_count,
+    last_user_text, last_assistant_text.
+    """
+    session = load_session(session_id)
+    if session is None:
+        return {"error": "session not found"}
+    messages = session.messages or []
+    last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
+    last_assistant = next(
+        (m for m in reversed(messages) if m.get("role") == "assistant"), None
+    )
+    return {
+        "session_id": session.session_id,
+        "title": session.title,
+        "model": session.model,
+        "message_count": len(messages),
+        "last_user_text": _extract_text(last_user.get("content", ""))[:200] if last_user else "",
+        "last_assistant_text": _extract_text(last_assistant.get("content", ""))[:200] if last_assistant else "",
+    }
