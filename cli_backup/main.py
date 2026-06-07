@@ -260,7 +260,7 @@ import threading
 import time as _time
 from datetime import datetime
 
-from cli import __version__, __release_date__
+from sidekick_cli import __version__, __release_date__
 from runtime._compat.shim_constants import AI_GATEWAY_BASE_URL, OPENROUTER_BASE_URL
 
 logger = logging.getLogger(__name__)
@@ -3283,7 +3283,7 @@ def _model_flow_azure_foundry(config, current_model=""):
         load_config,
         save_config,
     )
-    from cli import azure_detect
+    from sidekick_cli import azure_detect
     import getpass
 
     # ── Load current Azure Foundry configuration ─────────────────────
@@ -5704,7 +5704,7 @@ def _print_curator_first_run_notice() -> None:
     to preview or disable before then. Silent on steady state.
     """
     try:
-        from runtime import curator
+        from agent import curator
     except Exception:
         return
     try:
@@ -5750,7 +5750,7 @@ def _print_curator_recent_run_notice() -> None:
     no rename information to display (no archives).
     """
     try:
-        from runtime import curator
+        from agent import curator
     except Exception:
         return
     try:
