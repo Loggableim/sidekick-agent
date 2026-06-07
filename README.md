@@ -118,6 +118,5 @@ python -m pip install -e ".[all]"
 ## Known issues
 
 - Gateway prints 2 non-blocking warnings about missing config validators (harmless)
-- WebUI uses `hermes-*` localStorage keys (kosmetic, functional)
-- CLI help text still mentions "Hermes" in some subcommand descriptions
-- See `docs/releases/v0.1.0-monorepo.md` for full details
+- Session-Layer: `shared/sessions.py` und `web/api/session_ops.py` noch nicht vollständig vereinheitlicht
+- See `docs/releases/v0.2.0.md` for full details
