@@ -40,7 +40,13 @@ TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
 STATE_DIR = (
-    Path(os.getenv("HERMES_WEBUI_STATE_DIR", str(HOME / ".hermes" / "webui")))
+    Path(
+        os.getenv("SIDEKICK_WEBUI_STATE_DIR")
+        or os.getenv("HERMES_WEBUI_STATE_DIR")
+        or os.getenv("SIDEKICK_STATE_DIR")
+        or os.getenv("HERMES_STATE_DIR")
+        or (Path.home() / ".sidekick" / "state")
+    )
     .expanduser()
     .resolve()
 )
