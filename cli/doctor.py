@@ -16,7 +16,7 @@ from cli.env_loader import load_hermes_dotenv
 from runtime._compat.shim_constants import display_sidekick_home
 
 PROJECT_ROOT = get_project_root()
-HERMES_HOME = get_sidekick_home()
+SIDEKICK_HOME = get_sidekick_home()
 _DHH = display_sidekick_home()  # user-facing display path (e.g. ~/.sidekick or ~/.sidekick/profiles/coder)
 
 # Load environment variables from ~/.sidekick/.env so API key checks work
@@ -378,7 +378,7 @@ def run_doctor(args):
     print(color("◆ Configuration Files", Colors.CYAN, Colors.BOLD))
     
     # Check ~/.sidekick/.env (primary location for user config)
-    env_path = HERMES_HOME / '.env'
+    env_path = SIDEKICK_HOME / '.env'
     if env_path.exists():
         check_ok(f"{_DHH}/.env file exists")
         
@@ -410,7 +410,7 @@ def run_doctor(args):
                 issues.append("Run 'sidekick setup' to create .env")
     
     # Check ~/.sidekick/config.yaml (primary) or project cli-config.yaml (fallback)
-    config_path = HERMES_HOME / 'config.yaml'
+    config_path = SIDEKICK_HOME / 'config.yaml'
     if config_path.exists():
         check_ok(f"{_DHH}/config.yaml exists")
 
@@ -587,7 +587,7 @@ def run_doctor(args):
                 check_warn("config.yaml not found", "(using defaults)")
 
     # Check config version and stale keys
-    config_path = HERMES_HOME / 'config.yaml'
+    config_path = SIDEKICK_HOME / 'config.yaml'
     if config_path.exists():
         try:
             from cli.config import check_config_version, migrate_config
@@ -727,7 +727,7 @@ def run_doctor(args):
     print()
     print(color("◆ Directory Structure", Colors.CYAN, Colors.BOLD))
     
-    hermes_home = HERMES_HOME
+    hermes_home = SIDEKICK_HOME
     if hermes_home.exists():
         check_ok(f"{_DHH} directory exists")
     elif should_fix:
@@ -1574,7 +1574,7 @@ def run_doctor(args):
     print()
     print(color("◆ Skills Hub", Colors.CYAN, Colors.BOLD))
 
-    hub_dir = HERMES_HOME / "skills" / ".hub"
+    hub_dir = SIDEKICK_HOME / "skills" / ".hub"
     if hub_dir.exists():
         check_ok("Skills Hub directory exists")
         lock_file = hub_dir / "lock.json"
@@ -1623,7 +1623,7 @@ def run_doctor(args):
     _active_memory_provider = ""
     try:
         import yaml as _yaml
-        _mem_cfg_path = HERMES_HOME / "config.yaml"
+        _mem_cfg_path = SIDEKICK_HOME / "config.yaml"
         if _mem_cfg_path.exists():
             with open(_mem_cfg_path, encoding="utf-8") as _f:
                 _raw_cfg = _yaml.safe_load(_f) or {}
