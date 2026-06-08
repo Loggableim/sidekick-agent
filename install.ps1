@@ -617,10 +617,9 @@ function Set-GitBashEnvVar {
 function Test-Node {
     <#
     .SYNOPSIS
-    Ensure Node.js is installed. Needed for browser automation tools (Playwright)
-    and the optional TUI. Installs via winget or binary download.
+    Check for Node.js. Sidekick core works without it. Browser tools and TUI need it.
+    Skip auto-install if SKIP_NODE_AUTOINSTALL=1 is set (saves ~5min on slow winget).
     #>
-    Write-Info "Checking Node.js (for browser tools and TUI)..."
     $NodeVersion = "22"
 
     # Already available
@@ -632,12 +631,19 @@ function Test-Node {
     }
 
     # Already managed
-    $managedNode = "$SidekickHome\\node\\node.exe"
+    $managedNode = "$SidekickHome\node\node.exe"
     if (Test-Path $managedNode) {
         $version = & $managedNode --version
-        $env:Path = "$SidekickHome\\node;$env:Path"
+        $env:Path = "$SidekickHome\node;$env:Path"
         Write-Success "Node.js $version found (Sidekick-managed)"
         $script:HasNode = $true
+        return $true
+    }
+
+    # Skip auto-install if requested
+    if ($env:SKIP_NODE_AUTOINSTALL -eq "1") {
+        Write-Info "Skipping Node.js auto-install (SKIP_NODE_AUTOINSTALL=1)"
+        $script:HasNode = $false
         return $true
     }
 
