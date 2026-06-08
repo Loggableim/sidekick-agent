@@ -111,11 +111,27 @@ if (-not $script:IsElevated) {
         $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
         $psi.UseShellExecute = $true
         $psi.Verb = "runas"
+        # Ensure the elevated window is VISIBLE and stays open on error.
+        # Without WindowStyle, PowerShell 5.1 sometimes launches a hidden
+        # window that immediately exits, making it look like a "crash".
+        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
         $elevated = [System.Diagnostics.Process]::Start($psi)
+        if ($null -eq $elevated) {
+            # UAC was denied or the process could not start
+            Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
+            Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
+            Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
+            Write-Host "→   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+            exit 7
+        }
+        # Capture exit code — WaitForExit() doesn't throw on null Process.
+        # Note: WaitForExit() blocks until the elevated window closes.
         $elevated.WaitForExit()
-        exit $elevated.ExitCode
-    } catch {
-        # User clicked "No" on UAC, or UAC was denied
+        $exitCode = $elevated.ExitCode
+        exit $exitCode
+    } catch [System.InvalidOperationException], [System.ComponentModel.Win32Exception] {
+        # UAC denied: Process::Start with runas verb throws Win32Exception
+        # when the user cancels the elevation dialog.
         Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
         Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
         Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
@@ -1839,8 +1855,35 @@ Install-Repository
                         Remove-Item $tmpHosts -ErrorAction SilentlyContinue
                     }
                 }
-                $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
-                Start-Sleep -Seconds 3
+                # CRITICAL: Start dashboard DETACHED from the installer console.
+                # Using -NoNewWindow binds the process to the installer's
+                # console session — when the installer calls exit 0,
+                # Windows kills the console, and sidekick dies with it.
+                # The user sees "success" then ERR_CONNECTION_REFUSED.
+                #
+                # Solution: -WindowStyle Hidden (not -NoNewWindow) starts the
+                # process independently so it survives installer exit.
+                $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -WindowStyle Hidden -PassThru
+                # Wait for actual health check instead of a blind sleep.
+                # Slow systems (first cold-load of Python + imports) can take
+                # 5-10 seconds; Start-Sleep 3 is unreliable.
+                Write-Info "Waiting for dashboard to respond (port 8787)..."
+                $healthOk = $false
+                for ($i = 0; $i -lt 20; $i++) {
+                    Start-Sleep -Milliseconds 500
+                    try {
+                        $null = Invoke-WebRequest -Uri "http://127.0.0.1:8787/health" -UseBasicParsing -TimeoutSec 2
+                        $healthOk = $true
+                        break
+                    } catch {
+                        # Not ready yet — keep waiting
+                    }
+                }
+                if ($healthOk) {
+                    Write-Success "Dashboard health check passed"
+                } else {
+                    Write-Warn "Dashboard health check timed out — may still be starting"
+                }
                 if ($hostsOk) {
                     Start-Process "http://sidekick:8787"
                 } else {
