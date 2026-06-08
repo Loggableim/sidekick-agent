@@ -1774,7 +1774,10 @@ Install-Repository
                             Write-Info "Added 'sidekick' to hosts — http://sidekick:8787 now works"
                             $hostsOk = $true
                         } else {
-                            Write-Info "Could not write to hosts file (admin needed for http://sidekick:8787)"
+                            Write-Info "Hosts file is read-only or admin-protected (http://sidekick:8787 will not resolve)."
+                            Write-Info "  To enable: run PowerShell as Administrator and execute:"
+                            Write-Info "    Add-Content C:\Windows\System32\drivers\etc\hosts '127.0.0.1`tsidekick  # sidekick'"
+                            Write-Host ""
                         }
                     } catch {
                         Write-Info "Could not write to hosts file (admin needed for http://sidekick:8787): $_"
