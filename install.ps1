@@ -450,10 +450,28 @@ Write-Info "Checking Git..."
         $gitDir = "$SidekickHome\git"
 
 Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
-        # Invoke-WebRequest with -OutFile shows native PowerShell progress bar
-        # (Writing request stream... X of Y bytes). -UseBasicParsing is NOT needed
-        # with -OutFile because no content is parsed, only streamed to disk.
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -TimeoutSec 120
+        try {
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "sidekick-installer")
+            $wc.add_DownloadProgressChanged({
+                $pct = $_.ProgressPercentage
+                $received = $_.BytesReceived
+                $total = $_.TotalBytesToReceive
+                $mb = [math]::Round($received / 1MB, 1)
+                $totalMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { "?" }
+                $bar = [string]::new('█', [math]::Floor($pct / 5)) + [string]::new('░', [math]::Ceiling((100 - $pct) / 5))
+                Write-Progress -Activity "Downloading PortableGit" -Status "$mb MB / $totalMb MB ($pct%)" -PercentComplete $pct
+                Write-Host "`r  ⏳ $($bar) $pct% ($mb MB / $totalMb MB)" -NoNewline -ForegroundColor DarkYellow
+            })
+            $wc.DownloadFileAsync((New-Object Uri($downloadUrl)), $tmpFile)
+            while ($wc.IsBusy) { Start-Sleep -Milliseconds 200 }
+            Write-Host ""
+            Write-Progress -Activity "Downloading PortableGit" -Completed
+            $wc.Dispose()
+        } catch {
+            # Fallback: plain Invoke-WebRequest
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -TimeoutSec 120
+        }
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
