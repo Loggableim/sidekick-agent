@@ -2663,6 +2663,11 @@ def _build_insights_from_state_db(days: int) -> dict | None:
 
     Returns None if state.db is unavailable or the import fails — caller
     falls through to the _index.json fallback.
+
+    Discovers available columns via PRAGMA table_info so the query works
+    across schema versions — columns added in later migrations (e.g.
+    cache_read_tokens, reasoning_tokens, actual_cost_usd) are silently
+    zero-filled when absent.
     """
     import time as _time
     import collections
@@ -2680,24 +2685,56 @@ def _build_insights_from_state_db(days: int) -> dict | None:
     except Exception:
         return None
 
+    # ── Discover available columns via PRAGMA ──────────────────────────────
+    # This makes the query robust across schema versions: old DB files
+    # that predate cost/token migration columns still produce valid results
+    # instead of raising "no such column".
     try:
-        # ── single query: aggregate everything from one pass ──
-        # We build the model stats, daily_tokens, and activity data from the DB.
-        # First: get all rows in the window (limited to reduce memory pressure).
-        import time as _time_module
+        col_rows = db._conn.execute("PRAGMA table_info(sessions)").fetchall()
+        existing_cols: set[str] = {r[1].lower() for r in col_rows}
+    except Exception:
+        existing_cols = set()
 
+    _COLUMN_DEFAULTS: dict[str, str] = {
+        "input_tokens": "0",
+        "output_tokens": "0",
+        "cache_read_tokens": "0",
+        "reasoning_tokens": "0",
+        "estimated_cost_usd": "0",
+        "actual_cost_usd": "0",
+        "message_count": "0",
+    }
+
+    def _col_sql(name: str, alias: str | None = None) -> str:
+        """Return a COALESCE expression for *name*, defaulting to 0 when the
+        column does not exist in the current schema."""
+        target = alias or name
+        if name in existing_cols:
+            default = _COLUMN_DEFAULTS.get(name, "0")
+            return f"COALESCE({name}, {default}) AS {target}"
+        return f"{_COLUMN_DEFAULTS.get(name, '0')} AS {target}"
+
+    # Determine the best timestamp column for the WHERE clause — the real
+    # state.db schema (agent-side) uses `started_at` but may lack `updated_at`
+    # or `created_at` that the SessionDB shim schema declares.
+    _TS_COLS = ["started_at", "updated_at", "created_at"]
+    _existing_ts_cols = [c for c in _TS_COLS if c in existing_cols]
+    _ts_col = _existing_ts_cols[0] if _existing_ts_cols else "started_at"
+
+    try:
         rows_raw = db._conn.execute(
-            """SELECT
-                started_at, model,
-                COALESCE(input_tokens, 0) AS input_tokens,
-                COALESCE(output_tokens, 0) AS output_tokens,
-                COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
-                COALESCE(reasoning_tokens, 0) AS reasoning_tokens,
-                COALESCE(estimated_cost_usd, 0) AS estimated_cost,
-                COALESCE(actual_cost_usd, 0) AS actual_cost,
-                COALESCE(message_count, 0) AS message_count
+            f"""SELECT
+                {_ts_col} AS started_at,
+                COALESCE(model, '') AS model,
+                {_col_sql('input_tokens')},
+                {_col_sql('output_tokens')},
+                {_col_sql('cache_read_tokens')},
+                {_col_sql('reasoning_tokens')},
+                {_col_sql('estimated_cost_usd', 'estimated_cost')},
+                {_col_sql('actual_cost_usd', 'actual_cost')},
+                {_col_sql('message_count')}
             FROM sessions
-            WHERE COALESCE(started_at, updated_at, created_at) >= ?
+            WHERE {_ts_col} >= ?
             ORDER BY started_at ASC
             """,
             (cutoff_ts,),

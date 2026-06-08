@@ -61,7 +61,20 @@ except ImportError:
         f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'"
     )
 
-WEB_DIST = Path(os.environ["HERMES_WEB_DIST"]) if "HERMES_WEB_DIST" in os.environ else Path(__file__).parent / "web_dist"
+# WEB_DIST: where the built frontend lives. Falls back through several
+# reasonable locations because the monorepo has the SPA assets in different
+# places depending on build state (web/static/index.html in dev, web_dist
+# after `npm run build`, etc.)
+_WEB_DIST_CANDIDATES = [
+    Path(__file__).parent.parent / "web" / "static",  # web/static (dev / monorepo layout)
+    Path(__file__).parent / "web_dist",                # cli/web_dist (after build)
+    Path(__file__).parent.parent / "web_dist",         # web_dist at repo root
+    Path(__file__).parent.parent / "dist",             # dist at repo root
+]
+WEB_DIST = Path(os.environ["HERMES_WEB_DIST"]) if "HERMES_WEB_DIST" in os.environ else next(
+    (p for p in _WEB_DIST_CANDIDATES if (p / "index.html").exists()),
+    _WEB_DIST_CANDIDATES[1]  # final fallback
+)
 _log = logging.getLogger(__name__)
 
 app = FastAPI(title="Sidekick Agent", version=__version__)
