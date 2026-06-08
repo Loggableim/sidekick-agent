@@ -1,6 +1,6 @@
 # ============================================================================
 # Sidekick Installer for Windows
-# v0.7.19 — clone first, then venv inside repo
+# v0.7.21 — Real progress bar for PortableGit download
 # ============================================================================
 # Installation script for Windows (PowerShell).
 # Uses uv for fast Python provisioning and package management.
