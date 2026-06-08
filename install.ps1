@@ -1747,15 +1747,26 @@ Install-Repository
     }
     
     # ── Auto-open WebUI ────────────────────────────────────────────
-    Write-Info "Opening Sidekick WebUI in your browser..."
-    try {
-        $sidekickExe = $script:SidekickExe
-        if (Test-Path $sidekickExe) {
-            $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
-            Start-Sleep -Seconds 3
-            # Open the dashboard URL in the default browser
-            Start-Process "http://127.0.0.1:8787"
-            Write-Success "WebUI dashboard started at http://127.0.0.1:8787"
+        Write-Info "Opening Sidekick WebUI in your browser..."
+        try {
+            $sidekickExe = $script:SidekickExe
+            if (Test-Path $sidekickExe) {
+                # Add 'sidekick' to Windows hosts file so http://sidekick:8787 works
+                $hostsPath = "$env:windir\System32\drivers\etc\hosts"
+                $hostsEntry = "127.0.0.1`tsidekick"
+                $hostsContent = if (Test-Path $hostsPath) { Get-Content $hostsPath -Raw } else { "" }
+                if ($hostsContent -notmatch "(?m)^\s*127\.0\.0\.1\s+sidekick\s*$") {
+                    try {
+                        Add-Content -Path $hostsPath -Value "`r`n$hostsEntry  # sidekick-installer`r`n" -ErrorAction Stop
+                        Write-Info "Added 'sidekick' to hosts file — http://sidekick:8787 now works"
+                    } catch {
+                        Write-Warn "Could not add hosts entry (run as admin to enable http://sidekick:8787): $_"
+                    }
+                }
+                $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
+                Start-Sleep -Seconds 3
+                Start-Process "http://sidekick:8787"
+                Write-Success "WebUI dashboard started at http://sidekick:8787 (also reachable at http://127.0.0.1:8787)"
         } else {
             Write-Warn "sidekick.exe not found — start dashboard manually with: .\start.ps1 dashboard"
         }
