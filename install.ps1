@@ -64,7 +64,7 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Forc
 $RepoUrlSsh = "git@github.com:Loggableim/sidekick-agent.git"
 $RepoUrlHttps = "https://github.com/Loggableim/sidekick-agent.git"
 $PythonVersion = "3.11"
-$script:VenvPath = "$InstallDir\.venv"
+$script:VenvPath = "$SidekickHome\.venv"
 $script:PythonExe = "$script:VenvPath\Scripts\python.exe"
 $script:SidekickExe = "$script:VenvPath\Scripts\sidekick.exe"
 
@@ -995,9 +995,12 @@ function Install-Dependencies {
     
     Push-Location $InstallDir
     
-    if (-not $NoVenv) {
-        # Tell uv to install into our venv (no activation needed)
-        $env:VIRTUAL_ENV = "$script:VenvPath"
+if (-not $NoVenv) {
+        # Tell uv to install into our venv via explicit python path
+        # (more reliable than $VIRTUAL_ENV which uv might resolve differently)
+        $pipArgs = "--python", "$script:PythonExe"
+    } else {
+        $pipArgs = @()
     }
     
     # Install main package.  Tiered fallback so a single flaky git+https dep
@@ -1024,7 +1027,7 @@ function Install-Dependencies {
     $installed = $false
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        & $UvCmd pip install -e $tier.Spec
+        & $UvCmd pip install $pipArgs -e $tier.Spec
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
@@ -1052,7 +1055,7 @@ function Install-Dependencies {
         if (-not $webOk) {
             Write-Warn "fastapi/uvicorn not importable — `sidekick dashboard` will not work."
             Write-Info "Attempting targeted install of [web] extra as last resort..."
-            & $UvCmd pip install -e ".[web]"
+            & $UvCmd pip install $pipArgs -e ".[web]"
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "[web] extra installed; `sidekick dashboard` should now work."
             } else {
