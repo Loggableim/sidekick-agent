@@ -374,13 +374,16 @@ function Install-Git {
     ``SIDEKICK_GIT_BASH_PATH`` (User scope) so Sidekick can find it in a fresh
     shell without a second PATH refresh.
     #>
-    Write-Info "Checking Git..."
+Write-Info "Checking Git..."
 
     if (Get-Command git -ErrorAction SilentlyContinue) {
-        $version = git --version
-        Write-Success "Git found ($version)"
-        Set-GitBashEnvVar
-        return $true
+        $version = git --version 2>$null
+        if ($LASTEXITCODE -eq 0 -and $version -match "git version") {
+            Write-Success "Git found ($version)"
+            Set-GitBashEnvVar
+            return $true
+        }
+        Write-Warn "Git found on PATH but returned error (corrupt config?) — downloading PortableGit"
     }
 
     # Download PortableGit into $SidekickHome\git.  Always works as long as
@@ -554,13 +557,13 @@ function Set-GitBashEnvVar {
 function Test-Node {
     <#
     .SYNOPSIS
-    Check for Node.js.  Sidekick does not require Node.js for its core
-    functionality, but it is needed for browser automation tools (Playwright)
-    and the optional TUI.  This function is informational only — it does not
-    attempt to install Node.js.
+    Ensure Node.js is installed. Needed for browser automation tools (Playwright)
+    and the optional TUI. Installs via winget or binary download.
     #>
-    Write-Info "Checking Node.js (optional — for browser tools and TUI)..."
+    Write-Info "Checking Node.js (for browser tools and TUI)..."
+    $NodeVersion = "22"
 
+    # Already available
     if (Get-Command node -ErrorAction SilentlyContinue) {
         $version = node --version
         Write-Success "Node.js $version found"
@@ -568,19 +571,69 @@ function Test-Node {
         return $true
     }
 
-    # Check our own managed install from a previous run
-    $managedNode = "$SidekickHome\node\node.exe"
+    # Already managed
+    $managedNode = "$SidekickHome\\node\\node.exe"
     if (Test-Path $managedNode) {
         $version = & $managedNode --version
-        $env:Path = "$SidekickHome\node;$env:Path"
+        $env:Path = "$SidekickHome\\node;$env:Path"
         Write-Success "Node.js $version found (Sidekick-managed)"
         $script:HasNode = $true
         return $true
     }
 
-    Write-Warn "Node.js not found — browser tools and TUI will be unavailable."
-    Write-Info "Install manually if needed: https://nodejs.org/en/download/"
-    Write-Info "  Or: winget install OpenJS.NodeJS.LTS"
+    # Install via winget
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Info "Installing Node.js $NodeVersion via winget..."
+        try {
+            winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+            $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+            if (Get-Command node -ErrorAction SilentlyContinue) {
+                $version = node --version
+                Write-Success "Node.js $version installed via winget"
+                $script:HasNode = $true
+                return $true
+            }
+        } catch {
+            Write-Warn "winget install failed: $_"
+        }
+    }
+
+    # Fallback: download binary zip
+    Write-Info "Downloading Node.js $NodeVersion binary..."
+    try {
+        $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
+        $indexUrl = "https://nodejs.org/dist/latest-v${NodeVersion}.x/"
+        $indexPage = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing -TimeoutSec 30
+        $zipName = ($indexPage.Content | Select-String -Pattern "node-v${NodeVersion}\\.\\d+\\.\\d+-win-${arch}\\.zip" -AllMatches).Matches[0].Value
+
+        if ($zipName) {
+            $downloadUrl = "${indexUrl}${zipName}"
+            $tmpZip = "$env:TEMP\\$zipName"
+            $tmpDir = "$env:TEMP\\sidekick-node-extract"
+
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpZip -UseBasicParsing -TimeoutSec 120
+            if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
+            Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
+
+            $extractedDir = Get-ChildItem $tmpDir -Directory | Select-Object -First 1
+            if ($extractedDir) {
+                if (Test-Path "$SidekickHome\\node") { Remove-Item -Recurse -Force "$SidekickHome\\node" }
+                Move-Item $extractedDir.FullName "$SidekickHome\\node"
+                $env:Path = "$SidekickHome\\node;$env:Path"
+                $version = & "$SidekickHome\\node\\node.exe" --version
+                Write-Success "Node.js $version installed to $SidekickHome\\node\\"
+                $script:HasNode = $true
+                Remove-Item -Force $tmpZip -ErrorAction SilentlyContinue
+                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
+                return $true
+            }
+        }
+    } catch {
+        Write-Warn "Node.js download failed: $_"
+    }
+
+    Write-Warn "Could not auto-install Node.js — browser tools and TUI will be unavailable."
+    Write-Info "Install manually: https://nodejs.org/en/download/"
     $script:HasNode = $false
     return $true
 }
