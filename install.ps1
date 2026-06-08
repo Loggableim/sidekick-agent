@@ -1,6 +1,6 @@
 # ============================================================================
 # Sidekick Installer for Windows
-# v0.7.21 — Real progress bar for PortableGit download
+# v0.7.31 — Use Write-Host in admin-elevation block (irm | iex fix)
 # ============================================================================
 # Installation script for Windows (PowerShell).
 # Uses uv for fast Python provisioning and package management.
@@ -94,14 +94,14 @@ if (-not $script:IsElevated) {
     # case, download install.ps1 fresh to %TEMP% and re-launch elevated.
     $scriptPath = $MyInvocation.MyCommand.Path
     if (-not $scriptPath -or -not (Test-Path $scriptPath)) {
-        Write-Info "Saving installer to %TEMP% for elevated re-launch..."
+        Write-Host "→ Saving installer to %TEMP% for elevated re-launch..." -ForegroundColor Cyan
         $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
         try {
             $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
-            Write-Info "Saved to $scriptPath"
+            Write-Host "→ Saved to $scriptPath" -ForegroundColor Cyan
         } catch {
-            Write-Err "Could not download installer for elevated re-launch: $_"
+            Write-Host "✗ Could not download installer for elevated re-launch: $_" -ForegroundColor Red
             exit 7
         }
     }
@@ -116,14 +116,14 @@ if (-not $script:IsElevated) {
         exit $elevated.ExitCode
     } catch {
         # User clicked "No" on UAC, or UAC was denied
-        Write-Err "Administrator privileges were not granted. Cannot continue."
-        Write-Info "Re-run as Administrator:"
-        Write-Info "  1. Right-click PowerShell -> Run as Administrator"
-        Write-Info "  2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex"
+        Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
+        Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
+        Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
+        Write-Host "→   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
         exit 7
     }
 }
-Write-Success "Running as Administrator (elevation OK)"
+Write-Host "✓ Running as Administrator (elevation OK)" -ForegroundColor Green
 
 # ============================================================================
 # Log file setup
