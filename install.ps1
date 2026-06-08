@@ -993,6 +993,13 @@ Write-Info "Configuring git for Windows compatibility..."
 function Install-Dependencies {
 Write-Info "Installing dependencies..."
 
+    # Remove any stale .venv inside $InstallDir left from previous failed runs
+    $staleVenv = "$InstallDir\.venv"
+    if (Test-Path $staleVenv) {
+        Remove-Item -Recurse -Force $staleVenv -ErrorAction SilentlyContinue
+        Write-Info "Removed stale .venv from $InstallDir"
+    }
+
     # uv scans CWD for .venv even with VIRTUAL_ENV set.
     # Push to where .venv lives so uv stops looking at $InstallDir
     Push-Location $SidekickHome
