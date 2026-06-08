@@ -1568,7 +1568,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
         
         $wshell = New-Object -ComObject WScript.Shell
         $shortcut = $wshell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = ""$script:SidekickExe""
+        $shortcut.TargetPath = $script:SidekickExe
         $shortcut.Arguments = "dashboard"
         $shortcut.Description = "Sidekick WebUI Dashboard"
         $shortcut.WorkingDirectory = "$InstallDir"
@@ -1584,7 +1584,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
     # ── Auto-open WebUI ────────────────────────────────────────────
     Write-Info "Opening Sidekick WebUI in your browser..."
     try {
-        $sidekickExe = ""$script:SidekickExe""
+        $sidekickExe = $script:SidekickExe
         if (Test-Path $sidekickExe) {
             $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
             Start-Sleep -Seconds 3
