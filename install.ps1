@@ -583,9 +583,20 @@ function Test-Node {
 
     # Install via winget
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Info "Installing Node.js $NodeVersion via winget..."
+        Write-Info "Installing Node.js $NodeVersion via winget (may take several minutes)..."
         try {
-            winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null
+            # Show a simple activity spinner while winget runs
+            $wingetJob = Start-Job -ScriptBlock { param($v) winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null } -ArgumentList $NodeVersion
+            $spinner = @("|", "/", "-", "\\")
+            $i = 0
+            while ($wingetJob.State -eq "Running") {
+                Write-Host "`r  ⏳ Installing Node.js $NodeVersion $($spinner[$i])" -NoNewline -ForegroundColor DarkYellow
+                $i = ($i + 1) % 4
+                Start-Sleep -Milliseconds 200
+            }
+            Write-Host "`r  " -NoNewline
+            Receive-Job $wingetJob -ErrorAction SilentlyContinue | Out-Null
+            Remove-Job $wingetJob -ErrorAction SilentlyContinue
             $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
             if (Get-Command node -ErrorAction SilentlyContinue) {
                 $version = node --version
@@ -834,10 +845,24 @@ function Install-Repository {
         # Git for Windows can fail on atomic file operations (hook templates,
         # config lock files) due to antivirus, OneDrive, or NTFS filter drivers.
         # The -c flag injects config before any file I/O occurs.
-        Write-Info "Configuring git for Windows compatibility..."
+Write-Info "Configuring git for Windows compatibility..."
         $env:GIT_CONFIG_COUNT = "1"
         $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
         $env:GIT_CONFIG_VALUE_0 = "false"
+        # If the user's .gitconfig is corrupt (common on fresh VMs), replace it
+        $gitConfigPath = "$env:USERPROFILE\.gitconfig"
+        if (Test-Path $gitConfigPath) {
+            $testResult = git config --list --global 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "Corrupt .gitconfig found at $gitConfigPath — replacing with clean config"
+                try {
+                    $backupPath = "$env:USERPROFILE\.gitconfig.sidekick-backup"
+                    Copy-Item -Path $gitConfigPath -Destination $backupPath -Force
+                    Remove-Item -Path $gitConfigPath -Force
+                    Write-Info "Backed up old config to $backupPath"
+                } catch { }
+            }
+        }
         git config --global windows.appendAtomically false 2>$null
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
