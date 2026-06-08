@@ -160,6 +160,7 @@ function Test-Python {
         if ($pythonPath) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python found: $ver"
+            $script:PythonExe = $pythonPath
             return $true
         }
     } catch { }
@@ -173,11 +174,18 @@ function Test-Python {
             if ($pythonPath) {
                 $ver = & $pythonPath --version 2>$null
                 Write-Success "Python installed: $ver"
+                $script:PythonExe = $pythonPath
                 return $true
             }
         } else {
             Write-Warn "uv python install output:"
             Write-Host $uvOutput -ForegroundColor DarkGray
+            # Log uv version and helpful troubleshooting message
+            try {
+                $uvVer = & $UvCmd --version 2>&1
+                Write-Info "uv version: $uvVer"
+            } catch { }
+            Write-Info "uv could not download Python $PythonVersion. This is often a network issue or missing prebuilt binary for this Windows version."
         }
     } catch {
         Write-Warn "uv python install error: $_"
@@ -192,24 +200,69 @@ function Test-Python {
                 $ver = & $pythonPath --version 2>$null
                 Write-Success "Found fallback: $ver"
                 $script:PythonVersion = $fallbackVer
+                $script:PythonExe = $pythonPath
                 return $true
             }
         } catch { }
     }
 
-    # Fallback: try system python
-    if (Get-Command python -ErrorAction SilentlyContinue) {
-        $sysVer = python --version 2>$null
-        if ($sysVer -match "3\.(1[0-9]|[1-9][0-9])") {
-            Write-Success "Using system Python: $sysVer"
+    # NEW: Scan PATH and standard install locations for a real Python
+    # executable.  We MUST NOT use Get-Command python / bare `python` because
+    # the Microsoft Store App Execution Alias on clean Windows 10/11 returns
+    # a hit but only opens the Store — it is NOT a usable Python interpreter.
+    Write-Info "Scanning for system Python installations (excluding Microsoft Store alias)..."
+    
+    # Collect candidate directories
+    $candidateDirs = @()
+    
+    # PATH directories — skip Microsoft\WindowsApps (Store alias)
+    $pathDirs = $env:PATH -split ';'
+    foreach ($dir in $pathDirs) {
+        if ($dir -and $dir -notlike "*Microsoft*WindowsApps*" -and (Test-Path "$dir\python.exe")) {
+            $candidateDirs += $dir
+        }
+    }
+    
+    # Standard user install locations (%LOCALAPPDATA%\Programs\Python\Python3xx)
+    $localAppDataPython = "$env:LOCALAPPDATA\Programs\Python"
+    if (Test-Path $localAppDataPython) {
+        $subdirs = Get-ChildItem -Path $localAppDataPython -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^Python3' }
+        foreach ($sub in $subdirs) {
+            $candidateDirs += $sub.FullName
+        }
+    }
+    
+    # System install locations (%ProgramFiles%\Python* and %ProgramFiles(x86)%\Python*)
+    $progFiles = "${env:ProgramFiles}\Python*"
+    Get-ChildItem -Path $progFiles -Directory -ErrorAction SilentlyContinue | ForEach-Object { $candidateDirs += $_.FullName }
+    $progFiles86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($progFiles86) {
+        Get-ChildItem -Path "$progFiles86\Python*" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $candidateDirs += $_.FullName }
+    }
+    
+    # Check each candidate — must return a real version string like "Python 3.1x.y"
+    $seen = @{}
+    foreach ($dir in $candidateDirs) {
+        $exePath = "$dir\python.exe"
+        if (-not (Test-Path $exePath)) { continue }
+        $normPath = (Resolve-Path $exePath).ProviderPath.ToLower()
+        if ($seen.ContainsKey($normPath)) { continue }
+        $seen[$normPath] = $true
+        
+        $ver = & $exePath --version 2>$null
+        if ($ver -match "Python 3\.(1[0-9]|[1-9][0-9])\.") {
+            Write-Success "Found real Python: $ver at $exePath"
+            $script:PythonExe = $exePath
             return $true
         }
     }
     
-    Write-Err "Failed to install Python $PythonVersion"
-    Write-Info "Install Python 3.11 manually, then re-run this script:"
-    Write-Info "  https://www.python.org/downloads/"
-    Write-Info "  Or: winget install Python.Python.3.11"
+    # No usable Python found — print clear instructions and return $false
+    Write-Err "No usable Python 3.10+ found on this system."
+    Write-Info "Install Python 3.11 from https://www.python.org/downloads/"
+    Write-Info "Make sure to check 'Add Python to PATH' during installation."
+    Write-Info "Or run: winget install Python.Python.3.11"
+    Write-Info "Log file: $LogFile"
     return $false
 }
 
@@ -753,8 +806,13 @@ function Install-Venv {
         Remove-Item -Recurse -Force "venv"
     }
     
-    # uv creates the venv and pins the Python version in one step
-    & $UvCmd venv venv --python $PythonVersion
+    # Use the found Python executable directly (rejects Store alias, no uv dependency)
+    & $PythonExe -m venv "venv"
+    if ($LASTEXITCODE -ne 0) {
+        Pop-Location
+        Write-Err "Failed to create virtual environment"
+        exit 5
+    }
     
     Pop-Location
     
@@ -1259,7 +1317,7 @@ function Invoke-SetupWizard {
     if (-not $NoVenv) {
         & ".\venv\Scripts\python.exe" -m sidekick_cli.main setup
     } else {
-        python -m sidekick_cli.main setup
+        & $PythonExe -m sidekick_cli.main setup
     }
     
     Pop-Location

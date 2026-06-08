@@ -41,6 +41,11 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.p
   ```
 - **Git clone fails:** Check your internet connection or proxy settings.
 - **uv install fails:** The installer falls back to system Python. Ensure Python 3.11+ is installed from [python.org](https://python.org).
+- **Microsoft Store Python App Execution Alias:** On clean Windows 10/11, `uv python install 3.11` may fail (network/prebuilt binary issues), and the fallback `python` command returns the Microsoft Store App Execution Alias — which only opens the Store. The installer now explicitly searches PATH and standard installation directories for a *real* `python.exe`, skipping the Store alias location (`Microsoft\WindowsApps`). If you see **"No usable Python 3.10+ found"**:
+  - Install Python from [python.org](https://www.python.org/downloads/) (click the download button, run the installer, **check "Add Python to PATH"**).
+  - Or run: `winget install Python.Python.3.11`
+  - Or install Python via the Microsoft Store, then remove the App Execution Alias in **Settings → Apps → App execution aliases** (turn off "python.exe" and "python3.exe").
+  - After installing, re-run the Sidekick installer.
 
 **To update an existing install:**
 ```powershell
