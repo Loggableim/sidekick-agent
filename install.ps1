@@ -993,7 +993,9 @@ Write-Info "Configuring git for Windows compatibility..."
 function Install-Dependencies {
 Write-Info "Installing dependencies..."
 
-    Push-Location $InstallDir
+    # uv scans CWD for .venv even with VIRTUAL_ENV set.
+    # Push to where .venv lives so uv stops looking at $InstallDir
+    Push-Location $SidekickHome
 
     if (-not $NoVenv) {
         $env:VIRTUAL_ENV = "$script:VenvPath"
@@ -1011,7 +1013,7 @@ Write-Info "Installing dependencies..."
     $installed = $false
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        & $UvCmd pip install $pipPython -e $tier.Spec
+        & $UvCmd pip install $pipPython -e "$InstallDir$($tier.Spec)"
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
