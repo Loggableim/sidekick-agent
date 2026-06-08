@@ -1017,10 +1017,17 @@ Write-Info "Installing dependencies..."
         @{ Name = "dashboard + core platforms"; Spec = ".[web,mcp,cron,cli,messaging,dev]" },
         @{ Name = "core only (no extras)"; Spec = "." }
     )
-    $installed = $false
+$installed = $false
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        & $UvCmd pip install $pipPython -e "$InstallDir$($tier.Spec)"
+        # Spec = ".[all]" -> strip leading dot, use "-e $InstallDir[all]"
+        $spec = $tier.Spec
+        if ($spec -eq ".") {
+            & $UvCmd pip install $pipPython -e "$InstallDir"
+        } else {
+            $extras = $spec.Substring(1)  # ".[all]" -> "[all]"
+            & $UvCmd pip install $pipPython -e "$InstallDir$extras"
+        }
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
