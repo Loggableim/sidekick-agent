@@ -100,6 +100,11 @@ function Invoke-External {
         [int]$TimeoutSeconds = 300
     )
 
+    # Save and temporarily override ErrorActionPreference so stderr from native
+    # commands (e.g. uv download progress) does NOT become a terminating error.
+    $savedEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+
     # Create temp files for stdout/stderr
     $tmpOut = [System.IO.Path]::GetTempFileName()
     $tmpErr = [System.IO.Path]::GetTempFileName()
@@ -128,6 +133,8 @@ function Invoke-External {
         }
     }
     finally {
+        # Restore ErrorActionPreference
+        $ErrorActionPreference = $savedEAP
         # Cleanup temp files
         Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
         Remove-Item $tmpErr -Force -ErrorAction SilentlyContinue
@@ -142,9 +149,9 @@ function Install-Uv {
     Write-Info "Checking for uv package manager..."
     
     # Check if uv is already available
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
+if (Get-Command uv -ErrorAction SilentlyContinue) {
         $version = uv --version
-        $script:UvCmd = "uv"
+        $script:UvCmd = (Get-Command uv).Source  # Full path required for Start-Process
         Write-Success "uv found ($version)"
         return $true
     }
@@ -219,7 +226,7 @@ function Ensure-Venv {
     Write-Info "Creating virtual environment with uv (Python $PythonVersion)..."
     Add-Content -Path $LogFile -Value "[INFO] Running: uv venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--python", $PythonVersion, "`"$VenvPath`"")
+    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--python", $PythonVersion, "$VenvPath")
 
     if ($result.ExitCode -eq 0 -and (Test-Path $venvPython)) {
         $ver = & $venvPython --version 2>$null
@@ -245,7 +252,7 @@ function Ensure-Venv {
         if ($pythonPath -and (Test-Path $pythonPath)) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python provisioned: $ver"
-            & $pythonPath -m venv "`"$VenvPath`""
+            & $pythonPath -m venv "$VenvPath"
             if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                 $script:PythonExe = $venvPython
                 return $true
@@ -266,7 +273,7 @@ function Ensure-Venv {
             if ($pythonPath -and (Test-Path $pythonPath)) {
                 $ver = & $pythonPath --version 2>$null
                 Write-Success "Python provisioned on retry: $ver"
-                & $pythonPath -m venv "`"$VenvPath`""
+                & $pythonPath -m venv "$VenvPath"
                 if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                     $script:PythonExe = $venvPython
                     return $true
@@ -314,7 +321,7 @@ function Ensure-Venv {
         $ver = & $exePath --version 2>$null
         if ($ver -match "Python 3\.(1[0-9]|[1-9][0-9])\.") {
             Write-Success "Found system Python: $ver"
-            & $exePath -m venv "`"$VenvPath`""
+            & $exePath -m venv "$VenvPath"
             if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                 $script:PythonExe = $venvPython
                 return $true
