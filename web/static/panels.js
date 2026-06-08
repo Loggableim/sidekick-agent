@@ -3307,16 +3307,49 @@ function _renderInsights(d, box, wikiStatus) {
     const value = Number(n || 0);
     return value >= 1e6 ? (value/1e6).toFixed(1) + 'M' : value >= 1e3 ? (value/1e3).toFixed(1) + 'K' : fmtNum(value);
   };
+  const safe = v => Number(v || 0);
 
-  // Overview cards
-  const overviewCards = [
-    { label: t('insights_sessions'), value: fmtNum(d.total_sessions), icon: li('message-square', 18) },
-    { label: t('insights_messages'), value: fmtNum(d.total_messages), icon: li('hash', 18) },
-    { label: t('insights_tokens'), value: fmtTokens(d.total_tokens), icon: li('cpu', 18) },
-    { label: t('insights_cost'), value: fmtCost(d.total_cost), icon: li('dollar-sign', 18) },
-  ];
+  // ── Derived metrics ──
+  const avgTokensPerSession = safe(d.total_tokens) && safe(d.total_sessions)
+    ? fmtTokens(Math.round(safe(d.total_tokens) / safe(d.total_sessions))) : '—';
+  const avgMessagesPerSession = safe(d.total_messages) && safe(d.total_sessions)
+    ? (safe(d.total_messages) / safe(d.total_sessions)).toFixed(1) : '—';
 
-  // Daily token trend
+  // Top model by cost or tokens
+  let topModelName = '—', topModelCost = 0;
+  if (Array.isArray(d.models) && d.models.length) {
+    const sorted = [...d.models].sort((a, b) => safe(b.cost) - safe(a.cost));
+    topModelName = sorted[0].model;
+    topModelCost = sorted[0].cost || 0;
+  }
+
+  // Peak day from daily_tokens
+  let peakDay = '—', peakDayTokens = 0;
+  if (Array.isArray(d.daily_tokens) && d.daily_tokens.length) {
+    const pk = d.daily_tokens.reduce((a, b) => (safe(b.input_tokens) + safe(b.output_tokens)) > (safe(a.input_tokens) + safe(a.output_tokens)) ? b : a, d.daily_tokens[0]);
+    peakDay = pk.date || '—';
+    peakDayTokens = safe(pk.input_tokens) + safe(pk.output_tokens);
+  }
+
+  // Cost coverage heuristic
+  const totalEst = safe(d.total_estimated_cost);
+  const totalAct = safe(d.total_actual_cost);
+  const costCoverage = totalAct && totalEst ? Math.round((totalAct / totalEst) * 100) + '% matched' : totalAct ? 'Actual' : totalEst ? 'Estimated only' : 'N/A';
+
+  // Data source label
+  const sourceLabel = d.data_source === 'state_db' ? 'Analytics DB' : d.data_source === 'index_json_fallback' ? 'Session Index' : d.data_source === 'empty' ? 'Empty' : d.data_source || 'Unknown';
+  const sourceColor = d.data_source === 'state_db' ? 'ok' : 'warn';
+
+  // ── KPI Row (Main) ──
+  const kpiRow = `<div class="insights-kpi-row">
+    <div class="insights-kpi-card"><div class="insights-kpi-value">${fmtNum(d.total_sessions)}</div><div class="insights-kpi-label">${esc(t('insights_sessions'))}</div></div>
+    <div class="insights-kpi-card"><div class="insights-kpi-value">${fmtNum(d.total_messages)}</div><div class="insights-kpi-label">${esc(t('insights_messages'))}</div></div>
+    <div class="insights-kpi-card"><div class="insights-kpi-value">${fmtTokens(d.total_tokens)}</div><div class="insights-kpi-label">${esc(t('insights_tokens'))}</div></div>
+    <div class="insights-kpi-card"><div class="insights-kpi-value">${fmtCost(d.total_cost)}</div><div class="insights-kpi-label">${esc(t('insights_cost'))}</div></div>
+    <div class="insights-kpi-card"><div class="insights-kpi-value">${avgTokensPerSession}</div><div class="insights-kpi-label">Avg tokens/session</div></div>
+  </div>`;
+
+  // ── Daily token trend (Main) ──
   const dailyTokens = Array.isArray(d.daily_tokens) ? d.daily_tokens : [];
   let dailyHtml = '';
   if (dailyTokens.length) {
@@ -3337,7 +3370,7 @@ function _renderInsights(d, box, wikiStatus) {
     dailyHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_daily_tokens'))}</div><div class="insights-empty">${esc(t('insights_no_usage_data'))}</div></div>`;
   }
 
-  // Models table
+  // ── Models table (Main grid left) ──
   let modelsHtml = '';
   if (d.models && d.models.length) {
     modelsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_models'))}</div><div class="insights-table insights-model-table"><div class="insights-table-head"><span>${esc(t('insights_model_name'))}</span><span>${esc(t('insights_model_sessions'))}</span><span>${esc(t('insights_model_tokens'))}</span><span>${esc(t('insights_model_cost'))}</span><span>${esc(t('insights_model_share'))}</span></div>` +
@@ -3351,24 +3384,24 @@ function _renderInsights(d, box, wikiStatus) {
     modelsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_models'))}</div><div class="insights-empty">${esc(t('insights_no_usage_data'))}</div></div>`;
   }
 
+  // ── Activity side-by-side (Main grid right) ──
   // Activity by day of week
   let dowHtml = '';
   if (d.activity_by_day) {
     const maxDow = Math.max(...d.activity_by_day.map(x => x.sessions), 1);
-    dowHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_activity_by_day'))}</div><div class="insights-bars">` +
+    dowHtml = `<div class="insights-card" style="margin-bottom:10px"><div class="insights-card-title">${esc(t('insights_activity_by_day'))}</div><div class="insights-bars">` +
       d.activity_by_day.map(r => {
         const pct = (r.sessions / maxDow * 100).toFixed(0);
         return `<div class="insights-bar-row"><span class="insights-bar-label">${r.day}</span><div class="insights-bar-track"><div class="insights-bar-fill" style="width:${pct}%"></div></div><span class="insights-bar-value">${r.sessions}</span></div>`;
       }).join('') +
       `</div></div>`;
   }
-
   // Activity by hour
   let hodHtml = '';
   if (d.activity_by_hour) {
     const maxHod = Math.max(...d.activity_by_hour.map(x => x.sessions), 1);
     const peakHour = d.activity_by_hour.reduce((a, b) => b.sessions > a.sessions ? b : a, {hour:0,sessions:0});
-    hodHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_activity_by_hour'))} <span style="font-weight:400;font-size:11px;color:var(--muted)">${esc(t('insights_peak_hour').replace('{hour}', peakHour.hour + ':00'))}</span></div><div class="insights-bars">` +
+    hodHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_activity_by_hour'))} <span style="font-weight:400;font-size:10px;color:var(--muted)">${esc(t('insights_peak_hour').replace('{hour}', peakHour.hour + ':00'))}</span></div><div class="insights-bars" style="max-height:240px;overflow-y:auto">` +
       d.activity_by_hour.map(r => {
         const pct = (r.sessions / maxHod * 100).toFixed(0);
         const isPeak = r.hour === peakHour.hour && peakHour.sessions > 0;
@@ -3376,60 +3409,142 @@ function _renderInsights(d, box, wikiStatus) {
       }).join('') +
       `</div></div>`;
   }
+  const activityHtml = dowHtml || hodHtml ? `<div>${dowHtml}${hodHtml}</div>` : '';
 
-  // Token breakdown
-  const tokenCards = `
-    <div class="insights-card">
-      <div class="insights-card-title">${esc(t('insights_token_breakdown'))}</div>
-      <div class="insights-token-row">
-        <span class="insights-token-label">${esc(t('insights_input_tokens'))}</span>
-        <span class="insights-token-value">${fmtTokens(d.total_input_tokens)}</span>
-      </div>
-      <div class="insights-token-row">
-        <span class="insights-token-label">${esc(t('insights_output_tokens'))}</span>
-        <span class="insights-token-value">${fmtTokens(d.total_output_tokens)}</span>
-      </div>
-      <div class="insights-token-row insights-token-total">
-        <span class="insights-token-label">${esc(t('insights_total'))}</span>
-        <span class="insights-token-value">${fmtTokens(d.total_tokens)}</span>
-      </div>
-    </div>`;
+  // ── Token breakdown (Main, below grid) ──
+  const hasExtraTokens = d.total_cache_read_tokens > 0 || d.total_reasoning_tokens > 0;
+  const tokenCards = `<div class="insights-card">
+    <div class="insights-card-title">${esc(t('insights_token_breakdown'))}</div>
+    <div class="insights-token-row">
+      <span class="insights-token-label">${esc(t('insights_input_tokens'))}</span>
+      <span class="insights-token-value">${fmtTokens(d.total_input_tokens)}</span>
+    </div>
+    <div class="insights-token-row">
+      <span class="insights-token-label">${esc(t('insights_output_tokens'))}</span>
+      <span class="insights-token-value">${fmtTokens(d.total_output_tokens)}</span>
+    </div>
+    ${hasExtraTokens ? `
+    <div class="insights-token-row">
+      <span class="insights-token-label">Cache read</span>
+      <span class="insights-token-value">${fmtTokens(d.total_cache_read_tokens || 0)}</span>
+    </div>
+    <div class="insights-token-row">
+      <span class="insights-token-label">Reasoning</span>
+      <span class="insights-token-value">${fmtTokens(d.total_reasoning_tokens || 0)}</span>
+    </div>` : ''}
+    <div class="insights-token-row insights-token-total">
+      <span class="insights-token-label">${esc(t('insights_total'))}</span>
+      <span class="insights-token-value">${fmtTokens(d.total_tokens)}</span>
+    </div>
+  </div>`;
 
-// Data source indicator + warnings
-  const sourceLabel = d.data_source === 'state_db' ? 'Analytics DB' : d.data_source === 'index_json_fallback' ? 'Session Index' : d.data_source === 'empty' ? 'Empty' : d.data_source || 'Unknown';
-  const sourceColor = d.data_source === 'state_db' ? 'ok' : 'warn';
+  // ── Data Quality + Warnings (Inspector) ──
   const warningsHtml = Array.isArray(d.warnings) && d.warnings.length
-    ? d.warnings.map(w => `<div class="insights-warning" style="color:var(--accent);font-size:11px;margin-bottom:4px">⚠ ${esc(w)}</div>`).join('')
-    : '';
-  const sourceBadge = d.data_source
-    ? `<span class="wiki-status-badge ${sourceColor}" style="font-size:9px;padding:2px 6px;margin-left:auto">${esc(sourceLabel)}</span>`
+    ? d.warnings.map(w => `<div class="insights-warning-box" style="margin-bottom:8px">⚠ ${esc(w)}</div>`).join('')
     : '';
 
-  box.innerHTML = `
-    <div class="insights-layout">
-      <aside class="insights-left-column">
-        ${_renderSystemHealthPanel()}
-        <div class="insights-grid insights-grid--stacked">
-          ${overviewCards.map(c => `<div class="insights-stat"><div class="insights-stat-icon">${c.icon}</div><div class="insights-stat-info"><div class="insights-stat-value">${c.value}</div><div class="insights-stat-label">${esc(c.label)}</div></div></div>`).join('')}
-        </div>
+  const dataQualityHtml = `<div class="insights-inspector-compact">
+    <div class="insights-inspector-title">Data Quality</div>
+    <div class="insights-inspector-row"><span class="label">Data source</span><span class="value"><span class="insights-source-badge ${sourceColor}">${esc(sourceLabel)}</span></span></div>
+    <div class="insights-inspector-row"><span class="label">Window type</span><span class="value">${esc(d.window_type || '—')}</span></div>
+    <div class="insights-inspector-row"><span class="label">Period</span><span class="value">${safe(d.period_days)} days</span></div>
+    <div class="insights-inspector-row"><span class="label">Sessions</span><span class="value">${fmtNum(d.total_sessions)}</span></div>
+    <div class="insights-inspector-row"><span class="label">Cost coverage</span><span class="value">${costCoverage}</span></div>
+    <div class="insights-inspector-row"><span class="label">Top model</span><span class="value" style="max-width:100px;overflow:hidden;text-overflow:ellipsis">${esc(topModelName)}</span></div>
+    <div class="insights-inspector-row"><span class="label">Peak day</span><span class="value">${peakDay !== '—' ? peakDay : '—'}</span></div>
+    ${d.total_estimated_cost !== undefined ? `<div class="insights-inspector-row"><span class="label">Est. cost</span><span class="value">${fmtCost(d.total_estimated_cost)}</span></div>` : ''}
+    ${d.total_actual_cost !== undefined ? `<div class="insights-inspector-row"><span class="label">Actual cost</span><span class="value">${fmtCost(d.total_actual_cost)}</span></div>` : ''}
+    ${d.cutoff_ts ? `<div class="insights-inspector-row"><span class="label">Cutoff</span><span class="value">${new Date(d.cutoff_ts * 1000).toLocaleDateString()}</span></div>` : ''}
+  </div>`;
+
+  // ── System Health compact (Inspector) ──
+  const systemHealthCompact = `<div class="insights-inspector-compact" style="padding:10px">
+    <div class="insights-inspector-title">System Status</div>
+    <div id="systemHealthPanelCompact">${_renderSystemHealthPanel()}</div>
+  </div>`;
+
+  // ── LLM Wiki compact (Inspector) ──
+  const wikiCompact = `<div class="insights-inspector-compact" style="padding:10px">
+    <div class="insights-inspector-title">LLM Wiki</div>
+    <div id="wikiStatusCompact">${_renderLlmWikiStatus(wikiStatus)}</div>
+  </div>`;
+
+  // ── Period buttons ──
+  const periods = [7, 30, 90, 365];
+  const currentPeriod = safe(d.period_days) || 30;
+  const periodBtns = periods.map(p =>
+    `<button class="insights-period-btn${p === currentPeriod ? ' active' : ''}" onclick="document.getElementById('insightsPeriod').value=${p};loadInsights(true)">${p}d</button>`
+  ).join('');
+
+  const viewNavItems = ['Overview', 'Models', 'Cost', 'Tokens', 'Activity'];
+  const viewNav = viewNavItems.map(v =>
+    `<button class="insights-nav-btn active">${v}</button>`
+  ).join('');
+
+  // ── Left Controls ──
+  const controlsHtml = `<div class="insights-controls">
+    <div class="insights-control-section">
+      <div class="insights-control-title">Period</div>
+      <div class="insights-period-group">${periodBtns}</div>
+    </div>
+    <div class="insights-control-section">
+      <div class="insights-control-title">Views</div>
+      <div class="insights-nav">${viewNav}</div>
+    </div>
+    <div class="insights-control-section">
+      <div class="insights-control-title">Quick Facts</div>
+      <div class="insights-quickfact"><span class="insights-quickfact-label">Top model</span><span class="insights-quickfact-value" title="${esc(topModelName)}">${esc(topModelName)}</span></div>
+      <div class="insights-quickfact"><span class="insights-quickfact-label">Peak day</span><span class="insights-quickfact-value">${peakDay !== '—' ? peakDay : '—'}</span></div>
+      <div class="insights-quickfact"><span class="insights-quickfact-label">Avg msg/session</span><span class="insights-quickfact-value">${avgMessagesPerSession}</span></div>
+      <div class="insights-quickfact"><span class="insights-quickfact-label">Cost coverage</span><span class="insights-quickfact-value">${costCoverage}</span></div>
+    </div>
+    <div class="insights-control-section">
+      <div class="insights-control-title">Source</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:10px">
+        <span class="insights-source-badge ${sourceColor}">${esc(sourceLabel)}</span>
+        <span style="color:var(--muted)">${esc(d.window_type || 'calendar_days')}</span>
+      </div>
+    </div>
+  </div>`;
+
+  // ── Main Header ──
+  const mainHeader = `<div class="insights-header">
+    <div class="insights-header-title">${esc(t('insights_title') || 'Usage Analytics')}</div>
+    <div class="insights-header-meta">
+      <span class="insights-source-badge ${sourceColor}">${esc(sourceLabel)}</span>
+      <span>${safe(d.period_days)} days</span>
+      <span>·</span>
+      <span>${fmtNum(d.total_sessions)} sessions</span>
+    </div>
+  </div>`;
+
+  // ── Inspector ──
+  const inspectorHtml = `<div class="insights-inspector">
+    ${warningsHtml}
+    ${dataQualityHtml}
+    ${wikiCompact}
+    ${systemHealthCompact}
+  </div>`;
+
+  // ── Assemble ──
+  box.innerHTML = `<div class="insights-shell">
+    ${controlsHtml}
+    <div class="insights-main-column">
+      ${mainHeader}
+      ${kpiRow}
+      ${dailyHtml}
+      <div class="insights-main-grid">
+        ${modelsHtml}
         ${tokenCards}
-      </aside>
-      <section class="insights-main-column">
-        ${_renderLlmWikiStatus(wikiStatus)}
-        ${warningsHtml}
-        ${dailyHtml}
-        <div class="insights-row insights-row--responsive">
-          ${modelsHtml}
-          ${dowHtml}
-        </div>
-        ${hodHtml}
-      </section>
+      </div>
+      ${activityHtml ? `<div class="insights-main-grid">${activityHtml}</div>` : ''}
     </div>
-    <div style="display:flex;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:10px;margin-top:12px;opacity:.6">
-      ${esc(t('insights_footer').replace('{days}', d.period_days))}
-      ${sourceBadge}
-    </div>
-  `;
+    ${inspectorHtml}
+  </div>`;
+
+  // Restore system health polling by re-connecting the panel ID
+  if (typeof _syncSystemHealthMonitorVisibility === 'function') _syncSystemHealthMonitorVisibility();
+  if (typeof pollSystemHealth === 'function') void pollSystemHealth();
 }
 
 async function clearConversation() {
