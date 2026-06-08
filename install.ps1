@@ -834,8 +834,12 @@ function Install-Repository {
                 if ($LASTEXITCODE -ne 0) { Write-Err "git fetch failed (exit $LASTEXITCODE)" ; exit 4 }
                 git -c windows.appendAtomically=false checkout $Branch
                 if ($LASTEXITCODE -ne 0) { Write-Err "git checkout $Branch failed (exit $LASTEXITCODE)" ; exit 4 }
-                git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 pull origin $Branch
-                if ($LASTEXITCODE -ne 0) { Write-Err "git pull failed (exit $LASTEXITCODE)" ; exit 4 }
+git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 pull --ff-only origin $Branch
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "git pull --ff-only failed (exit $LASTEXITCODE) — trying reset..."
+                    git -c windows.appendAtomically=false reset --hard origin/$Branch
+                    if ($LASTEXITCODE -ne 0) { Write-Err "git reset failed (exit $LASTEXITCODE)" ; exit 4 }
+                }
             } finally {
                 Pop-Location
             }
