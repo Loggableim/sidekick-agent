@@ -1,5 +1,6 @@
 # ============================================================================
 # Sidekick Installer for Windows
+# v0.7.19 — clone first, then venv inside repo
 # ============================================================================
 # Installation script for Windows (PowerShell).
 # Uses uv for fast Python provisioning and package management.
@@ -64,7 +65,7 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Forc
 $RepoUrlSsh = "git@github.com:Loggableim/sidekick-agent.git"
 $RepoUrlHttps = "https://github.com/Loggableim/sidekick-agent.git"
 $PythonVersion = "3.11"
-$script:VenvPath = "$SidekickHome\.venv"
+$script:VenvPath = "$InstallDir\.venv"
 $script:PythonExe = "$script:VenvPath\Scripts\python.exe"
 $script:SidekickExe = "$script:VenvPath\Scripts\sidekick.exe"
 
@@ -993,16 +994,7 @@ Write-Info "Configuring git for Windows compatibility..."
 function Install-Dependencies {
 Write-Info "Installing dependencies..."
 
-    # Remove any stale .venv inside $InstallDir left from previous failed runs
-    $staleVenv = "$InstallDir\.venv"
-    if (Test-Path $staleVenv) {
-        Remove-Item -Recurse -Force $staleVenv -ErrorAction SilentlyContinue
-        Write-Info "Removed stale .venv from $InstallDir"
-    }
-
-    # uv scans CWD for .venv even with VIRTUAL_ENV set.
-    # Push to where .venv lives so uv stops looking at $InstallDir
-    Push-Location $SidekickHome
+    Push-Location $InstallDir
 
     if (-not $NoVenv) {
         $env:VIRTUAL_ENV = "$script:VenvPath"
@@ -1017,10 +1009,9 @@ Write-Info "Installing dependencies..."
         @{ Name = "dashboard + core platforms"; Spec = ".[web,mcp,cron,cli,messaging,dev]" },
         @{ Name = "core only (no extras)"; Spec = "." }
     )
-$installed = $false
+    $installed = $false
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        # Spec = ".[all]" -> strip leading dot, use "-e $InstallDir[all]"
         $spec = $tier.Spec
         if ($spec -eq ".") {
             & $UvCmd pip install $pipPython -e "$InstallDir"
@@ -1660,7 +1651,6 @@ function Main {
     } catch {}
 
 if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" ; exit 2 }
-    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed — cannot continue" ; exit 2 }
     if (-not (Install-Git)) { Write-Err "Git not available and auto-install failed — install from https://git-scm.com/download/win then re-run" ; exit 2 }
     # Test-Node always returns $true (sets $script:HasNode on success, emits a
     # warning on failure and continues so non-browser installs still work).
@@ -1669,7 +1659,8 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
     [void](Test-Node)
     Install-SystemPackages  # ripgrep + ffmpeg in one step
 
-    Install-Repository
+Install-Repository
+    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed — cannot continue" ; exit 2 }
     Install-Dependencies
     Install-NodeDeps
     Set-PathVariable
