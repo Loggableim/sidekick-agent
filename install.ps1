@@ -432,8 +432,28 @@ Write-Info "Checking Git..."
         $tmpFile = "$env:TEMP\$($asset.name)"
         $gitDir = "$SidekickHome\git"
 
-        Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 60
+Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
+        try {
+            $wc = New-Object System.Net.WebClient
+            $wc.Headers.Add("User-Agent", "sidekick-installer")
+            $progressHash = @{}
+            $reg = Register-ObjectEvent -InputObject $wc -EventName DownloadProgressChanged -Action {
+                $pct = $EventArgs.ProgressPercentage
+                $received = $EventArgs.BytesReceived
+                $total = $EventArgs.TotalBytesToReceive
+                $mb = [math]::Round($received / 1MB, 1)
+                $totalMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { "?" }
+                Write-Progress -Activity "Downloading PortableGit" -Status "$mb MB / $totalMb MB" -PercentComplete $pct
+            } -MessageData $progressHash
+            $wc.DownloadFileAsync($downloadUrl, $tmpFile)
+            while ($wc.IsBusy) { Start-Sleep -Milliseconds 200 }
+            Unregister-Event -SourceIdentifier $reg.Name -ErrorAction SilentlyContinue
+            Write-Progress -Activity "Downloading PortableGit" -Completed
+        } catch {
+            # Fallback: plain Invoke-WebRequest
+            $wc.Dispose()
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 60
+        }
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
@@ -846,23 +866,28 @@ function Install-Repository {
         # config lock files) due to antivirus, OneDrive, or NTFS filter drivers.
         # The -c flag injects config before any file I/O occurs.
 Write-Info "Configuring git for Windows compatibility..."
-        $env:GIT_CONFIG_COUNT = "1"
-        $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
-        $env:GIT_CONFIG_VALUE_0 = "false"
-        # If the user's .gitconfig is corrupt (common on fresh VMs), replace it
+
+        # FIRST: check for corrupt .gitconfig BEFORE calling any git config --global
         $gitConfigPath = "$env:USERPROFILE\.gitconfig"
         if (Test-Path $gitConfigPath) {
-            $testResult = git config --list --global 2>&1
+            # Use 2>$null (NOT 2>&1) to avoid ErrorActionPreference=Stop issues
+            $null = git config --list --global 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warn "Corrupt .gitconfig found at $gitConfigPath — replacing with clean config"
                 try {
                     $backupPath = "$env:USERPROFILE\.gitconfig.sidekick-backup"
-                    Copy-Item -Path $gitConfigPath -Destination $backupPath -Force
-                    Remove-Item -Path $gitConfigPath -Force
+                    Copy-Item -Path $gitConfigPath -Destination $backupPath -Force -ErrorAction SilentlyContinue
+                    Remove-Item -Path $gitConfigPath -Force -ErrorAction Stop
                     Write-Info "Backed up old config to $backupPath"
-                } catch { }
+                } catch {
+                    Write-Warn "Could not repair .gitconfig: $_"
+                }
             }
         }
+
+        $env:GIT_CONFIG_COUNT = "1"
+        $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
+        $env:GIT_CONFIG_VALUE_0 = "false"
         git config --global windows.appendAtomically false 2>$null
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
