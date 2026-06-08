@@ -23,6 +23,22 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
+# Admin rights check
+# ============================================================================
+# Sidekick installs everything under %LOCALAPPDATA% and does NOT need admin.
+# If the user runs elevated, warn them — but continue (some users prefer it).
+# If winget (used for Node.js) needs elevation later, it handles that itself.
+$script:IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $script:IsElevated) {
+    # Running as non-admin — this is the NORMAL case.
+    # winget may still work (it can trigger its own UAC prompt).
+} else {
+    Write-Warn "Sidekick Installer is running as Administrator — this is not required."
+    Write-Info "Sidekick installs under %LOCALAPPDATA% and does not need admin rights."
+    Write-Info "Proceeding anyway..."
+}
+
+# ============================================================================
 # Log file setup
 # ============================================================================
 $LogDir = "$env:LOCALAPPDATA\sidekick\logs"
@@ -433,27 +449,10 @@ Write-Info "Checking Git..."
         $gitDir = "$SidekickHome\git"
 
 Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
-        try {
-            $wc = New-Object System.Net.WebClient
-            $wc.Headers.Add("User-Agent", "sidekick-installer")
-            $progressHash = @{}
-            $reg = Register-ObjectEvent -InputObject $wc -EventName DownloadProgressChanged -Action {
-                $pct = $EventArgs.ProgressPercentage
-                $received = $EventArgs.BytesReceived
-                $total = $EventArgs.TotalBytesToReceive
-                $mb = [math]::Round($received / 1MB, 1)
-                $totalMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { "?" }
-                Write-Progress -Activity "Downloading PortableGit" -Status "$mb MB / $totalMb MB" -PercentComplete $pct
-            } -MessageData $progressHash
-            $wc.DownloadFileAsync($downloadUrl, $tmpFile)
-            while ($wc.IsBusy) { Start-Sleep -Milliseconds 200 }
-            Unregister-Event -SourceIdentifier $reg.Name -ErrorAction SilentlyContinue
-            Write-Progress -Activity "Downloading PortableGit" -Completed
-        } catch {
-            # Fallback: plain Invoke-WebRequest
-            $wc.Dispose()
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 60
-        }
+        # Invoke-WebRequest with -OutFile shows native PowerShell progress bar
+        # (Writing request stream... X of Y bytes). -UseBasicParsing is NOT needed
+        # with -OutFile because no content is parsed, only streamed to disk.
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -TimeoutSec 120
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
@@ -868,21 +867,25 @@ function Install-Repository {
 Write-Info "Configuring git for Windows compatibility..."
 
         # FIRST: check for corrupt .gitconfig BEFORE calling any git config --global
-        $gitConfigPath = "$env:USERPROFILE\.gitconfig"
-        if (Test-Path $gitConfigPath) {
-            # Use 2>$null (NOT 2>&1) to avoid ErrorActionPreference=Stop issues
-            $null = git config --list --global 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warn "Corrupt .gitconfig found at $gitConfigPath — replacing with clean config"
-                try {
+        # Must use a self-contained try/catch because $ErrorActionPreference=Stop
+        # converts native-command non-zero exits into terminating exceptions.
+        try {
+            $gitConfigPath = "$env:USERPROFILE\.gitconfig"
+            if (Test-Path $gitConfigPath) {
+                # 2>$null avoids ErrorActionPreference issues on stderr-only output,
+                # but a non-zero exit still triggers Stop.  Catch that here.
+                $null = git config --list --global 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "Corrupt .gitconfig found at $gitConfigPath — replacing with clean config"
                     $backupPath = "$env:USERPROFILE\.gitconfig.sidekick-backup"
                     Copy-Item -Path $gitConfigPath -Destination $backupPath -Force -ErrorAction SilentlyContinue
-                    Remove-Item -Path $gitConfigPath -Force -ErrorAction Stop
+                    Remove-Item -Path $gitConfigPath -Force -ErrorAction SilentlyContinue
                     Write-Info "Backed up old config to $backupPath"
-                } catch {
-                    Write-Warn "Could not repair .gitconfig: $_"
                 }
             }
+        } catch {
+            # If git config --list itself throws despite 2>$null, just warn and continue
+            Write-Warn "Could not check .gitconfig: $_"
         }
 
         $env:GIT_CONFIG_COUNT = "1"
