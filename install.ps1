@@ -997,10 +997,14 @@ function Install-Dependencies {
     
 if (-not $NoVenv) {
         # Tell uv to install into our venv via explicit python path
-        # (more reliable than $VIRTUAL_ENV which uv might resolve differently)
+        # AND set VIRTUAL_ENV so uv resolves the venv correctly
+        # (uv looks for .venv in CWD first; without VIRTUAL_ENV it fails
+        #  because we moved .venv outside $InstallDir)
         $pipArgs = "--python", "$script:PythonExe"
+        $env:VIRTUAL_ENV = "$script:VenvPath"
     } else {
         $pipArgs = @()
+        Remove-Item Env:\VIRTUAL_ENV -ErrorAction SilentlyContinue
     }
     
     # Install main package.  Tiered fallback so a single flaky git+https dep
