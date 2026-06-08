@@ -151,96 +151,138 @@ function Install-Uv {
     }
 }
 
-function Test-Python {
-    Write-Info "Checking Python $PythonVersion..."
-    
-    # Let uv find or install Python
-    try {
-        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
-        if ($pythonPath) {
-            $ver = & $pythonPath --version 2>$null
-            Write-Success "Python found: $ver"
-            $script:PythonExe = $pythonPath
+function Ensure-Venv {
+    param([string]$VenvPath)
+
+    $venvPython = "$VenvPath\Scripts\python.exe"
+
+    # ── 1. If venv already exists and has a working python, use it ──
+    if (Test-Path $venvPython) {
+        $ver = & $venvPython --version 2>$null
+        if ($ver -match "Python 3\.") {
+            Write-Success "Virtual environment found: $ver"
+            $script:PythonExe = $venvPython
             return $true
         }
-    } catch { }
-    
-    # Python not found — use uv to install it (no admin needed!)
-    Write-Info "Python $PythonVersion not found, installing via uv..."
+        Write-Warn "Virtual environment broken at $VenvPath — recreating..."
+        Remove-Item -Recurse -Force $VenvPath -ErrorAction SilentlyContinue
+    }
+
+    # ── 2. Primary path: uv venv --python (handles Python download + venv in one step) ──
+    Write-Info "Creating virtual environment with uv (Python $PythonVersion)..."
+    Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
+
     try {
-        $uvOutput = & $UvCmd python install $PythonVersion 2>&1
-        if ($LASTEXITCODE -eq 0) {
+        # Capture both stdout and stderr separately for logging
+        $uvOut = & $UvCmd venv --python $PythonVersion "$VenvPath" 2>&1
+        $uvExit = $LASTEXITCODE
+        Add-Content -Path $LogFile -Value "[INFO] uv venv exit code: $uvExit" -Encoding UTF8 -ErrorAction SilentlyContinue
+        if ($uvOut) {
+            Add-Content -Path $LogFile -Value "[INFO] uv venv output: $uvOut" -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+
+        if ($uvExit -eq 0 -and (Test-Path $venvPython)) {
+            $ver = & $venvPython --version 2>$null
+            Write-Success "Virtual environment created: $ver"
+            $script:PythonExe = $venvPython
+            Add-Content -Path $LogFile -Value "[OK] PythonExe = $venvPython" -Encoding UTF8 -ErrorAction SilentlyContinue
+            return $true
+        }
+
+        # uv venv failed — log and continue
+        Write-Warn "uv venv exited with code $uvExit. See $LogFile for details."
+        Add-Content -Path $LogFile -Value "[WARN] uv venv failed. Full output:" -Encoding UTF8 -ErrorAction SilentlyContinue
+        Add-Content -Path $LogFile -Value "$uvOut" -Encoding UTF8 -ErrorAction SilentlyContinue
+    } catch {
+        Write-Warn "uv venv command error: $_"
+        Add-Content -Path $LogFile -Value "[ERR] uv venv exception: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
+    }
+
+    # ── 3. Fallback: uv python install + python -m venv ──
+    Write-Info "Trying uv python install instead..."
+    Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd python install $PythonVersion" -Encoding UTF8 -ErrorAction SilentlyContinue
+
+    try {
+        $installOut = & $UvCmd python install $PythonVersion 2>&1
+        $installExit = $LASTEXITCODE
+        Add-Content -Path $LogFile -Value "[INFO] uv python install exit code: $installExit" -Encoding UTF8 -ErrorAction SilentlyContinue
+        if ($installOut) {
+            Add-Content -Path $LogFile -Value "[INFO] uv python install output: $installOut" -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+
+        if ($installExit -eq 0) {
+            # Find the installed Python
             $pythonPath = & $UvCmd python find $PythonVersion 2>$null
-            if ($pythonPath) {
+            if ($pythonPath -and (Test-Path $pythonPath)) {
                 $ver = & $pythonPath --version 2>$null
-                Write-Success "Python installed: $ver"
-                $script:PythonExe = $pythonPath
-                return $true
+                Write-Success "Python provisioned: $ver"
+                & $pythonPath -m venv "$VenvPath"
+                if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
+                    $script:PythonExe = $venvPython
+                    return $true
+                }
             }
         } else {
-            Write-Warn "uv python install output:"
-            Write-Host $uvOutput -ForegroundColor DarkGray
-            # Log uv version and helpful troubleshooting message
-            try {
-                $uvVer = & $UvCmd --version 2>&1
-                Write-Info "uv version: $uvVer"
-            } catch { }
-            Write-Info "uv could not download Python $PythonVersion. This is often a network issue or missing prebuilt binary for this Windows version."
+            Write-Warn "uv python install exited with code $installExit."
+            Add-Content -Path $LogFile -Value "[WARN] uv python install failed. Full output:" -Encoding UTF8 -ErrorAction SilentlyContinue
+            Add-Content -Path $LogFile -Value "$installOut" -Encoding UTF8 -ErrorAction SilentlyContinue
+
+            # One retry
+            Write-Info "Retrying Python download..."
+            Start-Sleep -Seconds 2
+            $installOut = & $UvCmd python install $PythonVersion 2>&1
+            $installExit = $LASTEXITCODE
+            Add-Content -Path $LogFile -Value "[INFO] uv python install retry exit code: $installExit" -Encoding UTF8 -ErrorAction SilentlyContinue
+            if ($installOut) {
+                Add-Content -Path $LogFile -Value "[INFO] uv python install retry output: $installOut" -Encoding UTF8 -ErrorAction SilentlyContinue
+            }
+
+            if ($installExit -eq 0) {
+                $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+                if ($pythonPath -and (Test-Path $pythonPath)) {
+                    $ver = & $pythonPath --version 2>$null
+                    Write-Success "Python provisioned on retry: $ver"
+                    & $pythonPath -m venv "$VenvPath"
+                    if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
+                        $script:PythonExe = $venvPython
+                        return $true
+                    }
+                }
+            }
         }
     } catch {
         Write-Warn "uv python install error: $_"
+        Add-Content -Path $LogFile -Value "[ERR] uv python install exception: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
     }
 
-    # Fallback: check if ANY Python 3.10+ is already available on the system
-    Write-Info "Trying to find any existing Python 3.10+..."
-    foreach ($fallbackVer in @("3.12", "3.13", "3.10")) {
-        try {
-            $pythonPath = & $UvCmd python find $fallbackVer 2>$null
-            if ($pythonPath) {
-                $ver = & $pythonPath --version 2>$null
-                Write-Success "Found fallback: $ver"
-                $script:PythonVersion = $fallbackVer
-                $script:PythonExe = $pythonPath
-                return $true
-            }
-        } catch { }
-    }
-
-    # NEW: Scan PATH and standard install locations for a real Python
-    # executable.  We MUST NOT use Get-Command python / bare `python` because
-    # the Microsoft Store App Execution Alias on clean Windows 10/11 returns
-    # a hit but only opens the Store — it is NOT a usable Python interpreter.
+    # ── 4. Scan for system Python (excluding Store alias) ──
     Write-Info "Scanning for system Python installations (excluding Microsoft Store alias)..."
-    
-    # Collect candidate directories
     $candidateDirs = @()
-    
+
     # PATH directories — skip Microsoft\WindowsApps (Store alias)
-    $pathDirs = $env:PATH -split ';'
-    foreach ($dir in $pathDirs) {
+    foreach ($dir in ($env:PATH -split ';')) {
         if ($dir -and $dir -notlike "*Microsoft*WindowsApps*" -and (Test-Path "$dir\python.exe")) {
             $candidateDirs += $dir
         }
     }
-    
-    # Standard user install locations (%LOCALAPPDATA%\Programs\Python\Python3xx)
-    $localAppDataPython = "$env:LOCALAPPDATA\Programs\Python"
-    if (Test-Path $localAppDataPython) {
-        $subdirs = Get-ChildItem -Path $localAppDataPython -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^Python3' }
-        foreach ($sub in $subdirs) {
-            $candidateDirs += $sub.FullName
-        }
+
+    # %LOCALAPPDATA%\Programs\Python\Python3xx
+    $localPy = "$env:LOCALAPPDATA\Programs\Python"
+    if (Test-Path $localPy) {
+        Get-ChildItem $localPy -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^Python3' } |
+            ForEach-Object { $candidateDirs += $_.FullName }
     }
-    
-    # System install locations (%ProgramFiles%\Python* and %ProgramFiles(x86)%\Python*)
-    $progFiles = "${env:ProgramFiles}\Python*"
-    Get-ChildItem -Path $progFiles -Directory -ErrorAction SilentlyContinue | ForEach-Object { $candidateDirs += $_.FullName }
-    $progFiles86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
-    if ($progFiles86) {
-        Get-ChildItem -Path "$progFiles86\Python*" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $candidateDirs += $_.FullName }
+
+    # %ProgramFiles%\Python* and %ProgramFiles(x86)%\Python*
+    Get-ChildItem "${env:ProgramFiles}\Python*" -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { $candidateDirs += $_.FullName }
+    $pf86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
+    if ($pf86) {
+        Get-ChildItem "$pf86\Python*" -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { $candidateDirs += $_.FullName }
     }
-    
-    # Check each candidate — must return a real version string like "Python 3.1x.y"
+
     $seen = @{}
     foreach ($dir in $candidateDirs) {
         $exePath = "$dir\python.exe"
@@ -248,20 +290,24 @@ function Test-Python {
         $normPath = (Resolve-Path $exePath).ProviderPath.ToLower()
         if ($seen.ContainsKey($normPath)) { continue }
         $seen[$normPath] = $true
-        
+
         $ver = & $exePath --version 2>$null
         if ($ver -match "Python 3\.(1[0-9]|[1-9][0-9])\.") {
-            Write-Success "Found real Python: $ver at $exePath"
-            $script:PythonExe = $exePath
-            return $true
+            Write-Success "Found system Python: $ver"
+            & $exePath -m venv "$VenvPath"
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
+                $script:PythonExe = $venvPython
+                return $true
+            }
         }
     }
-    
-    # No usable Python found — print clear instructions and return $false
+
+    # ── 5. All paths exhausted ──
     Write-Err "No usable Python 3.10+ found on this system."
-    Write-Info "Install Python 3.11 from https://www.python.org/downloads/"
-    Write-Info "Make sure to check 'Add Python to PATH' during installation."
-    Write-Info "Or run: winget install Python.Python.3.11"
+    Write-Info "Install Python 3.11 manually:"
+    Write-Info "  https://www.python.org/downloads/"
+    Write-Info "  (check 'Add Python to PATH' during installation)"
+    Write-Info "  Or: winget install Python.Python.3.11"
     Write-Info "Log file: $LogFile"
     return $false
 }
@@ -791,33 +837,7 @@ function Install-Repository {
     Write-Success "Repository ready"
 }
 
-function Install-Venv {
-    if ($NoVenv) {
-        Write-Info "Skipping virtual environment (-NoVenv)"
-        return
-    }
-    
-    Write-Info "Creating virtual environment with Python $PythonVersion..."
-    
-    Push-Location $InstallDir
-    
-    if (Test-Path "venv") {
-        Write-Info "Virtual environment already exists, recreating..."
-        Remove-Item -Recurse -Force "venv"
-    }
-    
-    # Use the found Python executable directly (rejects Store alias, no uv dependency)
-    & $PythonExe -m venv "venv"
-    if ($LASTEXITCODE -ne 0) {
-        Pop-Location
-        Write-Err "Failed to create virtual environment"
-        exit 5
-    }
-    
-    Pop-Location
-    
-    Write-Success "Virtual environment ready (Python $PythonVersion)"
-}
+
 
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
@@ -1485,8 +1505,8 @@ function Main {
         }
     } catch {}
 
-    if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" ; exit 2 }
-    if (-not (Test-Python)) { Write-Err "Python $PythonVersion not available — cannot continue" ; exit 2 }
+if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" ; exit 2 }
+    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed — cannot continue" ; exit 2 }
     if (-not (Install-Git)) { Write-Err "Git not available and auto-install failed — install from https://git-scm.com/download/win then re-run" ; exit 2 }
     # Test-Node always returns $true (sets $script:HasNode on success, emits a
     # warning on failure and continues so non-browser installs still work).
@@ -1496,7 +1516,6 @@ function Main {
     Install-SystemPackages  # ripgrep + ffmpeg in one step
 
     Install-Repository
-    Install-Venv
     Install-Dependencies
     Install-NodeDeps
     Set-PathVariable
@@ -1519,7 +1538,7 @@ function Main {
         
         $wshell = New-Object -ComObject WScript.Shell
         $shortcut = $wshell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "$venvPath\Scripts\sidekick.exe"
+        $shortcut.TargetPath = "$InstallDir\.venv\Scripts\sidekick.exe"
         $shortcut.Arguments = "dashboard"
         $shortcut.Description = "Sidekick WebUI Dashboard"
         $shortcut.WorkingDirectory = "$InstallDir"
@@ -1535,7 +1554,7 @@ function Main {
     # ── Auto-open WebUI ────────────────────────────────────────────
     Write-Info "Opening Sidekick WebUI in your browser..."
     try {
-        $sidekickExe = "$venvPath\Scripts\sidekick.exe"
+        $sidekickExe = "$InstallDir\.venv\Scripts\sidekick.exe"
         if (Test-Path $sidekickExe) {
             $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
             Start-Sleep -Seconds 3
