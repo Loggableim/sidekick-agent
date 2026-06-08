@@ -48,6 +48,9 @@ if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Forc
 $RepoUrlSsh = "git@github.com:Loggableim/sidekick-agent.git"
 $RepoUrlHttps = "https://github.com/Loggableim/sidekick-agent.git"
 $PythonVersion = "3.11"
+$script:VenvPath = "$InstallDir\.venv"
+$script:PythonExe = "$script:VenvPath\Scripts\python.exe"
+$script:SidekickExe = "$script:VenvPath\Scripts\sidekick.exe"
 
 # ============================================================================
 # Helper functions
@@ -208,7 +211,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 function Ensure-Venv {
     param([string]$VenvPath)
 
-    $venvPython = "$VenvPath\Scripts\python.exe"
+    $venvPython = "$VenvPath\Scripts\python.exe"  # local alias for $script:PythonExe
 
     # ── 1. If venv already exists and has a working python, use it ──
     if (Test-Path $venvPython) {
@@ -873,7 +876,7 @@ function Install-Dependencies {
     
     if (-not $NoVenv) {
         # Tell uv to install into our venv (no activation needed)
-        $env:VIRTUAL_ENV = "$InstallDir\venv"
+        $env:VIRTUAL_ENV = "$script:VenvPath"
     }
     
     # Install main package.  Tiered fallback so a single flaky git+https dep
@@ -918,7 +921,7 @@ function Install-Dependencies {
     # users hit and lazy-import errors from `sidekick dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) { "$script:PythonExe" } else { (& $UvCmd python find $PythonVersion) }
     if (Test-Path $pythonExe) {
         $webOk = $false
         try {
@@ -961,7 +964,7 @@ function Set-PathVariable {
     if ($NoVenv) {
         $sidekickBin = "$InstallDir"
     } else {
-        $sidekickBin = "$InstallDir\venv\Scripts"
+        $sidekickBin = "$script:VenvPath\Scripts"
     }
     
     # Add the venv Scripts dir to user PATH so sidekick is globally available
@@ -1074,7 +1077,7 @@ Delete the contents (or this file) to use the default personality.
     
     # Seed bundled skills into ~/.sidekick/skills/ (manifest-based, one-time per skill)
     Write-Info "Syncing bundled skills to ~/.sidekick/skills/ ..."
-    $pythonExe = "$InstallDir\venv\Scripts\python.exe"
+    $pythonExe = "$script:PythonExe"
     if (Test-Path $pythonExe) {
         try {
             & $pythonExe "$InstallDir\tools\skills_sync.py" 2>$null
@@ -1260,7 +1263,7 @@ function Install-PlatformSdks {
         return
     }
 
-    $pythonExe = "$InstallDir\venv\Scripts\python.exe"
+    $pythonExe = "$script:PythonExe"
     if (-not (Test-Path $pythonExe)) {
         Write-Warn "Skipping platform-SDK verification: $pythonExe not found"
         return
@@ -1362,7 +1365,7 @@ function Invoke-SetupWizard {
     
     # Run sidekick setup using the venv Python directly (no activation needed)
     if (-not $NoVenv) {
-        & ".\venv\Scripts\python.exe" -m sidekick_cli.main setup
+        & "$script:PythonExe" -m sidekick_cli.main setup
     } else {
         & $PythonExe -m sidekick_cli.main setup
     }
@@ -1383,7 +1386,7 @@ function Start-GatewayIfConfigured {
 
     if (-not $hasMessaging) { return }
 
-    $sidekickCmd = "$InstallDir\venv\Scripts\sidekick.exe"
+    $sidekickCmd = "$script:SidekickExe"
     if (-not (Test-Path $sidekickCmd)) {
         $sidekickCmd = "sidekick"
     }
@@ -1565,7 +1568,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
         
         $wshell = New-Object -ComObject WScript.Shell
         $shortcut = $wshell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "$InstallDir\.venv\Scripts\sidekick.exe"
+        $shortcut.TargetPath = ""$script:SidekickExe""
         $shortcut.Arguments = "dashboard"
         $shortcut.Description = "Sidekick WebUI Dashboard"
         $shortcut.WorkingDirectory = "$InstallDir"
@@ -1581,7 +1584,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
     # ── Auto-open WebUI ────────────────────────────────────────────
     Write-Info "Opening Sidekick WebUI in your browser..."
     try {
-        $sidekickExe = "$InstallDir\.venv\Scripts\sidekick.exe"
+        $sidekickExe = ""$script:SidekickExe""
         if (Test-Path $sidekickExe) {
             $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
             Start-Sleep -Seconds 3
