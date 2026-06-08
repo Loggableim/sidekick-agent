@@ -884,14 +884,29 @@ Write-Info "Configuring git for Windows compatibility..."
                 }
             }
         } catch {
-            # If git config --list itself throws despite 2>$null, just warn and continue
-            Write-Warn "Could not check .gitconfig: $_"
+            # If git config --list itself throws despite 2>$null, remove corrupt file
+            Write-Warn "Could not check .gitconfig: $_ — removing corrupt file"
+            $gitConfigPath = "$env:USERPROFILE\.gitconfig"
+            if (Test-Path $gitConfigPath) {
+                try {
+                    $backupPath = "$env:USERPROFILE\.gitconfig.sidekick-backup"
+                    Copy-Item -Path $gitConfigPath -Destination $backupPath -Force -ErrorAction SilentlyContinue
+                    Remove-Item -Path $gitConfigPath -Force -ErrorAction SilentlyContinue
+                    Write-Info "Removed corrupt .gitconfig (backup at $backupPath)"
+                } catch {
+                    Write-Warn "Could not remove corrupt .gitconfig: $_"
+                }
+            }
         }
 
+        # Now safe to call git config --global — .gitconfig is clean or we already
+        # set GIT_CONFIG_COUNT/GIT_CONFIG_KEY/GIT_CONFIG_VALUE env vars as override
         $env:GIT_CONFIG_COUNT = "1"
         $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
         $env:GIT_CONFIG_VALUE_0 = "false"
-        git config --global windows.appendAtomically false 2>$null
+        # Also set GIT_CONFIG_NOSYSTEM=1 to fully bypass any system-level gitconfig
+        # wrap in try/catch because $ErrorActionPreference=Stop can fire on stderr
+        try { git config --global windows.appendAtomically false 2>$null } catch { }
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
         Write-Info "Trying SSH clone..."
