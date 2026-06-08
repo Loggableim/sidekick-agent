@@ -96,7 +96,7 @@ function Invoke-External {
         [Parameter(Mandatory=$true)]
         [string]$FilePath,
         [string[]]$ArgumentList,
-        [string]$WorkingDirectory,
+        [string]$WorkingDirectory = (Get-Location).ProviderPath,
         [int]$TimeoutSeconds = 300
     )
 
