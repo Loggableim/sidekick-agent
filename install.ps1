@@ -88,6 +88,53 @@ function Write-Err {
 }
 
 # ============================================================================
+# Process execution helper (separated streams, no ErrorActionPreference issues)
+# ============================================================================
+
+function Invoke-External {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FilePath,
+        [string[]]$ArgumentList,
+        [string]$WorkingDirectory,
+        [int]$TimeoutSeconds = 300
+    )
+
+    # Create temp files for stdout/stderr
+    $tmpOut = [System.IO.Path]::GetTempFileName()
+    $tmpErr = [System.IO.Path]::GetTempFileName()
+
+    try {
+        $proc = Start-Process -FilePath $FilePath `
+            -ArgumentList $ArgumentList `
+            -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput $tmpOut `
+            -RedirectStandardError $tmpErr `
+            -WorkingDirectory $WorkingDirectory
+
+        # Read captured output
+        $stdout = Get-Content $tmpOut -Raw -ErrorAction SilentlyContinue
+        $stderr = Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue
+
+        # Log everything
+        if ($stdout) { Add-Content -Path $LogFile -Value "[CMD:stdout] $stdout" -Encoding UTF8 -ErrorAction SilentlyContinue }
+        if ($stderr) { Add-Content -Path $LogFile -Value "[CMD:stderr] $stderr" -Encoding UTF8 -ErrorAction SilentlyContinue }
+        Add-Content -Path $LogFile -Value "[CMD:exit] $($proc.ExitCode)" -Encoding UTF8 -ErrorAction SilentlyContinue
+
+        return @{
+            ExitCode = $proc.ExitCode
+            Stdout = ($stdout -replace '\s+$', '')
+            Stderr = ($stderr -replace '\s+$', '')
+        }
+    }
+    finally {
+        # Cleanup temp files
+        Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
+        Remove-Item $tmpErr -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ============================================================================
 # Dependency checks
 # ============================================================================
 
@@ -170,89 +217,62 @@ function Ensure-Venv {
 
     # ── 2. Primary path: uv venv --python (handles Python download + venv in one step) ──
     Write-Info "Creating virtual environment with uv (Python $PythonVersion)..."
-    Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
+    Add-Content -Path $LogFile -Value "[INFO] Running: uv venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-    try {
-        # Capture both stdout and stderr separately for logging
-        $uvOut = & $UvCmd venv --python $PythonVersion "$VenvPath" 2>&1
-        $uvExit = $LASTEXITCODE
-        Add-Content -Path $LogFile -Value "[INFO] uv venv exit code: $uvExit" -Encoding UTF8 -ErrorAction SilentlyContinue
-        if ($uvOut) {
-            Add-Content -Path $LogFile -Value "[INFO] uv venv output: $uvOut" -Encoding UTF8 -ErrorAction SilentlyContinue
-        }
+    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--python", $PythonVersion, "`"$VenvPath`"")
 
-        if ($uvExit -eq 0 -and (Test-Path $venvPython)) {
-            $ver = & $venvPython --version 2>$null
-            Write-Success "Virtual environment created: $ver"
-            $script:PythonExe = $venvPython
-            Add-Content -Path $LogFile -Value "[OK] PythonExe = $venvPython" -Encoding UTF8 -ErrorAction SilentlyContinue
-            return $true
-        }
-
-        # uv venv failed — log and continue
-        Write-Warn "uv venv exited with code $uvExit. See $LogFile for details."
-        Add-Content -Path $LogFile -Value "[WARN] uv venv failed. Full output:" -Encoding UTF8 -ErrorAction SilentlyContinue
-        Add-Content -Path $LogFile -Value "$uvOut" -Encoding UTF8 -ErrorAction SilentlyContinue
-    } catch {
-        Write-Warn "uv venv command error: $_"
-        Add-Content -Path $LogFile -Value "[ERR] uv venv exception: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($result.ExitCode -eq 0 -and (Test-Path $venvPython)) {
+        $ver = & $venvPython --version 2>$null
+        Write-Success "Virtual environment created: $ver"
+        $script:PythonExe = $venvPython
+        Add-Content -Path $LogFile -Value "[OK] PythonExe = $venvPython" -Encoding UTF8 -ErrorAction SilentlyContinue
+        return $true
     }
+
+    # uv venv failed — log and continue
+    Write-Warn "uv venv exited with code $($result.ExitCode). See $LogFile for details."
+    Add-Content -Path $LogFile -Value "[WARN] uv venv failed. stderr was captured above." -Encoding UTF8 -ErrorAction SilentlyContinue
 
     # ── 3. Fallback: uv python install + python -m venv ──
     Write-Info "Trying uv python install instead..."
-    Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd python install $PythonVersion" -Encoding UTF8 -ErrorAction SilentlyContinue
+    Add-Content -Path $LogFile -Value "[INFO] Running: uv python install $PythonVersion" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-    try {
-        $installOut = & $UvCmd python install $PythonVersion 2>&1
-        $installExit = $LASTEXITCODE
-        Add-Content -Path $LogFile -Value "[INFO] uv python install exit code: $installExit" -Encoding UTF8 -ErrorAction SilentlyContinue
-        if ($installOut) {
-            Add-Content -Path $LogFile -Value "[INFO] uv python install output: $installOut" -Encoding UTF8 -ErrorAction SilentlyContinue
+    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("python", "install", $PythonVersion)
+
+    if ($result.ExitCode -eq 0) {
+        # Find the installed Python
+        $pythonPath = & $UvCmd python find $PythonVersion 2>$null
+        if ($pythonPath -and (Test-Path $pythonPath)) {
+            $ver = & $pythonPath --version 2>$null
+            Write-Success "Python provisioned: $ver"
+            & $pythonPath -m venv "`"$VenvPath`""
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
+                $script:PythonExe = $venvPython
+                return $true
+            }
         }
+    } else {
+        Write-Warn "uv python install exited with code $($result.ExitCode)."
+        Add-Content -Path $LogFile -Value "[WARN] uv python install failed. stderr was captured above." -Encoding UTF8 -ErrorAction SilentlyContinue
 
-        if ($installExit -eq 0) {
-            # Find the installed Python
+        # One retry
+        Write-Info "Retrying Python download..."
+        Start-Sleep -Seconds 2
+
+        $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("python", "install", $PythonVersion)
+
+        if ($result.ExitCode -eq 0) {
             $pythonPath = & $UvCmd python find $PythonVersion 2>$null
             if ($pythonPath -and (Test-Path $pythonPath)) {
                 $ver = & $pythonPath --version 2>$null
-                Write-Success "Python provisioned: $ver"
-                & $pythonPath -m venv "$VenvPath"
+                Write-Success "Python provisioned on retry: $ver"
+                & $pythonPath -m venv "`"$VenvPath`""
                 if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                     $script:PythonExe = $venvPython
                     return $true
                 }
             }
-        } else {
-            Write-Warn "uv python install exited with code $installExit."
-            Add-Content -Path $LogFile -Value "[WARN] uv python install failed. Full output:" -Encoding UTF8 -ErrorAction SilentlyContinue
-            Add-Content -Path $LogFile -Value "$installOut" -Encoding UTF8 -ErrorAction SilentlyContinue
-
-            # One retry
-            Write-Info "Retrying Python download..."
-            Start-Sleep -Seconds 2
-            $installOut = & $UvCmd python install $PythonVersion 2>&1
-            $installExit = $LASTEXITCODE
-            Add-Content -Path $LogFile -Value "[INFO] uv python install retry exit code: $installExit" -Encoding UTF8 -ErrorAction SilentlyContinue
-            if ($installOut) {
-                Add-Content -Path $LogFile -Value "[INFO] uv python install retry output: $installOut" -Encoding UTF8 -ErrorAction SilentlyContinue
-            }
-
-            if ($installExit -eq 0) {
-                $pythonPath = & $UvCmd python find $PythonVersion 2>$null
-                if ($pythonPath -and (Test-Path $pythonPath)) {
-                    $ver = & $pythonPath --version 2>$null
-                    Write-Success "Python provisioned on retry: $ver"
-                    & $pythonPath -m venv "$VenvPath"
-                    if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
-                        $script:PythonExe = $venvPython
-                        return $true
-                    }
-                }
-            }
         }
-    } catch {
-        Write-Warn "uv python install error: $_"
-        Add-Content -Path $LogFile -Value "[ERR] uv python install exception: $_" -Encoding UTF8 -ErrorAction SilentlyContinue
     }
 
     # ── 4. Scan for system Python (excluding Store alias) ──
@@ -294,7 +314,7 @@ function Ensure-Venv {
         $ver = & $exePath --version 2>$null
         if ($ver -match "Python 3\.(1[0-9]|[1-9][0-9])\.") {
             Write-Success "Found system Python: $ver"
-            & $exePath -m venv "$VenvPath"
+            & $exePath -m venv "`"$VenvPath`""
             if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                 $script:PythonExe = $venvPython
                 return $true
