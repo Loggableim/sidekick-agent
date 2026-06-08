@@ -450,27 +450,49 @@ Write-Info "Checking Git..."
         $gitDir = "$SidekickHome\git"
 
 Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
+        # Use Invoke-WebRequest -OutFile (native PowerShell progress via Write-Progress in
+        # PowerShell 7+). For PowerShell 5.1 we supplement with a custom polling-based
+        # progress bar that reads the on-disk file size every 200ms.
         try {
-            $wc = New-Object System.Net.WebClient
-            $wc.Headers.Add("User-Agent", "sidekick-installer")
-            $wc.add_DownloadProgressChanged({
-                $pct = $_.ProgressPercentage
-                $received = $_.BytesReceived
-                $total = $_.TotalBytesToReceive
-                $mb = [math]::Round($received / 1MB, 1)
-                $totalMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { "?" }
-                $bar = [string]::new('█', [math]::Floor($pct / 5)) + [string]::new('░', [math]::Ceiling((100 - $pct) / 5))
-                Write-Progress -Activity "Downloading PortableGit" -Status "$mb MB / $totalMb MB ($pct%)" -PercentComplete $pct
-                Write-Host "`r  ⏳ $($bar) $pct% ($mb MB / $totalMb MB)" -NoNewline -ForegroundColor DarkYellow
-            })
-            $wc.DownloadFileAsync((New-Object Uri($downloadUrl)), $tmpFile)
-            while ($wc.IsBusy) { Start-Sleep -Milliseconds 200 }
-            Write-Host ""
-            Write-Progress -Activity "Downloading PortableGit" -Completed
-            $wc.Dispose()
+            $request = [System.Net.HttpWebRequest]::Create($downloadUrl)
+            $request.UserAgent = "sidekick-installer"
+            $response = $request.GetResponse()
+            $totalSize = [int64]$response.ContentLength
+            $response.Close()
+
+            if ($totalSize -gt 0) {
+                # Polling-based progress: launch IWR in background job, watch file size
+                $iwrJob = Start-Job -ScriptBlock {
+                    param($u, $o) Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing -TimeoutSec 600 2>&1
+                } -ArgumentList $downloadUrl, $tmpFile
+
+                $lastPct = -1
+                while ($iwrJob.State -eq "Running") {
+                    Start-Sleep -Milliseconds 250
+                    if (Test-Path $tmpFile) {
+                        $current = (Get-Item $tmpFile).Length
+                        $pct = [int](($current / $totalSize) * 100)
+                        if ($pct -ne $lastPct) {
+                            $lastPct = $pct
+                            $mb = [math]::Round($current / 1MB, 1)
+                            $totalMb = [math]::Round($totalSize / 1MB, 1)
+                            $bar = [string]::new([char]0x2588, [math]::Floor($pct / 5)) + [string]::new([char]0x2591, [math]::Ceiling((100 - $pct) / 5))
+                            Write-Progress -Activity "Downloading PortableGit" -Status "$mb MB / $totalMb MB ($pct%)" -PercentComplete $pct
+                            Write-Host "`r  ⏳ $($bar) $pct% ($mb MB / $totalMb MB)" -NoNewline -ForegroundColor DarkYellow
+                        }
+                    }
+                }
+                Receive-Job $iwrJob -Wait | Out-Null
+                Remove-Job $iwrJob -Force
+                Write-Host ""
+                Write-Progress -Activity "Downloading PortableGit" -Completed
+            } else {
+                # Unknown size — fall back to plain download
+                Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 600
+            }
         } catch {
-            # Fallback: plain Invoke-WebRequest
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -TimeoutSec 120
+            # Final fallback: plain Invoke-WebRequest
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 600
         }
 
         if (Test-Path $gitDir) {
