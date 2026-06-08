@@ -1576,11 +1576,63 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
     try {
         $sidekickExe = "$InstallDir\.venv\Scripts\sidekick.exe"
         if (Test-Path $sidekickExe) {
-            $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
-            Start-Sleep -Seconds 3
-            # Open the dashboard URL in the default browser
-            Start-Process "http://127.0.0.1:8787"
-            Write-Success "WebUI dashboard started at http://127.0.0.1:8787"
+            # The new `sidekick dashboard` runs on port 9119 by default
+            # (see cli/web_server.py). We pass --port explicitly to be safe
+            # and to match the URL we open below.
+            $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard","--port","9119" -NoNewWindow -PassThru
+            # Wait for the server to actually bind (up to 15s)
+            $ready = $false
+            for ($i = 0; $i -lt 15; $i++) {
+                Start-Sleep -Seconds 1
+                try {
+                    $client = New-Object System.Net.Sockets.TcpClient
+                    $iar = $client.BeginConnect("127.0.0.1", 9119, $null, $null)
+                    $success = $iar.AsyncWaitHandle.WaitOne(500, $false)
+                    if ($success) {
+                        $client.EndConnect($iar)
+                        $client.Close()
+                        $ready = $true
+                        break
+                    }
+                    $client.Close()
+                } catch {}
+            }
+            if (-not $ready) {
+                Write-Warn "Dashboard did not start within 15s — opening URL anyway"
+            }
+
+            # Add 'sidekick' to Windows hosts file so http://sidekick:9119 works
+            $hostsPath = "$env:windir\System32\drivers\etc\hosts"
+            $hostsEntry = "127.0.0.1`tsidekick"
+            $hostsContent = if (Test-Path $hostsPath) { Get-Content $hostsPath -Raw } else { "" }
+            $hostsOk = $false
+            if ($hostsContent -match "(?m)^\s*127\.0\.0\.1\s+sidekick\s*$") {
+                $hostsOk = $true
+            } else {
+                $tmpHosts = [System.IO.Path]::GetTempFileName()
+                try {
+                    Copy-Item $hostsPath $tmpHosts -Force -ErrorAction Stop
+                    $newContent = (Get-Content $tmpHosts -Raw) + "`r`n$hostsEntry  # sidekick-installer`r`n"
+                    Set-Content -Path $tmpHosts -Value $newContent -ErrorAction Stop
+                    $copyResult = cmd /c copy /Y "$tmpHosts" "$hostsPath" 2>&1
+                    if ($LASTEXITCODE -eq 0 -and (Get-Content $hostsPath -Raw) -match "127\.0\.0\.1\s+sidekick") {
+                        Write-Info "Added 'sidekick' to hosts — http://sidekick:9119 now works"
+                        $hostsOk = $true
+                    } else {
+                        Write-Info "Hosts file is read-only or admin-protected (http://sidekick:9119 will not resolve)."
+                        Write-Info "  To enable: run PowerShell as Administrator and execute:"
+                        Write-Info "    Add-Content C:\Windows\System32\drivers\etc\hosts '127.0.0.1`tsidekick  # sidekick'"
+                        Write-Host ""
+                    }
+                } catch {
+                    Write-Info "Could not write to hosts file: $_"
+                } finally {
+                    Remove-Item $tmpHosts -ErrorAction SilentlyContinue
+                }
+            }
+            $url = if ($hostsOk) { "http://sidekick:9119" } else { "http://127.0.0.1:9119" }
+            Start-Process $url
+            Write-Success "WebUI dashboard started — open $url"
         } else {
             Write-Warn "sidekick.exe not found — start dashboard manually with: .\start.ps1 dashboard"
         }
