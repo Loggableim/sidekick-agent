@@ -68,6 +68,24 @@ function Write-Err {
     if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
+# Pause before closing the elevated window on error, so the user can read
+# the error message.  Only fires in the elevated process (not the original
+# non-admin session) and only for non-zero exit codes.
+function Pause-IfElevated {
+    param([int]$ExitCode)
+    if ($script:IsElevated -and $ExitCode -ne 0) {
+        Write-Host ""
+        Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Red
+        Write-Host "│          ✗ Installation failed (exit code $ExitCode)          │" -ForegroundColor Red
+        Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Check the log file for details:" -ForegroundColor Yellow
+        Write-Host "    $env:LOCALAPPDATA\sidekick\logs\" -ForegroundColor Yellow
+        Write-Host ""
+        Read-Host "  Press Enter to close this window"
+    }
+}
+
 # ============================================================================
 # Admin rights — REQUIRED for Sidekick installer
 # ============================================================================
@@ -97,11 +115,12 @@ if (-not $script:IsElevated) {
         Write-Host "→ Saving installer to %TEMP% for elevated re-launch..." -ForegroundColor Cyan
         $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
         try {
-            $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1"
+            $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/HEAD/install.ps1"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
             Write-Host "→ Saved to $scriptPath" -ForegroundColor Cyan
         } catch {
             Write-Host "✗ Could not download installer for elevated re-launch: $_" -ForegroundColor Red
+            Pause-IfElevated -ExitCode 7
             exit 7
         }
     }
@@ -973,6 +992,7 @@ git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpee
                 Write-Err "Could not remove $InstallDir : $_"
                 Write-Info "Close any programs that might be using files in $InstallDir (editors,"
                 Write-Info "terminals, running sidekick processes) and try again."
+                Pause-IfElevated -ExitCode 4
                 exit 4
             }
         }
@@ -1088,6 +1108,7 @@ Write-Info "Configuring git for Windows compatibility..."
 
         if (-not $cloneSuccess) {
             Write-Err "Failed to download repository (tried git clone SSH, HTTPS, and ZIP)"
+            Pause-IfElevated -ExitCode 4
             exit 4
         }
     }
@@ -1149,6 +1170,7 @@ Write-Info "Installing dependencies..."
     }
     if (-not $installed) {
         Write-Err "Failed to install sidekick-agent package even with no extras. Inspect the uv pip install output above."
+        Pause-IfElevated -ExitCode 5
         exit 5
     }
 
@@ -1916,5 +1938,6 @@ try {
     Write-Host ""
     Write-Info "→ Log file: $LogFile"
     Write-Host ""
+    Pause-IfElevated -ExitCode 1
     exit 1
 }
