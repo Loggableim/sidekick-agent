@@ -22,6 +22,52 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# ============================================================================
+# Helper functions (defined EARLY so they're available everywhere, including
+# the admin-elevation block below. Critical for `irm | iex` pipeline mode where
+# function scoping behaves differently than for .ps1 files.)
+# ============================================================================
+
+# LogFile is initialized later in the "Log file setup" section, but the
+# Write-* helpers must be safe to call before that section runs. We use a
+# script-scoped variable that defaults to $null.
+$script:LogFile = $null
+
+function Write-Banner {
+    Write-Host ""
+    Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Cyan
+    Write-Host "│             ⚡ Sidekick Installer                         │" -ForegroundColor Cyan
+    Write-Host "├─────────────────────────────────────────────────────────┤" -ForegroundColor Cyan
+    Write-Host "│  An open source AI agent for your terminal.              │" -ForegroundColor Cyan
+    Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Cyan
+    Write-Host ""
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "→ $Message" -ForegroundColor Cyan
+    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[INFO] → $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host "✓ $Message" -ForegroundColor Green
+    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[OK]   ✓ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+}
+
+function Write-Warn {
+    param([string]$Message)
+    Write-Host "⚠ $Message" -ForegroundColor Yellow
+    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[WARN] ⚠ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+}
+
+function Write-Err {
+    param([string]$Message)
+    Write-Host "✗ $Message" -ForegroundColor Red
+    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+}
+
 # ============================================================================
 # Admin rights — REQUIRED for Sidekick installer
 # ============================================================================
@@ -83,7 +129,7 @@ Write-Success "Running as Administrator (elevation OK)"
 # Log file setup
 # ============================================================================
 $LogDir = "$env:LOCALAPPDATA\sidekick\logs"
-$LogFile = "$LogDir\install-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$script:LogFile = "$LogDir\install-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
 # ============================================================================
@@ -112,40 +158,8 @@ $script:SidekickExe = "$script:VenvPath\Scripts\sidekick.exe"
 # ============================================================================
 # Helper functions
 # ============================================================================
-
-function Write-Banner {
-    Write-Host ""
-    Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Cyan
-    Write-Host "│             ⚡ Sidekick Installer                         │" -ForegroundColor Cyan
-    Write-Host "├─────────────────────────────────────────────────────────┤" -ForegroundColor Cyan
-    Write-Host "│  An open source AI agent for your terminal.              │" -ForegroundColor Cyan
-    Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Cyan
-    Write-Host ""
-}
-
-function Write-Info {
-    param([string]$Message)
-    Write-Host "→ $Message" -ForegroundColor Cyan
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] → $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
-}
-
-function Write-Success {
-    param([string]$Message)
-    Write-Host "✓ $Message" -ForegroundColor Green
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   ✓ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
-}
-
-function Write-Warn {
-    param([string]$Message)
-    Write-Host "⚠ $Message" -ForegroundColor Yellow
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] ⚠ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
-}
-
-function Write-Err {
-    param([string]$Message)
-    Write-Host "✗ $Message" -ForegroundColor Red
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
-}
+# (Helper functions are now defined at the top of the script so they're
+# available in `irm | iex` pipeline mode. See top of file.)
 
 # ============================================================================
 # Process execution helper (separated streams, no ErrorActionPreference issues)
