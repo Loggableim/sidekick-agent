@@ -1751,22 +1751,45 @@ Install-Repository
         try {
             $sidekickExe = $script:SidekickExe
             if (Test-Path $sidekickExe) {
-                # Add 'sidekick' to Windows hosts file so http://sidekick:8787 works
+                # Try to add 'sidekick' to Windows hosts file so http://sidekick:8787 works.
+                # On most Windows installs the file is owned by SYSTEM, so a non-admin
+                # PowerShell can't write it. We attempt the write and gracefully fall
+                # back to telling the user how to do it manually.
                 $hostsPath = "$env:windir\System32\drivers\etc\hosts"
                 $hostsEntry = "127.0.0.1`tsidekick"
                 $hostsContent = if (Test-Path $hostsPath) { Get-Content $hostsPath -Raw } else { "" }
-                if ($hostsContent -notmatch "(?m)^\s*127\.0\.0\.1\s+sidekick\s*$") {
+                $hostsOk = $false
+                if ($hostsContent -match "(?m)^\s*127\.0\.0\.1\s+sidekick\s*$") {
+                    Write-Info "'sidekick' already in hosts file"
+                    $hostsOk = $true
+                } else {
+                    $tmpHosts = [System.IO.Path]::GetTempFileName()
                     try {
-                        Add-Content -Path $hostsPath -Value "`r`n$hostsEntry  # sidekick-installer`r`n" -ErrorAction Stop
-                        Write-Info "Added 'sidekick' to hosts file — http://sidekick:8787 now works"
+                        Copy-Item $hostsPath $tmpHosts -Force -ErrorAction Stop
+                        $newContent = (Get-Content $tmpHosts -Raw) + "`r`n$hostsEntry  # sidekick-installer`r`n"
+                        Set-Content -Path $tmpHosts -Value $newContent -ErrorAction Stop
+                        # Atomic-ish replace: copy via cmd /c which runs in the user's context
+                        $copyResult = cmd /c copy /Y "$tmpHosts" "$hostsPath" 2>&1
+                        if ($LASTEXITCODE -eq 0 -and (Get-Content $hostsPath -Raw) -match "127\.0\.0\.1\s+sidekick") {
+                            Write-Info "Added 'sidekick' to hosts — http://sidekick:8787 now works"
+                            $hostsOk = $true
+                        } else {
+                            Write-Info "Could not write to hosts file (admin needed for http://sidekick:8787)"
+                        }
                     } catch {
-                        Write-Warn "Could not add hosts entry (run as admin to enable http://sidekick:8787): $_"
+                        Write-Info "Could not write to hosts file (admin needed for http://sidekick:8787): $_"
+                    } finally {
+                        Remove-Item $tmpHosts -ErrorAction SilentlyContinue
                     }
                 }
                 $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -NoNewWindow -PassThru
                 Start-Sleep -Seconds 3
-                Start-Process "http://sidekick:8787"
-                Write-Success "WebUI dashboard started at http://sidekick:8787 (also reachable at http://127.0.0.1:8787)"
+                if ($hostsOk) {
+                    Start-Process "http://sidekick:8787"
+                } else {
+                    Start-Process "http://127.0.0.1:8787"
+                }
+                Write-Success "WebUI dashboard started — open http://sidekick:8787 (or http://127.0.0.1:8787 if hosts-file is locked)"
         } else {
             Write-Warn "sidekick.exe not found — start dashboard manually with: .\start.ps1 dashboard"
         }
