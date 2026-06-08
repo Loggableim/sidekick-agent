@@ -22,22 +22,62 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
 # ============================================================================
-# Admin rights check
+# Admin rights — REQUIRED for Sidekick installer
 # ============================================================================
-# Sidekick installs everything under %LOCALAPPDATA% and does NOT need admin.
-# If the user runs elevated, warn them — but continue (some users prefer it).
-# If winget (used for Node.js) needs elevation later, it handles that itself.
+# Sidekick needs admin for:
+#   - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:8787)
+#   - Setting machine-wide environment variables (PATH, SIDEKICK_GIT_BASH_PATH)
+#   - winget (Node.js) needs elevation to install per-machine
+#   - Optional: Add/Remove Programs entry for clean uninstall
+#
+# We self-elevate via UAC. If the user clicks "No", exit with a clear error.
 $script:IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $script:IsElevated) {
-    # Running as non-admin — this is the NORMAL case.
-    # winget may still work (it can trigger its own UAC prompt).
-} else {
-    Write-Warn "Sidekick Installer is running as Administrator — this is not required."
-    Write-Info "Sidekick installs under %LOCALAPPDATA% and does not need admin rights."
-    Write-Info "Proceeding anyway..."
+    Write-Host ""
+    Write-Host "  Sidekick Installer needs Administrator privileges to:" -ForegroundColor Yellow
+    Write-Host "    - Write to your hosts file (so http://sidekick:8787 works)" -ForegroundColor DarkGray
+    Write-Host "    - Set machine-wide PATH and SIDEKICK_GIT_BASH_PATH" -ForegroundColor DarkGray
+    Write-Host "    - Install Node.js via winget (triggers its own UAC otherwise)" -ForegroundColor DarkGray
+    Write-Host "    - Register an Add/Remove Programs entry" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Requesting elevation (UAC prompt)..." -ForegroundColor Cyan
+    Write-Host ""
+    # Determine the script path. If running via iex (no file), the script
+    # body is in memory and $MyInvocation.MyCommand.Path is null. In that
+    # case, download install.ps1 fresh to %TEMP% and re-launch elevated.
+    $scriptPath = $MyInvocation.MyCommand.Path
+    if (-not $scriptPath -or -not (Test-Path $scriptPath)) {
+        Write-Info "Saving installer to %TEMP% for elevated re-launch..."
+        $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
+        try {
+            $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1"
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
+            Write-Info "Saved to $scriptPath"
+        } catch {
+            Write-Err "Could not download installer for elevated re-launch: $_"
+            exit 7
+        }
+    }
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $psi.UseShellExecute = $true
+        $psi.Verb = "runas"
+        $elevated = [System.Diagnostics.Process]::Start($psi)
+        $elevated.WaitForExit()
+        exit $elevated.ExitCode
+    } catch {
+        # User clicked "No" on UAC, or UAC was denied
+        Write-Err "Administrator privileges were not granted. Cannot continue."
+        Write-Info "Re-run as Administrator:"
+        Write-Info "  1. Right-click PowerShell -> Run as Administrator"
+        Write-Info "  2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex"
+        exit 7
+    }
 }
+Write-Success "Running as Administrator (elevation OK)"
 
 # ============================================================================
 # Log file setup
