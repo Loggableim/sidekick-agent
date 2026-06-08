@@ -991,37 +991,17 @@ Write-Info "Configuring git for Windows compatibility..."
 
 
 function Install-Dependencies {
-    Write-Info "Installing dependencies..."
-    
+Write-Info "Installing dependencies..."
+
     Push-Location $InstallDir
-    
-if (-not $NoVenv) {
-        # Tell uv to install into our venv via explicit python path
-        # AND set VIRTUAL_ENV so uv resolves the venv correctly
-        # (uv looks for .venv in CWD first; without VIRTUAL_ENV it fails
-        #  because we moved .venv outside $InstallDir)
-        $pipArgs = "--python", "$script:PythonExe"
+
+    if (-not $NoVenv) {
         $env:VIRTUAL_ENV = "$script:VenvPath"
+        $pipPython = "--python", "$script:PythonExe"
     } else {
-        $pipArgs = @()
-        Remove-Item Env:\VIRTUAL_ENV -ErrorAction SilentlyContinue
+        $pipPython = @()
     }
-    
-    # Install main package.  Tiered fallback so a single flaky git+https dep
-    # doesn't silently drop dashboard/MCP/cron/messaging extras.  Each tier's
-    # stdout/stderr is preserved — no Out-Null swallowing — so the user can
-    # see what failed.
-    #
-    # Tier 1: [all] — everything, including RL git+https deps (best case).
-    # Tier 2: [core-extras] synthesised locally — all PyPI-only extras we
-    #         ship (web, mcp, cron, cli, voice, messaging, slack, dev, acp,
-    #         pty, homeassistant, sms, tts-premium, honcho, google, mistral,
-    #         bedrock, dingtalk, feishu, modal, daytona, vercel).  Drops [rl]
-    #         and [matrix] (linux-only) which are the usual failure culprits.
-    # Tier 3: [web,mcp,cron,cli,messaging,dev] — the minimum we strongly
-    #         believe a user expects `sidekick dashboard` / slash commands /
-    #         cron / messaging platforms to work out of the box.
-    # Tier 4: bare `.` — last-resort so at least the core CLI launches.
+
     $installTiers = @(
         @{ Name = "all (with RL/matrix extras)"; Spec = ".[all]" },
         @{ Name = "PyPI-only extras (no git deps)"; Spec = ".[web,mcp,cron,cli,voice,messaging,slack,dev,acp,pty,homeassistant,sms,tts-premium,honcho,google,mistral,bedrock,dingtalk,feishu,modal,daytona,vercel]" },
@@ -1031,7 +1011,7 @@ if (-not $NoVenv) {
     $installed = $false
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        & $UvCmd pip install $pipArgs -e $tier.Spec
+        & $UvCmd pip install $pipPython -e $tier.Spec
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
