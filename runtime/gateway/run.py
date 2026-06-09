@@ -1001,7 +1001,7 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
     """
     import shutil
 
-    hermes_bin = shutil.which("hermes")
+    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
     if hermes_bin:
         return [hermes_bin]
 

@@ -221,7 +221,7 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
     logger.info("dispatch worker %s starting", worker_id)
 
     # ── Resolve `hermes` binary ──────────────────────────────────────────
-    hermes_bin = shutil.which("hermes")
+    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
     if not hermes_bin:
         hermes_bin = sys.executable
         hermes_args = ["-m", "hermes_cli.main"]

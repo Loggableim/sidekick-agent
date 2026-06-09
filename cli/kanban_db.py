@@ -3893,7 +3893,7 @@ def _resolve_sidekick_argv() -> list[str]:
     """
     import shutil
 
-    hermes_bin = shutil.which("hermes")
+    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
     if hermes_bin:
         return [hermes_bin]
     # Fallback to the module form. ``sidekick_cli.main`` is the actual
