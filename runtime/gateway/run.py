@@ -2436,6 +2436,20 @@ class GatewayRunner:
         return {}
 
     @staticmethod
+    def _load_gateway_config_value(key, default=None):
+        try:
+            import yaml as _y
+            cfg_path = _sidekick_home / "config.yaml"
+            if cfg_path.exists():
+                with open(cfg_path, encoding="utf-8") as _f:
+                    cfg = _y.safe_load(_f) or {}
+                gw_cfg = cfg.get("gateway", {}) or {}
+                return gw_cfg.get(key, default)
+        except Exception:
+            pass
+        return default
+
+    @staticmethod
     def _load_fallback_model() -> list | dict | None:
         """Load fallback provider chain from config.yaml.
 
@@ -16281,7 +16295,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # and gateway.log (INFO+, gateway-component records only).
     # Idempotent, so repeated calls from AIAgent.__init__ won't duplicate.
     from sidekick_logging import setup_logging
-    setup_logging(hermes_home=_sidekick_home, mode="gateway")
+    setup_logging()
 
     # Optional stderr handler — level driven by -v/-q flags on the CLI.
     # verbosity=None (-q/--quiet): no stderr output
@@ -16289,7 +16303,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # verbosity=1    (-v):         INFO and above
     # verbosity=2+   (-vv/-vvv):   DEBUG
     if verbosity is not None:
-        from agent.redact import RedactingFormatter
+        from runtime.redact import RedactingFormatter
 
         _stderr_level = {0: logging.WARNING, 1: logging.INFO}.get(verbosity, logging.DEBUG)
         _stderr_handler = logging.StreamHandler()
