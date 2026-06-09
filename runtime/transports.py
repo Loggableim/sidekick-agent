@@ -56,6 +56,28 @@ _chat_completions_discovered = False
 class ChatCompletionsTransport:
     """Builds kwargs for ``client.chat.completions.create(**kwargs)``."""
 
+    def validate_response(self, response: Any) -> bool:
+        """Return True for a usable Chat Completions response."""
+        if response is None:
+            return False
+        choices = getattr(response, "choices", None)
+        return bool(choices)
+
+    def normalize_response(self, response: Any, **_: Any) -> Any:
+        """Return the first assistant message with finish_reason attached."""
+        choice = response.choices[0]
+        message = getattr(choice, "message", None)
+        if message is None:
+            message = {}
+        finish_reason = getattr(choice, "finish_reason", None) or "stop"
+        try:
+            setattr(message, "finish_reason", finish_reason)
+            return message
+        except Exception:
+            normalized = dict(message) if isinstance(message, dict) else {"content": str(message)}
+            normalized["finish_reason"] = finish_reason
+            return normalized
+
     def build_kwargs(
         self,
         *,

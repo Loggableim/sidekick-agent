@@ -274,8 +274,7 @@ def _resolve_runtime_from_pool_entry(
             # anthropic_messages and chat_completions models, so the previous
             # session's mode must not leak across /model switches.
             # Refs #16878.
-            from cli.models import opencode_model_api_mode, opencode_model_runtime_fallback
-            effective_model = opencode_model_runtime_fallback(provider, effective_model)
+            from cli.models import opencode_model_api_mode
             api_mode = opencode_model_api_mode(provider, effective_model)
         elif configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
             api_mode = configured_mode
@@ -1321,9 +1320,8 @@ def resolve_runtime_provider(
                 # otherwise carry the previous mode forward, stripping /v1
                 # from base_url for chat_completions models and 404'ing.
                 # Refs #16878.
-                from cli.models import opencode_model_api_mode, opencode_model_runtime_fallback
+                from cli.models import opencode_model_api_mode
                 _effective = target_model or model_cfg.get("default", "")
-                _effective = opencode_model_runtime_fallback(provider, _effective)
                 api_mode = opencode_model_api_mode(provider, _effective)
             elif configured_mode and _provider_supports_explicit_api_mode(provider, configured_provider):
                 api_mode = configured_mode

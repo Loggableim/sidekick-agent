@@ -271,7 +271,7 @@ _API_KEY_PROVIDER_AUX_MODELS_FALLBACK: Dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
     "ai-gateway": "google/gemini-3-flash",
     "opencode-zen": "gemini-3-flash",
-    "opencode-go": "glm-5",
+    "opencode-go": "deepseek-v4-flash",
     "kilocode": "google/gemini-3-flash-preview",
     "ollama-cloud": "nemotron-3-nano:30b",
     "tencent-tokenhub": "hy3-preview",
@@ -4196,31 +4196,6 @@ def call_llm(
         return _validate_llm_response(
             client.chat.completions.create(**kwargs), task)
     except Exception as first_err:
-        first_err_str = str(first_err)
-        if (
-            resolved_provider == "opencode-go"
-            and (
-                "HTTP 400" in first_err_str
-                or "status_code=400" in first_err_str
-                or "BadRequestError" in type(first_err).__name__
-            )
-        ):
-            try:
-                from cli.models import opencode_model_runtime_fallback
-
-                fallback_model = opencode_model_runtime_fallback(resolved_provider, final_model)
-                if fallback_model and fallback_model != final_model:
-                    logger.warning(
-                        "Auxiliary %s: OpenCode Go rejected %s with HTTP 400; retrying with %s",
-                        task or "call", final_model, fallback_model,
-                    )
-                    fallback_kwargs = dict(kwargs)
-                    fallback_kwargs["model"] = fallback_model
-                    return _validate_llm_response(
-                        client.chat.completions.create(**fallback_kwargs), task
-                    )
-            except Exception:
-                pass
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
             retry_kwargs.pop("temperature", None)

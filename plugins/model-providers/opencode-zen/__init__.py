@@ -23,7 +23,7 @@ opencode_go = ProviderProfile(
     aliases=("opencode_go", "go", "opencode-go-sub"),
     env_vars=("OPENCODE_GO_API_KEY",),
     base_url="https://opencode.ai/zen/go/v1",
-    default_aux_model="glm-5",
+    default_aux_model="deepseek-v4-flash",
 )
 
 register_provider(opencode_zen)
