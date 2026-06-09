@@ -47,7 +47,8 @@ from typing import List, Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 # Suppress startup messages for clean CLI experience
-os.environ["HERMES_QUIET"] = "1"  # Our own modules
+os.environ["SIDEKICK_QUIET"] = "1"
+os.environ["HERMES_QUIET"] = "1"  # backward compat
 
 import yaml
 
@@ -291,7 +292,7 @@ def load_cli_config() -> Dict[str, Any]:
 
     # --ignore-user-config: force-skip the user config.yaml (still honor project
     # config as a fallback so defaults stay sensible).
-    ignore_user_config = os.environ.get("HERMES_IGNORE_USER_CONFIG") == "1"
+    ignore_user_config = (os.environ.get("SIDEKICK_IGNORE_USER_CONFIG") or os.environ.get("HERMES_IGNORE_USER_CONFIG")) == "1"
 
     # Use user config if it exists, otherwise project config
     if user_config_path.exists() and not ignore_user_config:
@@ -612,7 +613,8 @@ def load_cli_config() -> Dict[str, Any]:
     if isinstance(security_config, dict):
         redact = security_config.get("redact_secrets")
         if redact is not None:
-            os.environ["HERMES_REDACT_SECRETS"] = str(redact).lower()
+            os.environ["SIDEKICK_REDACT_SECRETS"] = str(redact).lower()
+            os.environ["HERMES_REDACT_SECRETS"] = str(redact).lower()  # backward compat
 
     return defaults
 
@@ -2455,9 +2457,9 @@ class SidekickCLI:
             self.max_turns = CLI_CONFIG["agent"]["max_turns"]
         elif CLI_CONFIG.get("max_turns"):  # Backwards compat: root-level max_turns
             self.max_turns = CLI_CONFIG["max_turns"]
-        elif os.getenv("HERMES_MAX_ITERATIONS"):
+        elif os.getenv("SIDEKICK_MAX_ITERATIONS") or os.getenv("HERMES_MAX_ITERATIONS"):
             try:
-                self.max_turns = int(os.getenv("HERMES_MAX_ITERATIONS", ""))
+                self.max_turns = int(os.getenv("SIDEKICK_MAX_ITERATIONS") or os.getenv("HERMES_MAX_ITERATIONS", ""))
             except (TypeError, ValueError):
                 self.max_turns = 90
         else:
@@ -2489,11 +2491,11 @@ class SidekickCLI:
         # by `sidekick chat --ignore-rules` in hermes_cli/main.py. When true we
         # pass skip_context_files=True and skip_memory=True to AIAgent so
         # AGENTS.md/SOUL.md/.cursorrules and persistent memory are not loaded.
-        self.ignore_rules = ignore_rules or os.environ.get("HERMES_IGNORE_RULES") == "1"
+        self.ignore_rules = ignore_rules or (os.environ.get("SIDEKICK_IGNORE_RULES") or os.environ.get("HERMES_IGNORE_RULES")) == "1"
         
         # Ephemeral system prompt: env var takes precedence, then config
         self.system_prompt = (
-            os.getenv("HERMES_EPHEMERAL_SYSTEM_PROMPT", "")
+            os.getenv("SIDEKICK_EPHEMERAL_SYSTEM_PROMPT") or os.getenv("HERMES_EPHEMERAL_SYSTEM_PROMPT", "")
             or CLI_CONFIG["agent"].get("system_prompt", "")
         )
         self.personalities = CLI_CONFIG["agent"].get("personalities", {})
@@ -5565,7 +5567,7 @@ class SidekickCLI:
                     self.agent._session_db_created = False
                     self._session_db.create_session(
                         session_id=self.session_id,
-                        source=os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                        source=os.environ.get("SIDEKICK_SESSION_SOURCE") or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
                         model=self.model,
                         model_config={
                             "max_iterations": self.max_turns,
@@ -5933,7 +5935,7 @@ class SidekickCLI:
         try:
             self._session_db.create_session(
                 session_id=new_session_id,
-                source=os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                source=os.environ.get("SIDEKICK_SESSION_SOURCE") or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
                 model=self.model,
                 model_config={
                     "max_iterations": self.max_turns,
@@ -8380,14 +8382,16 @@ class SidekickCLI:
         import os
         from cli.colors import Colors as _Colors
 
-        current = is_truthy_value(os.environ.get("HERMES_YOLO_MODE"))
+        current = is_truthy_value(os.environ.get("SIDEKICK_YOLO_MODE") or os.environ.get("HERMES_YOLO_MODE"))
         if current:
+            os.environ.pop("SIDEKICK_YOLO_MODE", None)
             os.environ.pop("HERMES_YOLO_MODE", None)
             _cprint(
                 f"  ⚠ YOLO mode {_Colors.BOLD}{_Colors.RED}OFF{_Colors.RESET}"
                 " — dangerous commands will require approval."
             )
         else:
+            os.environ["SIDEKICK_YOLO_MODE"] = "1"
             os.environ["HERMES_YOLO_MODE"] = "1"
             _cprint(
                 f"  ⚡ YOLO mode {_Colors.BOLD}{_Colors.GREEN}ON{_Colors.RESET}"
@@ -11048,7 +11052,7 @@ class SidekickCLI:
         # won't affect the running process — we just want the operator to
         # see that they're running without the safety net.
         try:
-            _redact_raw = os.getenv("HERMES_REDACT_SECRETS", "true")
+            _redact_raw = os.getenv("SIDEKICK_REDACT_SECRETS") or os.getenv("HERMES_REDACT_SECRETS", "true")
             if _redact_raw.lower() not in {"1", "true", "yes", "on"}:
                 self._console_print(
                     "[bold red]⚠  Secret redaction is DISABLED[/] "
@@ -13062,7 +13066,7 @@ class SidekickCLI:
                 if getattr(self, "agent", None) and getattr(self, "_agent_running", False):
                     self.agent.interrupt(f"received signal {signum}")
                     try:
-                        _grace = float(os.getenv("HERMES_SIGTERM_GRACE", "1.5"))
+                        _grace = float(os.getenv("SIDEKICK_SIGTERM_GRACE") or os.getenv("HERMES_SIGTERM_GRACE", "1.5"))
                     except (TypeError, ValueError):
                         _grace = 1.5
                     if _grace > 0:
@@ -13302,7 +13306,8 @@ def main(
 
     # Signal to terminal_tool that we're in interactive mode
     # This enables interactive sudo password prompts with timeout
-    os.environ["HERMES_INTERACTIVE"] = "1"
+    os.environ["SIDEKICK_INTERACTIVE"] = "1"
+    os.environ["HERMES_INTERACTIVE"] = "1"  # backward compat
     
     # Handle gateway mode (messaging + cron)
     if gateway:
@@ -13437,7 +13442,7 @@ def main(
             if _agent is not None:
                 _agent.interrupt(f"received signal {signum}")
                 try:
-                    _grace = float(os.getenv("HERMES_SIGTERM_GRACE", "1.5"))
+                    _grace = float(os.getenv("SIDEKICK_SIGTERM_GRACE") or os.getenv("HERMES_SIGTERM_GRACE", "1.5"))
                 except (TypeError, ValueError):
                     _grace = 1.5
                 if _grace > 0:
