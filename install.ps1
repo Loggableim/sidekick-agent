@@ -1561,9 +1561,9 @@ function Start-GatewayIfConfigured {
 
 function Write-Completion {
     Write-Host ""
-    Write-Host "+---------------------------------------------------------+" -ForegroundColor Green
+    Write-Host '+---------------------------------------------------------+' -ForegroundColor Green
     Write-Host "|              [OK] Installation Complete!                   |" -ForegroundColor Green
-    Write-Host "+---------------------------------------------------------+" -ForegroundColor Green
+    Write-Host '+---------------------------------------------------------+' -ForegroundColor Green
     Write-Host ""
     
     # Show file locations
@@ -1586,13 +1586,13 @@ function Write-Completion {
     Write-Host "   sidekick              " -NoNewline -ForegroundColor Green
     Write-Host "Start chatting with Sidekick"
     Write-Host "   sidekick setup        " -NoNewline -ForegroundColor Green
-    Write-Host "Configure API keys & settings"
+    Write-Host 'Configure API keys & settings'
     Write-Host "   sidekick config       " -NoNewline -ForegroundColor Green
     Write-Host "View/edit configuration"
     Write-Host "   sidekick config edit  " -NoNewline -ForegroundColor Green
     Write-Host "Open config in editor"
     Write-Host "   sidekick gateway      " -NoNewline -ForegroundColor Green
-    Write-Host "Start messaging gateway (Telegram, Discord, etc.)"
+    Write-Host 'Start messaging gateway (Telegram, Discord, etc.)'
     Write-Host "   sidekick update       " -NoNewline -ForegroundColor Green
     Write-Host "Update to latest version"
     Write-Host "   sidekick dashboard    " -NoNewline -ForegroundColor Green
@@ -1625,7 +1625,7 @@ function Write-Completion {
     Write-Host ""
     
     if (-not $HasRipgrep) {
-        Write-Host "Note: ripgrep (rg) was not installed. For faster file search:" -ForegroundColor Yellow
+        Write-Host 'Note: ripgrep (rg) was not installed. For faster file search:' -ForegroundColor Yellow
         Write-Host "  winget install BurntSushi.ripgrep.MSVC" -ForegroundColor Yellow
         Write-Host ""
     }
