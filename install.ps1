@@ -232,12 +232,19 @@ function Invoke-External {
     $tmpErr = [System.IO.Path]::GetTempFileName()
 
     try {
-        $proc = Start-Process -FilePath $FilePath `
-            -ArgumentList $ArgumentList `
-            -Wait -PassThru -NoNewWindow `
-            -RedirectStandardOutput $tmpOut `
-            -RedirectStandardError $tmpErr `
-            -WorkingDirectory $WorkingDirectory
+        $params = @{
+            FilePath = $FilePath
+            ArgumentList = $ArgumentList
+            Wait = $true
+            PassThru = $true
+            NoNewWindow = $true
+            RedirectStandardOutput = $tmpOut
+            RedirectStandardError = $tmpErr
+        }
+        if ($WorkingDirectory) {
+            $params.WorkingDirectory = $WorkingDirectory
+        }
+        $proc = Start-Process @params
 
         # Read captured output
         $stdout = Get-Content $tmpOut -Raw -ErrorAction SilentlyContinue
