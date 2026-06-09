@@ -55,36 +55,36 @@ $PythonVersion = "3.11"
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Cyan
-    Write-Host "│             ⚡ Sidekick Installer                         │" -ForegroundColor Cyan
-    Write-Host "├─────────────────────────────────────────────────────────┤" -ForegroundColor Cyan
-    Write-Host "│  An open source AI agent for your terminal.              │" -ForegroundColor Cyan
-    Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Cyan
+    Write-Host "+---------------------------------------------------------+" -ForegroundColor Cyan
+    Write-Host "|             ~ Sidekick Installer                         |" -ForegroundColor Cyan
+    Write-Host "+---------------------------------------------------------+" -ForegroundColor Cyan
+    Write-Host "|  An open source AI agent for your terminal.              |" -ForegroundColor Cyan
+    Write-Host "+---------------------------------------------------------+" -ForegroundColor Cyan
     Write-Host ""
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "→ $Message" -ForegroundColor Cyan
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] → $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "-> $Message" -ForegroundColor Cyan
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] -> $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "✓ $Message" -ForegroundColor Green
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   ✓ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "[OK] $Message" -ForegroundColor Green
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   [OK] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host "⚠ $Message" -ForegroundColor Yellow
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] ⚠ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "[!] $Message" -ForegroundColor Yellow
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] [!] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Err {
     param([string]$Message)
-    Write-Host "✗ $Message" -ForegroundColor Red
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "[FAIL] $Message" -ForegroundColor Red
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  [FAIL] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 # Pause before closing the elevated window on error, so the user can read
@@ -94,9 +94,9 @@ function Pause-IfElevated {
     param([int]$ExitCode)
     if ($script:IsElevated -and $ExitCode -ne 0) {
         Write-Host ""
-        Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Red
-        Write-Host "│          ✗ Installation failed (exit code $ExitCode)          │" -ForegroundColor Red
-        Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Red
+        Write-Host "+---------------------------------------------------------+" -ForegroundColor Red
+        Write-Host "|          [FAIL] Installation failed (exit code $ExitCode)          |" -ForegroundColor Red
+        Write-Host "+---------------------------------------------------------+" -ForegroundColor Red
         Write-Host ""
         Write-Host "  Check the log file for details:" -ForegroundColor Yellow
         Write-Host "    $env:LOCALAPPDATA\sidekick\logs\" -ForegroundColor Yellow
@@ -106,7 +106,7 @@ function Pause-IfElevated {
 }
 
 # ============================================================================
-# Admin rights — REQUIRED for Sidekick installer
+# Admin rights - REQUIRED for Sidekick installer
 # ============================================================================
 # Sidekick needs admin for:
 #   - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:8787)
@@ -131,14 +131,14 @@ if (-not $script:IsElevated) {
     # case, download install.ps1 fresh to %TEMP% and re-launch elevated.
     $scriptPath = $MyInvocation.MyCommand.Path
     if (-not $scriptPath -or -not (Test-Path $scriptPath)) {
-        Write-Host "→ Saving installer to %TEMP% for elevated re-launch..." -ForegroundColor Cyan
+        Write-Host "-> Saving installer to %TEMP% for elevated re-launch..." -ForegroundColor Cyan
         $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
         try {
             $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/HEAD/install.ps1"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
-            Write-Host "→ Saved to $scriptPath" -ForegroundColor Cyan
+            Write-Host "-> Saved to $scriptPath" -ForegroundColor Cyan
         } catch {
-            Write-Host "✗ Could not download installer for elevated re-launch: $_" -ForegroundColor Red
+            Write-Host "[FAIL] Could not download installer for elevated re-launch: $_" -ForegroundColor Red
             Pause-IfElevated -ExitCode 7
             exit 7
         }
@@ -156,13 +156,13 @@ if (-not $script:IsElevated) {
         $elevated = [System.Diagnostics.Process]::Start($psi)
         if ($null -eq $elevated) {
             # UAC was denied or the process could not start
-            Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
-            Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
-            Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
-            Write-Host "→   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+            Write-Host "[FAIL] Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
+            Write-Host "-> Re-run as Administrator:" -ForegroundColor Cyan
+            Write-Host "->   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
+            Write-Host "->   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
             exit 7
         }
-        # Capture exit code — WaitForExit() doesn't throw on null Process.
+        # Capture exit code - WaitForExit() doesn't throw on null Process.
         # Note: WaitForExit() blocks until the elevated window closes.
         $elevated.WaitForExit()
         $exitCode = $elevated.ExitCode
@@ -170,14 +170,14 @@ if (-not $script:IsElevated) {
     } catch [System.InvalidOperationException], [System.ComponentModel.Win32Exception] {
         # UAC denied: Process::Start with runas verb throws Win32Exception
         # when the user cancels the elevation dialog.
-        Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
-        Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
-        Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
-        Write-Host "→   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+        Write-Host "[FAIL] Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
+        Write-Host "-> Re-run as Administrator:" -ForegroundColor Cyan
+        Write-Host "->   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
+        Write-Host "->   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
         exit 7
     }
 }
-Write-Host "✓ Running as Administrator (elevation OK)" -ForegroundColor Green
+Write-Host "[OK] Running as Administrator (elevation OK)" -ForegroundColor Green
 
 # ============================================================================
 # Log file setup
@@ -331,7 +331,7 @@ function Ensure-Venv {
 
     $venvPython = "$VenvPath\Scripts\python.exe"
 
-    # ── 1. If venv already exists and has a working python, use it ──
+    # -- 1. If venv already exists and has a working python, use it --
     if (Test-Path $venvPython) {
         $ver = & $venvPython --version 2>$null
         if ($ver -match "Python 3\.") {
@@ -339,11 +339,11 @@ function Ensure-Venv {
             $script:PythonExe = $venvPython
             return $true
         }
-        Write-Warn "Virtual environment broken at $VenvPath — recreating..."
+        Write-Warn "Virtual environment broken at $VenvPath - recreating..."
         Remove-Item -Recurse -Force $VenvPath -ErrorAction SilentlyContinue
     }
 
-    # ── 2. Primary path: uv venv --python (handles Python download + venv in one step) ──
+    # -- 2. Primary path: uv venv --python (handles Python download + venv in one step) --
     Write-Info "Creating virtual environment with uv (Python $PythonVersion)..."
     Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
 
@@ -357,11 +357,11 @@ function Ensure-Venv {
         return $true
     }
 
-    # uv venv failed — log and continue
+    # uv venv failed - log and continue
     Write-Warn "uv venv exited with code $($result.ExitCode). See $LogFile for details."
     Add-Content -Path $LogFile -Value "[WARN] uv venv failed. stderr was captured above." -Encoding UTF8 -ErrorAction SilentlyContinue
 
-    # ── 3. Fallback: uv python install + python -m venv ──
+    # -- 3. Fallback: uv python install + python -m venv --
     Write-Info "Trying uv python install instead..."
     Add-Content -Path $LogFile -Value "[INFO] Running: uv python install $PythonVersion" -Encoding UTF8 -ErrorAction SilentlyContinue
 
@@ -403,11 +403,11 @@ function Ensure-Venv {
         }
     }
 
-    # ── 4. Scan for system Python (excluding Store alias) ──
+    # -- 4. Scan for system Python (excluding Store alias) --
     Write-Info "Scanning for system Python installations (excluding Microsoft Store alias)..."
     $candidateDirs = @()
 
-    # PATH directories — skip Microsoft\WindowsApps (Store alias)
+    # PATH directories - skip Microsoft\WindowsApps (Store alias)
     foreach ($dir in ($env:PATH -split ';')) {
         if ($dir -and $dir -notlike "*Microsoft*WindowsApps*" -and (Test-Path "$dir\python.exe")) {
             $candidateDirs += $dir
@@ -450,7 +450,7 @@ function Ensure-Venv {
         }
     }
 
-    # ── 5. All paths exhausted ──
+    # -- 5. All paths exhausted --
     Write-Err "No usable Python 3.10+ found on this system."
     Write-Info "Install Python 3.11 manually:"
     Write-Info "  https://www.python.org/downloads/"
@@ -466,17 +466,17 @@ function Install-Git {
     Ensure Git (and Git Bash) are installed.  Git for Windows bundles bash.exe
     which Sidekick uses to run shell commands.
 
-    Priority order (deliberately simple — no winget, no registry, no system
+    Priority order (deliberately simple - no winget, no registry, no system
     package manager):
-      1. Existing ``git`` on PATH — use it as-is (the common fast path).
+      1. Existing ``git`` on PATH - use it as-is (the common fast path).
       2. Download **PortableGit** from the official git-for-windows GitHub
          release (self-extracting 7z.exe) and unpack it to
-         ``%LOCALAPPDATA%\sidekick\git`` — never touches system Git, never
+         ``%LOCALAPPDATA%\sidekick\git`` - never touches system Git, never
          requires admin, works even on locked-down machines and machines
          with a broken system Git install.
 
     **Why PortableGit, not MinGit:**  MinGit is the minimal-automation
-    distribution and ships ONLY ``git.exe`` — no bash, no POSIX utilities.
+    distribution and ships ONLY ``git.exe`` - no bash, no POSIX utilities.
     Sidekick needs ``bash.exe`` to run shell commands.  PortableGit is the
     full Git for Windows distribution without the installer UI; it ships
     ``git.exe`` + ``bash.exe`` + ``sh``, ``awk``, ``sed``, ``grep``, ``curl``,
@@ -502,9 +502,9 @@ function Install-Git {
     }
 
     # Download PortableGit into $SidekickHome\git.  Always works as long as
-    # we can reach github.com — no admin, no winget, no reliance on the
+    # we can reach github.com - no admin, no winget, no reliance on the
     # user's possibly-broken system Git install.
-    Write-Info "Git not found — downloading PortableGit to $SidekickHome\git\ ..."
+    Write-Info "Git not found - downloading PortableGit to $SidekickHome\git\ ..."
     Write-Info "(no admin rights required; isolated from any system Git install)"
 
     try {
@@ -516,7 +516,7 @@ function Install-Git {
                 "64-bit"
             }
         } else {
-            # PortableGit does not ship a 32-bit build — fall back to MinGit 32-bit
+            # PortableGit does not ship a 32-bit build - fall back to MinGit 32-bit
             # with a warning that bash-based features will be unavailable.
             "32-bit-mingit"
         }
@@ -525,7 +525,7 @@ function Install-Git {
         $release = Invoke-RestMethod -Uri $releaseApi -UseBasicParsing -TimeoutSec 60 -Headers @{ "User-Agent" = "sidekick-installer" }
 
         if ($arch -eq "32-bit-mingit") {
-            Write-Warn "32-bit Windows detected — PortableGit is 64-bit only.  Installing MinGit 32-bit as a last resort; bash-dependent Sidekick features (terminal tool, agent-browser) will not work on this machine."
+            Write-Warn "32-bit Windows detected - PortableGit is 64-bit only.  Installing MinGit 32-bit as a last resort; bash-dependent Sidekick features (terminal tool, agent-browser) will not work on this machine."
             $assetPattern = "MinGit-*-32-bit.zip"
             $downloadIsZip = $true
         } elseif ($arch -eq "arm64") {
@@ -650,7 +650,7 @@ function Set-GitBashEnvVar {
 
     # Standard system install locations as a final fallback.  Note:
     # ProgramFiles(x86) can't be referenced via ${env:...} string interpolation
-    # because of the parens — use [Environment]::GetEnvironmentVariable().
+    # because of the parens - use [Environment]::GetEnvironmentVariable().
     $candidates += "${env:ProgramFiles}\Git\bin\bash.exe"
     $pf86 = [Environment]::GetEnvironmentVariable("ProgramFiles(x86)")
     if ($pf86) { $candidates += "$pf86\Git\bin\bash.exe" }
@@ -665,7 +665,7 @@ function Set-GitBashEnvVar {
         }
     }
 
-    Write-Warn "Could not locate bash.exe — Sidekick may not find Git Bash."
+    Write-Warn "Could not locate bash.exe - Sidekick may not find Git Bash."
     Write-Info "If needed, set SIDEKICK_GIT_BASH_PATH manually to your bash.exe path."
 }
 
@@ -674,10 +674,10 @@ function Test-Node {
     .SYNOPSIS
     Check for Node.js.  Sidekick does not require Node.js for its core
     functionality, but it is needed for browser automation tools (Playwright)
-    and the optional TUI.  This function is informational only — it does not
+    and the optional TUI.  This function is informational only - it does not
     attempt to install Node.js.
     #>
-    Write-Info "Checking Node.js (optional — for browser tools and TUI)..."
+    Write-Info "Checking Node.js (optional - for browser tools and TUI)..."
 
     if (Get-Command node -ErrorAction SilentlyContinue) {
         $version = node --version
@@ -696,7 +696,7 @@ function Test-Node {
         return $true
     }
 
-    Write-Warn "Node.js not found — browser tools and TUI will be unavailable."
+    Write-Warn "Node.js not found - browser tools and TUI will be unavailable."
     Write-Info "Install manually if needed: https://nodejs.org/en/download/"
     Write-Info "  Or: winget install OpenJS.NodeJS.LTS"
     $script:HasNode = $false
@@ -833,7 +833,7 @@ function Install-Repository {
 
     if (Test-Path $InstallDir) {
         # Test-Path "$InstallDir\.git" returns True when .git is a file OR a
-        # directory OR a symlink OR a submodule-style gitfile — and also when
+        # directory OR a symlink OR a submodule-style gitfile - and also when
         # it's a broken stub left over from a failed previous install (e.g.
         # a partial Remove-Item that couldn't delete a locked index.lock).
         # Validate the repo properly by asking git itself.  Two checks
@@ -880,7 +880,7 @@ function Install-Repository {
             # a partial uninstall used to lock the installer into the
             # "update" branch forever, emitting three ``fatal: not a git
             # repository`` errors and failing with "not in a git directory".
-            Write-Warn "Existing directory at $InstallDir is not a valid git repo — replacing it."
+            Write-Warn "Existing directory at $InstallDir is not a valid git repo - replacing it."
             try {
                 Remove-Item -Recurse -Force $InstallDir -ErrorAction Stop
             } catch {
@@ -927,7 +927,7 @@ function Install-Repository {
         # Fallback: download ZIP archive (bypasses git file I/O issues entirely)
         if (-not $cloneSuccess) {
             if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
-            Write-Warn "Git clone failed — downloading ZIP archive instead..."
+            Write-Warn "Git clone failed - downloading ZIP archive instead..."
             try {
                 $zipUrl = "https://github.com/Loggableim/sidekick-agent/archive/refs/heads/$Branch.zip"
                 $zipPath = "$env:TEMP\sidekick-agent-$Branch.zip"
@@ -1001,19 +1001,19 @@ function Install-Dependencies {
     
     # Install main package.  Tiered fallback so a single flaky git+https dep
     # doesn't silently drop dashboard/MCP/cron/messaging extras.  Each tier's
-    # stdout/stderr is preserved — no Out-Null swallowing — so the user can
+    # stdout/stderr is preserved - no Out-Null swallowing - so the user can
     # see what failed.
     #
-    # Tier 1: [all] — everything, including RL git+https deps (best case).
-    # Tier 2: [core-extras] synthesised locally — all PyPI-only extras we
+    # Tier 1: [all] - everything, including RL git+https deps (best case).
+    # Tier 2: [core-extras] synthesised locally - all PyPI-only extras we
     #         ship (web, mcp, cron, cli, voice, messaging, slack, dev, acp,
     #         pty, homeassistant, sms, tts-premium, honcho, google, mistral,
     #         bedrock, dingtalk, feishu, modal, daytona, vercel).  Drops [rl]
     #         and [matrix] (linux-only) which are the usual failure culprits.
-    # Tier 3: [web,mcp,cron,cli,messaging,dev] — the minimum we strongly
+    # Tier 3: [web,mcp,cron,cli,messaging,dev] - the minimum we strongly
     #         believe a user expects `sidekick dashboard` / slash commands /
     #         cron / messaging platforms to work out of the box.
-    # Tier 4: bare `.` — last-resort so at least the core CLI launches.
+    # Tier 4: bare `.` - last-resort so at least the core CLI launches.
     $installTiers = @(
         @{ Name = "all (with RL/matrix extras)"; Spec = ".[all]" },
         @{ Name = "PyPI-only extras (no git deps)"; Spec = ".[web,mcp,cron,cli,voice,messaging,slack,dev,acp,pty,homeassistant,sms,tts-premium,honcho,google,mistral,bedrock,dingtalk,feishu,modal,daytona,vercel]" },
@@ -1038,7 +1038,7 @@ function Install-Dependencies {
         exit 5
     }
 
-    # Verify the dashboard deps specifically — they're the most common thing
+    # Verify the dashboard deps specifically - they're the most common thing
     # users hit and lazy-import errors from `sidekick dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
@@ -1050,7 +1050,7 @@ function Install-Dependencies {
             if ($LASTEXITCODE -eq 0) { $webOk = $true }
         } catch { }
         if (-not $webOk) {
-            Write-Warn "fastapi/uvicorn not importable — `sidekick dashboard` will not work."
+            Write-Warn "fastapi/uvicorn not importable - `sidekick dashboard` will not work."
             Write-Info "Attempting targeted install of [web] extra as last resort..."
             & $UvCmd pip install -e ".[web]"
             if ($LASTEXITCODE -eq 0) {
@@ -1070,7 +1070,7 @@ function Install-Dependencies {
     #     Users who don't do RL training never need it.
     # Users who do want it can run the one-liner we print below.
     if (Test-Path "tinker-atropos\pyproject.toml") {
-        Write-Info "tinker-atropos submodule found — skipping install (optional, for RL training)"
+        Write-Info "tinker-atropos submodule found - skipping install (optional, for RL training)"
         Write-Info "  To install later: $UvCmd pip install -e `".\tinker-atropos`""
     }
     
@@ -1168,7 +1168,7 @@ function Copy-ConfigTemplates {
     # flags the BOM as an invisible unicode character and refuses to
     # load the file.  PS7's ``-Encoding utf8NoBOM`` fixes that but we
     # don't control which PowerShell version the user has.  Go direct
-    # to .NET with an explicit UTF8Encoding($false) — BOM-free on every
+    # to .NET with an explicit UTF8Encoding($false) - BOM-free on every
     # PowerShell version.
     $soulPath = "$SidekickHome\SOUL.md"
     if (-not (Test-Path $soulPath)) {
@@ -1224,7 +1224,7 @@ function Install-NodeDeps {
     # Resolve npm explicitly to npm.cmd, NOT npm.ps1.  Node.js on Windows
     # ships BOTH npm.cmd (a batch shim) and npm.ps1 (a PowerShell shim).
     # Get-Command's default ordering picks whichever comes first in PATHEXT,
-    # and on many systems that's .ps1 — but .ps1 requires scripts to be
+    # and on many systems that's .ps1 - but .ps1 requires scripts to be
     # enabled in PowerShell's execution policy, which most Windows users
     # don't have (the Restricted / RemoteSigned default blocks unsigned
     # .ps1 files).  .cmd has no such restriction and works on every box.
@@ -1234,7 +1234,7 @@ function Install-NodeDeps {
     # returned if we can't find a .cmd sibling.
     $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
     if (-not $npmCmd) {
-        Write-Warn "npm not found on PATH — skipping Node.js dependencies."
+        Write-Warn "npm not found on PATH - skipping Node.js dependencies."
         Write-Info "Open a new PowerShell window and re-run 'sidekick setup tools' later."
         return
     }
@@ -1245,7 +1245,7 @@ function Install-NodeDeps {
             Write-Info "Using npm.cmd (PowerShell execution policy blocks npm.ps1)"
             $npmExe = $npmCmdSibling
         } else {
-            Write-Warn "Only npm.ps1 available — install may fail if script execution is disabled."
+            Write-Warn "Only npm.ps1 available - install may fail if script execution is disabled."
             Write-Info "  If it fails, either enable PS script execution or install Node via winget."
         }
     }
@@ -1272,7 +1272,7 @@ function Install-NodeDeps {
                 Remove-Item -Force $logPath -ErrorAction SilentlyContinue
                 return $true
             }
-            Write-Warn "$label npm install failed — exit code $code"
+            Write-Warn "$label npm install failed - exit code $code"
             if (Test-Path $logPath) {
                 $errText = (Get-Content $logPath -Raw -ErrorAction SilentlyContinue)
                 if ($errText) {
@@ -1294,7 +1294,7 @@ function Install-NodeDeps {
         }
     }
 
-    # Browser tools (optional — only if Node.js is available)
+    # Browser tools (optional - only if Node.js is available)
     if (Test-Path "$InstallDir\package.json") {
         Write-Info "Installing Node.js dependencies (browser tools)..."
         $browserLog = "$env:TEMP\sidekick-npm-browser-$(Get-Random).log"
@@ -1317,7 +1317,7 @@ function Install-NodeDeps {
                 if ($npxCmd) { $npxExe = $npxCmd.Source }
             }
             if (-not $npxExe) {
-                Write-Warn "npx not found — cannot install Playwright Chromium."
+                Write-Warn "npx not found - cannot install Playwright Chromium."
                 Write-Info "Run manually later: cd `"$InstallDir`"; npx playwright install chromium"
             } else {
                 $pwLog = "$env:TEMP\sidekick-playwright-install-$(Get-Random).log"
@@ -1329,7 +1329,7 @@ function Install-NodeDeps {
                         Write-Success "Playwright Chromium installed (browser tools ready)"
                         Remove-Item -Force $pwLog -ErrorAction SilentlyContinue
                     } else {
-                        Write-Warn "Playwright Chromium install failed — exit code $pwCode"
+                        Write-Warn "Playwright Chromium install failed - exit code $pwCode"
                         Write-Warn "Browser tools will not work until Chromium is installed."
                         if (Test-Path $pwLog) {
                             $pwErr = Get-Content $pwLog -Raw -ErrorAction SilentlyContinue
@@ -1354,7 +1354,7 @@ function Install-NodeDeps {
         }
     }
 
-    # TUI (optional — only if Node.js is available)
+    # TUI (optional - only if Node.js is available)
     $tuiDir = "$InstallDir\ui-tui"
     if (Test-Path "$tuiDir\package.json") {
         Write-Info "Installing TUI dependencies..."
@@ -1372,7 +1372,7 @@ function Install-PlatformSdks {
     #    which silently skips some messaging SDKs from [messaging].
     # 2. `uv` creates the venv without pip.  If a messaging SDK ends up
     #    missing, the user can't `pip install python-telegram-bot` to
-    #    recover — pip simply isn't in their venv.
+    #    recover - pip simply isn't in their venv.
     #
     # Strategy: bootstrap pip via `python -m ensurepip` (idempotent), then
     # for each token set in .env, verify the matching SDK imports.  If not,
@@ -1452,7 +1452,7 @@ function Install-PlatformSdks {
             Write-Info "Bootstrapping pip into venv (uv doesn't ship pip)..."
             & $pythonExe -m ensurepip --upgrade 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "ensurepip failed — can't auto-install missing SDKs."
+                Write-Warn "ensurepip failed - can't auto-install missing SDKs."
                 Write-Info "Manual recovery: $UvCmd pip install `"$($missing[0].Spec)`""
                 return
             }
@@ -1557,9 +1557,9 @@ function Start-GatewayIfConfigured {
 
 function Write-Completion {
     Write-Host ""
-    Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Green
-    Write-Host "│              ✓ Installation Complete!                   │" -ForegroundColor Green
-    Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Green
+    Write-Host "+---------------------------------------------------------+" -ForegroundColor Green
+    Write-Host "|              [OK] Installation Complete!                   |" -ForegroundColor Green
+    Write-Host "+---------------------------------------------------------+" -ForegroundColor Green
     Write-Host ""
     
     # Show file locations
@@ -1575,7 +1575,7 @@ function Write-Completion {
     Write-Host "$SidekickHome\sidekick-agent\"
     Write-Host ""
     
-    Write-Host "─────────────────────────────────────────────────────────" -ForegroundColor Cyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "🚀 Commands:" -ForegroundColor Cyan
     Write-Host ""
@@ -1597,9 +1597,9 @@ function Write-Completion {
     Write-Host "Launch the terminal TUI"
     Write-Host ""
     
-    Write-Host "─────────────────────────────────────────────────────────" -ForegroundColor Cyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "⚡ Try Sidekick now:" -ForegroundColor Cyan
+    Write-Host "~ Try Sidekick now:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "   Restart your terminal, then run:" -ForegroundColor Yellow
     Write-Host ""
@@ -1609,12 +1609,12 @@ function Write-Completion {
     Write-Host ""
     Write-Host "   sidekick dashboard" -ForegroundColor Green
     Write-Host ""
-    Write-Host "─────────────────────────────────────────────────────────" -ForegroundColor Cyan
+    Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "⚡ Restart your terminal for PATH changes to take effect" -ForegroundColor Yellow
+    Write-Host "~ Restart your terminal for PATH changes to take effect" -ForegroundColor Yellow
     Write-Host ""
     
-    # Show optional Node.js info (informational only — Sidekick does not require it)
+    # Show optional Node.js info (informational only - Sidekick does not require it)
     Write-Host "Note: Node.js is optional for Sidekick." -ForegroundColor Yellow
     Write-Host "Browser tools and TUI need Node.js. Install if desired:" -ForegroundColor Yellow
     Write-Host "  https://nodejs.org/en/download/" -ForegroundColor Yellow
@@ -1639,7 +1639,7 @@ function Main {
     Write-Banner
 
     # Windows refuses to delete a directory any shell is currently cd'd
-    # inside — and silently leaves orphan files behind, which then wedge
+    # inside - and silently leaves orphan files behind, which then wedge
     # "is this a valid git repo" probes on re-install.  If the current
     # working dir is under $InstallDir, step out to the user's home
     # BEFORE doing anything else.  Harmless when the user ran the
@@ -1656,9 +1656,9 @@ function Main {
         }
     } catch {}
 
-if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" ; exit 2 }
-    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed — cannot continue" ; exit 2 }
-    if (-not (Install-Git)) { Write-Err "Git not available and auto-install failed — install from https://git-scm.com/download/win then re-run" ; exit 2 }
+if (-not (Install-Uv)) { Write-Err "uv installation failed - cannot continue" ; exit 2 }
+    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed - cannot continue" ; exit 2 }
+    if (-not (Install-Git)) { Write-Err "Git not available and auto-install failed - install from https://git-scm.com/download/win then re-run" ; exit 2 }
     # Test-Node always returns $true (sets $script:HasNode on success, emits a
     # warning on failure and continues so non-browser installs still work).
     # Cast to [void] so the bare return value doesn't print "True" to the
@@ -1677,7 +1677,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
 
     Write-Completion
     
-    # ── Desktop shortcut ──────────────────────────────────────────
+    # -- Desktop shortcut ------------------------------------------
     Write-Info "Creating desktop shortcut..."
     try {
         $desktopPath = [Environment]::GetFolderPath("Desktop")
@@ -1702,7 +1702,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
         Write-Warn "Could not create desktop shortcut: $_"
     }
     
-    # ── Auto-open WebUI ────────────────────────────────────────────
+    # -- Auto-open WebUI --------------------------------------------
     Write-Info "Opening Sidekick WebUI in your browser..."
     try {
         $sidekickExe = "$InstallDir\.venv\Scripts\sidekick.exe"
@@ -1729,7 +1729,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
                 } catch {}
             }
             if (-not $ready) {
-                Write-Warn "Dashboard did not start within 15s — opening URL anyway"
+                Write-Warn "Dashboard did not start within 15s - opening URL anyway"
             }
 
             # Add 'sidekick' to Windows hosts file so http://sidekick:9119 works
@@ -1747,7 +1747,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
                     Set-Content -Path $tmpHosts -Value $newContent -ErrorAction Stop
                     $copyResult = cmd /c copy /Y "$tmpHosts" "$hostsPath" 2>&1
                     if ($LASTEXITCODE -eq 0 -and (Get-Content $hostsPath -Raw) -match "127\.0\.0\.1\s+sidekick") {
-                        Write-Info "Added 'sidekick' to hosts — http://sidekick:9119 now works"
+                        Write-Info "Added 'sidekick' to hosts - http://sidekick:9119 now works"
                         $hostsOk = $true
                     } else {
                         Write-Info "Hosts file is read-only or admin-protected (http://sidekick:9119 will not resolve)."
@@ -1762,7 +1762,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
                 }
                 # CRITICAL: Start dashboard DETACHED from the installer console.
                 # Using -NoNewWindow binds the process to the installer's
-                # console session — when the installer calls exit 0,
+                # console session - when the installer calls exit 0,
                 # Windows kills the console, and sidekick dies with it.
                 # The user sees "success" then ERR_CONNECTION_REFUSED.
                 #
@@ -1781,22 +1781,22 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
                         $healthOk = $true
                         break
                     } catch {
-                        # Not ready yet — keep waiting
+                        # Not ready yet - keep waiting
                     }
                 }
                 if ($healthOk) {
                     Write-Success "Dashboard health check passed"
                 } else {
-                    Write-Warn "Dashboard health check timed out — may still be starting"
+                    Write-Warn "Dashboard health check timed out - may still be starting"
                 }
                 if ($hostsOk) {
                     Start-Process "http://sidekick:8787"
                 } else {
                     Start-Process "http://127.0.0.1:8787"
                 }
-                Write-Success "WebUI dashboard started — open http://sidekick:8787 (or http://127.0.0.1:8787 if hosts-file is locked)"
+                Write-Success "WebUI dashboard started - open http://sidekick:8787 (or http://127.0.0.1:8787 if hosts-file is locked)"
         } else {
-            Write-Warn "sidekick.exe not found — start dashboard manually with: .\start.ps1 dashboard"
+            Write-Warn "sidekick.exe not found - start dashboard manually with: .\start.ps1 dashboard"
         }
     } catch {
         Write-Warn "Could not auto-start WebUI: $_"
@@ -1819,7 +1819,7 @@ try {
     Write-Host "  Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1' -OutFile install.ps1" -ForegroundColor Yellow
     Write-Host "  .\\install.ps1" -ForegroundColor Yellow
     Write-Host ""
-    Write-Info "→ Log file: $LogFile"
+    Write-Info "-> Log file: $LogFile"
     Write-Host ""
     Pause-IfElevated -ExitCode 1
     exit 1
