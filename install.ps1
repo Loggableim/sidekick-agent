@@ -223,7 +223,7 @@ function Invoke-External {
         [Parameter(Mandatory=$true)]
         [string]$FilePath,
         [string[]]$ArgumentList,
-        [string]$WorkingDirectory,
+        [string]$WorkingDirectory = ".",
         [int]$TimeoutSeconds = 300
     )
 
