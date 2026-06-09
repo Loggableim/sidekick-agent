@@ -352,7 +352,7 @@ function Ensure-Venv {
     Write-Info "Creating virtual environment with uv (Python $PythonVersion)..."
     Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--python", $PythonVersion, "`"$VenvPath`"")
+    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--seed", "--python", $PythonVersion, "`"$VenvPath`"")
 
     if ($result.ExitCode -eq 0 -and (Test-Path $venvPython)) {
         $ver = & $venvPython --version 2>$null
@@ -1023,6 +1023,7 @@ function Install-Dependencies {
         @{ Name = "all (with RL/matrix extras)"; Spec = ".[all]" },
         @{ Name = "PyPI-only extras (no git deps)"; Spec = ".[web,mcp,cron,cli,voice,messaging,slack,dev,acp,pty,homeassistant,sms,tts-premium,honcho,google,mistral,bedrock,dingtalk,feishu,modal,daytona,vercel]" },
         @{ Name = "dashboard + core platforms"; Spec = ".[web,mcp,cron,cli,messaging,dev]" },
+        @{ Name = "webui + minimal"; Spec = ".[web]" },
         @{ Name = "core only (no extras)"; Spec = "." }
     )
     $installed = $false
