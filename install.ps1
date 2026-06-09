@@ -1030,7 +1030,7 @@ function Install-Dependencies {
     $venvPython = "$script:VenvPath\Scripts\python.exe"
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        & $UvCmd pip install --python "$venvPython" -e $tier.Spec
+        & $UvCmd pip install -e $tier.Spec
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
@@ -1059,7 +1059,7 @@ function Install-Dependencies {
         if (-not $webOk) {
             Write-Warn "fastapi/uvicorn not importable - `sidekick dashboard` will not work."
             Write-Info "Attempting targeted install of [web] extra as last resort..."
-            & $UvCmd pip install --python "$venvPython" -e ".[web]"
+            & $UvCmd pip install -e ".[web]"
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "[web] extra installed; `sidekick dashboard` should now work."
             } else {
