@@ -992,12 +992,44 @@ function Install-Repository {
     Write-Success "Repository ready"
 }
 
+function Stop-RunningSidekickProcesses {
+    Write-Info "Stopping any running Sidekick processes before dependency install..."
+
+    $stopped = @()
+    try {
+        $procs = Get-Process -Name "sidekick" -ErrorAction SilentlyContinue
+        foreach ($proc in @($procs)) {
+            try {
+                Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                $stopped += $proc.Id
+            } catch {
+                Write-Warn "Could not stop sidekick PID $($proc.Id): $_"
+            }
+        }
+    } catch {
+        Write-Warn "Could not inspect running sidekick processes: $_"
+    }
+
+    foreach ($name in @("Sidekick WebUI", "Sidekick Gateway")) {
+        try {
+            taskkill /f /fi "WINDOWTITLE eq $name" 2>$null | Out-Null
+        } catch { }
+    }
+
+    if ($stopped.Count -gt 0) {
+        Write-Success "Stopped running Sidekick process(es): $($stopped -join ', ')"
+    } else {
+        Write-Info "No running sidekick.exe process found"
+    }
+}
+
 
 
 function Install-Dependencies {
     Write-Info "Installing dependencies..."
     
     Push-Location $InstallDir
+    Stop-RunningSidekickProcesses
     
     if (-not $NoVenv) {
         # Tell uv to install into our venv (no activation needed)
