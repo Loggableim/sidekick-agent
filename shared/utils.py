@@ -96,7 +96,7 @@ def atomic_json_write(
             _restore_file_mode(path, prev_mode)
 
 
-def atomic_yaml_write(path: Union[str, Path], data: Any, *, default_flow_style: bool = False) -> None:
+def atomic_yaml_write(path: Union[str, Path], data: Any, *, default_flow_style: bool = False, extra_content: str | None = None) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     prev_mode = _preserve_file_mode(path)
@@ -111,6 +111,9 @@ def atomic_yaml_write(path: Union[str, Path], data: Any, *, default_flow_style: 
             delete=False,
         ) as f:
             yaml.safe_dump(data, f, default_flow_style=default_flow_style, allow_unicode=True, sort_keys=False)
+            if extra_content:
+                f.write("\n")
+                f.write(extra_content)
             f.flush()
             os.fsync(f.fileno())
             tmp_name = f.name
