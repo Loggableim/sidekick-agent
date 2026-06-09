@@ -55,23 +55,22 @@ $PythonVersion = "3.11"
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "+---------------------------------------------------------+" -ForegroundColor Cyan
-    Write-Host "|             ~ Sidekick Installer                         |" -ForegroundColor Cyan
-    Write-Host "+---------------------------------------------------------+" -ForegroundColor Cyan
-    Write-Host "|  An open source AI agent for your terminal.              |" -ForegroundColor Cyan
-    Write-Host "+---------------------------------------------------------+" -ForegroundColor Cyan
+    Write-Host "  +-------------------------------------------------------------+" -ForegroundColor White
+    Write-Host "  |                  Sidekick Installer                          |" -ForegroundColor Magenta
+    Write-Host "  |  An open source AI agent for your terminal.                  |" -ForegroundColor DarkGray
+    Write-Host "  +-------------------------------------------------------------+" -ForegroundColor White
     Write-Host ""
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "-> $Message" -ForegroundColor Cyan
+    Write-Host "  >> $Message" -ForegroundColor Yellow
     if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] -> $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "[OK] $Message" -ForegroundColor Green
+    Write-Host "  DONE $Message" -ForegroundColor Green
     if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   [OK] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
@@ -1028,6 +1027,7 @@ function Install-Dependencies {
         @{ Name = "core only (no extras)"; Spec = "." }
     )
     $installed = $false
+    $env:VIRTUAL_ENV = $script:VenvPath
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
         & $UvCmd pip install -e $tier.Spec
