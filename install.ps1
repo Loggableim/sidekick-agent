@@ -20,6 +20,7 @@ $SidekickHome = "$env:LOCALAPPDATA\sidekick"
 $InstallDir = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 # ============================================================================
 # Log file setup
@@ -1048,7 +1049,7 @@ function Install-Dependencies {
     # users hit and lazy-import errors from `sidekick dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
     if (Test-Path $pythonExe) {
         $webOk = $false
         try {
@@ -1091,7 +1092,7 @@ function Set-PathVariable {
     if ($NoVenv) {
         $sidekickBin = "$InstallDir"
     } else {
-        $sidekickBin = "$InstallDir\venv\Scripts"
+        $sidekickBin = "$script:VenvPath\Scripts"
     }
     
     # Add the venv Scripts dir to user PATH so sidekick is globally available
