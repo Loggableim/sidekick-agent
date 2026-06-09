@@ -46,7 +46,7 @@ Documentation = "https://docs.sidekick-agent.dev"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["sidekick_constants", "bootstrap"]
+py-modules = ["run_agent", "sidekick_constants", "bootstrap"]
 
 [tool.setuptools.packages.find]
 include = [

@@ -19,11 +19,10 @@ sys.modules["sidekick_time"] = _shim_time
 
 # ---------------------------------------------------------------------------
 # Register run_agent stub so that cron and web code importing
-# ``from run_agent import AIAgent`` resolves without an import hook.
-# ---------------------------------------------------------------------------
-import runtime._compat.run_agent as _run_agent_stub  # noqa: E402
-
-sys.modules["run_agent"] = _run_agent_stub
+# The real run_agent.py at the repo root is the canonical implementation.
+# Do NOT register a stub alias here — it would shadow the real module
+# and cause ``AIAgent.run_conversation(persist_user_message=...)`` to fail
+# with a TypeError (the stub doesn't accept that parameter).
 
 # ---------------------------------------------------------------------------
 # Register runtime._compat.shim_state as sidekick_state so that code
