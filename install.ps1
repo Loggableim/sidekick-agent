@@ -55,34 +55,33 @@ $PythonVersion = "3.11"
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "  +-------------------------------------------------------------+" -ForegroundColor White
-    Write-Host "  |                  Sidekick Installer                          |" -ForegroundColor Magenta
-    Write-Host "  |  An open source AI agent for your terminal.                  |" -ForegroundColor DarkGray
-    Write-Host "  +-------------------------------------------------------------+" -ForegroundColor White
+    Write-Host "  +--------------------=[ Sidekick Agent ]=---------------------+" -ForegroundColor White
+    Write-Host "  | Open source AI agent for your terminal                      |" -ForegroundColor DarkGray
+    Write-Host "  +------------------------------------------------------------+" -ForegroundColor White
     Write-Host ""
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "  >> $Message" -ForegroundColor Yellow
+    Write-Host "  [..] $Message" -ForegroundColor Green
     if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] -> $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "  DONE $Message" -ForegroundColor Green
+    Write-Host "  [OK] $Message" -ForegroundColor DarkGray
     if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   [OK] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host "[!] $Message" -ForegroundColor Yellow
+    Write-Host "  [!!] $Message" -ForegroundColor Yellow
     if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] [!] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Err {
     param([string]$Message)
-    Write-Host "[FAIL] $Message" -ForegroundColor Red
+    Write-Host "  [FAIL] $Message" -ForegroundColor Red
     if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  [FAIL] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
