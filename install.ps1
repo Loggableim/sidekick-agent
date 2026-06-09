@@ -1658,13 +1658,27 @@ function Main {
     Write-Completion
     try {
         $desktopPath = [Environment]::GetFolderPath("Desktop")
-        $batPath = "$desktopPath\Sidekick WebUI.bat"
-        "@echo off
-cd /d `"$InstallDir`"
-start `"`" `"$script:VenvPath\Scripts\python.exe`" `"web\server.py`"
-echo WebUI started on http://127.0.0.1:8787
-echo Close this window to stop the WebUI.
-pause" | Set-Content -Path $batPath -Encoding ASCII
+        $batPath = "$desktopPath\Sidekick.bat"
+$batContent = '@echo off
+title Sidekick Agent
+cd /d "' + $InstallDir + '"
+set SIDEKICK_HOME=' + $SidekickHome + '
+set HERMES_HOME=' + $SidekickHome + '
+echo [1/2] Starte Gateway (Agent-Kommunikation)...
+start "Sidekick Gateway" /min "' + $script:VenvPath + '\Scripts\python.exe" -m sidekick_app gateway run --replace --quiet
+echo [2/2] Starte WebUI...
+start "Sidekick WebUI" /min "' + $script:VenvPath + '\Scripts\python.exe" "web\server.py"
+echo.
+echo WebUI: http://127.0.0.1:8787
+echo Gateway: aktiv (minimiert)
+echo.
+echo Close dieses Fenster zum Beenden aller Dienste.
+pause
+echo Shutdown...
+taskkill /f /fi "WINDOWTITLE eq Sidekick WebUI" >nul 2>&1
+taskkill /f /fi "WINDOWTITLE eq Sidekick Gateway" >nul 2>&1
+echo Done.'
+        Set-Content -Path $batPath -Value $batContent -Encoding ASCII
     } catch { }
     Write-Success "Desktop shortcut created"
 }

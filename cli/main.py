@@ -1422,7 +1422,7 @@ def cmd_chat(args):
         )
 
     # Import and run the CLI
-    from cli.main import main as cli_main
+    from cli.cli import main as cli_main
 
     # Build kwargs from args
     kwargs = {
