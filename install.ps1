@@ -19,20 +19,6 @@ $Branch = "master"
 $SidekickHome = "$env:LOCALAPPDATA\sidekick"
 $InstallDir = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
 
-# Parse command-line arguments when run as a script file (.\\install.ps1 -NoVenv -SkipSetup)
-if ($MyInvocation.MyCommand.CommandType -eq "ExternalScript") {
-    # Simple arg parser for common flags
-    for ($i = 0; $i -lt $args.Count; $i++) {
-        switch -wildcard ($args[$i]) {
-            "-NoVenv" { $NoVenv = $true }
-            "-SkipSetup" { $SkipSetup = $true }
-            "-Branch" { if ($i+1 -lt $args.Count) { $Branch = $args[++$i] } }
-            "-SidekickHome" { if ($i+1 -lt $args.Count) { $SidekickHome = $args[++$i] } }
-            "-InstallDir" { if ($i+1 -lt $args.Count) { $InstallDir = $args[++$i] } }
-        }
-    }
-}
-
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
