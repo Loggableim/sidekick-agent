@@ -236,7 +236,7 @@ def _debug(msg: str) -> None:
     broken stderr pipe must not kill the whole gateway — the main
     command pipe (stdin+stdout) is what actually matters.
     """
-    if os.environ.get("HERMES_VOICE_DEBUG", "").strip() != "1":
+    if (os.environ.get("SIDEKICK_VOICE_DEBUG") or os.environ.get("HERMES_VOICE_DEBUG", "")).strip() != "1":
         return
     try:
         print(f"[voice] {msg}", file=sys.stderr, flush=True)

@@ -715,10 +715,11 @@ def _sync_sidekick_home_from_systemd_unit(system: bool) -> None:
     unit_home = env.get("HERMES_HOME", "").strip()
     if not unit_home:
         return
-    current = os.environ.get("HERMES_HOME", "").strip()
+    current = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", "").strip()
     if current == unit_home:
         return
-    os.environ["HERMES_HOME"] = unit_home
+    os.environ["SIDEKICK_HOME"] = unit_home
+    os.environ["HERMES_HOME"] = unit_home  # backward compat
 
 
 def _read_systemd_unit_properties(
@@ -1238,7 +1239,7 @@ def _windows_gateway_should_absorb_console_controls() -> bool:
     if not is_windows():
         return False
 
-    detached = os.getenv("HERMES_GATEWAY_DETACHED", "").strip().lower()
+    detached = (os.getenv("SIDEKICK_GATEWAY_DETACHED") or os.getenv("HERMES_GATEWAY_DETACHED", "")).strip().lower()
     if detached in {"1", "true", "yes", "on"}:
         return True
 
@@ -3079,7 +3080,7 @@ def _guard_official_docker_root_gateway() -> None:
     """Refuse gateway startup when the official Docker privilege drop was bypassed."""
     if not hasattr(os, "geteuid") or os.geteuid() != 0:
         return
-    if _truthy_env(os.getenv("HERMES_ALLOW_ROOT_GATEWAY")):
+    if _truthy_env(os.getenv("SIDEKICK_ALLOW_ROOT_GATEWAY") or os.getenv("HERMES_ALLOW_ROOT_GATEWAY")):
         return
     if not _is_official_docker_checkout():
         return
@@ -3195,7 +3196,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
     from datetime import datetime as _dt, timezone as _tz
 
     def _exit_diag(tag: str, **extra: object) -> None:
-        if os.environ.get("HERMES_GATEWAY_EXIT_DIAG", "1") != "1":
+        if (os.environ.get("SIDEKICK_GATEWAY_EXIT_DIAG") or os.environ.get("HERMES_GATEWAY_EXIT_DIAG", "1")) != "1":
             return
         try:
             from runtime._compat.shim_constants import get_sidekick_home as _ghh

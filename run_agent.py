@@ -15071,7 +15071,7 @@ class AIAgent:
             # protocol violation).  The agent loop strips tools before calling
             # _handle_max_iterations, so the model cannot call kanban_block
             # itself — we must do it on its behalf.
-            _kanban_task = os.environ.get("HERMES_KANBAN_TASK")
+            _kanban_task = os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")
             if _kanban_task:
                 try:
                     handle_function_call(

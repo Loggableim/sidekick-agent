@@ -112,7 +112,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 #
 # Many modules cache HERMES_HOME at import time (module-level constants).
 # We intercept --profile/-p from sys.argv here and set the env var so that
-# every subsequent ``os.getenv("HERMES_HOME", ...)`` resolves correctly.
+# every subsequent ``os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", ...)`` resolves correctly.
 # The flag is stripped from sys.argv so argparse never sees it.
 # Falls back to ~/.sidekick/active_profile for sticky default.
 # ---------------------------------------------------------------------------

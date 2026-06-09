@@ -27,7 +27,7 @@ from contextlib import redirect_stdout, redirect_stderr
 # A test that legitimately needs real outbound spawns the server with the env
 # var unset (no current callers — every test_server-using test should be
 # mockable).
-if os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK", "").strip() in ("1", "true", "yes"):
+if (os.environ.get("SIDEKICK_WEBUI_TEST_NETWORK_BLOCK") or os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK", "")).strip() in ("1", "true", "yes"):
     _REAL_CREATE_CONN = socket.create_connection
     _REAL_SOCK_CONNECT = socket.socket.connect
 
@@ -135,7 +135,7 @@ class _Tee:
 
 
 def _resolve_log_file():
-    log_file = os.environ.get("HERMES_WEBUI_LOG_FILE", "").strip()
+    log_file = (os.environ.get("SIDEKICK_WEBUI_LOG_FILE") or os.environ.get("HERMES_WEBUI_LOG_FILE", "")).strip()
     if log_file:
         return log_file
     return str(STATE_DIR.parent / "webui.log")
