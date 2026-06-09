@@ -27,7 +27,7 @@ from contextlib import redirect_stdout, redirect_stderr
 # A test that legitimately needs real outbound spawns the server with the env
 # var unset (no current callers — every test_server-using test should be
 # mockable).
-if os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK", "").strip() in ("1", "true", "yes"):
+if (os.environ.get("SIDEKICK_WEBUI_TEST_NETWORK_BLOCK") or os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK", "")).strip() in ("1", "true", "yes"):
     _REAL_CREATE_CONN = socket.create_connection
     _REAL_SOCK_CONNECT = socket.socket.connect
 
@@ -87,7 +87,7 @@ if os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK", "").strip() in ("1", "true"
         if _addr_is_local(host):
             return _REAL_CREATE_CONN(address, *a, **kw)
         raise OSError(
-            f"hermes test network isolation (server.py): outbound to {address!r} blocked"
+            f"sidekick test network isolation (server.py): outbound to {address!r} blocked"
         )
 
     def _blocked_socket_connect(self, address):
@@ -98,7 +98,7 @@ if os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK", "").strip() in ("1", "true"
         if _addr_is_local(host):
             return _REAL_SOCK_CONNECT(self, address)
         raise OSError(
-            f"hermes test network isolation (server.py): socket.connect to {address!r} blocked"
+            f"sidekick test network isolation (server.py): socket.connect to {address!r} blocked"
         )
 
     socket.create_connection = _blocked_create_connection
@@ -135,7 +135,7 @@ class _Tee:
 
 
 def _resolve_log_file():
-    log_file = os.environ.get("HERMES_WEBUI_LOG_FILE", "").strip()
+    log_file = (os.environ.get("SIDEKICK_WEBUI_LOG_FILE") or os.environ.get("HERMES_WEBUI_LOG_FILE", "")).strip()
     if log_file:
         return log_file
     return str(STATE_DIR.parent / "webui.log")
@@ -421,7 +421,7 @@ def _start_cron_ticker() -> None:
 
 
 def main() -> None:
-    from web.api.config import print_startup_config, verify_hermes_imports, _HERMES_FOUND
+    from web.api.config import print_startup_config, verify_sidekick_imports, _SIDEKICK_FOUND
 
     log_path = _resolve_log_file()
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -486,14 +486,14 @@ def main() -> None:
         print(f'        and memory via the local API. Set HERMES_WEBUI_PASSWORD to', flush=True)
         print(f'        enable authentication.', flush=True)
 
-    ok, missing, errors = verify_hermes_imports()
-    if not ok and _HERMES_FOUND:
+    ok, missing, errors = verify_sidekick_imports()
+    if not ok and _SIDEKICK_FOUND:
         print(f'[!!] Warning: Nova agent found but missing modules: {missing}', flush=True)
         for mod, err in errors.items():
             print(f'     {mod}: {err}', flush=True)
         print('     Attempting to install missing dependencies from agent requirements.txt...', flush=True)
         auto_install_agent_deps()
-        ok, missing, errors = verify_hermes_imports()
+        ok, missing, errors = verify_sidekick_imports()
         if not ok:
             print(f'[!!] Still missing after install attempt: {missing}', flush=True)
             for mod, err in errors.items():

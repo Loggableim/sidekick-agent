@@ -152,10 +152,10 @@ def run_oneshot(
     # not host it), and silently picking the provider's catalog default hides
     # the mismatch.  Require the caller to be explicit.  Validate BEFORE the
     # stderr redirect so the message actually reaches the terminal.
-    env_model_early = os.getenv("HERMES_INFERENCE_MODEL", "").strip()
+    env_model_early = (os.getenv("SIDEKICK_INFERENCE_MODEL") or os.getenv("HERMES_INFERENCE_MODEL", "")).strip()
     if provider and not ((model or "").strip() or env_model_early):
         sys.stderr.write(
-            "sidekick -z: --provider requires --model (or HERMES_INFERENCE_MODEL). "
+            "sidekick -z: --provider requires --model (or SIDEKICK_INFERENCE_MODEL / HERMES_INFERENCE_MODEL). "
             "Pass both explicitly, or neither to use your configured defaults.\n"
         )
         return 2
@@ -168,8 +168,10 @@ def run_oneshot(
 
     # Auto-approve any shell / tool approvals.  Non-interactive by
     # definition — a prompt would hang forever.
-    os.environ["HERMES_YOLO_MODE"] = "1"
-    os.environ["HERMES_ACCEPT_HOOKS"] = "1"
+    os.environ["SIDEKICK_YOLO_MODE"] = "1"
+    os.environ["SIDEKICK_ACCEPT_HOOKS"] = "1"
+    os.environ["HERMES_YOLO_MODE"] = "1"  # backward compat
+    os.environ["HERMES_ACCEPT_HOOKS"] = "1"  # backward compat
 
     # Redirect stderr AND stdout to devnull for the entire call tree.
     # We'll print the final response to the real stdout at the end.
@@ -224,7 +226,7 @@ def _run_agent(
 ) -> str:
     """Build an AIAgent exactly like a normal CLI chat turn would, then
     run a single conversation.  Returns the final response string."""
-    # Imports are local so they don't run when hermes is invoked for
+    # Imports are local so they don't run when sidekick is invoked for
     # other commands (keeps top-level CLI startup cheap).
     from cli.config import load_config
     from cli.models import detect_provider_for_model
@@ -241,7 +243,7 @@ def _run_agent(
     else:
         cfg_model = model_cfg.get("default") or model_cfg.get("model") or ""
 
-    env_model = os.getenv("HERMES_INFERENCE_MODEL", "").strip()
+    env_model = (os.getenv("SIDEKICK_INFERENCE_MODEL") or os.getenv("HERMES_INFERENCE_MODEL", "")).strip()
     effective_model = (model or "").strip() or env_model or cfg_model
 
     # Resolve effective provider: explicit arg → (auto-detect from model if

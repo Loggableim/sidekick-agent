@@ -793,7 +793,7 @@ class _OAuthCallbackHandler(http.server.BaseHTTPRequestHandler):
 
 
 _SUCCESS_PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Hermes — signed in</title>
+<html><head><meta charset="utf-8"><title>Sidekick — signed in</title>
 <style>
 body { font: 16px/1.5 system-ui, sans-serif; margin: 10vh auto; max-width: 32rem; text-align: center; color: #222; }
 h1 { color: #1a7f37; } p { color: #555; }
@@ -803,7 +803,7 @@ h1 { color: #1a7f37; } p { color: #555; }
 """
 
 _ERROR_PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Hermes — sign-in failed</title>
+<html><head><meta charset="utf-8"><title>Sidekick — sign-in failed</title>
 <style>
 body {{ font: 16px/1.5 system-ui, sans-serif; margin: 10vh auto; max-width: 32rem; text-align: center; color: #222; }}
 h1 {{ color: #b42318; }} p {{ color: #555; }}

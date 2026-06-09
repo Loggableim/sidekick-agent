@@ -118,9 +118,9 @@ _SANE_PATH = os.pathsep.join(_SANE_PATH_DIRS)
 
 
 def _webui_browser_context() -> tuple[str, str, str]:
-    session_id = os.getenv("HERMES_WEBUI_BROWSER_SESSION_ID", "").strip()
-    base_url = os.getenv("HERMES_WEBUI_BROWSER_BASE_URL", "").strip().rstrip("/")
-    token = os.getenv("HERMES_WEBUI_BROWSER_PERMISSION_TOKEN", "").strip()
+    session_id = os.getenv("SIDEKICK_WEBUI_BROWSER_SESSION_ID") or os.getenv("HERMES_WEBUI_BROWSER_SESSION_ID", "").strip()
+    base_url = os.getenv("SIDEKICK_WEBUI_BROWSER_BASE_URL") or os.getenv("HERMES_WEBUI_BROWSER_BASE_URL", "").strip().rstrip("/")
+    token = os.getenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN") or os.getenv("HERMES_WEBUI_BROWSER_PERMISSION_TOKEN", "").strip()
     return session_id, base_url, token
 
 
@@ -1133,7 +1133,7 @@ def _emergency_cleanup_all_sessions():
     Called on process exit or interrupt to prevent orphaned sessions.
 
     Also runs the orphan reaper to clean up daemons left behind by previously
-    crashed hermes processes — this way every clean hermes exit sweeps
+    crashed sidekick processes — this way every clean sidekick exit sweeps
     accumulated orphans, not just ones that actively used the browser tool.
     """
     global _cleanup_done
@@ -1156,9 +1156,9 @@ def _emergency_cleanup_all_sessions():
                 _session_last_activity.clear()
                 _recording_sessions.clear()
 
-    # Sweep orphans from other crashed hermes processes.  Safe even if we
+    # Sweep orphans from other crashed sidekick processes.  Safe even if we
     # never used the browser — uses owner_pid liveness to avoid reaping
-    # daemons owned by other live hermes processes.
+    # daemons owned by other live sidekick processes.
     try:
         _reap_orphaned_browser_sessions()
     except Exception as e:
@@ -1207,10 +1207,10 @@ def _cleanup_inactive_browser_sessions():
 
 
 def _write_owner_pid(socket_dir: str, session_name: str) -> None:
-    """Record the current hermes PID as the owner of a browser socket dir.
+    """Record the current sidekick PID as the owner of a browser socket dir.
 
     Written atomically to ``<socket_dir>/<session_name>.owner_pid`` so the
-    orphan reaper can distinguish daemons owned by a live hermes process
+    orphan reaper can distinguish daemons owned by a live sidekick process
     (don't reap) from daemons whose owner crashed (reap).  Best-effort —
     an OSError here just falls back to the legacy ``tracked_names``
     heuristic in the reaper.
@@ -1233,13 +1233,13 @@ def _reap_orphaned_browser_sessions():
 
     This function scans the tmp directory for ``agent-browser-*`` socket dirs
     left behind by previous runs, reads the daemon PID files, and kills any
-    daemons whose owning hermes process is no longer alive.
+    daemons whose owning sidekick process is no longer alive.
 
     Ownership detection priority:
       1. ``<session>.owner_pid`` file (written by current code) — if the
-         referenced hermes PID is alive, leave the daemon alone regardless
+         referenced sidekick PID is alive, leave the daemon alone regardless
          of whether it's in *this* process's ``_active_sessions``.  This is
-         cross-process safe: two concurrent hermes instances won't reap each
+         cross-process safe: two concurrent sidekick instances won't reap each
          other's daemons.
       2. Fallback for daemons that predate owner_pid: check
          ``_active_sessions`` in the current process.  If not tracked here,
@@ -1290,7 +1290,7 @@ def _reap_orphaned_browser_sessions():
                 owner_alive = None  # corrupt file — fall through
 
         if owner_alive is True:
-            # Owner is alive — this session belongs to a live hermes process.
+            # Owner is alive — this session belongs to a live sidekick process.
             continue
 
         if owner_alive is None:
@@ -1936,7 +1936,7 @@ def _run_browser_command(
             f"agent-browser-{session_info['session_name']}"
         )
         os.makedirs(task_socket_dir, mode=0o700, exist_ok=True)
-        # Record this hermes PID as the session owner (cross-process safe
+        # Record this sidekick PID as the session owner (cross-process safe
         # orphan detection — see _write_owner_pid).
         _write_owner_pid(task_socket_dir, session_info['session_name'])
         logger.debug("browser cmd=%s task=%s socket_dir=%s (%d chars)",

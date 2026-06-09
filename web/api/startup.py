@@ -21,19 +21,19 @@ def fix_credential_permissions() -> None:
       - HERMES_HOME_MODE     → group bits are allowed if set by the operator,
                                only world-readable/world-writable files are fixed
     """
-    if os.environ.get('HERMES_SKIP_CHMOD', '').strip() in ('1', 'true'):
+    if os.environ.get('SIDEKICK_SKIP_CHMOD', '').strip() in ('1', 'true') or os.environ.get('HERMES_SKIP_CHMOD', '').strip() in ('1', 'true'):
         return
 
     # Parse operator-declared mode to know if group bits are intentional
     declared_mode = None
-    raw_mode = os.environ.get('HERMES_HOME_MODE', '').strip()
+    raw_mode = os.environ.get('SIDEKICK_HOME_MODE', '').strip() or os.environ.get('HERMES_HOME_MODE', '').strip()
     if raw_mode:
         try:
             declared_mode = int(raw_mode, 8)
         except ValueError:
             pass
 
-    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    hermes_home = Path(os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME', str(Path.home() / '.sidekick')))
     if not hermes_home.is_dir():
         return
     for name in _SENSITIVE_FILES:
@@ -56,11 +56,11 @@ def fix_credential_permissions() -> None:
 
 
 def _agent_dir() -> Path | None:
-    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    hermes_home = Path(os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME', str(Path.home() / '.sidekick')))
     for raw in [
         os.environ.get('SIDEKICK_WEBUI_AGENT_DIR', '').strip(),
         os.environ.get('HERMES_WEBUI_AGENT_DIR', '').strip(),
-        str(hermes_home / 'hermes-agent'),
+        str(hermes_home / 'sidekick-agent'),
     ]:
         if not raw:
             continue
@@ -76,7 +76,7 @@ def _trusted_agent_dir(agent_dir: Path) -> bool:
     on POSIX systems, is owned by the current process user.
 
     Intentionally does NOT enforce a canonical path (i.e. does not require
-    the dir to be ~/.hermes/hermes-agent), so custom SIDEKICK_WEBUI_AGENT_DIR
+    the dir to be ~/.sidekick/sidekick-agent), so custom SIDEKICK_WEBUI_AGENT_DIR
     or HERMES_WEBUI_AGENT_DIR paths work correctly when
     SIDEKICK_WEBUI_AUTO_INSTALL=1 is set.
     """

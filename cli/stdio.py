@@ -105,7 +105,7 @@ def configure_windows_stdio() -> bool:
         _CONFIGURED = True
         return False
 
-    if os.environ.get("HERMES_DISABLE_WINDOWS_UTF8") in {"1", "true", "True", "yes"}:
+    if (os.environ.get("SIDEKICK_DISABLE_WINDOWS_UTF8") or os.environ.get("HERMES_DISABLE_WINDOWS_UTF8")) in {"1", "true", "True", "yes"}:
         _CONFIGURED = True
         return False
 
@@ -127,15 +127,15 @@ def configure_windows_stdio() -> bool:
     if _default_editor and not os.environ.get("EDITOR") and not os.environ.get("VISUAL"):
         os.environ["EDITOR"] = _default_editor
 
-    # Augment PATH with the Hermes-managed Git install directories so
+    # Augment PATH with the Sidekick-managed Git install directories so
     # subprocess calls (bash, rg, grep, etc.) resolve even in sessions
     # that started before the User PATH broadcast reached them.  When
     # install.ps1 adds these to User PATH via SetEnvironmentVariable,
-    # already-running shells don't see the change — which means hermes
+    # already-running shells don't see the change — which means sidekick
     # launched from the install session won't find rg / bash / grep
     # even though they're "installed".  Prepending the known paths here
     # closes that gap.  No-op when the paths don't exist (e.g. system-Git
-    # install without Hermes-managed PortableGit).
+    # install without Sidekick-managed PortableGit).
     _augment_path_with_known_tools()
 
     # Flip the console code page first so that any subprocess that

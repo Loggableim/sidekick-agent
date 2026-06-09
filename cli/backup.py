@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Directory names to skip entirely (matched against each path component)
 _EXCLUDED_DIRS = {
-    "hermes-agent",     # the codebase repo — re-clone instead
+    "sidekick-agent",     # the codebase repo — re-clone instead
     "__pycache__",      # bytecode caches — regenerated on import
     ".git",             # nested git dirs (profiles shouldn't have these, but safety)
     "node_modules",     # js deps if website/ somehow leaks in
@@ -66,7 +66,7 @@ _SECRET_FILE_NAMES = {".env", "auth.json", "state.db"}
 
 
 def _should_exclude(rel_path: Path) -> bool:
-    """Return True if *rel_path* (relative to hermes root) should be skipped."""
+    """Return True if *rel_path* (relative to sidekick root) should be skipped."""
     parts = rel_path.parts
 
     # Any path component matches an excluded dir name
@@ -130,7 +130,7 @@ def run_backup(args) -> None:
     hermes_root = get_default_hermes_root()
 
     if not hermes_root.is_dir():
-        print(f"Error: Hermes home directory not found at {display_sidekick_home()}")
+        print(f"Error: Sidekick home directory not found at {display_sidekick_home()}")
         sys.exit(1)
 
     # Determine output path
@@ -176,7 +176,7 @@ def run_backup(args) -> None:
             if _should_exclude(rel):
                 continue
 
-            # Skip the output zip itself if it happens to be inside hermes root
+            # Skip the output zip itself if it happens to be inside sidekick root
             try:
                 if fpath.resolve() == out_path.resolve():
                     continue
@@ -262,7 +262,7 @@ def _validate_backup_zip(zf: zipfile.ZipFile) -> tuple[bool, str]:
     if not names:
         return False, "zip archive is empty"
 
-    # Look for telltale files that a hermes home would have
+    # Look for telltale files that a sidekick home would have
     markers = {"config.yaml", ".env", "state.db"}
     found = set()
     for n in names:
@@ -283,7 +283,7 @@ def _validate_backup_zip(zf: zipfile.ZipFile) -> tuple[bool, str]:
 def _detect_prefix(zf: zipfile.ZipFile) -> str:
     """Detect if the zip has a common directory prefix wrapping all entries.
 
-    Some tools zip as `.hermes/config.yaml` instead of `config.yaml`.
+    Some tools zip as `.sidekick/config.yaml` instead of `config.yaml`.
     Returns the prefix to strip (empty string if none).
     """
     names = [n for n in zf.namelist() if not n.endswith("/")]
@@ -298,7 +298,7 @@ def _detect_prefix(zf: zipfile.ZipFile) -> str:
     if len(first_parts) == 1:
         prefix = first_parts.pop()
         # Only strip if it looks like a hermes dir name
-        if prefix in {".hermes", "hermes"}:
+        if prefix in {".sidekick", "hermes"}:
             return prefix + "/"
 
     return ""
@@ -464,7 +464,7 @@ def run_import(args) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Quick state snapshots (used by /snapshot slash command and hermes backup --quick)
+# Quick state snapshots (used by /snapshot slash command and sidekick backup --quick)
 # ---------------------------------------------------------------------------
 
 # Critical state files to include in quick snapshots (relative to HERMES_HOME).

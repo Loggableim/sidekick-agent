@@ -254,7 +254,7 @@ def auth_add_command(args) -> None:
 
     if provider == "nous":
         # Codex-style auto-import: if a shared Nous credential lives at
-        # <hermes-root>/shared/nous_auth.json (written by any previous
+        # <sidekick-root>/shared/nous_auth.json (written by any previous
         # successful login), offer to import it instead of running the
         # full device-code flow. This makes `sidekick --profile <name>
         # auth add nous --type oauth` a one-tap operation for users who
@@ -450,7 +450,7 @@ def auth_remove_command(args) -> None:
         raise SystemExit(f'No credential matching "{target}" for provider {provider}.')
     print(f"Removed {provider} credential #{index} ({removed.label})")
 
-    # Unified removal dispatch.  Every credential source Hermes reads from
+    # Unified removal dispatch.  Every credential source Sidekick reads from
     # (env vars, external OAuth files, auth.json blocks, custom config)
     # has a RemovalStep registered in agent.credential_sources.  The step
     # handles its source-specific cleanup and we centralise suppression +

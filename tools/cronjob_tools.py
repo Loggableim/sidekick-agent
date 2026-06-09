@@ -146,7 +146,7 @@ def _resolve_model_override(model_obj: Optional[Dict[str, Any]]) -> tuple:
     """Resolve a model override object into (provider, model) for job storage.
 
     If provider is omitted, pins the current main provider from config so the
-    job doesn't drift when the user later changes their default via hermes model.
+    job doesn't drift when the user later changes their default via sidekick model.
 
     Returns (provider_str_or_none, model_str_or_none).
     """
@@ -649,9 +649,9 @@ def check_cronjob_requirements() -> bool:
     so no external crontab executable is required.
     """
     return bool(
-        os.getenv("HERMES_INTERACTIVE")
-        or os.getenv("HERMES_GATEWAY_SESSION")
-        or os.getenv("HERMES_EXEC_ASK")
+        os.getenv("SIDEKICK_INTERACTIVE") or os.getenv("HERMES_INTERACTIVE")
+        or os.getenv("SIDEKICK_GATEWAY_SESSION") or os.getenv("HERMES_GATEWAY_SESSION")
+        or os.getenv("SIDEKICK_EXEC_ASK") or os.getenv("HERMES_EXEC_ASK")
     )
 
 

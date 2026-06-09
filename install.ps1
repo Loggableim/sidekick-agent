@@ -1,6 +1,5 @@
 # ============================================================================
 # Sidekick Installer for Windows
-# v0.7.31 — Use Write-Host in admin-elevation block (irm | iex fix)
 # ============================================================================
 # Installation script for Windows (PowerShell).
 # Uses uv for fast Python provisioning and package management.
@@ -16,7 +15,7 @@
 param(
     [switch]$NoVenv,
     [switch]$SkipSetup,
-    [string]$Branch = "master",
+    [string]$Branch = "main",
     [string]$SidekickHome = "$env:LOCALAPPDATA\sidekick",
     [string]$InstallDir = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
 )
@@ -24,15 +23,35 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ============================================================================
-# Helper functions (defined EARLY so they're available everywhere, including
-# the admin-elevation block below. Critical for `irm | iex` pipeline mode where
-# function scoping behaves differently than for .ps1 files.)
+# Log file setup
+# ============================================================================
+$LogDir = "$env:LOCALAPPDATA\sidekick\logs"
+$LogFile = "$LogDir\install-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+
+# ============================================================================
+# Exit Code Schema
+# ============================================================================
+# 0  Success
+# 1  Generic failure (unhandled exception)
+# 2  Missing prerequisite (Python/Git/uv install failed)
+# 3  Network/download failure (timeout, DNS, HTTP)
+# 4  Git/update failure (clone, fetch, checkout)
+# 5  Install/venv failure (pip install, dependency install)
+# 6  Verification failure (doctor/smoke check failed)
 # ============================================================================
 
-# LogFile is initialized later in the "Log file setup" section, but the
-# Write-* helpers must be safe to call before that section runs. We use a
-# script-scoped variable that defaults to $null.
-$script:LogFile = $null
+# ============================================================================
+# Configuration
+# ============================================================================
+
+$RepoUrlSsh = "git@github.com:Loggableim/sidekick-agent.git"
+$RepoUrlHttps = "https://github.com/Loggableim/sidekick-agent.git"
+$PythonVersion = "3.11"
+
+# ============================================================================
+# Helper functions
+# ============================================================================
 
 function Write-Banner {
     Write-Host ""
@@ -47,25 +66,25 @@ function Write-Banner {
 function Write-Info {
     param([string]$Message)
     Write-Host "→ $Message" -ForegroundColor Cyan
-    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[INFO] → $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] → $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Success {
     param([string]$Message)
     Write-Host "✓ $Message" -ForegroundColor Green
-    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[OK]   ✓ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   ✓ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Warn {
     param([string]$Message)
     Write-Host "⚠ $Message" -ForegroundColor Yellow
-    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[WARN] ⚠ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] ⚠ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Err {
     param([string]$Message)
     Write-Host "✗ $Message" -ForegroundColor Red
-    if ($script:LogFile) { Add-Content -Path $script:LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 # Pause before closing the elevated window on error, so the user can read
@@ -205,14 +224,9 @@ function Invoke-External {
         [Parameter(Mandatory=$true)]
         [string]$FilePath,
         [string[]]$ArgumentList,
-        [string]$WorkingDirectory = (Get-Location).ProviderPath,
+        [string]$WorkingDirectory,
         [int]$TimeoutSeconds = 300
     )
-
-    # Save and temporarily override ErrorActionPreference so stderr from native
-    # commands (e.g. uv download progress) does NOT become a terminating error.
-    $savedEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
 
     # Create temp files for stdout/stderr
     $tmpOut = [System.IO.Path]::GetTempFileName()
@@ -242,8 +256,6 @@ function Invoke-External {
         }
     }
     finally {
-        # Restore ErrorActionPreference
-        $ErrorActionPreference = $savedEAP
         # Cleanup temp files
         Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
         Remove-Item $tmpErr -Force -ErrorAction SilentlyContinue
@@ -258,9 +270,9 @@ function Install-Uv {
     Write-Info "Checking for uv package manager..."
     
     # Check if uv is already available
-if (Get-Command uv -ErrorAction SilentlyContinue) {
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
         $version = uv --version
-        $script:UvCmd = (Get-Command uv).Source  # Full path required for Start-Process
+        $script:UvCmd = "uv"
         Write-Success "uv found ($version)"
         return $true
     }
@@ -317,7 +329,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 function Ensure-Venv {
     param([string]$VenvPath)
 
-    $venvPython = "$VenvPath\Scripts\python.exe"  # local alias for $script:PythonExe
+    $venvPython = "$VenvPath\Scripts\python.exe"
 
     # ── 1. If venv already exists and has a working python, use it ──
     if (Test-Path $venvPython) {
@@ -333,9 +345,9 @@ function Ensure-Venv {
 
     # ── 2. Primary path: uv venv --python (handles Python download + venv in one step) ──
     Write-Info "Creating virtual environment with uv (Python $PythonVersion)..."
-    Add-Content -Path $LogFile -Value "[INFO] Running: uv venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
+    Add-Content -Path $LogFile -Value "[INFO] Running: & $UvCmd venv --python $PythonVersion $VenvPath" -Encoding UTF8 -ErrorAction SilentlyContinue
 
-    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--python", $PythonVersion, "$VenvPath")
+    $result = Invoke-External -FilePath $script:UvCmd -ArgumentList @("venv", "--python", $PythonVersion, "`"$VenvPath`"")
 
     if ($result.ExitCode -eq 0 -and (Test-Path $venvPython)) {
         $ver = & $venvPython --version 2>$null
@@ -361,7 +373,7 @@ function Ensure-Venv {
         if ($pythonPath -and (Test-Path $pythonPath)) {
             $ver = & $pythonPath --version 2>$null
             Write-Success "Python provisioned: $ver"
-            & $pythonPath -m venv "$VenvPath"
+            & $pythonPath -m venv "`"$VenvPath`""
             if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                 $script:PythonExe = $venvPython
                 return $true
@@ -382,7 +394,7 @@ function Ensure-Venv {
             if ($pythonPath -and (Test-Path $pythonPath)) {
                 $ver = & $pythonPath --version 2>$null
                 Write-Success "Python provisioned on retry: $ver"
-                & $pythonPath -m venv "$VenvPath"
+                & $pythonPath -m venv "`"$VenvPath`""
                 if ($LASTEXITCODE -eq 0 -and (Test-Path $venvPython)) {
                     $script:PythonExe = $venvPython
                     return $true
@@ -480,16 +492,13 @@ function Install-Git {
     ``SIDEKICK_GIT_BASH_PATH`` (User scope) so Sidekick can find it in a fresh
     shell without a second PATH refresh.
     #>
-Write-Info "Checking Git..."
+    Write-Info "Checking Git..."
 
     if (Get-Command git -ErrorAction SilentlyContinue) {
-        $version = git --version 2>$null
-        if ($LASTEXITCODE -eq 0 -and $version -match "git version") {
-            Write-Success "Git found ($version)"
-            Set-GitBashEnvVar
-            return $true
-        }
-        Write-Warn "Git found on PATH but returned error (corrupt config?) — downloading PortableGit"
+        $version = git --version
+        Write-Success "Git found ($version)"
+        Set-GitBashEnvVar
+        return $true
     }
 
     # Download PortableGit into $SidekickHome\git.  Always works as long as
@@ -538,51 +547,8 @@ Write-Info "Checking Git..."
         $tmpFile = "$env:TEMP\$($asset.name)"
         $gitDir = "$SidekickHome\git"
 
-Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
-        # Use Invoke-WebRequest -OutFile (native PowerShell progress via Write-Progress in
-        # PowerShell 7+). For PowerShell 5.1 we supplement with a custom polling-based
-        # progress bar that reads the on-disk file size every 200ms.
-        try {
-            $request = [System.Net.HttpWebRequest]::Create($downloadUrl)
-            $request.UserAgent = "sidekick-installer"
-            $response = $request.GetResponse()
-            $totalSize = [int64]$response.ContentLength
-            $response.Close()
-
-            if ($totalSize -gt 0) {
-                # Polling-based progress: launch IWR in background job, watch file size
-                $iwrJob = Start-Job -ScriptBlock {
-                    param($u, $o) Invoke-WebRequest -Uri $u -OutFile $o -UseBasicParsing -TimeoutSec 600 2>&1
-                } -ArgumentList $downloadUrl, $tmpFile
-
-                $lastPct = -1
-                while ($iwrJob.State -eq "Running") {
-                    Start-Sleep -Milliseconds 250
-                    if (Test-Path $tmpFile) {
-                        $current = (Get-Item $tmpFile).Length
-                        $pct = [int](($current / $totalSize) * 100)
-                        if ($pct -ne $lastPct) {
-                            $lastPct = $pct
-                            $mb = [math]::Round($current / 1MB, 1)
-                            $totalMb = [math]::Round($totalSize / 1MB, 1)
-                            $bar = [string]::new([char]0x2588, [math]::Floor($pct / 5)) + [string]::new([char]0x2591, [math]::Ceiling((100 - $pct) / 5))
-                            Write-Progress -Activity "Downloading PortableGit" -Status "$mb MB / $totalMb MB ($pct%)" -PercentComplete $pct
-                            Write-Host "`r  ⏳ $($bar) $pct% ($mb MB / $totalMb MB)" -NoNewline -ForegroundColor DarkYellow
-                        }
-                    }
-                }
-                Receive-Job $iwrJob -Wait | Out-Null
-                Remove-Job $iwrJob -Force
-                Write-Host ""
-                Write-Progress -Activity "Downloading PortableGit" -Completed
-            } else {
-                # Unknown size — fall back to plain download
-                Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 600
-            }
-        } catch {
-            # Final fallback: plain Invoke-WebRequest
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 600
-        }
+        Write-Info "Downloading $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)..."
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 60
 
         if (Test-Path $gitDir) {
             Write-Info "Removing previous Git install at $gitDir ..."
@@ -706,12 +672,13 @@ function Set-GitBashEnvVar {
 function Test-Node {
     <#
     .SYNOPSIS
-    Check for Node.js. Sidekick core works without it. Browser tools and TUI need it.
-    Skip auto-install if SKIP_NODE_AUTOINSTALL=1 is set (saves ~5min on slow winget).
+    Check for Node.js.  Sidekick does not require Node.js for its core
+    functionality, but it is needed for browser automation tools (Playwright)
+    and the optional TUI.  This function is informational only — it does not
+    attempt to install Node.js.
     #>
-    $NodeVersion = "22"
+    Write-Info "Checking Node.js (optional — for browser tools and TUI)..."
 
-    # Already available
     if (Get-Command node -ErrorAction SilentlyContinue) {
         $version = node --version
         Write-Success "Node.js $version found"
@@ -719,7 +686,7 @@ function Test-Node {
         return $true
     }
 
-    # Already managed
+    # Check our own managed install from a previous run
     $managedNode = "$SidekickHome\node\node.exe"
     if (Test-Path $managedNode) {
         $version = & $managedNode --version
@@ -729,77 +696,9 @@ function Test-Node {
         return $true
     }
 
-    # Skip auto-install if requested
-    if ($env:SKIP_NODE_AUTOINSTALL -eq "1") {
-        Write-Info "Skipping Node.js auto-install (SKIP_NODE_AUTOINSTALL=1)"
-        $script:HasNode = $false
-        return $true
-    }
-
-    # Install via winget
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Info "Installing Node.js $NodeVersion via winget (may take several minutes)..."
-        try {
-            # Show a simple activity spinner while winget runs
-            $wingetJob = Start-Job -ScriptBlock { param($v) winget install OpenJS.NodeJS.LTS --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-Null } -ArgumentList $NodeVersion
-            $spinner = @("|", "/", "-", "\\")
-            $i = 0
-            while ($wingetJob.State -eq "Running") {
-                Write-Host "`r  ⏳ Installing Node.js $NodeVersion $($spinner[$i])" -NoNewline -ForegroundColor DarkYellow
-                $i = ($i + 1) % 4
-                Start-Sleep -Milliseconds 200
-            }
-            Write-Host "`r  " -NoNewline
-            Receive-Job $wingetJob -ErrorAction SilentlyContinue | Out-Null
-            Remove-Job $wingetJob -ErrorAction SilentlyContinue
-            $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
-            if (Get-Command node -ErrorAction SilentlyContinue) {
-                $version = node --version
-                Write-Success "Node.js $version installed via winget"
-                $script:HasNode = $true
-                return $true
-            }
-        } catch {
-            Write-Warn "winget install failed: $_"
-        }
-    }
-
-    # Fallback: download binary zip
-    Write-Info "Downloading Node.js $NodeVersion binary..."
-    try {
-        $arch = if ([Environment]::Is64BitOperatingSystem) { "x64" } else { "x86" }
-        $indexUrl = "https://nodejs.org/dist/latest-v${NodeVersion}.x/"
-        $indexPage = Invoke-WebRequest -Uri $indexUrl -UseBasicParsing -TimeoutSec 30
-        $zipName = ($indexPage.Content | Select-String -Pattern "node-v${NodeVersion}\\.\\d+\\.\\d+-win-${arch}\\.zip" -AllMatches).Matches[0].Value
-
-        if ($zipName) {
-            $downloadUrl = "${indexUrl}${zipName}"
-            $tmpZip = "$env:TEMP\\$zipName"
-            $tmpDir = "$env:TEMP\\sidekick-node-extract"
-
-            Invoke-WebRequest -Uri $downloadUrl -OutFile $tmpZip -UseBasicParsing -TimeoutSec 120
-            if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
-            Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
-
-            $extractedDir = Get-ChildItem $tmpDir -Directory | Select-Object -First 1
-            if ($extractedDir) {
-                if (Test-Path "$SidekickHome\\node") { Remove-Item -Recurse -Force "$SidekickHome\\node" }
-                Move-Item $extractedDir.FullName "$SidekickHome\\node"
-                $env:Path = "$SidekickHome\\node;$env:Path"
-                $version = & "$SidekickHome\\node\\node.exe" --version
-                Write-Success "Node.js $version installed to $SidekickHome\\node\\"
-                $script:HasNode = $true
-                Remove-Item -Force $tmpZip -ErrorAction SilentlyContinue
-                Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
-                return $true
-            }
-        }
-    } catch {
-        Write-Warn "Node.js download failed: $_"
-    }
-
-    Write-Warn "Could not auto-install Node.js — browser tools and TUI will be unavailable."
-    Write-Info "Install manually: https://nodejs.org/en/download/"
+    Write-Warn "Node.js not found — browser tools and TUI will be unavailable."
+    Write-Info "Install manually if needed: https://nodejs.org/en/download/"
+    Write-Info "  Or: winget install OpenJS.NodeJS.LTS"
     $script:HasNode = $false
     return $true
 }
@@ -969,12 +868,8 @@ function Install-Repository {
                 if ($LASTEXITCODE -ne 0) { Write-Err "git fetch failed (exit $LASTEXITCODE)" ; exit 4 }
                 git -c windows.appendAtomically=false checkout $Branch
                 if ($LASTEXITCODE -ne 0) { Write-Err "git checkout $Branch failed (exit $LASTEXITCODE)" ; exit 4 }
-git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 pull --ff-only origin $Branch
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warn "git pull --ff-only failed (exit $LASTEXITCODE) — trying reset..."
-                    git -c windows.appendAtomically=false reset --hard origin/$Branch
-                    if ($LASTEXITCODE -ne 0) { Write-Err "git reset failed (exit $LASTEXITCODE)" ; exit 4 }
-                }
+                git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=60 pull origin $Branch
+                if ($LASTEXITCODE -ne 0) { Write-Err "git pull failed (exit $LASTEXITCODE)" ; exit 4 }
             } finally {
                 Pop-Location
             }
@@ -1005,49 +900,11 @@ git -c windows.appendAtomically=false -c http.lowSpeedLimit=1000 -c http.lowSpee
         # Git for Windows can fail on atomic file operations (hook templates,
         # config lock files) due to antivirus, OneDrive, or NTFS filter drivers.
         # The -c flag injects config before any file I/O occurs.
-Write-Info "Configuring git for Windows compatibility..."
-
-        # FIRST: check for corrupt .gitconfig BEFORE calling any git config --global
-        # Must use a self-contained try/catch because $ErrorActionPreference=Stop
-        # converts native-command non-zero exits into terminating exceptions.
-        try {
-            $gitConfigPath = "$env:USERPROFILE\.gitconfig"
-            if (Test-Path $gitConfigPath) {
-                # 2>$null avoids ErrorActionPreference issues on stderr-only output,
-                # but a non-zero exit still triggers Stop.  Catch that here.
-                $null = git config --list --global 2>$null
-                if ($LASTEXITCODE -ne 0) {
-                    Write-Warn "Corrupt .gitconfig found at $gitConfigPath — replacing with clean config"
-                    $backupPath = "$env:USERPROFILE\.gitconfig.sidekick-backup"
-                    Copy-Item -Path $gitConfigPath -Destination $backupPath -Force -ErrorAction SilentlyContinue
-                    Remove-Item -Path $gitConfigPath -Force -ErrorAction SilentlyContinue
-                    Write-Info "Backed up old config to $backupPath"
-                }
-            }
-        } catch {
-            # If git config --list itself throws despite 2>$null, remove corrupt file
-            Write-Warn "Could not check .gitconfig: $_ — removing corrupt file"
-            $gitConfigPath = "$env:USERPROFILE\.gitconfig"
-            if (Test-Path $gitConfigPath) {
-                try {
-                    $backupPath = "$env:USERPROFILE\.gitconfig.sidekick-backup"
-                    Copy-Item -Path $gitConfigPath -Destination $backupPath -Force -ErrorAction SilentlyContinue
-                    Remove-Item -Path $gitConfigPath -Force -ErrorAction SilentlyContinue
-                    Write-Info "Removed corrupt .gitconfig (backup at $backupPath)"
-                } catch {
-                    Write-Warn "Could not remove corrupt .gitconfig: $_"
-                }
-            }
-        }
-
-        # Now safe to call git config --global — .gitconfig is clean or we already
-        # set GIT_CONFIG_COUNT/GIT_CONFIG_KEY/GIT_CONFIG_VALUE env vars as override
+        Write-Info "Configuring git for Windows compatibility..."
         $env:GIT_CONFIG_COUNT = "1"
         $env:GIT_CONFIG_KEY_0 = "windows.appendAtomically"
         $env:GIT_CONFIG_VALUE_0 = "false"
-        # Also set GIT_CONFIG_NOSYSTEM=1 to fully bypass any system-level gitconfig
-        # wrap in try/catch because $ErrorActionPreference=Stop can fire on stderr
-        try { git config --global windows.appendAtomically false 2>$null } catch { }
+        git config --global windows.appendAtomically false 2>$null
 
         # Try SSH first, then HTTPS, with -c flag for atomic write fix
         Write-Info "Trying SSH clone..."
@@ -1133,17 +990,30 @@ Write-Info "Configuring git for Windows compatibility..."
 
 
 function Install-Dependencies {
-Write-Info "Installing dependencies..."
-
+    Write-Info "Installing dependencies..."
+    
     Push-Location $InstallDir
-
+    
     if (-not $NoVenv) {
-        $env:VIRTUAL_ENV = "$script:VenvPath"
-        $pipPython = "--python", "$script:PythonExe"
-    } else {
-        $pipPython = @()
+        # Tell uv to install into our venv (no activation needed)
+        $env:VIRTUAL_ENV = "$InstallDir\venv"
     }
-
+    
+    # Install main package.  Tiered fallback so a single flaky git+https dep
+    # doesn't silently drop dashboard/MCP/cron/messaging extras.  Each tier's
+    # stdout/stderr is preserved — no Out-Null swallowing — so the user can
+    # see what failed.
+    #
+    # Tier 1: [all] — everything, including RL git+https deps (best case).
+    # Tier 2: [core-extras] synthesised locally — all PyPI-only extras we
+    #         ship (web, mcp, cron, cli, voice, messaging, slack, dev, acp,
+    #         pty, homeassistant, sms, tts-premium, honcho, google, mistral,
+    #         bedrock, dingtalk, feishu, modal, daytona, vercel).  Drops [rl]
+    #         and [matrix] (linux-only) which are the usual failure culprits.
+    # Tier 3: [web,mcp,cron,cli,messaging,dev] — the minimum we strongly
+    #         believe a user expects `sidekick dashboard` / slash commands /
+    #         cron / messaging platforms to work out of the box.
+    # Tier 4: bare `.` — last-resort so at least the core CLI launches.
     $installTiers = @(
         @{ Name = "all (with RL/matrix extras)"; Spec = ".[all]" },
         @{ Name = "PyPI-only extras (no git deps)"; Spec = ".[web,mcp,cron,cli,voice,messaging,slack,dev,acp,pty,homeassistant,sms,tts-premium,honcho,google,mistral,bedrock,dingtalk,feishu,modal,daytona,vercel]" },
@@ -1153,13 +1023,7 @@ Write-Info "Installing dependencies..."
     $installed = $false
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        $spec = $tier.Spec
-        if ($spec -eq ".") {
-            & $UvCmd pip install $pipPython -e "$InstallDir"
-        } else {
-            $extras = $spec.Substring(1)  # ".[all]" -> "[all]"
-            & $UvCmd pip install $pipPython -e "$InstallDir$extras"
-        }
+        & $UvCmd pip install -e $tier.Spec
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
@@ -1178,7 +1042,7 @@ Write-Info "Installing dependencies..."
     # users hit and lazy-import errors from `sidekick dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$script:PythonExe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $NoVenv) { "$InstallDir\venv\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
     if (Test-Path $pythonExe) {
         $webOk = $false
         try {
@@ -1188,7 +1052,7 @@ Write-Info "Installing dependencies..."
         if (-not $webOk) {
             Write-Warn "fastapi/uvicorn not importable — `sidekick dashboard` will not work."
             Write-Info "Attempting targeted install of [web] extra as last resort..."
-            & $UvCmd pip install $pipArgs -e ".[web]"
+            & $UvCmd pip install -e ".[web]"
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "[web] extra installed; `sidekick dashboard` should now work."
             } else {
@@ -1221,7 +1085,7 @@ function Set-PathVariable {
     if ($NoVenv) {
         $sidekickBin = "$InstallDir"
     } else {
-        $sidekickBin = "$script:VenvPath\Scripts"
+        $sidekickBin = "$InstallDir\venv\Scripts"
     }
     
     # Add the venv Scripts dir to user PATH so sidekick is globally available
@@ -1334,7 +1198,7 @@ Delete the contents (or this file) to use the default personality.
     
     # Seed bundled skills into ~/.sidekick/skills/ (manifest-based, one-time per skill)
     Write-Info "Syncing bundled skills to ~/.sidekick/skills/ ..."
-    $pythonExe = "$script:PythonExe"
+    $pythonExe = "$InstallDir\venv\Scripts\python.exe"
     if (Test-Path $pythonExe) {
         try {
             & $pythonExe "$InstallDir\tools\skills_sync.py" 2>$null
@@ -1520,7 +1384,7 @@ function Install-PlatformSdks {
         return
     }
 
-    $pythonExe = "$script:PythonExe"
+    $pythonExe = "$InstallDir\venv\Scripts\python.exe"
     if (-not (Test-Path $pythonExe)) {
         Write-Warn "Skipping platform-SDK verification: $pythonExe not found"
         return
@@ -1622,7 +1486,7 @@ function Invoke-SetupWizard {
     
     # Run sidekick setup using the venv Python directly (no activation needed)
     if (-not $NoVenv) {
-        & "$script:PythonExe" -m sidekick_cli.main setup
+        & ".\venv\Scripts\python.exe" -m sidekick_cli.main setup
     } else {
         & $PythonExe -m sidekick_cli.main setup
     }
@@ -1643,7 +1507,7 @@ function Start-GatewayIfConfigured {
 
     if (-not $hasMessaging) { return }
 
-    $sidekickCmd = "$script:SidekickExe"
+    $sidekickCmd = "$InstallDir\venv\Scripts\sidekick.exe"
     if (-not (Test-Path $sidekickCmd)) {
         $sidekickCmd = "sidekick"
     }
@@ -1793,6 +1657,7 @@ function Main {
     } catch {}
 
 if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" ; exit 2 }
+    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed — cannot continue" ; exit 2 }
     if (-not (Install-Git)) { Write-Err "Git not available and auto-install failed — install from https://git-scm.com/download/win then re-run" ; exit 2 }
     # Test-Node always returns $true (sets $script:HasNode on success, emits a
     # warning on failure and continues so non-browser installs still work).
@@ -1801,8 +1666,7 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
     [void](Test-Node)
     Install-SystemPackages  # ripgrep + ffmpeg in one step
 
-Install-Repository
-    if (-not (Ensure-Venv -VenvPath "$InstallDir\.venv")) { Write-Err "Python/venv provisioning failed — cannot continue" ; exit 2 }
+    Install-Repository
     Install-Dependencies
     Install-NodeDeps
     Set-PathVariable
@@ -1825,7 +1689,7 @@ Install-Repository
         
         $wshell = New-Object -ComObject WScript.Shell
         $shortcut = $wshell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $script:SidekickExe
+        $shortcut.TargetPath = "$InstallDir\.venv\Scripts\sidekick.exe"
         $shortcut.Arguments = "dashboard"
         $shortcut.Description = "Sidekick WebUI Dashboard"
         $shortcut.WorkingDirectory = "$InstallDir"
@@ -1839,43 +1703,62 @@ Install-Repository
     }
     
     # ── Auto-open WebUI ────────────────────────────────────────────
-        Write-Info "Opening Sidekick WebUI in your browser..."
-        try {
-            $sidekickExe = $script:SidekickExe
-            if (Test-Path $sidekickExe) {
-                # Try to add 'sidekick' to Windows hosts file so http://sidekick:8787 works.
-                # On most Windows installs the file is owned by SYSTEM, so a non-admin
-                # PowerShell can't write it. We attempt the write and gracefully fall
-                # back to telling the user how to do it manually.
-                $hostsPath = "$env:windir\System32\drivers\etc\hosts"
-                $hostsEntry = "127.0.0.1`tsidekick"
-                $hostsContent = if (Test-Path $hostsPath) { Get-Content $hostsPath -Raw } else { "" }
-                $hostsOk = $false
-                if ($hostsContent -match "(?m)^\s*127\.0\.0\.1\s+sidekick\s*$") {
-                    Write-Info "'sidekick' already in hosts file"
-                    $hostsOk = $true
-                } else {
-                    $tmpHosts = [System.IO.Path]::GetTempFileName()
-                    try {
-                        Copy-Item $hostsPath $tmpHosts -Force -ErrorAction Stop
-                        $newContent = (Get-Content $tmpHosts -Raw) + "`r`n$hostsEntry  # sidekick-installer`r`n"
-                        Set-Content -Path $tmpHosts -Value $newContent -ErrorAction Stop
-                        # Atomic-ish replace: copy via cmd /c which runs in the user's context
-                        $copyResult = cmd /c copy /Y "$tmpHosts" "$hostsPath" 2>&1
-                        if ($LASTEXITCODE -eq 0 -and (Get-Content $hostsPath -Raw) -match "127\.0\.0\.1\s+sidekick") {
-                            Write-Info "Added 'sidekick' to hosts — http://sidekick:8787 now works"
-                            $hostsOk = $true
-                        } else {
-                            Write-Info "Hosts file is read-only or admin-protected (http://sidekick:8787 will not resolve)."
-                            Write-Info "  To enable: run PowerShell as Administrator and execute:"
-                            Write-Info "    Add-Content C:\Windows\System32\drivers\etc\hosts '127.0.0.1`tsidekick  # sidekick'"
-                            Write-Host ""
-                        }
-                    } catch {
-                        Write-Info "Could not write to hosts file (admin needed for http://sidekick:8787): $_"
-                    } finally {
-                        Remove-Item $tmpHosts -ErrorAction SilentlyContinue
+    Write-Info "Opening Sidekick WebUI in your browser..."
+    try {
+        $sidekickExe = "$InstallDir\.venv\Scripts\sidekick.exe"
+        if (Test-Path $sidekickExe) {
+            # The new `sidekick dashboard` runs on port 9119 by default
+            # (see cli/web_server.py). We pass --port explicitly to be safe
+            # and to match the URL we open below.
+            $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard","--port","9119" -NoNewWindow -PassThru
+            # Wait for the server to actually bind (up to 15s)
+            $ready = $false
+            for ($i = 0; $i -lt 15; $i++) {
+                Start-Sleep -Seconds 1
+                try {
+                    $client = New-Object System.Net.Sockets.TcpClient
+                    $iar = $client.BeginConnect("127.0.0.1", 9119, $null, $null)
+                    $success = $iar.AsyncWaitHandle.WaitOne(500, $false)
+                    if ($success) {
+                        $client.EndConnect($iar)
+                        $client.Close()
+                        $ready = $true
+                        break
                     }
+                    $client.Close()
+                } catch {}
+            }
+            if (-not $ready) {
+                Write-Warn "Dashboard did not start within 15s — opening URL anyway"
+            }
+
+            # Add 'sidekick' to Windows hosts file so http://sidekick:9119 works
+            $hostsPath = "$env:windir\System32\drivers\etc\hosts"
+            $hostsEntry = "127.0.0.1`tsidekick"
+            $hostsContent = if (Test-Path $hostsPath) { Get-Content $hostsPath -Raw } else { "" }
+            $hostsOk = $false
+            if ($hostsContent -match "(?m)^\s*127\.0\.0\.1\s+sidekick\s*$") {
+                $hostsOk = $true
+            } else {
+                $tmpHosts = [System.IO.Path]::GetTempFileName()
+                try {
+                    Copy-Item $hostsPath $tmpHosts -Force -ErrorAction Stop
+                    $newContent = (Get-Content $tmpHosts -Raw) + "`r`n$hostsEntry  # sidekick-installer`r`n"
+                    Set-Content -Path $tmpHosts -Value $newContent -ErrorAction Stop
+                    $copyResult = cmd /c copy /Y "$tmpHosts" "$hostsPath" 2>&1
+                    if ($LASTEXITCODE -eq 0 -and (Get-Content $hostsPath -Raw) -match "127\.0\.0\.1\s+sidekick") {
+                        Write-Info "Added 'sidekick' to hosts — http://sidekick:9119 now works"
+                        $hostsOk = $true
+                    } else {
+                        Write-Info "Hosts file is read-only or admin-protected (http://sidekick:9119 will not resolve)."
+                        Write-Info "  To enable: run PowerShell as Administrator and execute:"
+                        Write-Info "    Add-Content C:\Windows\System32\drivers\etc\hosts '127.0.0.1`tsidekick  # sidekick'"
+                        Write-Host ""
+                    }
+                } catch {
+                    Write-Info "Could not write to hosts file: $_"
+                } finally {
+                    Remove-Item $tmpHosts -ErrorAction SilentlyContinue
                 }
                 # CRITICAL: Start dashboard DETACHED from the installer console.
                 # Using -NoNewWindow binds the process to the installer's

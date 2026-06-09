@@ -1,7 +1,7 @@
 """
 Sidekick -- Self-update checker.
 
-Checks if the webui and hermes-agent git repos are behind their upstream
+Checks if the webui and sidekick-agent git repos are behind their upstream
 branches. Results are cached server-side (30-min TTL) so git fetch runs
 at most twice per hour regardless of client count.
 
@@ -92,7 +92,7 @@ def _detect_webui_version() -> str:
          ``__version__ = 'vX.Y.Z'``.
       3. ``'unknown'`` — last resort; displayed as-is in the settings badge.
     """
-    # When webui/ is part of a parent repo (hermes-portable), use that.
+    # When webui/ is part of a parent repo (sidekick-portable), use that.
     version_root = REPO_ROOT
     if not (version_root / '.git').exists() and (version_root.parent / '.git').exists():
         version_root = version_root.parent
@@ -160,8 +160,8 @@ def _normalize_remote_url(remote_url):
 
     Git remotes may be HTTPS or SSH and may include a literal ``.git`` suffix.
     Strip only that literal suffix — never use ``str.rstrip('.git')`` because it
-    treats the argument as a character set and can truncate ``hermes-webui`` to
-    ``hermes-webu``.
+    treats the argument as a character set and can truncate ``sidekick-webui`` to
+    ``sidekick-webu``.
     """
     if not remote_url:
         return remote_url
@@ -205,7 +205,7 @@ def _check_repo(path, name):
         return None
 
     # Fallback: if the given path has no .git, walk up one level.
-    # This lets the update checker find the hermes-portable repo
+    # This lets the update checker find the sidekick-portable repo
     # when webui/ is not a standalone checkout.
     git_path = path
     if not (git_path / '.git').exists():
@@ -384,7 +384,7 @@ def apply_force_update(target: str) -> dict:
         else:
             return {'ok': False, 'message': f'Unknown target: {target}'}
 
-        # Resolve to hermes-portable repo if webui/ is not a standalone checkout
+        # Resolve to sidekick-portable repo if webui/ is not a standalone checkout
         if path and not (path / '.git').exists() and (path.parent / '.git').exists():
             path = path.parent
 
@@ -449,7 +449,7 @@ def _apply_update_inner(target):
     else:
         return {'ok': False, 'message': f'Unknown target: {target}'}
 
-    # Resolve to hermes-portable repo if webui/ is not a standalone checkout
+    # Resolve to sidekick-portable repo if webui/ is not a standalone checkout
     if path and not (path / '.git').exists() and (path.parent / '.git').exists():
         path = path.parent
 

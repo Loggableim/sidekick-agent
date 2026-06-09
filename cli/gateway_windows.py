@@ -155,7 +155,7 @@ def _sanitize_filename(value: str) -> str:
 def get_task_script_path() -> Path:
     """The generated ``gateway.cmd`` wrapper that the schtasks entry invokes.
 
-    Lives under ``%LOCALAPPDATA%\\hermes\\gateway-service\\<task_name>.cmd``
+    Lives under ``%LOCALAPPDATA%\\sidekick\\gateway-service\\<task_name>.cmd``
     (or ``<HERMES_HOME>/gateway-service/<task_name>.cmd`` so per-profile
     Hermes installs stay self-contained).
     """

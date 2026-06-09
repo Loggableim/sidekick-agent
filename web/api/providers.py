@@ -434,7 +434,7 @@ def _get_hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return get_active_hermes_home()
     except ImportError:
-        return Path.home() / ".hermes"
+        return Path.home() / ".sidekick"
 
 
 def _load_env_file(env_path: Path) -> dict[str, str]:
@@ -743,6 +743,7 @@ def _agent_fetch_account_usage(provider: str, *, base_url: str | None = None, ap
 
 def _account_usage_subprocess_env(home: Path, provider: str, api_key: str | None) -> dict[str, str]:
     env = dict(os.environ)
+    env["SIDEKICK_HOME"] = str(Path(home))
     env["HERMES_HOME"] = str(Path(home))
 
     # Profile .env values should affect only the child quota probe, not the

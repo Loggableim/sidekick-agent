@@ -134,7 +134,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
     """Return True when Kanban is unavailable only because this is not a worker process."""
     if item.get("name") != "kanban":
         return False
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    if os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK"):
         return False
 
     tools = item.get("tools") or []
@@ -143,7 +143,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
 
 def _doctor_tool_availability_detail(toolset: str) -> str:
     """Optional explanatory suffix for toolsets whose doctor status needs context."""
-    if toolset == "kanban" and not os.environ.get("HERMES_KANBAN_TASK"):
+    if toolset == "kanban" and not (os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")):
         return "(runtime-gated; loaded only for dispatcher-spawned workers)"
     return ""
 
@@ -847,7 +847,7 @@ def run_doctor(args):
     if _safe_which("codex"):
         check_ok("codex CLI")
     else:
-        # Native OAuth uses Hermes' own device-code flow — the Codex CLI is
+        # Native OAuth uses Sidekick's own device-code flow — the Codex CLI is
         # only needed if you want to import existing tokens from
         # ~/.codex/auth.json.  Downgrade to info so users running
         # `sidekick auth openai-codex` aren't told they're missing something.
@@ -868,11 +868,11 @@ def run_doctor(args):
     print()
     print(color("◆ Directory Structure", Colors.CYAN, Colors.BOLD))
     
-    hermes_home = SIDEKICK_HOME
-    if hermes_home.exists():
+    sidekick_home = SIDEKICK_HOME
+    if sidekick_home.exists():
         check_ok(f"{_DHH} directory exists")
     elif should_fix:
-        hermes_home.mkdir(parents=True, exist_ok=True)
+        sidekick_home.mkdir(parents=True, exist_ok=True)
         check_ok(f"Created {_DHH} directory")
         fixed_count += 1
     else:
@@ -881,7 +881,7 @@ def run_doctor(args):
     # Check expected subdirectories
     expected_subdirs = ["cron", "sessions", "logs", "skills", "memories"]
     for subdir_name in expected_subdirs:
-        subdir_path = hermes_home / subdir_name
+        subdir_path = sidekick_home / subdir_name
         if subdir_path.exists():
             check_ok(f"{_DHH}/{subdir_name}/ exists")
         elif should_fix:
@@ -892,7 +892,7 @@ def run_doctor(args):
             check_warn(f"{_DHH}/{subdir_name}/ not found", "(will be created on first use)")
     
     # Check for SOUL.md persona file
-    soul_path = hermes_home / "SOUL.md"
+    soul_path = sidekick_home / "SOUL.md"
     if soul_path.exists():
         content = soul_path.read_text(encoding="utf-8").strip()
         # Check if it's just the template comments (no real content)
@@ -915,7 +915,7 @@ def run_doctor(args):
             fixed_count += 1
     
     # Check memory directory
-    memories_dir = hermes_home / "memories"
+    memories_dir = sidekick_home / "memories"
     if memories_dir.exists():
         check_ok(f"{_DHH}/memories/ directory exists")
         memory_file = memories_dir / "MEMORY.md"
@@ -938,7 +938,7 @@ def run_doctor(args):
             fixed_count += 1
     
     # Check SQLite session store
-    state_db_path = hermes_home / "state.db"
+    state_db_path = sidekick_home / "state.db"
     if state_db_path.exists():
         try:
             import sqlite3
@@ -953,7 +953,7 @@ def run_doctor(args):
         check_info(f"{_DHH}/state.db not created yet (will be created on first session)")
 
     # Check WAL file size (unbounded growth indicates missed checkpoints)
-    wal_path = hermes_home / "state.db-wal"
+    wal_path = sidekick_home / "state.db-wal"
     if wal_path.exists():
         try:
             wal_size = wal_path.stat().st_size
@@ -980,7 +980,7 @@ def run_doctor(args):
     _check_gateway_service_linger(issues)
 
     # =========================================================================
-    # Check: Command installation (hermes bin symlink)
+    # Check: Command installation (sidekick bin symlink)
     # =========================================================================
     if sys.platform != "win32":
         print()
@@ -989,7 +989,7 @@ def run_doctor(args):
         # Determine the venv entry point location
         _venv_bin = None
         for _venv_name in ("venv", ".venv"):
-            _candidate = PROJECT_ROOT / _venv_name / "bin" / "hermes"
+            _candidate = PROJECT_ROOT / _venv_name / "bin" / "sidekick"
             if _candidate.exists():
                 _venv_bin = _candidate
                 break
@@ -1003,7 +1003,7 @@ def run_doctor(args):
         else:
             _cmd_link_dir = Path.home() / ".local" / "bin"
             _cmd_link_display = "~/.local/bin"
-        _cmd_link = _cmd_link_dir / "hermes"
+        _cmd_link = _cmd_link_dir / "sidekick"
 
         if _venv_bin is None:
             check_warn(
@@ -1021,31 +1021,31 @@ def run_doctor(args):
                 _target = _cmd_link.resolve()
                 _expected = _venv_bin.resolve()
                 if _target == _expected:
-                    check_ok(f"{_cmd_link_display}/hermes → correct target")
+                    check_ok(f"{_cmd_link_display}/sidekick → correct target")
                 else:
                     check_warn(
-                        f"{_cmd_link_display}/hermes points to wrong target",
+                        f"{_cmd_link_display}/sidekick points to wrong target",
                         f"(→ {_target}, expected → {_expected})"
                     )
                     if should_fix:
                         _cmd_link.unlink()
                         _cmd_link.symlink_to(_venv_bin)
-                        check_ok(f"Fixed symlink: {_cmd_link_display}/hermes → {_venv_bin}")
+                        check_ok(f"Fixed symlink: {_cmd_link_display}/sidekick → {_venv_bin}")
                         fixed_count += 1
                     else:
                         issues.append(f"Broken symlink at {_cmd_link_display}/hermes — run 'sidekick doctor --fix'")
             elif _cmd_link.exists():
                 # It's a regular file, not a symlink — possibly a wrapper script
-                check_ok(f"{_cmd_link_display}/hermes exists (non-symlink)")
+                check_ok(f"{_cmd_link_display}/sidekick exists (non-symlink)")
             else:
                 check_fail(
-                    f"{_cmd_link_display}/hermes not found",
+                    f"{_cmd_link_display}/sidekick not found",
                     "(sidekick command may not work outside the venv)"
                 )
                 if should_fix:
                     _cmd_link_dir.mkdir(parents=True, exist_ok=True)
                     _cmd_link.symlink_to(_venv_bin)
-                    check_ok(f"Created symlink: {_cmd_link_display}/hermes → {_venv_bin}")
+                    check_ok(f"Created symlink: {_cmd_link_display}/sidekick → {_venv_bin}")
                     fixed_count += 1
 
                     # Check if the link dir is on PATH

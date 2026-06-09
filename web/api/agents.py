@@ -824,7 +824,7 @@ def _load_llm_config():
             if not api_key or len(api_key) < 8:
                 try:
                     import json as _j
-                    auth_path = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "auth.json"
+                    auth_path = Path(os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "auth.json"
                     if auth_path.exists():
                         auth_data = _j.loads(auth_path.read_text(encoding="utf-8"))
                         pool = auth_data.get("credential_pool", {}) if isinstance(auth_data, dict) else {}
@@ -853,7 +853,7 @@ def _load_llm_config():
         logger.debug("Shared provider context unavailable for agent chat", exc_info=True)
 
     import re
-    hermes_home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+    hermes_home = Path(os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     env_path = hermes_home / ".env"
 
     api_key = ""

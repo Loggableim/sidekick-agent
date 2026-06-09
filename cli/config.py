@@ -137,10 +137,15 @@ _EXTRA_ENV_KEYS = frozenset({
     # observability/langfuse` or `sidekick tools → Langfuse`); credentials gate
     # the plugin at runtime.
     "HERMES_LANGFUSE_ENV",
+    "SIDEKICK_LANGFUSE_ENV",
     "HERMES_LANGFUSE_RELEASE",
+    "SIDEKICK_LANGFUSE_RELEASE",
     "HERMES_LANGFUSE_SAMPLE_RATE",
+    "SIDEKICK_LANGFUSE_SAMPLE_RATE",
     "HERMES_LANGFUSE_MAX_CHARS",
+    "SIDEKICK_LANGFUSE_MAX_CHARS",
     "HERMES_LANGFUSE_DEBUG",
+    "SIDEKICK_LANGFUSE_DEBUG",
     "LANGFUSE_PUBLIC_KEY",
     "LANGFUSE_SECRET_KEY",
     "LANGFUSE_BASE_URL",
@@ -166,7 +171,7 @@ _MANAGED_SYSTEM_NAMES = {
 
 def get_managed_system() -> Optional[str]:
     """Return the package manager owning this install, if any."""
-    raw = os.getenv("HERMES_MANAGED", "").strip()
+    raw = (os.getenv("SIDEKICK_MANAGED") or os.getenv("HERMES_MANAGED", "")).strip()
     if raw:
         normalized = raw.lower()
         if normalized in _MANAGED_TRUE_VALUES:
@@ -180,7 +185,7 @@ def get_managed_system() -> Optional[str]:
 
 
 def is_managed() -> bool:
-    """Check if Hermes is running in package-manager-managed mode.
+    """Check if Sidekick is running in package-manager-managed mode.
 
     Two signals: the HERMES_MANAGED env var (set by the systemd service),
     or a .managed marker file in HERMES_HOME (set by the NixOS activation
@@ -204,15 +209,15 @@ def recommended_update_command() -> str:
     return get_managed_update_command() or "sidekick update"
 
 
-def format_managed_message(action: str = "modify this Hermes installation") -> str:
+def format_managed_message(action: str = "modify this Sidekick installation") -> str:
     """Build a user-facing error for managed installs."""
     managed_system = get_managed_system() or "a package manager"
-    raw = os.getenv("HERMES_MANAGED", "").strip().lower()
+    raw = (os.getenv("SIDEKICK_MANAGED") or os.getenv("HERMES_MANAGED", "")).strip().lower()
 
     if managed_system == "NixOS":
         env_hint = "true" if raw in _MANAGED_TRUE_VALUES else raw or "true"
         return (
-            f"Cannot {action}: this Hermes installation is managed by NixOS "
+            f"Cannot {action}: this Sidekick installation is managed by NixOS "
             f"(HERMES_MANAGED={env_hint}).\n"
             "Edit services.hermes-agent.settings in your configuration.nix and run:\n"
             "  sudo nixos-rebuild switch"
@@ -221,7 +226,7 @@ def format_managed_message(action: str = "modify this Hermes installation") -> s
     if managed_system == "Homebrew":
         env_hint = raw or "homebrew"
         return (
-            f"Cannot {action}: this Hermes installation is managed by Homebrew "
+            f"Cannot {action}: this Sidekick installation is managed by Homebrew "
             f"(HERMES_MANAGED={env_hint}).\n"
             "Use:\n"
             "  brew upgrade sidekick-agent"
@@ -244,7 +249,7 @@ def managed_error(action: str = "modify configuration"):
 def get_container_exec_info() -> Optional[dict]:
     """Read container mode metadata from HERMES_HOME/.container-mode.
 
-    Returns a dict with keys: backend, container_name, exec_user, hermes_bin
+    Returns a dict with keys: backend, container_name, exec_user, sidekick_bin
     or None if container mode is not active, we're already inside the
     container, or HERMES_DEV=1 is set.
 
@@ -252,7 +257,7 @@ def get_container_exec_info() -> Optional[dict]:
     container.enable = true. It tells the host CLI to exec into the container
     instead of running locally.
     """
-    if os.environ.get("HERMES_DEV") == "1":
+    if os.environ.get("SIDEKICK_DEV") == "1" or os.environ.get("HERMES_DEV") == "1":
         return None
 
     from runtime._compat.shim_constants import is_container
@@ -274,15 +279,15 @@ def get_container_exec_info() -> Optional[dict]:
     # All other exceptions (PermissionError, malformed data, etc.) propagate
 
     backend = info.get("backend", "docker")
-    container_name = info.get("container_name", "hermes-agent")
-    exec_user = info.get("exec_user", "hermes")
-    hermes_bin = info.get("hermes_bin", "/data/current-package/bin/hermes")
+    container_name = info.get("container_name", "sidekick-agent")
+    exec_user = info.get("exec_user", "sidekick")
+    sidekick_bin = info.get("sidekick_bin", "/data/current-package/bin/hermes")
 
     return {
         "backend": backend,
         "container_name": container_name,
         "exec_user": exec_user,
-        "hermes_bin": hermes_bin,
+        "sidekick_bin": sidekick_bin,
     }
 
 
@@ -322,7 +327,7 @@ def _secure_dir(path):
     if is_managed():
         return
     try:
-        mode_str = os.environ.get("HERMES_HOME_MODE", "").strip()
+        mode_str = (os.environ.get("SIDEKICK_HOME_MODE") or os.environ.get("HERMES_HOME_MODE", "")).strip()
         mode = int(mode_str, 8) if mode_str else 0o700
     except ValueError:
         mode = 0o700
@@ -335,13 +340,13 @@ def _secure_dir(path):
 def _is_container() -> bool:
     """Detect if we're running inside a Docker/Podman/LXC container.
 
-    When Hermes runs in a container with volume-mounted config files, forcing
+    When Sidekick runs in a container with volume-mounted config files, forcing
     0o600 permissions breaks multi-process setups where the gateway and
     dashboard run as different UIDs or the volume mount requires broader
     permissions.
     """
     # Explicit opt-out
-    if os.environ.get("HERMES_CONTAINER") or os.environ.get("HERMES_SKIP_CHMOD"):
+    if os.environ.get("SIDEKICK_CONTAINER") or os.environ.get("HERMES_CONTAINER") or os.environ.get("SIDEKICK_SKIP_CHMOD") or os.environ.get("HERMES_SKIP_CHMOD"):
         return True
     # Docker / Podman marker file
     if os.path.exists("/.dockerenv"):
@@ -461,7 +466,7 @@ DEFAULT_CONFIG = {
         # provider timeouts, 5xx, etc.) before the agent surfaces the
         # failure.  The OpenAI SDK already does its own low-level retries
         # (max_retries=2 default) for transient network errors; this is
-        # the Hermes-level retry loop that wraps the whole call.  Lower
+        # the Sidekick-level retry loop that wraps the whole call.  Lower
         # this to 1 if you use fallback providers and want fast failover
         # on flaky primaries; raise it if you prefer to tolerate longer
         # provider hiccups on a single provider.
@@ -532,13 +537,13 @@ DEFAULT_CONFIG = {
         # (bash doesn't source bashrc in non-interactive login mode) or
         # zsh-specific files like ``~/.zshrc`` / ``~/.zprofile``.
         # Paths support ``~`` / ``${VAR}``. Missing files are silently
-        # skipped. When empty, Hermes auto-sources ``~/.profile``,
+        # skipped. When empty, Sidekick auto-sources ``~/.profile``,
         # ``~/.bash_profile``, and ``~/.bashrc`` (in that order) if the
         # snapshot shell is bash (this is the ``auto_source_bashrc``
         # behaviour — disable with that key if you want strict login-only
         # semantics).
         "shell_init_files": [],
-        # When true (default), Hermes sources the user's shell rc files
+        # When true (default), Sidekick sources the user's shell rc files
         # (``~/.profile``, ``~/.bash_profile``, ``~/.bashrc``) in the
         # login shell used to build the environment snapshot. This
         # captures PATH additions, shell functions, and aliases — which a
@@ -555,7 +560,7 @@ DEFAULT_CONFIG = {
         "docker_forward_env": [],
         # Explicit environment variables to set inside Docker containers.
         # Unlike docker_forward_env (which reads values from the host process),
-        # docker_env lets you specify exact key-value pairs — useful when Hermes
+        # docker_env lets you specify exact key-value pairs — useful when Sidekick
         # runs as a systemd service without access to the user's shell environment.
         # Example: {"SSH_AUTH_SOCK": "/run/user/1000/ssh-agent.sock"}
         "docker_env": {},
@@ -572,7 +577,7 @@ DEFAULT_CONFIG = {
         # Each entry is "host_path:container_path" (standard Docker -v syntax).
         # Example:
         # ["/home/user/projects:/workspace/projects",
-        #  "/home/user/.hermes/cache/documents:/output"]
+        #  "/home/user/.sidekick/cache/documents:/output"]
         # For gateway MEDIA delivery, write inside Docker to /output/... and emit
         # the host-visible path in MEDIA:, not the container path.
         "docker_volumes": [],
@@ -586,7 +591,7 @@ DEFAULT_CONFIG = {
         # are owned by your host user instead of root, which avoids needing
         # `sudo chown` after container runs. Default off to preserve behavior
         # for images whose entrypoints expect to start as root (e.g. the
-        # bundled Hermes image, which drops to the `sidekick` user via gosu).
+        # bundled Sidekick image, which drops to the `sidekick` user via gosu).
         # When on, SETUID/SETGID caps are omitted from the container since
         # no privilege drop is needed.
         "docker_run_as_host_user": False,
@@ -624,7 +629,7 @@ DEFAULT_CONFIG = {
         "dialog_policy": "must_respond",  # must_respond | auto_dismiss | auto_accept
         "dialog_timeout_s": 300,  # Safety auto-dismiss after N seconds under must_respond
         "camofox": {
-            # When true, Hermes sends a stable profile-scoped userId to Camofox
+            # When true, Sidekick sends a stable profile-scoped userId to Camofox
             # so the server maps it to a persistent Firefox profile automatically.
             # When false (default), each session gets a random userId (ephemeral).
             "managed_persistence": False,
@@ -676,7 +681,7 @@ DEFAULT_CONFIG = {
     "file_read_max_chars": 100_000,
 
     # Tool-output truncation thresholds. When terminal output or a
-    # single read_file page exceeds these limits, Hermes truncates the
+    # single read_file page exceeds these limits, Sidekick truncates the
     # payload sent to the model (keeping head + tail for terminal,
     # enforcing pagination for read_file). Tuning these trades context
     # footprint against how much raw output the model can see in one
@@ -939,7 +944,7 @@ DEFAULT_CONFIG = {
         "platforms": {},  # Per-platform display overrides: {"telegram": {"tool_progress": "all"}, "slack": {"tool_progress": "off"}}
         # Gateway runtime-metadata footer appended to the FINAL message of a turn
         # (disabled by default to keep replies minimal). When enabled, renders
-        # e.g. `model · 68% · ~/projects/hermes`. Per-platform overrides go under
+        # e.g. `model · 68% · ~/projects/sidekick`. Per-platform overrides go under
         # display.platforms.<platform>.runtime_footer.
         "runtime_footer": {
             "enabled": False,
@@ -1110,13 +1115,13 @@ DEFAULT_CONFIG = {
     # Goals — persistent cross-turn goals (Ralph-style loop).
     # After every turn, a lightweight judge call asks the auxiliary model
     # whether the active /goal is satisfied by the assistant's last
-    # response. If not, Hermes feeds a continuation prompt back into the
+    # response. If not, Sidekick feeds a continuation prompt back into the
     # same session and keeps working until the goal is done, the turn
     # budget is exhausted, or the user pauses/clears it. Judge failures
     # fail OPEN (continue) so a flaky judge never wedges progress — the
     # turn budget is the real backstop.
     "goals": {
-        # Max continuation turns before Hermes auto-pauses the goal and
+        # Max continuation turns before Sidekick auto-pauses the goal and
         # asks the user to /goal resume. Protects against judge false
         # negatives (goal actually done but judge says continue) and
         # unbounded model spend on fuzzy / unachievable goals.
@@ -1389,7 +1394,7 @@ DEFAULT_CONFIG = {
     # The default URL is served by the docs site GitHub Pages deploy.
     "model_catalog": {
         "enabled": True,
-        "url": "https://hermes-agent.nousresearch.com/docs/api/model-catalog.json",
+        "url": "https://sidekick-agent.sh/docs/api/model-catalog.json",
         # Disk cache TTL in hours.  Beyond this, the CLI refetches on the
         # next /model or `sidekick model` invocation; network failures
         # silently fall back to the stale cache.
@@ -1753,8 +1758,24 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    "SIDEKICK_QWEN_BASE_URL": {
+        "description": "[alias: HERMES_QWEN_BASE_URL] Qwen Portal base URL override (default: https://portal.qwen.ai/v1)",
+        "prompt": "Qwen Portal base URL (leave empty for default)",
+        "url": None,
+        "password": False,
+        "category": "provider",
+        "advanced": True,
+    },
     "HERMES_GEMINI_CLIENT_ID": {
         "description": "Google OAuth client ID for google-gemini-cli (optional; defaults to Google's public gemini-cli client)",
+        "prompt": "Google OAuth client ID (optional — leave empty to use the public default)",
+        "url": "https://console.cloud.google.com/apis/credentials",
+        "password": False,
+        "category": "provider",
+        "advanced": True,
+    },
+    "SIDEKICK_GEMINI_CLIENT_ID": {
+        "description": "[alias: HERMES_GEMINI_CLIENT_ID] Google OAuth client ID for google-gemini-cli (optional; defaults to Google's public gemini-cli client)",
         "prompt": "Google OAuth client ID (optional — leave empty to use the public default)",
         "url": "https://console.cloud.google.com/apis/credentials",
         "password": False,
@@ -1769,8 +1790,24 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
+    "SIDEKICK_GEMINI_CLIENT_SECRET": {
+        "description": "[alias: HERMES_GEMINI_CLIENT_SECRET] Google OAuth client secret for google-gemini-cli (optional)",
+        "prompt": "Google OAuth client secret (optional)",
+        "url": "https://console.cloud.google.com/apis/credentials",
+        "password": True,
+        "category": "provider",
+        "advanced": True,
+    },
     "HERMES_GEMINI_PROJECT_ID": {
         "description": "GCP project ID for paid Gemini tiers (free tier auto-provisions)",
+        "prompt": "GCP project ID for Gemini OAuth (leave empty for free tier)",
+        "url": None,
+        "password": False,
+        "category": "provider",
+        "advanced": True,
+    },
+    "SIDEKICK_GEMINI_PROJECT_ID": {
+        "description": "[alias: HERMES_GEMINI_PROJECT_ID] GCP project ID for paid Gemini tiers (free tier auto-provisions)",
         "prompt": "GCP project ID for Gemini OAuth (leave empty for free tier)",
         "url": None,
         "password": False,
@@ -2139,6 +2176,13 @@ OPTIONAL_ENV_VARS = {
         "password": False,
         "category": "tool",
     },
+    "SIDEKICK_LANGFUSE_PUBLIC_KEY": {
+        "description": "[alias: HERMES_LANGFUSE_PUBLIC_KEY] Langfuse project public key (pk-lf-...)",
+        "prompt": "Langfuse public key",
+        "url": "https://cloud.langfuse.com",
+        "password": False,
+        "category": "tool",
+    },
     "HERMES_LANGFUSE_SECRET_KEY": {
         "description": "Langfuse project secret key (sk-lf-...)",
         "prompt": "Langfuse secret key",
@@ -2146,8 +2190,23 @@ OPTIONAL_ENV_VARS = {
         "password": True,
         "category": "tool",
     },
+    "SIDEKICK_LANGFUSE_SECRET_KEY": {
+        "description": "[alias: HERMES_LANGFUSE_SECRET_KEY] Langfuse project secret key (sk-lf-...)",
+        "prompt": "Langfuse secret key",
+        "url": "https://cloud.langfuse.com",
+        "password": True,
+        "category": "tool",
+    },
     "HERMES_LANGFUSE_BASE_URL": {
         "description": "Langfuse server URL (default: https://cloud.langfuse.com)",
+        "prompt": "Langfuse server URL (leave empty for cloud.langfuse.com)",
+        "url": None,
+        "password": False,
+        "category": "tool",
+        "advanced": True,
+    },
+    "SIDEKICK_LANGFUSE_BASE_URL": {
+        "description": "[alias: HERMES_LANGFUSE_BASE_URL] Langfuse server URL (default: https://cloud.langfuse.com)",
         "prompt": "Langfuse server URL (leave empty for cloud.langfuse.com)",
         "url": None,
         "password": False,
@@ -2534,10 +2593,24 @@ OPTIONAL_ENV_VARS = {
         "password": False,
         "category": "setting",
     },
+    "SIDEKICK_MAX_ITERATIONS": {
+        "description": "[alias: HERMES_MAX_ITERATIONS] Maximum tool-calling iterations per conversation (default: 90)",
+        "prompt": "Max iterations",
+        "url": None,
+        "password": False,
+        "category": "setting",
+    },
     # HERMES_TOOL_PROGRESS and HERMES_TOOL_PROGRESS_MODE are deprecated —
     # now configured via display.tool_progress in config.yaml (off|new|all|verbose).
     # Gateway falls back to these env vars for backward compatibility.
     "HERMES_TOOL_PROGRESS": {
+        "description": "(deprecated) Use display.tool_progress in config.yaml instead",
+        "prompt": "Tool progress (deprecated — use config.yaml)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+    },
+    "SIDEKICK_TOOL_PROGRESS": {
         "description": "(deprecated) Use display.tool_progress in config.yaml instead",
         "prompt": "Tool progress (deprecated — use config.yaml)",
         "url": None,
@@ -2551,6 +2624,13 @@ OPTIONAL_ENV_VARS = {
         "password": False,
         "category": "setting",
     },
+    "SIDEKICK_TOOL_PROGRESS_MODE": {
+        "description": "(deprecated) Use display.tool_progress in config.yaml instead",
+        "prompt": "Progress mode (deprecated — use config.yaml)",
+        "url": None,
+        "password": False,
+        "category": "setting",
+    },
     "HERMES_PREFILL_MESSAGES_FILE": {
         "description": "Path to JSON file with ephemeral prefill messages for few-shot priming",
         "prompt": "Prefill messages file path",
@@ -2558,8 +2638,22 @@ OPTIONAL_ENV_VARS = {
         "password": False,
         "category": "setting",
     },
+    "SIDEKICK_PREFILL_MESSAGES_FILE": {
+        "description": "[alias: HERMES_PREFILL_MESSAGES_FILE] Path to JSON file with ephemeral prefill messages for few-shot priming",
+        "prompt": "Prefill messages file path",
+        "url": None,
+        "password": False,
+        "category": "setting",
+    },
     "HERMES_EPHEMERAL_SYSTEM_PROMPT": {
         "description": "Ephemeral system prompt injected at API-call time (never persisted to sessions)",
+        "prompt": "Ephemeral system prompt",
+        "url": None,
+        "password": False,
+        "category": "setting",
+    },
+    "SIDEKICK_EPHEMERAL_SYSTEM_PROMPT": {
+        "description": "[alias: HERMES_EPHEMERAL_SYSTEM_PROMPT] Ephemeral system prompt injected at API-call time (never persisted to sessions)",
         "prompt": "Ephemeral system prompt",
         "url": None,
         "password": False,
@@ -2823,7 +2917,7 @@ def _normalize_custom_provider_entry(
     if isinstance(models, dict) and models:
         normalized["models"] = models
     elif isinstance(models, list) and models:
-        # Hand-edited configs (and older Hermes versions) write ``models`` as
+        # Hand-edited configs (and older Sidekick versions) write ``models`` as
         # a plain list of model ids. Preserve them by converting to the dict
         # shape downstream code expects; otherwise normalize silently drops
         # the list and /model shows the provider with (0) models.
@@ -3217,7 +3311,7 @@ def warn_deprecated_cwd_env_vars(config: Optional[Dict[str, Any]] = None) -> Non
             f"this is deprecated."
         )
     if lines:
-        hint_path = os.environ.get("HERMES_HOME", "~/.sidekick")
+        hint_path = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", "~/.sidekick")
         lines.insert(0, "\033[33m⚠ Deprecated .env settings detected:\033[0m")
         lines.append(
             f"  \033[2mMove to config.yaml instead:  "
@@ -3260,14 +3354,14 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
         if not isinstance(display, dict):
             display = {}
         if "tool_progress" not in display:
-            old_enabled = get_env_value("HERMES_TOOL_PROGRESS")
-            old_mode = get_env_value("HERMES_TOOL_PROGRESS_MODE")
+            old_enabled = get_env_value("SIDEKICK_TOOL_PROGRESS") or get_env_value("HERMES_TOOL_PROGRESS")
+            old_mode = get_env_value("SIDEKICK_TOOL_PROGRESS_MODE") or get_env_value("HERMES_TOOL_PROGRESS_MODE")
             if old_enabled and old_enabled.lower() in {"false", "0", "no"}:
                 display["tool_progress"] = "off"
-                results["config_added"].append("display.tool_progress=off (from HERMES_TOOL_PROGRESS=false)")
+                results["config_added"].append("display.tool_progress=off (from SIDEKICK_TOOL_PROGRESS/HERMES_TOOL_PROGRESS=false)")
             elif old_mode and old_mode.lower() in {"new", "all"}:
                 display["tool_progress"] = old_mode.lower()
-                results["config_added"].append(f"display.tool_progress={old_mode.lower()} (from HERMES_TOOL_PROGRESS_MODE)")
+                results["config_added"].append(f"display.tool_progress={old_mode.lower()} (from SIDEKICK_TOOL_PROGRESS_MODE/HERMES_TOOL_PROGRESS_MODE)")
             else:
                 display["tool_progress"] = "all"
                 results["config_added"].append("display.tool_progress=all (default)")
@@ -3280,7 +3374,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
     if current_ver < 5:
         config = load_config()
         if "timezone" not in config:
-            old_tz = os.getenv("HERMES_TIMEZONE", "")
+            old_tz = os.getenv("SIDEKICK_TIMEZONE") or os.getenv("HERMES_TIMEZONE", "")
             if old_tz and old_tz.strip():
                 config["timezone"] = old_tz.strip()
                 results["config_added"].append(f"timezone={old_tz.strip()} (from HERMES_TIMEZONE)")

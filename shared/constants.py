@@ -54,7 +54,7 @@ def get_optional_skills_dir(default: Path | None = None) -> Path:
     override = os.getenv("SIDEKICK_OPTIONAL_SKILLS", "").strip()
     if override:
         return Path(override)
-    override = os.getenv("HERMES_OPTIONAL_SKILLS", "").strip()
+    override = os.getenv("SIDEKICK_OPTIONAL_SKILLS") or os.getenv("HERMES_OPTIONAL_SKILLS", "").strip()
     if override:
         return Path(override)
     if default is not None:

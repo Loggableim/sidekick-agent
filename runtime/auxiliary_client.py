@@ -309,7 +309,7 @@ _PROVIDERS_WITHOUT_VISION: frozenset = frozenset({
 # `X-Title` is the canonical attribution header OpenRouter's dashboard
 # reads; the previous `X-OpenRouter-Title` label was not recognized there.
 _OR_HEADERS_BASE = {
-    "HTTP-Referer": "https://hermes-agent.nousresearch.com",
+    "HTTP-Referer": "https://sidekick-agent.sh",
     "X-Title": "Sidekick Agent",
     "X-OpenRouter-Categories": "productivity,cli-agent",
 }
@@ -344,7 +344,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
             or_config = {}
 
     # Determine cache enabled: env var overrides config.
-    env_cache = os.environ.get("HERMES_OPENROUTER_CACHE", "").strip().lower()
+    env_cache = (os.environ.get("SIDEKICK_OPENROUTER_CACHE") or os.environ.get("HERMES_OPENROUTER_CACHE", "")).strip().lower()
     if env_cache:
         cache_enabled = env_cache in _TRUTHY_ENV_VALUES
     else:
@@ -356,7 +356,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
     headers["X-OpenRouter-Cache"] = "true"
 
     # Determine TTL: env var overrides config.
-    env_ttl = os.environ.get("HERMES_OPENROUTER_CACHE_TTL", "").strip()
+    env_ttl = (os.environ.get("SIDEKICK_OPENROUTER_CACHE_TTL") or os.environ.get("HERMES_OPENROUTER_CACHE_TTL", "")).strip()
     if env_ttl:
         if env_ttl.isdigit():
             ttl = int(env_ttl)
@@ -375,7 +375,7 @@ import sidekick_cli as _sidekick_cli_mod
 _SIDEKICK_VERSION = getattr(_sidekick_cli_mod, "__version__", "0.1.0-migration")
 
 _AI_GATEWAY_HEADERS = {
-    "HTTP-Referer": "https://hermes-agent.nousresearch.com",
+    "HTTP-Referer": "https://sidekick-agent.sh",
     "X-Title": "Sidekick Agent",
     "User-Agent": f"SidekickAgent/{_SIDEKICK_VERSION}",
 }
@@ -1219,8 +1219,8 @@ def _resolve_nous_runtime_api(*, force_refresh: bool = False) -> Optional[tuple[
         from cli.auth import resolve_nous_runtime_credentials
 
         creds = resolve_nous_runtime_credentials(
-            min_key_ttl_seconds=max(60, int(os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
-            timeout_seconds=float(os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
+            min_key_ttl_seconds=max(60, int(os.getenv("SIDEKICK_NOUS_MIN_KEY_TTL_SECONDS") or os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
+            timeout_seconds=float(os.getenv("SIDEKICK_NOUS_TIMEOUT_SECONDS") or os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
             force_mint=force_refresh,
         )
     except Exception as exc:
@@ -1858,7 +1858,7 @@ def _get_provider_chain() -> List[tuple]:
 # happened). Entries auto-expire so a topped-up account recovers without
 # manual intervention.
 #
-# Failure isolation: the cache is in-process only. A second hermes
+# Failure isolation: the cache is in-process only. A second sidekick
 # process won't inherit the unhealthy mark — that's intentional, since
 # the user might be running two profiles with different OpenRouter keys.
 
@@ -2369,8 +2369,8 @@ def _refresh_provider_credentials(provider: str) -> bool:
             from cli.auth import resolve_nous_runtime_credentials
 
             creds = resolve_nous_runtime_credentials(
-                min_key_ttl_seconds=max(60, int(os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
-                timeout_seconds=float(os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
+                min_key_ttl_seconds=max(60, int(os.getenv("SIDEKICK_NOUS_MIN_KEY_TTL_SECONDS") or os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
+                timeout_seconds=float(os.getenv("SIDEKICK_NOUS_TIMEOUT_SECONDS") or os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
                 force_mint=True,
             )
             if not str(creds.get("api_key", "") or "").strip():
@@ -2795,7 +2795,7 @@ def resolve_provider_client(
             codex_token = _read_codex_access_token()
             if not codex_token:
                 logger.warning("resolve_provider_client: openai-codex requested "
-                               "but no Codex OAuth token found (run: hermes model)")
+                               "but no Codex OAuth token found (run: sidekick model)")
                 return None, None
             final_model = _normalize_resolved_model(model, provider)
             raw_client = OpenAI(
@@ -2808,7 +2808,7 @@ def resolve_provider_client(
         client, default = _build_codex_client(model)
         if client is None:
             logger.warning("resolve_provider_client: openai-codex requested "
-                           "but no Codex OAuth token found (run: hermes model)")
+                           "but no Codex OAuth token found (run: sidekick model)")
             return None, None
         final_model = _normalize_resolved_model(model or default, provider)
         return (_to_async_client(client, final_model, is_vision=is_vision) if async_mode

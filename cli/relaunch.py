@@ -52,7 +52,7 @@ _INHERITED_FLAGS_TABLE = _build_inherited_flag_table()
 
 
 def _extract_inherited_flags(argv: Sequence[str]) -> list[str]:
-    """Pull out flags that should carry over into a self-relaunched hermes."""
+    """Pull out flags that should carry over into a self-relaunched sidekick."""
     flags: list[str] = []
     i = 0
     while i < len(argv):
@@ -114,7 +114,7 @@ def resolve_hermes_bin() -> Optional[str]:
                 return abs_path
 
     # PATH lookup
-    path_bin = shutil.which("hermes")
+    path_bin = shutil.which("sidekick") or shutil.which("hermes")
     if path_bin:
         return path_bin
 
@@ -127,7 +127,7 @@ def build_relaunch_argv(
     preserve_inherited: bool = True,
     original_argv: Optional[Sequence[str]] = None,
 ) -> list[str]:
-    """Construct an argv list for replacing the current process with hermes.
+    """Construct an argv list for replacing the current process with sidekick.
 
     Args:
         extra_args: Arguments to append (e.g. ``["--resume", id]``).
@@ -158,7 +158,7 @@ def relaunch(
     preserve_inherited: bool = True,
     original_argv: Optional[Sequence[str]] = None,
 ) -> None:
-    """Replace the current process with a fresh hermes invocation.
+    """Replace the current process with a fresh sidekick invocation.
 
     On POSIX we use ``os.execvp`` which replaces the running process with
     the new one in place — same PID, no double-fork.  That's what the

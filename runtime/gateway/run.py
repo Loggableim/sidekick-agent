@@ -156,7 +156,7 @@ def _auto_continue_freshness_window() -> float:
     the freshness gate (restores the pre-fix "always fresh" behaviour for
     users who want to opt out).
     """
-    raw = os.environ.get("HERMES_AUTO_CONTINUE_FRESHNESS")
+    raw = os.environ.get("SIDEKICK_AUTO_CONTINUE_FRESHNESS") or os.environ.get("HERMES_AUTO_CONTINUE_FRESHNESS")
     if raw is None or raw == "":
         return float(_AUTO_CONTINUE_FRESHNESS_SECS_DEFAULT)
     try:
@@ -373,7 +373,7 @@ def _restart_notification_pending() -> bool:
 
 # Mark this process as a gateway so cli.py's module-level load_cli_config()
 # knows not to clobber TERMINAL_CWD if lazily imported.
-os.environ["_HERMES_GATEWAY"] = "1"
+os.environ["_SIDEKICK_GATEWAY"] = os.environ["_HERMES_GATEWAY"] = "1"
 
 _ensure_ssl_certs()
 
@@ -417,7 +417,7 @@ def _reload_runtime_env_preserving_config_authority() -> None:
 
     agent_cfg = cfg.get("agent", {})
     if isinstance(agent_cfg, dict) and "max_turns" in agent_cfg:
-        os.environ["HERMES_MAX_ITERATIONS"] = str(agent_cfg["max_turns"])
+        os.environ["SIDEKICK_MAX_ITERATIONS"] = os.environ["HERMES_MAX_ITERATIONS"] = str(agent_cfg["max_turns"])
 
 
 _DOCKER_VOLUME_SPEC_RE = re.compile(r"^(?P<host>.+):(?P<container>/[^:]+?)(?::(?P<options>[^:]+))?$")
@@ -536,35 +536,35 @@ if _config_path.exists():
         _agent_cfg = _cfg.get("agent", {})
         if _agent_cfg and isinstance(_agent_cfg, dict):
             if "max_turns" in _agent_cfg:
-                os.environ["HERMES_MAX_ITERATIONS"] = str(_agent_cfg["max_turns"])
+                os.environ["SIDEKICK_MAX_ITERATIONS"] = os.environ["HERMES_MAX_ITERATIONS"] = str(_agent_cfg["max_turns"])
             if "gateway_timeout" in _agent_cfg:
-                os.environ["HERMES_AGENT_TIMEOUT"] = str(_agent_cfg["gateway_timeout"])
+                os.environ["SIDEKICK_AGENT_TIMEOUT"] = os.environ["HERMES_AGENT_TIMEOUT"] = str(_agent_cfg["gateway_timeout"])
             if "gateway_timeout_warning" in _agent_cfg:
-                os.environ["HERMES_AGENT_TIMEOUT_WARNING"] = str(_agent_cfg["gateway_timeout_warning"])
+                os.environ["SIDEKICK_AGENT_TIMEOUT_WARNING"] = os.environ["HERMES_AGENT_TIMEOUT_WARNING"] = str(_agent_cfg["gateway_timeout_warning"])
             if "gateway_notify_interval" in _agent_cfg:
-                os.environ["HERMES_AGENT_NOTIFY_INTERVAL"] = str(_agent_cfg["gateway_notify_interval"])
+                os.environ["SIDEKICK_AGENT_NOTIFY_INTERVAL"] = os.environ["HERMES_AGENT_NOTIFY_INTERVAL"] = str(_agent_cfg["gateway_notify_interval"])
             if "restart_drain_timeout" in _agent_cfg:
-                os.environ["HERMES_RESTART_DRAIN_TIMEOUT"] = str(_agent_cfg["restart_drain_timeout"])
+                os.environ["SIDEKICK_RESTART_DRAIN_TIMEOUT"] = os.environ["HERMES_RESTART_DRAIN_TIMEOUT"] = str(_agent_cfg["restart_drain_timeout"])
             if "gateway_auto_continue_freshness" in _agent_cfg:
-                os.environ["HERMES_AUTO_CONTINUE_FRESHNESS"] = str(
+                os.environ["SIDEKICK_AUTO_CONTINUE_FRESHNESS"] = os.environ["HERMES_AUTO_CONTINUE_FRESHNESS"] = str(
                     _agent_cfg["gateway_auto_continue_freshness"]
                 )
         _display_cfg = _cfg.get("display", {})
         if _display_cfg and isinstance(_display_cfg, dict):
             if "busy_input_mode" in _display_cfg:
-                os.environ["HERMES_GATEWAY_BUSY_INPUT_MODE"] = str(_display_cfg["busy_input_mode"])
+                os.environ["SIDEKICK_GATEWAY_BUSY_INPUT_MODE"] = os.environ["HERMES_GATEWAY_BUSY_INPUT_MODE"] = str(_display_cfg["busy_input_mode"])
             if "busy_ack_enabled" in _display_cfg:
-                os.environ["HERMES_GATEWAY_BUSY_ACK_ENABLED"] = str(_display_cfg["busy_ack_enabled"])
+                os.environ["SIDEKICK_GATEWAY_BUSY_ACK_ENABLED"] = os.environ["HERMES_GATEWAY_BUSY_ACK_ENABLED"] = str(_display_cfg["busy_ack_enabled"])
         # Timezone: bridge config.yaml → HERMES_TIMEZONE env var.
         _tz_cfg = _cfg.get("timezone", "")
         if _tz_cfg and isinstance(_tz_cfg, str):
-            os.environ["HERMES_TIMEZONE"] = _tz_cfg.strip()
+            os.environ["SIDEKICK_TIMEZONE"] = os.environ["HERMES_TIMEZONE"] = _tz_cfg.strip()
         # Security settings
         _security_cfg = _cfg.get("security", {})
         if isinstance(_security_cfg, dict):
             _redact = _security_cfg.get("redact_secrets")
             if _redact is not None:
-                os.environ["HERMES_REDACT_SECRETS"] = str(_redact).lower()
+                os.environ["SIDEKICK_REDACT_SECRETS"] = os.environ["HERMES_REDACT_SECRETS"] = str(_redact).lower()
     except Exception as _bridge_err:
         # Previously this was silent (`except Exception: pass`), which
         # hid partial bridge failures and let .env defaults shadow
@@ -608,10 +608,10 @@ except Exception as _bootstrap_exc:
     print(f"  Warning: deprecation check failed: {_bootstrap_exc}", file=sys.stderr)
 
 # Gateway runs in quiet mode - suppress debug output and use cwd directly (no temp dirs)
-os.environ["HERMES_QUIET"] = "1"
+os.environ["SIDEKICK_QUIET"] = os.environ["HERMES_QUIET"] = "1"
 
 # Enable interactive exec approval for dangerous commands on messaging platforms
-os.environ["HERMES_EXEC_ASK"] = "1"
+os.environ["SIDEKICK_EXEC_ASK"] = os.environ["HERMES_EXEC_ASK"] = "1"
 
 # Set terminal working directory for messaging platforms.
 # config.yaml terminal.cwd is the canonical source (bridged to TERMINAL_CWD
@@ -688,7 +688,7 @@ def _resolve_runtime_agent_kwargs() -> dict:
 
     try:
         runtime = resolve_runtime_provider(
-            requested=os.getenv("HERMES_INFERENCE_PROVIDER"),
+            requested=os.getenv("SIDEKICK_INFERENCE_PROVIDER") or os.getenv("HERMES_INFERENCE_PROVIDER"),
         )
     except AuthError as auth_exc:
         # Primary provider auth failed (expired token, revoked key, etc.).
@@ -1001,7 +1001,7 @@ def _resolve_hermes_bin() -> Optional[list[str]]:
     """
     import shutil
 
-    hermes_bin = shutil.which("hermes")
+    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
     if hermes_bin:
         return [hermes_bin]
 
@@ -1444,10 +1444,10 @@ class GatewayRunner:
     # -- Setup skill availability ----------------------------------------
 
     def _has_setup_skill(self) -> bool:
-        """Check if the hermes-agent-setup skill is installed."""
+        """Check if the sidekick-agent-setup skill is installed."""
         try:
             from tools.skill_manager_tool import _find_skill
-            return _find_skill("hermes-agent-setup") is not None
+            return _find_skill("sidekick-agent-setup") is not None
         except Exception:
             return False
 
@@ -1602,7 +1602,7 @@ class GatewayRunner:
 
     def _adapter_disconnect_timeout_secs(self) -> float:
         """Return the per-adapter disconnect timeout used during shutdown."""
-        raw = os.getenv("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "").strip()
+        raw = (os.getenv("SIDEKICK_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT") or os.getenv("HERMES_GATEWAY_ADAPTER_DISCONNECT_TIMEOUT", "")).strip()
         if raw:
             try:
                 timeout = float(raw)
@@ -1617,7 +1617,7 @@ class GatewayRunner:
 
     def _platform_connect_timeout_secs(self) -> float:
         """Return the per-platform connect timeout used during startup/retry."""
-        raw = os.getenv("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "").strip()
+        raw = (os.getenv("SIDEKICK_GATEWAY_PLATFORM_CONNECT_TIMEOUT") or os.getenv("HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT", "")).strip()
         if raw:
             try:
                 timeout = float(raw)
@@ -2161,7 +2161,7 @@ class GatewayRunner:
         the prefill_messages_file key in ~/.sidekick/config.yaml.
         Relative paths are resolved from ~/.sidekick/.
         """
-        file_path = os.getenv("HERMES_PREFILL_MESSAGES_FILE", "")
+        file_path = os.getenv("SIDEKICK_PREFILL_MESSAGES_FILE") or os.getenv("HERMES_PREFILL_MESSAGES_FILE", "")
         if not file_path:
             try:
                 import yaml as _y
@@ -2198,7 +2198,7 @@ class GatewayRunner:
         Checks HERMES_EPHEMERAL_SYSTEM_PROMPT env var first, then falls back to
         agent.system_prompt in ~/.sidekick/config.yaml.
         """
-        prompt = os.getenv("HERMES_EPHEMERAL_SYSTEM_PROMPT", "")
+        prompt = os.getenv("SIDEKICK_EPHEMERAL_SYSTEM_PROMPT") or os.getenv("HERMES_EPHEMERAL_SYSTEM_PROMPT", "")
         if prompt:
             return prompt
         try:
@@ -2343,7 +2343,7 @@ class GatewayRunner:
     @staticmethod
     def _load_busy_input_mode() -> str:
         """Load gateway drain-time busy-input behavior from config/env."""
-        mode = os.getenv("HERMES_GATEWAY_BUSY_INPUT_MODE", "").strip().lower()
+        mode = (os.getenv("SIDEKICK_GATEWAY_BUSY_INPUT_MODE") or os.getenv("HERMES_GATEWAY_BUSY_INPUT_MODE", "")).strip().lower()
         if not mode:
             try:
                 import yaml as _y
@@ -2363,7 +2363,7 @@ class GatewayRunner:
     @staticmethod
     def _load_restart_drain_timeout() -> float:
         """Load graceful gateway restart/stop drain timeout in seconds."""
-        raw = os.getenv("HERMES_RESTART_DRAIN_TIMEOUT", "").strip()
+        raw = (os.getenv("SIDEKICK_RESTART_DRAIN_TIMEOUT") or os.getenv("HERMES_RESTART_DRAIN_TIMEOUT", "")).strip()
         if not raw:
             try:
                 import yaml as _y
@@ -2396,7 +2396,7 @@ class GatewayRunner:
           - ``error``  — only the final message when exit code is non-zero
           - ``off``    — no watcher messages at all
         """
-        mode = os.getenv("HERMES_BACKGROUND_NOTIFICATIONS", "")
+        mode = os.getenv("SIDEKICK_BACKGROUND_NOTIFICATIONS") or os.getenv("HERMES_BACKGROUND_NOTIFICATIONS", "")
         if not mode:
             try:
                 import yaml as _y
@@ -2567,7 +2567,7 @@ class GatewayRunner:
         # Check if busy ack is disabled — skip sending but still process the input.
         # Placed before debounce so we don't stamp a "last ack" timestamp that was
         # never actually delivered.
-        busy_ack_enabled = os.environ.get("HERMES_GATEWAY_BUSY_ACK_ENABLED", "true").lower() == "true"
+        busy_ack_enabled = (os.environ.get("SIDEKICK_GATEWAY_BUSY_ACK_ENABLED") or os.environ.get("HERMES_GATEWAY_BUSY_ACK_ENABLED", "true")).lower() == "true"
         if not busy_ack_enabled:
             logger.debug("Busy ack suppressed for session %s", session_key)
             return True  # input still processed, just no ack sent
@@ -3214,7 +3214,7 @@ class GatewayRunner:
         logger.info("Session storage: %s", self.config.sessions_dir)
 
         # Sanity-check that systemd's TimeoutStopSec covers our drain
-        # window.  When the user upgraded hermes-agent without re-running
+        # window.  When the user upgraded sidekick-agent without re-running
         # ``sidekick setup``, their unit file may still encode the old
         # default — in which case SIGKILL hits mid-drain and looks like
         # a phantom kill in the journal.  Best-effort, never raises.
@@ -3238,7 +3238,7 @@ class GatewayRunner:
         # config.yaml → env bridge did the right thing at a glance (instead
         # of silently running at a stale .env value for weeks).
         try:
-            _effective_max_iter = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
+            _effective_max_iter = int(os.getenv("SIDEKICK_MAX_ITERATIONS") or os.getenv("HERMES_MAX_ITERATIONS", "90"))
             logger.info(
                 "Agent budget: max_iterations=%d (agent.max_turns from config.yaml, "
                 "or HERMES_MAX_ITERATIONS from .env, or default 90)",
@@ -3252,7 +3252,7 @@ class GatewayRunner:
         # state at import time, so this log line is the source of truth
         # for this process's lifetime.
         try:
-            _redact_raw = os.getenv("HERMES_REDACT_SECRETS", "true")
+            _redact_raw = os.getenv("SIDEKICK_REDACT_SECRETS") or os.getenv("HERMES_REDACT_SECRETS", "true")
             _redact_on = _redact_raw.lower() in {"1", "true", "yes", "on"}
             if _redact_on:
                 logger.info(
@@ -4484,7 +4484,7 @@ class GatewayRunner:
         except Exception:
             logger.warning("kanban dispatcher: config loader unavailable; disabled")
             return
-        env_override = os.environ.get("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "").strip().lower()
+        env_override = (os.environ.get("SIDEKICK_KANBAN_DISPATCH_IN_GATEWAY") or os.environ.get("HERMES_KANBAN_DISPATCH_IN_GATEWAY", "")).strip().lower()
         if env_override in {"0", "false", "no", "off"}:
             logger.info("kanban dispatcher: disabled via HERMES_KANBAN_DISPATCH_IN_GATEWAY env")
             return
@@ -5157,7 +5157,7 @@ class GatewayRunner:
             # Apply Telegram notification mode from config.  Controls whether
             # intermediate messages (tool progress, streaming, status) trigger
             # push notifications.  Supports ENV override for quick testing.
-            _notify_mode = os.getenv("HERMES_TELEGRAM_NOTIFICATIONS", "")
+            _notify_mode = os.getenv("SIDEKICK_TELEGRAM_NOTIFICATIONS") or os.getenv("HERMES_TELEGRAM_NOTIFICATIONS", "")
             if not _notify_mode:
                 try:
                     _gw_cfg = _load_gateway_config()
@@ -5196,7 +5196,7 @@ class GatewayRunner:
         elif platform == Platform.SLACK:
             from gateway.platforms.slack import SlackAdapter, check_slack_requirements
             if not check_slack_requirements():
-                logger.warning("Slack: slack-bolt not installed. Run: pip install 'hermes-agent[slack]'")
+                logger.warning("Slack: slack-bolt not installed. Run: pip install 'sidekick-agent[slack]'")
                 return None
             return SlackAdapter(config)
 
@@ -5867,7 +5867,7 @@ class GatewayRunner:
         # wall-clock age alone isn't sufficient.  Evict only when the agent
         # has been *idle* beyond the inactivity threshold (or when the agent
         # object has no activity tracker and wall-clock age is extreme).
-        _raw_stale_timeout = _float_env("HERMES_AGENT_TIMEOUT", 1800)
+        _raw_stale_timeout = _float_env("SIDEKICK_AGENT_TIMEOUT", _float_env("HERMES_AGENT_TIMEOUT", 1800))
         _stale_ts = self._running_agents_ts.get(_quick_key, 0)
         if _quick_key in self._running_agents and _stale_ts:
             _stale_age = time.time() - _stale_ts
@@ -6137,7 +6137,7 @@ class GatewayRunner:
                 return None
 
             _telegram_followup_grace = float(
-                os.getenv("HERMES_TELEGRAM_FOLLOWUP_GRACE_SECONDS", "3.0")
+                os.getenv("SIDEKICK_TELEGRAM_FOLLOWUP_GRACE_SECONDS") or os.getenv("HERMES_TELEGRAM_FOLLOWUP_GRACE_SECONDS", "3.0")
             )
             _started_at = self._running_agents_ts.get(_quick_key, 0)
             if (
@@ -6770,7 +6770,7 @@ class GatewayRunner:
                                 "then /restart the gateway."
                             )
                             if self._has_setup_skill():
-                                _stt_msg += "\n\nFor full setup instructions, type: `/skill hermes-agent-setup`"
+                                _stt_msg += "\n\nFor full setup instructions, type: `/skill sidekick-agent-setup`"
                             await _stt_adapter.send(
                                 source.chat_id,
                                 _stt_msg,
@@ -6804,7 +6804,7 @@ class GatewayRunner:
 
                 # Translate host cache path to in-container path if running under Docker backend.
                 # This ensures the agent receives a path it can open inside its sandbox, as the
-                # cache directories are auto-mounted at /root/.hermes/cache/* by get_cache_directory_mounts().
+                # cache directories are auto-mounted at /root/.sidekick/cache/* by get_cache_directory_mounts().
                 agent_path = to_agent_visible_cache_path(path)
 
                 if mtype.startswith("text/"):
@@ -10213,7 +10213,7 @@ class GatewayRunner:
             disabled_toolsets = agent_cfg.get("disabled_toolsets") or None
 
             pr = self._provider_routing
-            max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
+            max_iterations = int(os.getenv("SIDEKICK_MAX_ITERATIONS") or os.getenv("HERMES_MAX_ITERATIONS", "90"))
             reasoning_config = self._resolve_session_reasoning_config(source=source)
             self._reasoning_config = reasoning_config
             self._service_tier = self._load_service_tier()
@@ -12993,8 +12993,8 @@ class GatewayRunner:
             disabled_note = "[The user sent voice message(s), but transcription is disabled in config."
             if self._has_setup_skill():
                 disabled_note += (
-                    " You have a skill called hermes-agent-setup that can help "
-                    "users configure Hermes features including voice, tools, and more."
+                    " You have a skill called sidekick-agent-setup that can help "
+                    "users configure Sidekick features including voice, tools, and more."
                 )
             disabled_note += "]"
             if user_text:
@@ -13028,8 +13028,8 @@ class GatewayRunner:
                         )
                         if self._has_setup_skill():
                             _no_stt_note += (
-                                " You have a skill called hermes-agent-setup "
-                                "that can help users configure Hermes features "
+                                " You have a skill called sidekick-agent-setup "
+                                "that can help users configure Sidekick features "
                                 "including voice, tools, and more."
                             )
                         _no_stt_note += "]"
@@ -13885,7 +13885,7 @@ class GatewayRunner:
             headers["X-Hermes-Session-Id"] = session_id
 
         body = {
-            "model": "hermes-agent",
+            "model": "sidekick-agent",
             "messages": api_messages,
             "stream": True,
         }
@@ -14163,7 +14163,7 @@ class GatewayRunner:
 
         # Tool progress mode — resolved per-platform with env var fallback
         _resolved_tp = resolve_display_setting(user_config, platform_key, "tool_progress")
-        _env_tp = os.getenv("HERMES_TOOL_PROGRESS_MODE")
+        _env_tp = os.getenv("SIDEKICK_TOOL_PROGRESS_MODE") or os.getenv("HERMES_TOOL_PROGRESS_MODE")
         _display_cfg = display_config if isinstance(display_config, dict) else {}
         _platforms_cfg = _display_cfg.get("platforms") or {}
         _platform_cfg = _platforms_cfg.get(platform_key) or {}
@@ -14653,10 +14653,10 @@ class GatewayRunner:
 
             # session_key is now set via contextvars in _set_session_env()
             # (concurrency-safe). Keep os.environ as fallback for CLI/cron.
-            os.environ["HERMES_SESSION_KEY"] = session_key or ""
+            os.environ["SIDEKICK_SESSION_KEY"] = os.environ["HERMES_SESSION_KEY"] = session_key or ""
 
             # Read from env var or use default (same as CLI)
-            max_iterations = int(os.getenv("HERMES_MAX_ITERATIONS", "90"))
+            max_iterations = int(os.getenv("SIDEKICK_MAX_ITERATIONS") or os.getenv("HERMES_MAX_ITERATIONS", "90"))
             
             # Map platform enum to the platform hint key the agent understands.
             # Platform.LOCAL ("local") maps to "cli"; others pass through as-is.
@@ -15487,7 +15487,7 @@ class GatewayRunner:
         # Config: agent.gateway_notify_interval in config.yaml, or
         # HERMES_AGENT_NOTIFY_INTERVAL env var.  Default 180s (3 min).
         # 0 = disable notifications.
-        _NOTIFY_INTERVAL_RAW = _float_env("HERMES_AGENT_NOTIFY_INTERVAL", 180)
+        _NOTIFY_INTERVAL_RAW = _float_env("SIDEKICK_AGENT_NOTIFY_INTERVAL", _float_env("HERMES_AGENT_NOTIFY_INTERVAL", 180))
         _NOTIFY_INTERVAL = _NOTIFY_INTERVAL_RAW if _NOTIFY_INTERVAL_RAW > 0 else None
         _notify_start = time.time()
 
@@ -15541,9 +15541,9 @@ class GatewayRunner:
             # Config: agent.gateway_timeout in config.yaml, or
             # HERMES_AGENT_TIMEOUT env var (env var takes precedence).
             # Default 1800s (30 min inactivity).  0 = unlimited.
-            _agent_timeout_raw = _float_env("HERMES_AGENT_TIMEOUT", 1800)
+            _agent_timeout_raw = _float_env("SIDEKICK_AGENT_TIMEOUT", _float_env("HERMES_AGENT_TIMEOUT", 1800))
             _agent_timeout = _agent_timeout_raw if _agent_timeout_raw > 0 else None
-            _agent_warning_raw = _float_env("HERMES_AGENT_TIMEOUT_WARNING", 900)
+            _agent_warning_raw = _float_env("SIDEKICK_AGENT_TIMEOUT_WARNING", _float_env("HERMES_AGENT_TIMEOUT_WARNING", 900))
             _agent_warning = _agent_warning_raw if _agent_warning_raw > 0 else None
             _warning_fired = False
             _executor_task = asyncio.ensure_future(
@@ -16316,7 +16316,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
         # before sending SIGTERM. If present, treat the signal as a
         # planned shutdown and exit 0 so systemd's Restart=on-failure
         # doesn't revive us (which would flap-fight the replacer when
-        # both services are enabled, e.g. hermes.service + hermes-
+        # both services are enabled, e.g. sidekick.service + sidekick-
         # gateway.service from pre-rename installs).
         planned_takeover = False
         try:

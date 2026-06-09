@@ -158,7 +158,7 @@ def kanban_home() -> Path:
     profile's ``HERMES_HOME`` would silently fork the board per profile,
     which breaks the dispatcher / worker handoff.
     """
-    override = os.environ.get("HERMES_KANBAN_HOME", "").strip()
+    override = (os.environ.get("SIDEKICK_KANBAN_HOME") or os.environ.get("HERMES_KANBAN_HOME", "")).strip()
     if override:
         return Path(override).expanduser()
     from runtime._compat.shim_constants import get_default_hermes_root
@@ -201,7 +201,7 @@ def get_current_board() -> str:
     with a best-effort warning — the dispatcher must never crash because a
     user hand-edited a file or removed a board directory.
     """
-    env = os.environ.get("HERMES_KANBAN_BOARD", "").strip()
+    env = (os.environ.get("SIDEKICK_KANBAN_BOARD") or os.environ.get("HERMES_KANBAN_BOARD", "")).strip()
     if env:
         try:
             normed = _normalize_board_slug(env)
@@ -292,7 +292,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
     3. Board ``default`` → ``<root>/kanban.db`` (back-compat path).
        Other boards → ``<root>/kanban/boards/<slug>/kanban.db``.
     """
-    override = os.environ.get("HERMES_KANBAN_DB", "").strip()
+    override = (os.environ.get("SIDEKICK_KANBAN_DB") or os.environ.get("HERMES_KANBAN_DB", "")).strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -314,7 +314,7 @@ def workspaces_root(board: Optional[str] = None) -> Path:
     that existing scratch workspaces from before the boards feature are
     preserved. Other boards use ``<root>/kanban/boards/<slug>/workspaces/``.
     """
-    override = os.environ.get("HERMES_KANBAN_WORKSPACES_ROOT", "").strip()
+    override = (os.environ.get("SIDEKICK_KANBAN_WORKSPACES_ROOT") or os.environ.get("HERMES_KANBAN_WORKSPACES_ROOT", "")).strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -3873,12 +3873,12 @@ def _rotate_worker_log(log_path: Path, max_bytes: int) -> None:
         pass
 
 
-def _resolve_hermes_argv() -> list[str]:
+def _resolve_sidekick_argv() -> list[str]:
     """Resolve the ``sidekick`` invocation as argv parts for ``Popen``.
 
     Tries in order:
 
-    1. ``shutil.which("hermes")`` — the console-script shim, the same form
+    1. ``shutil.which("sidekick")`` — the console-script shim, the same form
        that shows up in ``ps`` output and existing logs. Preferred so live
        systems' diagnostics stay familiar.
     2. ``sys.executable -m sidekick_cli.main`` — fallback for setups where
@@ -3893,13 +3893,17 @@ def _resolve_hermes_argv() -> list[str]:
     """
     import shutil
 
-    hermes_bin = shutil.which("hermes")
+    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
     if hermes_bin:
         return [hermes_bin]
     # Fallback to the module form. ``sidekick_cli.main`` is the actual
     # console-script target declared in pyproject.toml, NOT a top-level
     # ``sidekick`` package — there is no ``sidekick`` package to import.
     return [sys.executable, "-m", "sidekick_cli.main"]
+
+
+# Legacy alias for backward compatibility
+_resolve_hermes_argv = _resolve_sidekick_argv
 
 
 def _default_spawn(
@@ -3977,7 +3981,7 @@ def _default_spawn(
     env["HERMES_PROFILE"] = profile_arg
 
     cmd = [
-        *_resolve_hermes_argv(),
+        *_resolve_sidekick_argv(),
         "-p", profile_arg,
         # Auto-load the kanban-worker skill so every dispatched worker
         # has the pattern library (good summary/metadata shapes, retry

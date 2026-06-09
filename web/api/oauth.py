@@ -25,7 +25,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Compatibility for older helper tests and self-heal code that import these.
-AUTH_JSON_PATH = Path.home() / ".hermes" / "auth.json"
+AUTH_JSON_PATH = Path.home() / ".sidekick" / "auth.json"
 
 CODEX_ISSUER = "https://auth.openai.com"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -96,14 +96,14 @@ def _get_active_hermes_home() -> Path:
         return Path(get_active_hermes_home())
     except Exception as exc:
         # Per Opus advisor on stage-296: log the silent fallback so a corrupt
-        # profile state ending up writing tokens to ~/.hermes (instead of the
+        # profile state ending up writing tokens to ~/.sidekick (instead of the
         # active profile) is observable in logs rather than failing silently.
         logger.warning(
-            "Falling back to ~/.hermes for OAuth credential storage: "
+            "Falling back to ~/.sidekick for OAuth credential storage: "
             "active-profile resolution failed: %s",
             exc,
         )
-        return Path.home() / ".hermes"
+        return Path.home() / ".sidekick"
 
 
 # ── legacy auth.json helpers ────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 """Anthropic Messages API adapter for Sidekick Agent.
 
-Translates between Hermes's internal OpenAI-style message format and
+Translates between Sidekick's internal OpenAI-style message format and
 Anthropic's Messages API. Follows the same pattern as the codex_responses
 adapter — all provider-specific logic is isolated here.
 
@@ -946,7 +946,7 @@ def resolve_anthropic_token() -> Optional[str]:
     """Resolve an Anthropic token from all available sources.
 
     Priority:
-      1. ANTHROPIC_TOKEN env var (OAuth/setup token saved by Hermes)
+      1. ANTHROPIC_TOKEN env var (OAuth/setup token saved by Sidekick)
       2. CLAUDE_CODE_OAUTH_TOKEN env var
       3. Claude Code credentials (~/.claude.json or ~/.claude/.credentials.json)
          — with automatic refresh if expired and a refresh token is available
@@ -956,7 +956,7 @@ def resolve_anthropic_token() -> Optional[str]:
     """
     creds = read_claude_code_credentials()
 
-    # 1. Hermes-managed OAuth/setup token env var
+    # 1. Sidekick-managed OAuth/setup token env var
     token = os.getenv("ANTHROPIC_TOKEN", "").strip()
     if token:
         preferred = _prefer_refreshable_claude_code_token(token, creds)
@@ -1026,7 +1026,7 @@ def run_oauth_setup_token() -> Optional[str]:
     return None
 
 
-# ── Hermes-native PKCE OAuth flow ────────────────────────────────────────
+# ── Sidekick-native PKCE OAuth flow ────────────────────────────────────────
 # Mirrors the flow used by Claude Code, pi-ai, and OpenCode.
 # Stores credentials in ~/.sidekick/.anthropic_oauth.json (our own file).
 
@@ -1149,7 +1149,7 @@ def run_hermes_oauth_login_pure() -> Optional[Dict[str, Any]]:
 
 
 def read_hermes_oauth_credentials() -> Optional[Dict[str, Any]]:
-    """Read Hermes-managed OAuth credentials from ~/.sidekick/.anthropic_oauth.json."""
+    """Read Sidekick-managed OAuth credentials from ~/.sidekick/.anthropic_oauth.json."""
     if _SIDEKICK_OAUTH_FILE.exists():
         try:
             data = json.loads(_SIDEKICK_OAUTH_FILE.read_text(encoding="utf-8"))

@@ -108,7 +108,7 @@ def _get_token_dir() -> Path:
         from runtime._compat.shim_constants import get_sidekick_home
         base = Path(get_sidekick_home())
     except ImportError:
-        base = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+        base = Path(os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     return base / "mcp-tokens"
 
 

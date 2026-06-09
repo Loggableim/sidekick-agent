@@ -68,7 +68,7 @@ def _check_kanban_mode() -> bool:
     embedded by default) and orchestrator profiles with the kanban
     toolset enabled see the Kanban lifecycle tool surface.
     """
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    if os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK"):
         return True
     return _profile_has_kanban_toolset()
 
@@ -82,7 +82,7 @@ def _check_kanban_orchestrator_mode() -> bool:
     board state. Profiles that explicitly opt into the kanban toolset
     and are NOT scoped to a single task are the orchestrator surface.
     """
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    if os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK"):
         return False
     return _profile_has_kanban_toolset()
 
@@ -95,15 +95,15 @@ def _default_task_id(arg: Optional[str]) -> Optional[str]:
     """Resolve ``task_id`` arg or fall back to the env var the dispatcher set."""
     if arg:
         return arg
-    env_tid = os.environ.get("HERMES_KANBAN_TASK")
+    env_tid = os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")
     return env_tid or None
 
 
 def _worker_run_id(task_id: str) -> Optional[int]:
     """Return this worker's dispatcher run id when it is scoped to task_id."""
-    if os.environ.get("HERMES_KANBAN_TASK") != task_id:
+    if (os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")) != task_id:
         return None
-    raw = os.environ.get("HERMES_KANBAN_RUN_ID")
+    raw = os.environ.get("SIDEKICK_KANBAN_RUN_ID") or os.environ.get("HERMES_KANBAN_RUN_ID")
     if not raw:
         return None
     try:
@@ -131,7 +131,7 @@ def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
     when it must be rejected. Callers should ``return`` the error
     verbatim.
     """
-    env_tid = os.environ.get("HERMES_KANBAN_TASK")
+    env_tid = os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")
     if not env_tid:
         # Orchestrator or CLI context — no task-scope restriction.
         return None
@@ -188,7 +188,7 @@ def _require_orchestrator_tool(tool_name: str) -> Optional[str]:
     structured tool_error so the model gets a clear refusal instead of
     silently mutating board state from a worker context.
     """
-    if os.environ.get("HERMES_KANBAN_TASK"):
+    if os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK"):
         return tool_error(
             f"{tool_name} is orchestrator-only; dispatcher-spawned workers "
             "must use kanban_complete, kanban_block, kanban_heartbeat, or "
@@ -497,7 +497,7 @@ def _handle_heartbeat(args: dict, **kw) -> str:
             # (see _default_spawn in kanban_db.py); falling back to the
             # default _claimer_id() covers locally-driven workers that
             # never went through the dispatcher path.
-            claim_lock = os.environ.get("HERMES_KANBAN_CLAIM_LOCK")
+            claim_lock = os.environ.get("SIDEKICK_KANBAN_CLAIM_LOCK") or os.environ.get("HERMES_KANBAN_CLAIM_LOCK")
             kb.heartbeat_claim(conn, tid, claimer=claim_lock)
 
             ok = kb.heartbeat_worker(
@@ -538,7 +538,7 @@ def _handle_comment(args: dict, **kw) -> str:
     # the future-worker context with what reads as a system directive.
     # Cross-task commenting itself remains unrestricted (see #19713) —
     # comments are the deliberate handoff channel between tasks.
-    author = os.environ.get("HERMES_PROFILE") or "worker"
+    author = os.environ.get("SIDEKICK_PROFILE") or os.environ.get("HERMES_PROFILE") or "worker"
     try:
         kb, conn = _connect()
         try:
@@ -568,7 +568,7 @@ def _handle_create(args: dict, **kw) -> str:
         )
     body = args.get("body")
     parents = args.get("parents") or []
-    tenant = args.get("tenant") or os.environ.get("HERMES_TENANT")
+    tenant = args.get("tenant") or os.environ.get("SIDEKICK_TENANT") or os.environ.get("HERMES_TENANT")
     priority = args.get("priority")
     workspace_kind = args.get("workspace_kind") or "scratch"
     workspace_path = args.get("workspace_path")
@@ -611,7 +611,7 @@ def _handle_create(args: dict, **kw) -> str:
                     if max_runtime_seconds is not None else None
                 ),
                 skills=skills,
-                created_by=os.environ.get("HERMES_PROFILE") or "worker",
+                created_by=os.environ.get("SIDEKICK_PROFILE") or os.environ.get("HERMES_PROFILE") or "worker",
             )
             new_task = kb.get_task(conn, new_tid)
             return _ok(

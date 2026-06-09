@@ -16,7 +16,7 @@ from web.api.config import (
     DEFAULT_MODEL,
     DEFAULT_WORKSPACE,
     _FALLBACK_MODELS,
-    _HERMES_FOUND,
+    _SIDEKICK_FOUND,
     _PROVIDER_DISPLAY,
     _PROVIDER_MODELS,
     _get_config_path,
@@ -26,7 +26,7 @@ from web.api.config import (
     reload_config,
     resolve_active_provider_context,
     save_settings,
-    verify_hermes_imports,
+    verify_sidekick_imports,
 )
 from web.api.providers import _write_env_file  # shared impl with _ENV_LOCK (#1164)
 from web.api.workspace import get_last_workspace, load_workspaces
@@ -218,7 +218,7 @@ def _get_active_hermes_home() -> Path:
 
         return get_active_hermes_home()
     except ImportError:
-        return Path.home() / ".hermes"
+        return Path.home() / ".sidekick"
 
 
 def _load_env_file(env_path: Path) -> dict[str, str]:
@@ -694,9 +694,9 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
                 or _provider_oauth_authenticated(provider, _get_active_hermes_home())
             )
 
-    chat_ready = bool(_HERMES_FOUND and imports_ok and provider_ready)
+    chat_ready = bool(_SIDEKICK_FOUND and imports_ok and provider_ready)
 
-    if not _HERMES_FOUND or not imports_ok:
+    if not _SIDEKICK_FOUND or not imports_ok:
         state = "agent_unavailable"
         note = (
             "Sidekick is not fully importable from the Web UI yet. Finish bootstrap or fix the "
@@ -835,7 +835,7 @@ def _load_nova_characters() -> list[dict]:
 def get_onboarding_status() -> dict:
     settings = load_settings()
     cfg = get_config()
-    imports_ok, missing, errors = verify_hermes_imports()
+    imports_ok, missing, errors = verify_sidekick_imports()
     runtime = _status_from_runtime(cfg, imports_ok)
     workspaces = load_workspaces()
     last_workspace = get_last_workspace()
@@ -909,7 +909,7 @@ def get_onboarding_status() -> dict:
             "nova_character": settings.get("nova_character") or "nova",
         },
         "system": {
-            "hermes_found": bool(_HERMES_FOUND),
+            "sidekick_found": bool(_SIDEKICK_FOUND),
             "imports_ok": bool(imports_ok),
             "missing_modules": missing,
             "import_errors": errors,

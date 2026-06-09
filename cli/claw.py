@@ -39,7 +39,7 @@ _OPENCLAW_SCRIPT = (
     / "migration"
     / "openclaw-migration"
     / "scripts"
-    / "openclaw_to_hermes.py"
+    / "openclaw_to_sidekick.py"
 )
 
 # Fallback: user may have installed the skill from the Hub
@@ -49,7 +49,7 @@ _OPENCLAW_SCRIPT_INSTALLED = (
     / "migration"
     / "openclaw-migration"
     / "scripts"
-    / "openclaw_to_hermes.py"
+    / "openclaw_to_sidekick.py"
 )
 
 # Known OpenClaw directory names (current + legacy)
@@ -149,7 +149,7 @@ def _warn_if_openclaw_running(auto_yes: bool) -> None:
 
 
 def _warn_if_gateway_running(auto_yes: bool) -> None:
-    """Check if a Hermes gateway is running with connected platforms.
+    """Check if a Sidekick gateway is running with connected platforms.
 
     Migrating bot tokens while the gateway is polling will cause conflicts
     (e.g. Telegram 409 "terminated by other getUpdates request"). Warn the
@@ -194,7 +194,7 @@ _WORKSPACE_STATE_GLOBS = (
 
 
 def _find_migration_script() -> Path | None:
-    """Find the openclaw_to_hermes.py script in known locations."""
+    """Find the openclaw_to_sidekick.py script in known locations."""
     for candidate in [_OPENCLAW_SCRIPT, _OPENCLAW_SCRIPT_INSTALLED]:
         if candidate.exists():
             return candidate
@@ -203,7 +203,7 @@ def _find_migration_script() -> Path | None:
 
 def _load_migration_module(script_path: Path):
     """Dynamically load the migration script as a module."""
-    spec = importlib.util.spec_from_file_location("openclaw_to_hermes", script_path)
+    spec = importlib.util.spec_from_file_location("openclaw_to_sidekick", script_path)
     if spec is None or spec.loader is None:
         return None
     mod = importlib.util.module_from_spec(spec)
@@ -293,7 +293,7 @@ def _archive_directory(source_dir: Path, dry_run: bool = False) -> Path:
 
 
 def claw_command(args):
-    """Route hermes claw subcommands."""
+    """Route sidekick claw subcommands."""
     action = getattr(args, "claw_action", None)
 
     if action == "migrate":
@@ -311,7 +311,7 @@ def claw_command(args):
 
 
 def _cmd_migrate(args):
-    """Run the OpenClaw → Hermes migration."""
+    """Run the OpenClaw → Sidekick migration."""
     # Check current and legacy OpenClaw directories
     explicit_source = getattr(args, "source", None)
     if explicit_source:
@@ -335,7 +335,7 @@ def _cmd_migrate(args):
 
     # Secrets are never included implicitly — they must be explicitly requested
     # via --migrate-secrets, even under --preset full.  This mirrors OpenClaw's
-    # migrate-hermes posture (two-phase: run once without secrets, rerun with
+    # migrate-sidekick posture (two-phase: run once without secrets, rerun with
     # --include-secrets) and prevents a --preset full invocation from silently
     # importing API keys that the user may not have intended to copy.
 
@@ -348,7 +348,7 @@ def _cmd_migrate(args):
     )
     print(
         color(
-            "│          ⚕ Hermes — OpenClaw Migration                 │",
+            "│          ⚕ Sidekick — OpenClaw Migration                 │",
             Colors.MAGENTA,
         )
     )
@@ -398,7 +398,7 @@ def _cmd_migrate(args):
     # active will cause conflicts (e.g. Telegram 409).
     _warn_if_openclaw_running(auto_yes)
 
-    # Check if a Hermes gateway is running with connected platforms.
+    # Check if a Sidekick gateway is running with connected platforms.
     _warn_if_gateway_running(auto_yes)
 
     # Ensure config.yaml exists before migration tries to read it
@@ -498,7 +498,7 @@ def _cmd_migrate(args):
             print_info("Migration cancelled.")
             return
 
-    # ── Phase 2b: Pre-apply backup of the Hermes home ─────────
+    # ── Phase 2b: Pre-apply backup of the Sidekick home ─────────
     # Delegates to sidekick_cli.backup.create_pre_migration_backup(), which
     # shares implementation with the pre-update backup (same exclusion
     # rules, same SQLite safe-copy, zip format) so the archive is
@@ -519,7 +519,7 @@ def _cmd_migrate(args):
             print()
             print_error(f"Could not create pre-migration backup: {e}")
             print_info(
-                "Re-run with --no-backup to skip, or free up disk space under the Hermes home."
+                "Re-run with --no-backup to skip, or free up disk space under the Sidekick home."
             )
             logger.debug("Pre-migration backup error", exc_info=True)
             return
@@ -574,7 +574,7 @@ def _cmd_cleanup(args):
     )
     print(
         color(
-            "│          ⚕ Hermes — OpenClaw Cleanup                   │",
+            "│          ⚕ Sidekick — OpenClaw Cleanup                   │",
             Colors.MAGENTA,
         )
     )

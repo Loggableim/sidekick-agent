@@ -819,9 +819,10 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
 
     # Derive service name for this profile
     # Temporarily set HERMES_HOME so _profile_suffix resolves correctly
-    old_home = os.environ.get("HERMES_HOME")
+    old_home = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME")
     try:
-        os.environ["HERMES_HOME"] = str(profile_dir)
+        os.environ["SIDEKICK_HOME"] = str(profile_dir)
+        os.environ["HERMES_HOME"] = str(profile_dir)  # backward compat
         from cli.gateway import get_service_name, get_launchd_plist_path
 
         if _platform.system() == "Linux":
@@ -856,8 +857,10 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
         print(f"⚠ Service cleanup: {e}")
     finally:
         if old_home is not None:
-            os.environ["HERMES_HOME"] = old_home
-        elif "HERMES_HOME" in os.environ:
+            os.environ["SIDEKICK_HOME"] = old_home
+            os.environ["HERMES_HOME"] = old_home  # backward compat
+        elif "HERMES_HOME" in os.environ or "SIDEKICK_HOME" in os.environ:
+            del os.environ["SIDEKICK_HOME"]
             del os.environ["HERMES_HOME"]
 
 
@@ -1300,7 +1303,7 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 # ---------------------------------------------------------------------------
 
 def generate_bash_completion() -> str:
-    """Generate a bash completion script for hermes profile names."""
+    """Generate a bash completion script for sidekick profile names."""
     return '''# Sidekick Agent profile completion
 # Add to ~/.bashrc: eval "$(hermes completion bash)"
 
@@ -1350,7 +1353,7 @@ complete -F _hermes_completion hermes
 
 
 def generate_zsh_completion() -> str:
-    """Generate a zsh completion script for hermes profile names."""
+    """Generate a zsh completion script for sidekick profile names."""
     return '''#compdef hermes
 # Sidekick Agent profile completion
 # Add to ~/.zshrc: eval "$(hermes completion zsh)"

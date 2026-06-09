@@ -108,7 +108,7 @@ def _workspace_slug_from_request(handler, parsed=None) -> str | None:
         slug = handler.headers.get("X-Hermes-Workspace", "").strip().lower()
         if slug:
             return slug
-    slug = os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    slug = os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
     if slug:
         return slug
     return None
@@ -191,7 +191,7 @@ def _active_skills_dir() -> Path:
 
             return Path(SKILLS_DIR)
         except Exception:
-            return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "skills"
+            return Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser() / "skills"
 
 
 def _skill_path_within(base_dir: Path, candidate: Path) -> bool:
@@ -501,8 +501,8 @@ def _gateway_session_metadata_path():
     try:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
-    except Exception:
-        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve()
+    except ImportError:
+        hermes_home = Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser().resolve()
     return hermes_home / "sessions" / "sessions.json"
 
 
@@ -1137,7 +1137,7 @@ def _allowed_public_origins() -> set[str]:
     Each entry must include the scheme, e.g. https://myapp.example.com:8000.
     Entries without a scheme are silently skipped and a warning is printed.
     """
-    raw = os.getenv('HERMES_WEBUI_ALLOWED_ORIGINS', '')
+    raw = os.getenv('SIDEKICK_WEBUI_ALLOWED_ORIGINS') or os.getenv('HERMES_WEBUI_ALLOWED_ORIGINS', '')
     result = set()
     for value in raw.split(','):
         value = value.strip().rstrip('/').lower()
@@ -2323,7 +2323,7 @@ def _handle_logs(handler, parsed) -> bool:
 
         hermes_home = Path(get_active_hermes_home()).expanduser()
     except Exception:
-        hermes_home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")).expanduser()
+        hermes_home = Path(os.environ.get("SIDEKICK_HOME") or (Path.home() / ".sidekick")).expanduser()
 
     log_dir = hermes_home / "logs"
     log_path = log_dir / filename
@@ -2366,7 +2366,7 @@ def _handle_logs(handler, parsed) -> bool:
 
 # ── Insights endpoint ──────────────────────────────────────────────────────────
 
-_LLM_WIKI_DOCS_URL = "https://hermes-agent.nousresearch.com/docs/user-guide/skills/bundled/research/research-llm-wiki"
+_LLM_WIKI_DOCS_URL = "https://sidekick-agent.sh/docs/user-guide/skills/bundled/research/research-llm-wiki"
 _LLM_WIKI_PAGE_DIRS = ("entities", "concepts", "comparisons", "queries")
 
 
@@ -2375,7 +2375,7 @@ def _llm_wiki_active_hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return Path(get_active_hermes_home()).expanduser()
     except Exception:
-        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+        return Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser()
 
 
 def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
@@ -3789,7 +3789,7 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/session":
         import time as _time
         _t0 = _time.monotonic()
-        _debug_slow = os.environ.get("HERMES_DEBUG_SLOW", "")
+        _debug_slow = os.environ.get("SIDEKICK_DEBUG_SLOW") or os.environ.get("HERMES_DEBUG_SLOW", "")
         query = parse_qs(parsed.query)
         sid = query.get("session_id", [""])[0]
         if not sid:
@@ -4848,7 +4848,7 @@ def _handle_apply_code(handler, body) -> bool:
     path_obj = Path(file_path)
     if not path_obj.is_absolute():
         # Try to resolve relative to the workspace or cwd
-        workspace = os.environ.get("HERMES_KANBAN_WORKSPACE", "")
+        workspace = os.environ.get("SIDEKICK_KANBAN_WORKSPACE") or os.environ.get("HERMES_KANBAN_WORKSPACE", "")
         if workspace:
             path_obj = Path(workspace) / file_path
         else:
@@ -6799,7 +6799,7 @@ def _handle_agents_get(handler, parsed):
         from web.api.agents import list_activated_agents
         import json as _json
         agents_list = list_activated_agents()
-        profiles_root = Path.home() / ".hermes" / "profiles"
+        profiles_root = Path.home() / ".sidekick" / "profiles"
         results = []
         for a in agents_list:
             slug = a["slug"]
@@ -7737,7 +7737,7 @@ def _handle_media(handler, parsed):
     import os as _os
     from web.api.auth import is_auth_enabled, parse_cookie, verify_session
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = Path(_os.getenv("HERMES_HOME", str(_HOME / ".hermes"))).expanduser()
+    _HERMES_HOME = Path(_os.getenv("SIDEKICK_HOME") or _os.getenv("HERMES_HOME", str(_HOME / ".sidekick"))).expanduser()
 
     # Auth check
     if is_auth_enabled():
@@ -7752,11 +7752,9 @@ def _handle_media(handler, parsed):
     qs = parse_qs(parsed.query)
     raw_path = qs.get("path", [""])[0].strip()
     if not raw_path:
-        return bad(handler, "path parameter required", 400)
-
-    # Resolve the path and check it is within an allowed root
+        return bad(handler, "Path parameter is required", 400)
     try:
-        target = Path(raw_path).resolve()
+        resolved = Path(raw_path).expanduser().resolve()
     except Exception:
         return bad(handler, "Invalid path", 400)
 
@@ -7764,7 +7762,7 @@ def _handle_media(handler, parsed):
     allowed_roots = [
         _HERMES_HOME.resolve(),
         Path("/tmp").resolve(),
-        (_HOME / ".hermes").resolve(),
+        (_HOME / ".sidekick").resolve(),
         _HOME.resolve(),  # user home — needed for Windows absolute paths on other drives
     ]
     # Also allow the active workspace directory (where screenshots land)
@@ -8314,7 +8312,7 @@ def _handle_live_models(handler, parsed):
             import sys as _sys
             import os as _os
             _agent_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
-                                       "..", "..", ".hermes", "hermes-agent")
+                                       "..", "..", ".sidekick", "sidekick-agent")
             _agent_dir = _os.path.normpath(_agent_dir)
             if _agent_dir not in _sys.path:
                 _sys.path.insert(0, _agent_dir)
@@ -8666,7 +8664,7 @@ def _handle_memory_read(handler):
 
             mem_dir = get_active_hermes_home() / "memories"
         except ImportError:
-            mem_dir = Path.home() / ".hermes" / "memories"
+            mem_dir = Path.home() / ".sidekick" / "memories"
     mem_file = mem_dir / "MEMORY.md"
     user_file = mem_dir / "USER.md"
     memory = (
@@ -8709,9 +8707,9 @@ def _get_supermemory_client():
             from web.api.profiles import get_active_hermes_home
             sm_path = get_active_hermes_home() / "supermemory.json"
         except ImportError:
-            sm_path = Path.home() / ".hermes" / "supermemory.json"
+            sm_path = Path.home() / ".sidekick" / "supermemory.json"
         if not sm_path.exists():
-            alt = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "supermemory.json"
+            alt = Path(os.environ.get("LOCALAPPDATA", "")) / "sidekick" / "supermemory.json"
             if alt.exists():
                 sm_path = alt
         if not sm_path.exists():
@@ -8737,7 +8735,7 @@ def _handle_supermemory_status(handler):
         from web.api.profiles import get_active_hermes_home
         sm_path = get_active_hermes_home() / "supermemory.json"
         if not sm_path.exists():
-            alt = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "supermemory.json"
+            alt = Path(os.environ.get("LOCALAPPDATA", "")) / "sidekick" / "supermemory.json"
             if alt.exists():
                 sm_path = alt
         config_path = str(sm_path) if sm_path.exists() else None
@@ -8842,7 +8840,7 @@ def _handle_hybrid_search(handler, body):
             from web.api.profiles import get_active_hermes_home
             home = get_active_hermes_home()
         except ImportError:
-            home = Path.home() / ".hermes"
+            home = Path.home() / ".sidekick"
         memory_file = home / "MEMORY.md"
     if memory_file.exists():
         try:
@@ -9662,9 +9660,11 @@ def _handle_chat_sync(handler, body):
     with _ENV_LOCK:
         old_cwd = os.environ.get("TERMINAL_CWD")
         os.environ["TERMINAL_CWD"] = str(workspace)
-        old_exec_ask = os.environ.get("HERMES_EXEC_ASK")
-        old_session_key = os.environ.get("HERMES_SESSION_KEY")
+        old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK") or os.environ.get("HERMES_EXEC_ASK")
+        old_session_key = os.environ.get("SIDEKICK_SESSION_KEY") or os.environ.get("HERMES_SESSION_KEY")
+        os.environ["SIDEKICK_EXEC_ASK"] = "1"
         os.environ["HERMES_EXEC_ASK"] = "1"
+        os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
         os.environ["HERMES_SESSION_KEY"] = s.session_id
     try:
         from run_agent import AIAgent
@@ -9754,12 +9754,16 @@ def _handle_chat_sync(handler, body):
             else:
                 os.environ["TERMINAL_CWD"] = old_cwd
             if old_exec_ask is None:
+                os.environ.pop("SIDEKICK_EXEC_ASK", None)
                 os.environ.pop("HERMES_EXEC_ASK", None)
             else:
+                os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
                 os.environ["HERMES_EXEC_ASK"] = old_exec_ask
             if old_session_key is None:
+                os.environ.pop("SIDEKICK_SESSION_KEY", None)
                 os.environ.pop("HERMES_SESSION_KEY", None)
             else:
+                os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
                 os.environ["HERMES_SESSION_KEY"] = old_session_key
     with _get_session_agent_lock(s.session_id):
         _result_messages = result.get("messages") or _previous_context_messages
@@ -9882,7 +9886,7 @@ def _async_extract_facts(sid: str) -> None:
                 from web.api.profiles import get_active_hermes_home
                 mem_dir = get_active_hermes_home() / "memories"
             except ImportError:
-                mem_dir = _Path.home() / ".hermes" / "memories"
+                mem_dir = _Path.home() / ".sidekick" / "memories"
 
         mem_dir.mkdir(parents=True, exist_ok=True)
         mem_file = mem_dir / "MEMORY.md"
@@ -10850,7 +10854,7 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
 
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve()
+        hermes_home = Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser().resolve()
 
     db_path = hermes_home / "state.db"
     if not db_path.exists():
@@ -11411,7 +11415,7 @@ def _handle_memory_write(handler, body):
 
             mem_dir = get_active_hermes_home() / "memories"
         except ImportError:
-            mem_dir = Path.home() / ".hermes" / "memories"
+            mem_dir = Path.home() / ".sidekick" / "memories"
     mem_dir.mkdir(parents=True, exist_ok=True)
     section = body["section"]
     if section == "memory":
@@ -12106,9 +12110,9 @@ def _get_supermemory_client():
             from web.api.profiles import get_active_hermes_home
             sm_path = get_active_hermes_home() / "supermemory.json"
         except ImportError:
-            sm_path = Path.home() / ".hermes" / "supermemory.json"
+            sm_path = Path.home() / ".sidekick" / "supermemory.json"
         if not sm_path.exists():
-            alt = Path(os.environ.get("LOCALAPPDATA", "")) / "hermes" / "supermemory.json"
+            alt = Path(os.environ.get("LOCALAPPDATA", "")) / "sidekick" / "supermemory.json"
             if alt.exists():
                 sm_path = alt
         if not sm_path.exists():
@@ -12135,7 +12139,7 @@ def _handle_supermemory_status(handler):
         from web.api.profiles import get_active_hermes_home
         sm_path = get_active_hermes_home() / "supermemory.json"
         if not sm_path.exists():
-            sm_path = Path.home() / ".hermes" / "supermemory.json"
+            sm_path = Path.home() / ".sidekick" / "supermemory.json"
         if sm_path.exists():
             configured = True
             config_path = str(sm_path)
@@ -12291,7 +12295,7 @@ def _handle_hybrid_search(handler, body):
             from web.api.profiles import get_active_hermes_home
             home = get_active_hermes_home()
         except ImportError:
-            home = Path.home() / ".hermes"
+            home = Path.home() / ".sidekick"
         memory_file = home / "MEMORY.md"
     if memory_file.exists():
         try:

@@ -61,50 +61,50 @@ def _unwrap_profile_home_to_base(home: Path) -> Path:
     return home
 
 
-def _resolve_base_hermes_home() -> Path:
-    """Return the BASE ~/.hermes directory — the root that contains profiles/.
+def _resolve_base_sidekick_home() -> Path:
+    """Return the BASE ~/.sidekick directory — the root that contains profiles/.
 
-    This is intentionally distinct from HERMES_HOME, which tracks the *active
+    This is intentionally distinct from SIDEKICK_HOME, which tracks the *active
     profile's* home and changes on every profile switch.  The base dir must
-    always point to the top-level .hermes regardless of which profile is active.
+    always point to the top-level .sidekick regardless of which profile is active.
 
     Resolution order:
-      1. HERMES_BASE_HOME env var (set explicitly, highest priority)
-      2. HERMES_HOME env var — but only if it does NOT look like a profile subdir
+      1. SIDEKICK_BASE_HOME env var (set explicitly, highest priority)
+      2. SIDEKICK_HOME env var — but only if it does NOT look like a profile subdir
          (i.e. its parent is not named 'profiles').  This handles test isolation
-         where HERMES_HOME is set to an isolated test state dir.
-      3. ~/.hermes (always-correct default)
+         where SIDEKICK_HOME is set to an isolated test state dir.
+      3. ~/.sidekick (always-correct default)
 
-    The bug this prevents: if HERMES_HOME has already been mutated to
-    /home/user/.hermes/profiles/webui (by init_profile_state at startup),
-    reading it here would make _DEFAULT_HERMES_HOME point to that subdir,
+    The bug this prevents: if SIDEKICK_HOME has already been mutated to
+    /home/user/.sidekick/profiles/webui (by init_profile_state at startup),
+    reading it here would make _DEFAULT_SIDEKICK_HOME point to that subdir,
     causing switch_profile('webui') to look for
-    /home/user/.hermes/profiles/webui/profiles/webui — which doesn't exist.
+    /home/user/.sidekick/profiles/webui/profiles/webui — which doesn't exist.
 
-    HERMES_BASE_HOME normally points at the base home already, but isolated
+    SIDEKICK_BASE_HOME normally points at the base home already, but isolated
     single-profile WebUI deployments can provide /base/profiles/<name> there as
     well.  Normalize both env vars through the same helper so active-profile
     and per-request resolution share one base-root contract (#749).
     """
     # Explicit override for tests or unusual setups
-    base_override = os.getenv('HERMES_BASE_HOME', '').strip()
+    base_override = (os.getenv('SIDEKICK_BASE_HOME') or os.getenv('HERMES_BASE_HOME', '')).strip()
     if base_override:
         return _unwrap_profile_home_to_base(Path(base_override).expanduser())
 
-    hermes_home = os.getenv('HERMES_HOME', '').strip()
+    hermes_home = (os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', '')).strip()
     if hermes_home:
         p = Path(hermes_home).expanduser()
         # If HERMES_HOME points to a profiles/ subdir, walk up two levels to the base
         return _unwrap_profile_home_to_base(p)
 
-    return Path.home() / '.hermes'
+    return Path.home() / '.sidekick'
 
-_DEFAULT_HERMES_HOME = _resolve_base_hermes_home()
+_DEFAULT_SIDEKICK_HOME = _resolve_base_sidekick_home()
 
 
 def _read_active_profile_file() -> str:
-    """Read the sticky active profile from ~/.hermes/active_profile."""
-    ap_file = _DEFAULT_HERMES_HOME / 'active_profile'
+    """Read the sticky active profile from ~/.sidekick/active_profile."""
+    ap_file = _DEFAULT_SIDEKICK_HOME / 'active_profile'
     if ap_file.exists():
         try:
             name = ap_file.read_text(encoding="utf-8").strip()
@@ -119,13 +119,13 @@ def _read_active_profile_file() -> str:
 
 # ── Root-profile resolution (#1612) ────────────────────────────────────────
 #
-# Nova allows the root/default profile (~/.hermes itself) to have a
+# Nova allows the root/default profile (~/.sidekick itself) to have a
 # display name other than the legacy literal 'default'.  When that happens,
-# WebUI must NOT resolve the display name as ~/.hermes/profiles/<name> — that
+# WebUI must NOT resolve the display name as ~/.sidekick/profiles/<name> — that
 # directory doesn't exist, and every site that does `if name == 'default':`
 # will fall through to the wrong filesystem path.
 #
-# `_is_root_profile(name)` answers "does this name resolve to ~/.hermes?" and
+# `_is_root_profile(name)` answers "does this name resolve to ~/.sidekick?" and
 # is the canonical replacement for scattered `if name == 'default':` checks
 # in switch_profile, get_active_hermes_home, _validate_profile_name, etc.
 #
@@ -153,7 +153,7 @@ def _invalidate_root_profile_cache() -> None:
 
 
 def _is_root_profile(name: str) -> bool:
-    """True if *name* resolves to the Nova root profile (~/.hermes).
+    """True if *name* resolves to the Nova root profile (~/.sidekick).
 
     Matches the legacy 'default' alias plus any name where list_profiles_api()
     reports is_default=True. Memoized; call _invalidate_root_profile_cache()
@@ -249,16 +249,16 @@ def clear_request_profile() -> None:
 def _resolve_profile_home_for_name(name: str) -> Path:
     """Resolve a logical profile name to its Hermes home path.
 
-    Root/default aliases resolve to _DEFAULT_HERMES_HOME.  Valid named profiles
-    resolve to _DEFAULT_HERMES_HOME/profiles/<name> even when the directory has
+    Root/default aliases resolve to _DEFAULT_SIDEKICK_HOME.  Valid named profiles
+    resolve to _DEFAULT_SIDEKICK_HOME/profiles/<name> even when the directory has
     not been created yet; the agent layer may create it on first use.  Invalid
     names fall back to the base home so traversal-shaped cookie values cannot
     influence filesystem paths.
     """
     if not name or _is_root_profile(name):
-        return _DEFAULT_HERMES_HOME
+        return _DEFAULT_SIDEKICK_HOME
     if not _PROFILE_ID_RE.fullmatch(name):
-        return _DEFAULT_HERMES_HOME
+        return _DEFAULT_SIDEKICK_HOME
     return _resolve_named_profile_home(name)
 
 
@@ -318,7 +318,7 @@ def _home_for_scheduled_cron_job(job: dict) -> Path:
     if not raw:
         return get_active_hermes_home()
     if _is_root_profile(raw):
-        return _DEFAULT_HERMES_HOME
+        return _DEFAULT_SIDEKICK_HOME
     if not _PROFILE_ID_RE.fullmatch(raw):
         logger.warning(
             "Cron job %s has invalid profile %r; falling back to server default",
@@ -383,7 +383,8 @@ class cron_profile_context_for_home:
         _cron_env_lock.acquire()
         _push_cron_profile_context_depth()
         try:
-            self._prev_env = os.environ.get('HERMES_HOME')
+            self._prev_env = os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME')
+            os.environ['SIDEKICK_HOME'] = str(self._home)
             os.environ['HERMES_HOME'] = str(self._home)
 
             # Re-patch cron.jobs module-level constants (see main context manager
@@ -425,8 +426,10 @@ class cron_profile_context_for_home:
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             if self._prev_env is None:
+                os.environ.pop('SIDEKICK_HOME', None)
                 os.environ.pop('HERMES_HOME', None)
             else:
+                os.environ['SIDEKICK_HOME'] = self._prev_env
                 os.environ['HERMES_HOME'] = self._prev_env
             if self._prev_cj is not None:
                 try:
@@ -462,8 +465,9 @@ class cron_profile_context:
         _cron_env_lock.acquire()
         _push_cron_profile_context_depth()
         try:
-            self._prev_env = os.environ.get('HERMES_HOME')
+            self._prev_env = os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME')
             home = get_active_hermes_home()
+            os.environ['SIDEKICK_HOME'] = str(home)
             os.environ['HERMES_HOME'] = str(home)
 
             # Re-patch cron.jobs module-level constants. They are snapshot at
@@ -504,8 +508,10 @@ class cron_profile_context:
         try:
             # Restore env var
             if self._prev_env is None:
+                os.environ.pop('SIDEKICK_HOME', None)
                 os.environ.pop('HERMES_HOME', None)
             else:
+                os.environ['SIDEKICK_HOME'] = self._prev_env
                 os.environ['HERMES_HOME'] = self._prev_env
 
             # Restore cron.jobs module constants
@@ -534,7 +540,7 @@ def get_hermes_home_for_profile(name: str) -> Path:
     it reads only the filesystem — it never touches os.environ, module-level
     cached paths, or the process-level _active_profile global.
 
-    Falls back to _DEFAULT_HERMES_HOME (same as 'default') when *name* is None,
+    Falls back to _DEFAULT_SIDEKICK_HOME (same as 'default') when *name* is None,
     empty, 'default', or does not match the profile-name format (rejects path
     traversal such as '../../etc').
     """
@@ -625,7 +631,8 @@ def get_profile_runtime_env(home: Path) -> dict[str, str]:
 
 
 def _set_hermes_home(home: Path):
-    """Set HERMES_HOME env var and monkey-patch cached module-level paths."""
+    """Set HERMES_HOME/SIDEKICK_HOME env var and monkey-patch cached module-level paths."""
+    os.environ['SIDEKICK_HOME'] = str(home)
     os.environ['HERMES_HOME'] = str(home)
 
     _patch_skill_home_modules(home)
@@ -686,7 +693,7 @@ def _reload_dotenv(home: Path):
 def init_profile_state() -> None:
     """Initialize profile state at server startup.
 
-    Reads ~/.hermes/active_profile, sets HERMES_HOME env var, patches
+    Reads ~/.sidekick/active_profile, sets SIDEKICK_HOME env var, patches
     module-level cached paths.  Called once from config.py after imports.
     """
     global _active_profile
@@ -732,7 +739,7 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
 
     # Resolve profile directory
     if _is_root_profile(name):
-        home = _DEFAULT_HERMES_HOME
+        home = _DEFAULT_SIDEKICK_HOME
     else:
         home = _resolve_named_profile_home(name)
         if not home.is_dir():
@@ -748,7 +755,7 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
     if process_wide:
         # Write sticky default for CLI consistency
         try:
-            ap_file = _DEFAULT_HERMES_HOME / 'active_profile'
+            ap_file = _DEFAULT_SIDEKICK_HOME / 'active_profile'
             ap_file.write_text('' if _is_root_profile(name) else name, encoding='utf-8')
         except Exception:
             logger.debug("Failed to write active profile file")
@@ -864,13 +871,13 @@ def _default_profile_dict() -> dict:
     """Fallback profile dict when hermes_cli is not importable."""
     return {
         'name': 'default',
-        'path': str(_DEFAULT_HERMES_HOME),
+        'path': str(_DEFAULT_SIDEKICK_HOME),
         'is_default': True,
         'is_active': True,
         'gateway_running': False,
         'model': None,
         'provider': None,
-        'has_env': (_DEFAULT_HERMES_HOME / '.env').exists(),
+        'has_env': (_DEFAULT_SIDEKICK_HOME / '.env').exists(),
         'skill_count': 0,
     }
 
@@ -889,14 +896,14 @@ def _validate_profile_name(name: str):
 
 def _profiles_root() -> Path:
     """Return the canonical root that contains named profiles."""
-    return (_DEFAULT_HERMES_HOME / 'profiles').resolve()
+    return (_DEFAULT_SIDEKICK_HOME / 'profiles').resolve()
 
 
 def _resolve_named_profile_home(name: str) -> Path:
     """Resolve a named profile to a directory under the profiles root.
 
     Validates *name* as a logical profile identifier first, then resolves the
-    final filesystem path and enforces containment under ~/.hermes/profiles.
+    final filesystem path and enforces containment under ~/.sidekick/profiles.
     """
     _validate_profile_name(name)
     profiles_root = _profiles_root()
@@ -908,7 +915,7 @@ def _resolve_named_profile_home(name: str) -> Path:
 def _create_profile_fallback(name: str, clone_from: str = None,
                               clone_config: bool = False) -> Path:
     """Create a profile directory without hermes_cli (Docker/standalone fallback)."""
-    profile_dir = _DEFAULT_HERMES_HOME / 'profiles' / name
+    profile_dir = _DEFAULT_SIDEKICK_HOME / 'profiles' / name
     if profile_dir.exists():
         raise FileExistsError(f"Profile '{name}' already exists.")
 
@@ -920,9 +927,9 @@ def _create_profile_fallback(name: str, clone_from: str = None,
     # Clone config files from source profile if requested
     if clone_config and clone_from:
         if _is_root_profile(clone_from):
-            source_dir = _DEFAULT_HERMES_HOME
+            source_dir = _DEFAULT_SIDEKICK_HOME
         else:
-            source_dir = _DEFAULT_HERMES_HOME / 'profiles' / clone_from
+            source_dir = _DEFAULT_SIDEKICK_HOME / 'profiles' / clone_from
         if source_dir.is_dir():
             for filename in _CLONE_CONFIG_FILES:
                 src = source_dir / filename
@@ -987,7 +994,7 @@ def create_profile_api(name: str, clone_from: str = None,
     # hermes_cli and the webui runtime do not always agree on the exact root,
     # so we prefer the path returned by list_profiles_api() and fall back to the
     # standard profile location only if the profile cannot be found there yet.
-    profile_path = _DEFAULT_HERMES_HOME / 'profiles' / name
+    profile_path = _DEFAULT_SIDEKICK_HOME / 'profiles' / name
     for p in list_profiles_api():
         if p['name'] == name:
             try:

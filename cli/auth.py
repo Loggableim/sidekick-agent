@@ -95,7 +95,7 @@ QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
 DEFAULT_SPOTIFY_ACCOUNTS_BASE_URL = "https://accounts.spotify.com"
 DEFAULT_SPOTIFY_API_BASE_URL = "https://api.spotify.com/v1"
 DEFAULT_SPOTIFY_REDIRECT_URI = "http://127.0.0.1:43827/spotify/callback"
-SPOTIFY_DOCS_URL = "https://hermes-agent.nousresearch.com/docs/user-guide/features/spotify"  # noqa: real upstream URL
+SPOTIFY_DOCS_URL = "https://sidekick-agent.sh/docs/user-guide/features/spotify"  # noqa: real upstream URL
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 SPOTIFY_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
 DEFAULT_SPOTIFY_SCOPE = " ".join((
@@ -740,7 +740,7 @@ def _token_fingerprint(token: Any) -> Optional[str]:
 
 
 def _oauth_trace_enabled() -> bool:
-    raw = os.getenv("HERMES_OAUTH_TRACE", "").strip().lower()
+    raw = (os.getenv("SIDEKICK_OAUTH_TRACE") or os.getenv("HERMES_OAUTH_TRACE", "")).strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -766,7 +766,7 @@ def _auth_file_path() -> Path:
     # hermetic conftest, or sandbox escapes via threads/subprocesses. In
     # production (no PYTEST_CURRENT_TEST) this is a single dict lookup.
     if os.environ.get("PYTEST_CURRENT_TEST"):
-        real_home_auth = (Path.home() / ".hermes" / "auth.json").resolve(strict=False)
+        real_home_auth = (Path.home() / ".sidekick" / "auth.json").resolve(strict=False)
         try:
             resolved = path.resolve(strict=False)
         except Exception:
@@ -833,7 +833,7 @@ def _load_global_auth_store() -> Dict[str, Any]:
     if os.environ.get("PYTEST_CURRENT_TEST"):
         real_home_env = os.environ.get("HOME", "")
         if real_home_env:
-            real_root = Path(real_home_env) / ".hermes" / "auth.json"
+            real_root = Path(real_home_env) / ".sidekick" / "auth.json"
             try:
                 if global_path.resolve(strict=False) == real_root.resolve(strict=False):
                     return {}
@@ -1246,7 +1246,7 @@ def is_provider_explicitly_configured(provider_id: str) -> bool:
 
     # 3. Check provider-specific env vars
     # Exclude CLAUDE_CODE_OAUTH_TOKEN — it's set by Claude Code itself,
-    # not by the user explicitly configuring anthropic in Hermes.
+    # not by the user explicitly configuring anthropic in Sidekick.
     _IMPLICIT_ENV_VARS = {"CLAUDE_CODE_OAUTH_TOKEN"}
     pconfig = PROVIDER_REGISTRY.get(normalized)
     if pconfig and pconfig.auth_type == "api_key":
@@ -1700,7 +1700,7 @@ def resolve_qwen_runtime_credentials(
             code="qwen_access_token_missing",
         )
 
-    base_url = os.getenv("HERMES_QWEN_BASE_URL", "").strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
+    base_url = (os.getenv("SIDEKICK_QWEN_BASE_URL") or os.getenv("HERMES_QWEN_BASE_URL", "")).strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
     return {
         "provider": "qwen-oauth",
         "base_url": base_url,
@@ -1832,7 +1832,7 @@ def _spotify_client_id(
 
     candidates = (
         explicit,
-        get_env_value("HERMES_SPOTIFY_CLIENT_ID"),
+        get_env_value("SIDEKICK_SPOTIFY_CLIENT_ID") or get_env_value("HERMES_SPOTIFY_CLIENT_ID"),
         get_env_value("SPOTIFY_CLIENT_ID"),
         state.get("client_id") if isinstance(state, dict) else None,
     )
@@ -1841,7 +1841,7 @@ def _spotify_client_id(
         if cleaned:
             return cleaned
     raise AuthError(
-        "Spotify client_id is required. Set HERMES_SPOTIFY_CLIENT_ID or pass --client-id.",
+        "Spotify client_id is required. Set SIDEKICK_SPOTIFY_CLIENT_ID or pass --client-id.",
         provider="spotify",
         code="spotify_client_id_missing",
     )
@@ -1855,7 +1855,7 @@ def _spotify_redirect_uri(
 
     candidates = (
         explicit,
-        get_env_value("HERMES_SPOTIFY_REDIRECT_URI"),
+        get_env_value("SIDEKICK_SPOTIFY_REDIRECT_URI") or get_env_value("HERMES_SPOTIFY_REDIRECT_URI"),
         get_env_value("SPOTIFY_REDIRECT_URI"),
         state.get("redirect_uri") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_REDIRECT_URI,
@@ -1871,7 +1871,7 @@ def _spotify_api_base_url(state: Optional[Dict[str, Any]] = None) -> str:
     from cli.config import get_env_value
 
     candidates = (
-        get_env_value("HERMES_SPOTIFY_API_BASE_URL"),
+        get_env_value("SIDEKICK_SPOTIFY_API_BASE_URL") or get_env_value("HERMES_SPOTIFY_API_BASE_URL"),
         state.get("api_base_url") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_API_BASE_URL,
     )
@@ -1886,7 +1886,7 @@ def _spotify_accounts_base_url(state: Optional[Dict[str, Any]] = None) -> str:
     from cli.config import get_env_value
 
     candidates = (
-        get_env_value("HERMES_SPOTIFY_ACCOUNTS_BASE_URL"),
+        get_env_value("SIDEKICK_SPOTIFY_ACCOUNTS_BASE_URL") or get_env_value("HERMES_SPOTIFY_ACCOUNTS_BASE_URL"),
         state.get("accounts_base_url") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_ACCOUNTS_BASE_URL,
     )
@@ -2292,11 +2292,13 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
         raise SystemExit("Spotify setup cancelled: empty Client ID.")
 
     # Persist so subsequent `sidekick auth spotify` runs skip the wizard.
-    save_env_value("HERMES_SPOTIFY_CLIENT_ID", raw)
+    save_env_value("SIDEKICK_SPOTIFY_CLIENT_ID", raw)
+    save_env_value("HERMES_SPOTIFY_CLIENT_ID", raw)  # backward compat
     # Only persist the redirect URI if it's non-default, to avoid pinning
     # users to a value the default might later change to.
     if redirect_uri_hint and redirect_uri_hint != DEFAULT_SPOTIFY_REDIRECT_URI:
-        save_env_value("HERMES_SPOTIFY_REDIRECT_URI", redirect_uri_hint)
+        save_env_value("SIDEKICK_SPOTIFY_REDIRECT_URI", redirect_uri_hint)
+        save_env_value("HERMES_SPOTIFY_REDIRECT_URI", redirect_uri_hint)  # backward compat
 
     print()
     print("Saved HERMES_SPOTIFY_CLIENT_ID to ~/.sidekick/.env")
@@ -2408,13 +2410,13 @@ def _is_remote_session() -> bool:
 # =============================================================================
 # OpenAI Codex auth — tokens stored in ~/.sidekick/auth.json (not ~/.codex/)
 #
-# Hermes maintains its own Codex OAuth session separate from the Codex CLI
+# Sidekick maintains its own Codex OAuth session separate from the Codex CLI
 # and VS Code extension. This prevents refresh token rotation conflicts
 # where one app's refresh invalidates the other's session.
 # =============================================================================
 
 def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
-    """Read Codex OAuth tokens from Hermes auth store (~/.sidekick/auth.json).
+    """Read Codex OAuth tokens from Sidekick auth store (~/.sidekick/auth.json).
     
     Returns dict with 'tokens' (access_token, refresh_token) and 'last_refresh'.
     Raises AuthError if no Codex tokens are stored.
@@ -2463,7 +2465,7 @@ def _read_codex_tokens(*, _lock: bool = True) -> Dict[str, Any]:
 
 
 def _save_codex_tokens(tokens: Dict[str, str], last_refresh: str = None) -> None:
-    """Save Codex OAuth tokens to Hermes auth store (~/.sidekick/auth.json)."""
+    """Save Codex OAuth tokens to Sidekick auth store (~/.sidekick/auth.json)."""
     if last_refresh is None:
         last_refresh = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     with _auth_store_lock():
@@ -2482,7 +2484,7 @@ def refresh_codex_oauth_pure(
     *,
     timeout_seconds: float = 20.0,
 ) -> Dict[str, Any]:
-    """Refresh Codex OAuth tokens without mutating Hermes auth state."""
+    """Refresh Codex OAuth tokens without mutating Sidekick auth state."""
     del access_token  # Access token is only used by callers to decide whether to refresh.
     if not isinstance(refresh_token, str) or not refresh_token.strip():
         raise AuthError(
@@ -2586,7 +2588,7 @@ def _refresh_codex_auth_tokens(
 ) -> Dict[str, str]:
     """Refresh Codex access token using the refresh token.
     
-    Saves the new tokens to Hermes auth store automatically.
+    Saves the new tokens to Sidekick auth store automatically.
     """
     refreshed = refresh_codex_oauth_pure(
         str(tokens.get("access_token", "") or ""),
@@ -2641,17 +2643,17 @@ def resolve_codex_runtime_credentials(
     refresh_if_expiring: bool = True,
     refresh_skew_seconds: int = CODEX_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
 ) -> Dict[str, Any]:
-    """Resolve runtime credentials from Hermes's own Codex token store."""
+    """Resolve runtime credentials from Sidekick's own Codex token store."""
     data = _read_codex_tokens()
     tokens = dict(data["tokens"])
     access_token = str(tokens.get("access_token", "") or "").strip()
-    refresh_timeout_seconds = float(os.getenv("HERMES_CODEX_REFRESH_TIMEOUT_SECONDS", "20"))
+    refresh_timeout_seconds = float(os.getenv("SIDEKICK_CODEX_REFRESH_TIMEOUT_SECONDS") or os.getenv("HERMES_CODEX_REFRESH_TIMEOUT_SECONDS", "20"))
 
     should_refresh = bool(force_refresh)
     if (not should_refresh) and refresh_if_expiring:
         should_refresh = _codex_access_token_is_expiring(access_token, refresh_skew_seconds)
     if should_refresh:
-        # Re-read under lock to avoid racing with other Hermes processes
+        # Re-read under lock to avoid racing with other Sidekick processes
         with _auth_store_lock(timeout_seconds=max(float(AUTH_LOCK_TIMEOUT_SECONDS), refresh_timeout_seconds + 5.0)):
             data = _read_codex_tokens(_lock=False)
             tokens = dict(data["tokens"])
@@ -2666,7 +2668,7 @@ def resolve_codex_runtime_credentials(
                 access_token = str(tokens.get("access_token", "") or "").strip()
 
     base_url = (
-        os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+        (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/")
         or DEFAULT_CODEX_BASE_URL
     )
 
@@ -2718,7 +2720,7 @@ def _resolve_verify(
     effective_ca = (
         ca_bundle
         or tls_state.get("ca_bundle")
-        or os.getenv("HERMES_CA_BUNDLE")
+        or os.getenv("SIDEKICK_CA_BUNDLE") or os.getenv("HERMES_CA_BUNDLE")
         or os.getenv("SSL_CERT_FILE")
         or os.getenv("REQUESTS_CA_BUNDLE")
     )
@@ -2829,7 +2831,7 @@ def _poll_for_token(
 # File lives at ${HERMES_SHARED_AUTH_DIR}/nous_auth.json, defaulting to
 # ``<hermes-root>/shared/nous_auth.json`` where ``<hermes-root>`` is what
 # ``get_default_hermes_root()`` returns — ``~/.sidekick`` on Linux/macOS,
-# ``%LOCALAPPDATA%\hermes`` on native Windows, or the Docker/custom root.
+# ``%LOCALAPPDATA%\\sidekick`` on native Windows, or the Docker/custom root.
 # It is OUTSIDE any named profile's HERMES_HOME so named profiles (which
 # typically live under ``<hermes-root>/profiles/<name>/``) all see the
 # same file.
@@ -2852,12 +2854,12 @@ def _nous_shared_auth_dir() -> Path:
     ``<hermes-root>/shared/``, where ``<hermes-root>`` is what
     :func:`hermes_constants.get_default_hermes_root` returns — so
     Linux/macOS classic installs land at ``~/.sidekick/shared/``, native
-    Windows installs at ``%LOCALAPPDATA%\\hermes\\shared\\``, and
+    Windows installs at ``%LOCALAPPDATA%\\sidekick\\shared\\``, and
     Docker / custom ``HERMES_HOME`` deployments at
     ``<HERMES_HOME>/shared/``. Sits outside any named profile so all
     profiles under the same root share the store.
     """
-    override = os.getenv("HERMES_SHARED_AUTH_DIR", "").strip()
+    override = (os.getenv("SIDEKICK_SHARED_AUTH_DIR") or os.getenv("HERMES_SHARED_AUTH_DIR", "")).strip()
     if override:
         return Path(override).expanduser()
     from runtime._compat.shim_constants import get_default_hermes_root
@@ -2867,7 +2869,7 @@ def _nous_shared_auth_dir() -> Path:
 def _nous_shared_store_path() -> Path:
     path = _nous_shared_auth_dir() / NOUS_SHARED_STORE_FILENAME
     # Seat belt: if pytest is running and this resolves to a path under the
-    # real user's Hermes root, refuse rather than silently corrupt cross-profile
+    # real user's Sidekick root, refuse rather than silently corrupt cross-profile
     # state. Tests must set HERMES_SHARED_AUTH_DIR to a tmp_path (conftest
     # does not do this automatically — mirror the _auth_file_path() guard
     # so forgetting to set it fails loudly instead of writing to the real
@@ -3155,9 +3157,9 @@ def _refresh_access_token(
     # Detect the OAuth 2.1 "refresh token reuse" signal from the Nous portal
     # server and surface an actionable message.  This fires when an external
     # process (health-check script, monitoring tool, custom self-heal hook)
-    # called POST /api/oauth/token with Hermes's refresh_token without
+    # called POST /api/oauth/token with Sidekick's refresh_token without
     # persisting the rotated token back to auth.json — the server then
-    # retires the original RT, Hermes's next refresh uses it, and the whole
+    # retires the original RT, Sidekick's next refresh uses it, and the whole
     # session chain gets revoked as a token-theft signal (#15099).
     lowered = description.lower()
     if "reuse" in lowered or "reuse detected" in lowered:
@@ -3294,7 +3296,7 @@ def resolve_nous_access_token(
 
         portal_base_url = (
             _optional_base_url(state.get("portal_base_url"))
-            or os.getenv("HERMES_PORTAL_BASE_URL")
+            or os.getenv("SIDEKICK_PORTAL_BASE_URL") or os.getenv("HERMES_PORTAL_BASE_URL")
             or os.getenv("NOUS_PORTAL_BASE_URL")
             or DEFAULT_NOUS_PORTAL_URL
         ).rstrip("/")
@@ -3571,7 +3573,7 @@ def resolve_nous_runtime_credentials(
 
         portal_base_url = (
             _optional_base_url(state.get("portal_base_url"))
-            or os.getenv("HERMES_PORTAL_BASE_URL")
+            or os.getenv("SIDEKICK_PORTAL_BASE_URL") or os.getenv("HERMES_PORTAL_BASE_URL")
             or os.getenv("NOUS_PORTAL_BASE_URL")
             or DEFAULT_NOUS_PORTAL_URL
         ).rstrip("/")
@@ -4010,11 +4012,11 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
         return {"configured": False}
 
     command = (
-        os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
+        (os.getenv("SIDEKICK_COPILOT_ACP_COMMAND") or os.getenv("HERMES_COPILOT_ACP_COMMAND", "")).strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
-    raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
+    raw_args = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS") or os.getenv("HERMES_COPILOT_ACP_ARGS", "")).strip()
     args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
     base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
     if not base_url:
@@ -4124,11 +4126,11 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
         base_url = pconfig.inference_base_url
 
     command = (
-        os.getenv("HERMES_COPILOT_ACP_COMMAND", "").strip()
+        (os.getenv("SIDEKICK_COPILOT_ACP_COMMAND") or os.getenv("HERMES_COPILOT_ACP_COMMAND", "")).strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
-    raw_args = os.getenv("HERMES_COPILOT_ACP_ARGS", "").strip()
+    raw_args = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS") or os.getenv("HERMES_COPILOT_ACP_ARGS", "")).strip()
     args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
     resolved_command = shutil.which(command) if command else None
     if not resolved_command and not base_url.startswith("acp+tcp://"):
@@ -4497,7 +4499,7 @@ def _login_openai_codex(
 
     del args, pconfig  # kept for parity with other provider login helpers
 
-    # Check for existing Hermes-owned credentials
+    # Check for existing Sidekick-owned credentials
     if not force_new_login:
         try:
             existing = resolve_codex_runtime_credentials()
@@ -4535,7 +4537,7 @@ def _login_openai_codex(
                 do_import = "n"
             if do_import in {"y", "yes"}:
                 _save_codex_tokens(cli_tokens)
-                base_url = os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
+                base_url = (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
                 config_path = _update_config_for_provider("openai-codex", base_url)
                 print()
                 print("Credentials imported. Note: if Codex CLI refreshes its token,")
@@ -4543,7 +4545,7 @@ def _login_openai_codex(
                 print(f"  Config updated: {config_path} (model.provider=openai-codex)")
                 return
 
-    # Run a fresh device code flow — Hermes gets its own OAuth session
+    # Run a fresh device code flow — Sidekick gets its own OAuth session
     print()
     print("Signing in to OpenAI Codex...")
     print("(Sidekick creates its own session — won't affect Codex CLI or VS Code)")
@@ -4551,7 +4553,7 @@ def _login_openai_codex(
 
     creds = _codex_device_code_login()
 
-    # Save tokens to Hermes auth store
+    # Save tokens to Sidekick auth store
     _save_codex_tokens(creds["tokens"], creds.get("last_refresh"))
     config_path = _update_config_for_provider("openai-codex", creds.get("base_url", DEFAULT_CODEX_BASE_URL))
     print()
@@ -4690,7 +4692,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
 
     # Return tokens for the caller to persist (no longer writes to ~/.codex/)
     base_url = (
-        os.getenv("HERMES_CODEX_BASE_URL", "").strip().rstrip("/")
+        (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/")
         or DEFAULT_CODEX_BASE_URL
     )
 
@@ -4837,7 +4839,7 @@ def _minimax_poll_token(
 
 
 def _minimax_save_auth_state(auth_state: Dict[str, Any]) -> None:
-    """Persist MiniMax OAuth state to Hermes auth store (~/.sidekick/auth.json)."""
+    """Persist MiniMax OAuth state to Sidekick auth store (~/.sidekick/auth.json)."""
     with _auth_store_lock():
         auth_store = _load_auth_store()
         _save_provider_state(auth_store, "minimax-oauth", auth_state)
@@ -5061,7 +5063,7 @@ def _nous_device_code_login(
     pconfig = PROVIDER_REGISTRY["nous"]
     portal_base_url = (
         portal_base_url
-        or os.getenv("HERMES_PORTAL_BASE_URL")
+        or os.getenv("SIDEKICK_PORTAL_BASE_URL") or os.getenv("HERMES_PORTAL_BASE_URL")
         or os.getenv("NOUS_PORTAL_BASE_URL")
         or pconfig.portal_base_url
     ).rstrip("/")
@@ -5182,7 +5184,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
     insecure = bool(getattr(args, "insecure", False))
     ca_bundle = (
         getattr(args, "ca_bundle", None)
-        or os.getenv("HERMES_CA_BUNDLE")
+        or os.getenv("SIDEKICK_CA_BUNDLE") or os.getenv("HERMES_CA_BUNDLE")
         or os.getenv("SSL_CERT_FILE")
     )
 
@@ -5283,7 +5285,7 @@ def _login_nous(args, pconfig: ProviderConfig) -> None:
                     # The Portal's freeRecommendedModels endpoint is the
                     # source of truth for what's free *right now*. Augment
                     # the curated list with anything new the Portal flags
-                    # as free so users on older Hermes builds still see
+                    # as free so users on older Sidekick builds still see
                     # newly-launched free models without a CLI release.
                     _portal_for_recs = auth_state.get("portal_base_url", "")
                     model_ids, pricing = union_with_portal_free_recommendations(

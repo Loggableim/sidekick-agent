@@ -166,7 +166,7 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
             "Durable SQLite-backed task board shared across Hermes profiles. "
             "Tasks are claimed atomically, can depend on other tasks, and "
             "are executed by a named profile in an isolated workspace. "
-            "See https://hermes-agent.nousresearch.com/docs/user-guide/features/kanban "
+            "See https://sidekick-agent.sh/docs/user-guide/features/kanban "
             "or docs/hermes-kanban-v1-spec.pdf for the full design."
         ),
     )
@@ -652,7 +652,7 @@ def kanban_command(args: argparse.Namespace) -> int:
     # keeps the patch small and inherits the exact same resolution the
     # dispatcher uses for workers — consistency is a feature here.
     board_override = getattr(args, "board", None)
-    prev_board_env = os.environ.get("HERMES_KANBAN_BOARD")
+    prev_board_env = os.environ.get("SIDEKICK_KANBAN_BOARD") or os.environ.get("HERMES_KANBAN_BOARD")
     restore_board_env = False
 
     def _restore_board_env() -> None:
@@ -661,7 +661,8 @@ def kanban_command(args: argparse.Namespace) -> int:
         if prev_board_env is None:
             os.environ.pop("HERMES_KANBAN_BOARD", None)
         else:
-            os.environ["HERMES_KANBAN_BOARD"] = prev_board_env
+            os.environ["SIDEKICK_KANBAN_BOARD"] = prev_board_env
+            os.environ["HERMES_KANBAN_BOARD"] = prev_board_env  # backward compat
     if board_override:
         try:
             normed = kb._normalize_board_slug(board_override)
@@ -680,7 +681,8 @@ def kanban_command(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        os.environ["HERMES_KANBAN_BOARD"] = normed
+        os.environ["SIDEKICK_KANBAN_BOARD"] = normed
+        os.environ["HERMES_KANBAN_BOARD"] = normed  # backward compat
         restore_board_env = True
 
     # Boards management doesn't touch the DB at all — dispatch early so
@@ -1521,9 +1523,9 @@ def _cmd_comment(args: argparse.Namespace) -> int:
 
 
 def _worker_run_id_for(task_id: str) -> Optional[int]:
-    if os.environ.get("HERMES_KANBAN_TASK") != task_id:
+    if (os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")) != task_id:
         return None
-    raw = os.environ.get("HERMES_KANBAN_RUN_ID")
+    raw = os.environ.get("SIDEKICK_KANBAN_RUN_ID") or os.environ.get("HERMES_KANBAN_RUN_ID")
     if not raw:
         return None
     try:

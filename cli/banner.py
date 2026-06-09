@@ -128,7 +128,7 @@ def get_available_skills() -> Dict[str, List[str]]:
 _UPDATE_CHECK_CACHE_SECONDS = 6 * 3600
 
 # Sentinel returned when we know an update exists but can't count commits
-# (e.g. nix-built hermes — no local git history to count against).
+# (e.g. nix-built sidekick — no local git history to count against).
 UPDATE_AVAILABLE_NO_COUNT = -1
 
 _UPSTREAM_REPO_URL = "https://github.com/sidekick-ai/sidekick.git"
@@ -180,7 +180,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
 
 
 def check_for_updates() -> Optional[int]:
-    """Check whether a Hermes update is available.
+    """Check whether a Sidekick update is available.
 
     Two paths: if ``HERMES_REVISION`` is set (nix builds embed it), compare
     it to upstream main via ``git ls-remote``. Otherwise look for a local
@@ -192,7 +192,7 @@ def check_for_updates() -> Optional[int]:
     """
     hermes_home = get_sidekick_home()
     cache_file = hermes_home / ".update_check"
-    embedded_rev = os.environ.get("HERMES_REVISION") or None
+    embedded_rev = os.environ.get("SIDEKICK_REVISION") or os.environ.get("HERMES_REVISION") or None
 
     # Read cache — invalidate if the embedded rev has changed since last check
     now = time.time()
@@ -229,7 +229,7 @@ def check_for_updates() -> Optional[int]:
 
 
 def _resolve_repo_dir() -> Optional[Path]:
-    """Return the active Hermes git checkout, or None if this isn't a git install.
+    """Return the active Sidekick git checkout, or None if this isn't a git install.
 
     Prefers the running code's location over the profile-scoped path
     because ``$HERMES_HOME/hermes-agent/`` may be a stale copy carried
@@ -296,7 +296,7 @@ def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
     """Return ``(tag, release_url)`` for the latest git tag, or None.
 
     Local-only — runs ``git describe --tags --abbrev=0`` against the
-    Hermes checkout. Cached per-process. Release URL always points at the
+    Sidekick checkout. Cached per-process. Release URL always points at the
     canonical sidekick-ai/sidekick repo (forks don't get a link).
     """
     global _latest_release_cache
@@ -608,7 +608,7 @@ def build_welcome_banner(console: Console, model: str, cwd: str,
                     f"[dim yellow] — run [bold]{recommended_update_command()}[/bold] to update[/]"
                 )
             else:
-                # UPDATE_AVAILABLE_NO_COUNT: nix-built hermes; we know an update
+                # UPDATE_AVAILABLE_NO_COUNT: nix-built sidekick; we know an update
                 # exists but not by how much, and we don't know how the user
                 # installed it (nix run, profile, system flake, home-manager).
                 managed_cmd = get_managed_update_command()
