@@ -1,21 +1,22 @@
 """Compat shim — provides ``now()`` for code importing from ``sidekick_time``.
 
-The cron module (``runtime/cron/jobs.py``, ``runtime/cron/scheduler.py``)
-imports ``from sidekick_time import now as _hermes_now``.  This shim satisfies
-that contract with a simple ``time.time()`` wrapper.
+Returns a timezone-aware ``datetime`` (UTC) matching the original
+``sidekick_time.now()`` contract.  Consumers in cron and run_agent.py
+call ``.isoformat()``, ``.strftime()``, ``.tzinfo``, ``timedelta`` etc.
 """
 
 from __future__ import annotations
 
-import time
+from datetime import datetime, timezone
 
 
-def now() -> float:
-    """Return the current Unix timestamp (seconds since epoch).
+def now() -> datetime:
+    """Return the current UTC datetime.
 
-    Mirrors ``time.time()``.  Used by the cron scheduler and job runner.
+    All original consumers (cron jobs, run_agent.py) expect a ``datetime``
+    with ``.isoformat()``, ``.strftime()``, ``.tzinfo``, and arithmetic.
     """
-    return time.time()
+    return datetime.now(timezone.utc)
 
 
 __all__ = ["now"]

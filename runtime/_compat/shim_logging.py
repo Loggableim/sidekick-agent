@@ -20,7 +20,47 @@ import threading
 from pathlib import Path
 
 # ── Re-export from shared.logging_setup ─────────────────────────────────────
-from shared.logging_setup import get_logs_dir, setup_logging
+from shared.logging_setup import get_logs_dir
+from shared.logging_setup import setup_logging as _real_setup_logging
+
+
+def setup_logging(force: bool = False, hermes_home: Optional[str] = None) -> Path:
+    """Wrapper that accepts deprecated ``hermes_home`` kwarg (silently ignored)."""
+    return _real_setup_logging(force=force)
+
+# ── Verbose logging (for AIAgent --verbose mode) ────────────────────────────
+# Matches the original hermes_logging.setup_verbose_logging()
+_LOG_FORMAT_VERBOSE = "%(asctime)s - %(name)s - %(levelname)s%(session_tag)s - %(message)s"
+
+_NOISY_LOGGERS = (
+    "openai", "openai._base_client", "httpx", "httpcore",
+    "asyncio", "hpack", "hpack.hpack", "grpc", "modal",
+    "urllib3", "urllib3.connectionpool",
+)
+
+
+def setup_verbose_logging() -> None:
+    """Enable DEBUG-level console logging for ``--verbose`` / ``-v`` mode."""
+    from runtime.redact import RedactingFormatter
+
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, logging.StreamHandler):
+            if getattr(h, "_sidekick_verbose", False):
+                return
+
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(RedactingFormatter(_LOG_FORMAT_VERBOSE, datefmt="%H:%M:%S"))
+    handler._sidekick_verbose = True  # type: ignore[attr-defined]
+    root.addHandler(handler)
+
+    if root.level > logging.DEBUG:
+        root.setLevel(logging.DEBUG)
+
+    for name in _NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
 
 # ── Thread-local session context (matches original hermes_logging.py) ────────
 
@@ -68,4 +108,5 @@ __all__ = [
     "get_logs_dir",
     "set_session_context",
     "setup_logging",
+    "setup_verbose_logging",
 ]
