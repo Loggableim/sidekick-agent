@@ -1644,11 +1644,11 @@ function Main {
     Write-Banner
     try { $null = (Get-Location).ProviderPath } catch {}
     Install-Uv
-    Ensure-Venv -VenvPath "$InstallDir\.venv"
     Install-Git
     [void](Test-Node)
     Install-SystemPackages
     Install-Repository
+    Ensure-Venv -VenvPath "$InstallDir\.venv"
     Install-Dependencies
     Install-NodeDeps
     Set-PathVariable
