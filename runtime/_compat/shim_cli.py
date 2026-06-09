@@ -19,6 +19,8 @@ _PORTED_ROUTES: dict[str, str] = {
     "env_loader": "runtime._compat.shim_env_loader",
     "auth": "runtime._compat.shim_auth",
     "runtime_provider": "runtime._compat.shim_runtime_provider",
+    "kanban_db": "runtime._compat.shim_kanban_db",
+    "debug": "runtime._compat.shim_debug",
 }
 
 _KNOWN_UNPORTED = [
@@ -37,8 +39,6 @@ _KNOWN_UNPORTED = [
     "gateway",
     "web_server",
     "kanban",
-    "kanban_db",
-    "debug",
     "status",
     "tips",
     "doctor",
