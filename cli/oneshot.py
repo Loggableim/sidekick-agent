@@ -168,8 +168,10 @@ def run_oneshot(
 
     # Auto-approve any shell / tool approvals.  Non-interactive by
     # definition — a prompt would hang forever.
-    os.environ["HERMES_YOLO_MODE"] = "1"
-    os.environ["HERMES_ACCEPT_HOOKS"] = "1"
+    os.environ["SIDEKICK_YOLO_MODE"] = "1"
+    os.environ["SIDEKICK_ACCEPT_HOOKS"] = "1"
+    os.environ["HERMES_YOLO_MODE"] = "1"  # backward compat
+    os.environ["HERMES_ACCEPT_HOOKS"] = "1"  # backward compat
 
     # Redirect stderr AND stdout to devnull for the entire call tree.
     # We'll print the final response to the real stdout at the end.

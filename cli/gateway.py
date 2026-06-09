@@ -2394,7 +2394,7 @@ def _print_system_scope_remediation(action: str) -> None:
 
 def _get_restart_drain_timeout() -> float:
     """Return the configured gateway restart drain timeout in seconds."""
-    raw = os.getenv("HERMES_RESTART_DRAIN_TIMEOUT", "").strip()
+    raw = (os.getenv("SIDEKICK_RESTART_DRAIN_TIMEOUT") or os.getenv("HERMES_RESTART_DRAIN_TIMEOUT", "")).strip()
     if not raw:
         cfg = read_raw_config()
         agent_cfg = cfg.get("agent", {}) if isinstance(cfg, dict) else {}

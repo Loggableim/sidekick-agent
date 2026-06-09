@@ -751,7 +751,7 @@ def _resolve_effective_accept(
     """
     if accept_hooks_arg:
         return True
-    env = os.environ.get("HERMES_ACCEPT_HOOKS", "").strip().lower()
+    env = (os.environ.get("SIDEKICK_ACCEPT_HOOKS") or os.environ.get("HERMES_ACCEPT_HOOKS", "")).strip().lower()
     if env in {"1", "true", "yes", "on"}:
         return True
     cfg_val = cfg.get("hooks_auto_accept", False)

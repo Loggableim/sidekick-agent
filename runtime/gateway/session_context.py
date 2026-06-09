@@ -24,7 +24,7 @@ so concurrent messages never interfere.
 **Backward compatibility**
 
 The public helper ``get_session_env(name, default="")`` mirrors the old
-``os.getenv("HERMES_SESSION_*", ...)`` calls.  Existing tool code only
+``os.getenv("SIDEKICK_SESSION_*") or os.getenv("HERMES_SESSION_*", ...)`` calls.  Existing tool code only
 needs to replace the import + call site::
 
     # before
@@ -131,9 +131,9 @@ def clear_session_vars(tokens: list) -> None:
 
 
 def get_session_env(name: str, default: str = "") -> str:
-    """Read a session context variable by its legacy ``HERMES_SESSION_*`` name.
+    """Read a session context variable by its legacy ``HERMES_SESSION_*`` / ``SIDEKICK_SESSION_*`` name.
 
-    Drop-in replacement for ``os.getenv("HERMES_SESSION_*", default)``.
+    Drop-in replacement for ``os.getenv("SIDEKICK_SESSION_*") or os.getenv("HERMES_SESSION_*", default)``.
 
     Resolution order:
     1. Context variable (set by the gateway for concurrency-safe access).

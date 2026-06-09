@@ -1829,7 +1829,8 @@ class AIAgent:
         # session_context.py for concurrency safety (gateway runs multiple
         # sessions in one process).  Also writes os.environ as fallback for
         # CLI mode where ContextVars aren't used.
-        os.environ["HERMES_SESSION_ID"] = self.session_id
+        os.environ["SIDEKICK_SESSION_ID"] = self.session_id
+        os.environ["HERMES_SESSION_ID"] = self.session_id  # backward compat
         try:
             from gateway.session_context import _SESSION_ID
             _SESSION_ID.set(self.session_id)
@@ -3344,7 +3345,7 @@ class AIAgent:
         cfg = get_provider_request_timeout(self.provider, self.model)
         if cfg is not None:
             return cfg
-        return float(os.getenv("HERMES_API_TIMEOUT", 1800.0))
+        return float(os.getenv("SIDEKICK_API_TIMEOUT") or os.getenv("HERMES_API_TIMEOUT", 1800.0))
 
     def _resolved_api_call_stale_timeout_base(self) -> tuple[float, bool]:
         """Resolve the base non-stream stale timeout and whether it is implicit.
@@ -3364,7 +3365,7 @@ class AIAgent:
         if cfg is not None:
             return cfg, False
 
-        env_timeout = os.getenv("HERMES_API_CALL_STALE_TIMEOUT")
+        env_timeout = os.getenv("SIDEKICK_API_CALL_STALE_TIMEOUT") or os.getenv("HERMES_API_CALL_STALE_TIMEOUT")
         if env_timeout is not None:
             return float(env_timeout), False
 
@@ -6916,8 +6917,8 @@ class AIAgent:
             from cli.auth import resolve_nous_runtime_credentials
 
             creds = resolve_nous_runtime_credentials(
-                min_key_ttl_seconds=max(60, int(os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
-                timeout_seconds=float(os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
+                min_key_ttl_seconds=max(60, int(os.getenv("SIDEKICK_NOUS_MIN_KEY_TTL_SECONDS") or os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
+                timeout_seconds=float(os.getenv("SIDEKICK_NOUS_TIMEOUT_SECONDS") or os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
                 force_mint=force,
             )
         except Exception as exc:
@@ -7670,14 +7671,14 @@ class AIAgent:
             _base_timeout = (
                 _provider_timeout_cfg
                 if _provider_timeout_cfg is not None
-                else float(os.getenv("HERMES_API_TIMEOUT", 1800.0))
+                else float(os.getenv("SIDEKICK_API_TIMEOUT") or os.getenv("HERMES_API_TIMEOUT", 1800.0))
             )
             # Read timeout: config wins here too.  Otherwise use
             # HERMES_STREAM_READ_TIMEOUT (default 120s) for cloud providers.
             if _provider_timeout_cfg is not None:
                 _stream_read_timeout = _provider_timeout_cfg
             else:
-                _stream_read_timeout = float(os.getenv("HERMES_STREAM_READ_TIMEOUT", 120.0))
+                _stream_read_timeout = float(os.getenv("SIDEKICK_STREAM_READ_TIMEOUT") or os.getenv("HERMES_STREAM_READ_TIMEOUT", 120.0))
                 # Local providers (Ollama, llama.cpp, vLLM) can take minutes for
                 # prefill on large contexts before producing the first token.
                 # Auto-increase the httpx read timeout unless the user explicitly
@@ -8028,7 +8029,7 @@ class AIAgent:
         def _call():
             import httpx as _httpx
 
-            _max_stream_retries = int(os.getenv("HERMES_STREAM_RETRIES", 2))
+            _max_stream_retries = int(os.getenv("SIDEKICK_STREAM_RETRIES") or os.getenv("HERMES_STREAM_RETRIES", 2))
 
             try:
                 for _stream_attempt in range(_max_stream_retries + 1):
@@ -8275,7 +8276,7 @@ class AIAgent:
                 if request_client is not None:
                     self._close_request_openai_client(request_client, reason="stream_request_complete")
 
-        _stream_stale_timeout_base = float(os.getenv("HERMES_STREAM_STALE_TIMEOUT", 180.0))
+        _stream_stale_timeout_base = float(os.getenv("SIDEKICK_STREAM_STALE_TIMEOUT") or os.getenv("HERMES_STREAM_STALE_TIMEOUT", 180.0))
         # Local providers (Ollama, oMLX, llama-cpp) can take 300+ seconds
         # for prefill on large contexts.  Disable the stale detector unless
         # the user explicitly set HERMES_STREAM_STALE_TIMEOUT.
@@ -10147,7 +10148,8 @@ class AIAgent:
                 self._session_db.end_session(self.session_id, "compression")
                 old_session_id = self.session_id
                 self.session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-                os.environ["HERMES_SESSION_ID"] = self.session_id
+                os.environ["SIDEKICK_SESSION_ID"] = self.session_id
+                os.environ["HERMES_SESSION_ID"] = self.session_id  # backward compat
                 try:
                     from gateway.session_context import _SESSION_ID
                     _SESSION_ID.set(self.session_id)

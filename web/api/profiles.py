@@ -383,7 +383,8 @@ class cron_profile_context_for_home:
         _cron_env_lock.acquire()
         _push_cron_profile_context_depth()
         try:
-            self._prev_env = os.environ.get('HERMES_HOME')
+            self._prev_env = os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME')
+            os.environ['SIDEKICK_HOME'] = str(self._home)
             os.environ['HERMES_HOME'] = str(self._home)
 
             # Re-patch cron.jobs module-level constants (see main context manager
@@ -425,8 +426,10 @@ class cron_profile_context_for_home:
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             if self._prev_env is None:
+                os.environ.pop('SIDEKICK_HOME', None)
                 os.environ.pop('HERMES_HOME', None)
             else:
+                os.environ['SIDEKICK_HOME'] = self._prev_env
                 os.environ['HERMES_HOME'] = self._prev_env
             if self._prev_cj is not None:
                 try:
@@ -462,8 +465,9 @@ class cron_profile_context:
         _cron_env_lock.acquire()
         _push_cron_profile_context_depth()
         try:
-            self._prev_env = os.environ.get('HERMES_HOME')
+            self._prev_env = os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME')
             home = get_active_hermes_home()
+            os.environ['SIDEKICK_HOME'] = str(home)
             os.environ['HERMES_HOME'] = str(home)
 
             # Re-patch cron.jobs module-level constants. They are snapshot at
@@ -504,8 +508,10 @@ class cron_profile_context:
         try:
             # Restore env var
             if self._prev_env is None:
+                os.environ.pop('SIDEKICK_HOME', None)
                 os.environ.pop('HERMES_HOME', None)
             else:
+                os.environ['SIDEKICK_HOME'] = self._prev_env
                 os.environ['HERMES_HOME'] = self._prev_env
 
             # Restore cron.jobs module constants
@@ -625,7 +631,8 @@ def get_profile_runtime_env(home: Path) -> dict[str, str]:
 
 
 def _set_hermes_home(home: Path):
-    """Set HERMES_HOME env var and monkey-patch cached module-level paths."""
+    """Set HERMES_HOME/SIDEKICK_HOME env var and monkey-patch cached module-level paths."""
+    os.environ['SIDEKICK_HOME'] = str(home)
     os.environ['HERMES_HOME'] = str(home)
 
     _patch_skill_home_modules(home)

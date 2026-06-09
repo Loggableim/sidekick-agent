@@ -71,7 +71,8 @@ _WEB_DIST_CANDIDATES = [
     Path(__file__).parent.parent / "web_dist",         # web_dist at repo root
     Path(__file__).parent.parent / "dist",             # dist at repo root
 ]
-WEB_DIST = Path(os.environ["HERMES_WEB_DIST"]) if "HERMES_WEB_DIST" in os.environ else next(
+_web_dist = os.environ.get("SIDEKICK_WEB_DIST") or os.environ.get("HERMES_WEB_DIST")
+WEB_DIST = Path(_web_dist) if _web_dist else next(
     (p for p in _WEB_DIST_CANDIDATES if (p / "index.html").exists()),
     _WEB_DIST_CANDIDATES[1]  # final fallback
 )
@@ -156,7 +157,7 @@ def _require_token(request: Request) -> None:
 # "same origin". Validating the Host header at the app layer rejects any
 # request whose Host isn't one we bound for. See GHSA-ppp5-vxwm-4cf7.
 _LOOPBACK_HOST_VALUES: frozenset = frozenset({
-    "localhost", "127.0.0.1", "::1", "sidekick",
+    "localhost", "127.0.0.1", "::1",
 })
 
 
@@ -4165,7 +4166,7 @@ def _discover_dashboard_plugins() -> list:
         (bundled_root / "memory", "bundled"),
         (bundled_root, "bundled"),
     ]
-    if os.environ.get("HERMES_ENABLE_PROJECT_PLUGINS"):
+    if os.environ.get("SIDEKICK_ENABLE_PROJECT_PLUGINS") or os.environ.get("HERMES_ENABLE_PROJECT_PLUGINS"):
         search_dirs.append((Path.cwd() / ".hermes" / "plugins", "project"))
 
     for plugins_root, source in search_dirs:
