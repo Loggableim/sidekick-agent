@@ -154,7 +154,7 @@ def _find_whisper_binary() -> Optional[str]:
 
 
 def _get_local_command_template() -> Optional[str]:
-    configured = os.getenv(LOCAL_STT_COMMAND_ENV, "").strip()
+    configured = os.getenv("SIDEKICK_LOCAL_STT_COMMAND") or os.getenv(LOCAL_STT_COMMAND_ENV, "").strip()
     if configured:
         return configured
 
@@ -404,7 +404,7 @@ def _transcribe_local(file_path: str, model_name: str) -> Dict[str, Any]:
         # Language: config.yaml (stt.local.language) > env var > auto-detect.
         _forced_lang = (
             _load_stt_config().get("local", {}).get("language")
-            or os.getenv(LOCAL_STT_LANGUAGE_ENV)
+            or os.getenv("SIDEKICK_LOCAL_STT_LANGUAGE") or os.getenv(LOCAL_STT_LANGUAGE_ENV)
             or None
         )
         transcribe_kwargs = {"beam_size": 5}
@@ -484,7 +484,7 @@ def _transcribe_local_command(file_path: str, model_name: str) -> Dict[str, Any]
     # Language: config.yaml (stt.local.language) > env var > "en" default.
     language = (
         _load_stt_config().get("local", {}).get("language")
-        or os.getenv(LOCAL_STT_LANGUAGE_ENV)
+        or os.getenv("SIDEKICK_LOCAL_STT_LANGUAGE") or os.getenv(LOCAL_STT_LANGUAGE_ENV)
         or DEFAULT_LOCAL_STT_LANGUAGE
     )
     normalized_model = _normalize_local_command_model(model_name)
@@ -707,7 +707,7 @@ def _transcribe_xai(file_path: str, model_name: str) -> Dict[str, Any]:
     ).strip().rstrip("/")
     language = str(
         xai_config.get("language")
-        or os.getenv("HERMES_LOCAL_STT_LANGUAGE")
+        or os.getenv("SIDEKICK_LOCAL_STT_LANGUAGE") or os.getenv("HERMES_LOCAL_STT_LANGUAGE")
         or DEFAULT_LOCAL_STT_LANGUAGE
     ).strip()
     # .get("format", True) already defaults to True when the key is absent;

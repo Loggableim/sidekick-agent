@@ -108,7 +108,7 @@ def _workspace_slug_from_request(handler, parsed=None) -> str | None:
         slug = handler.headers.get("X-Hermes-Workspace", "").strip().lower()
         if slug:
             return slug
-    slug = os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    slug = os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
     if slug:
         return slug
     return None
@@ -1137,7 +1137,7 @@ def _allowed_public_origins() -> set[str]:
     Each entry must include the scheme, e.g. https://myapp.example.com:8000.
     Entries without a scheme are silently skipped and a warning is printed.
     """
-    raw = os.getenv('HERMES_WEBUI_ALLOWED_ORIGINS', '')
+    raw = os.getenv('SIDEKICK_WEBUI_ALLOWED_ORIGINS') or os.getenv('HERMES_WEBUI_ALLOWED_ORIGINS', '')
     result = set()
     for value in raw.split(','):
         value = value.strip().rstrip('/').lower()
@@ -3789,7 +3789,7 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/session":
         import time as _time
         _t0 = _time.monotonic()
-        _debug_slow = os.environ.get("HERMES_DEBUG_SLOW", "")
+        _debug_slow = os.environ.get("SIDEKICK_DEBUG_SLOW") or os.environ.get("HERMES_DEBUG_SLOW", "")
         query = parse_qs(parsed.query)
         sid = query.get("session_id", [""])[0]
         if not sid:
@@ -4848,7 +4848,7 @@ def _handle_apply_code(handler, body) -> bool:
     path_obj = Path(file_path)
     if not path_obj.is_absolute():
         # Try to resolve relative to the workspace or cwd
-        workspace = os.environ.get("HERMES_KANBAN_WORKSPACE", "")
+        workspace = os.environ.get("SIDEKICK_KANBAN_WORKSPACE") or os.environ.get("HERMES_KANBAN_WORKSPACE", "")
         if workspace:
             path_obj = Path(workspace) / file_path
         else:
@@ -7737,7 +7737,7 @@ def _handle_media(handler, parsed):
     import os as _os
     from web.api.auth import is_auth_enabled, parse_cookie, verify_session
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = Path(_os.getenv("HERMES_HOME", str(_HOME / ".sidekick"))).expanduser()
+    _HERMES_HOME = Path(_os.getenv("SIDEKICK_HOME") or _os.getenv("HERMES_HOME", str(_HOME / ".sidekick"))).expanduser()
 
     # Auth check
     if is_auth_enabled():
@@ -9660,9 +9660,11 @@ def _handle_chat_sync(handler, body):
     with _ENV_LOCK:
         old_cwd = os.environ.get("TERMINAL_CWD")
         os.environ["TERMINAL_CWD"] = str(workspace)
-        old_exec_ask = os.environ.get("HERMES_EXEC_ASK")
-        old_session_key = os.environ.get("HERMES_SESSION_KEY")
+        old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK") or os.environ.get("HERMES_EXEC_ASK")
+        old_session_key = os.environ.get("SIDEKICK_SESSION_KEY") or os.environ.get("HERMES_SESSION_KEY")
+        os.environ["SIDEKICK_EXEC_ASK"] = "1"
         os.environ["HERMES_EXEC_ASK"] = "1"
+        os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
         os.environ["HERMES_SESSION_KEY"] = s.session_id
     try:
         from run_agent import AIAgent
@@ -9752,12 +9754,16 @@ def _handle_chat_sync(handler, body):
             else:
                 os.environ["TERMINAL_CWD"] = old_cwd
             if old_exec_ask is None:
+                os.environ.pop("SIDEKICK_EXEC_ASK", None)
                 os.environ.pop("HERMES_EXEC_ASK", None)
             else:
+                os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
                 os.environ["HERMES_EXEC_ASK"] = old_exec_ask
             if old_session_key is None:
+                os.environ.pop("SIDEKICK_SESSION_KEY", None)
                 os.environ.pop("HERMES_SESSION_KEY", None)
             else:
+                os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
                 os.environ["HERMES_SESSION_KEY"] = old_session_key
     with _get_session_agent_lock(s.session_id):
         _result_messages = result.get("messages") or _previous_context_messages

@@ -41,17 +41,19 @@ _SPACES_ROOT_KEY = "HERMES_WEBUI_SPACES_DIR"
 _OLD_WORKSPACES_KEY = "HERMES_WEBUI_WORKSPACES_DIR"
 
 SPACES_ROOT: Path = Path(
-    os.getenv(
+    os.getenv("SIDEKICK_WEBUI_SPACES_DIR")
+    or os.getenv(
         _SPACES_ROOT_KEY,
-        str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "spaces"),
+        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "spaces"),
     )
 ).expanduser().resolve()
 
 # Old workspaces dir for backward compat
 _OLD_ROOT: Path = Path(
-    os.getenv(
+    os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR")
+    or os.getenv(
         _OLD_WORKSPACES_KEY,
-        str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
+        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
     )
 ).expanduser().resolve()
 
@@ -704,7 +706,7 @@ def resolve_active_space() -> Space:
     """Resolve the active space (never returns None)."""
     slug = get_active_space_slug()
     if not slug:
-        slug = os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower() or DEFAULT_SPACE_SLUG
+        slug = (os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "")).strip().lower() or DEFAULT_SPACE_SLUG
     return get_or_create_space(slug)
 
 

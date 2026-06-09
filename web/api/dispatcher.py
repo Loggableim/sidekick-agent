@@ -239,10 +239,14 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 
     # ── Environment ──────────────────────────────────────────────────────
     env = dict(os.environ)
+    env["SIDEKICK_KANBAN_TASK"] = task_id
     env["HERMES_KANBAN_TASK"] = task_id
+    env["SIDEKICK_KANBAN_BOARD"] = board_slug
     env["HERMES_KANBAN_BOARD"] = board_slug
+    env["SIDEKICK_PROFILE"] = agent_slug
     env["HERMES_PROFILE"] = agent_slug
     # Pin kanban home so the worker reads the right board
+    env["SIDEKICK_KANBAN_HOME"] = str(space.root)
     env["HERMES_KANBAN_HOME"] = str(space.root)
 
     # ── Worker log (per-space/board/task) ──────────────────────────────
@@ -340,6 +344,7 @@ def _set_space_kanban_home(space_root: str) -> None:
 
 
 def _clear_kanban_home() -> None:
+    os.environ.pop("SIDEKICK_KANBAN_HOME", None)
     os.environ.pop("HERMES_KANBAN_HOME", None)
 
 

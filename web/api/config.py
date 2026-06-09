@@ -30,12 +30,12 @@ HOME = Path.home()
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 
 # ── Network config (env-overridable) ─────────────────────────────────────────
-HOST = os.getenv("HERMES_WEBUI_HOST", "127.0.0.1")
-PORT = int(os.getenv("HERMES_WEBUI_PORT", "8787"))
+HOST = os.getenv("SIDEKICK_WEBUI_HOST") or os.getenv("HERMES_WEBUI_HOST", "127.0.0.1")
+PORT = int(os.getenv("SIDEKICK_WEBUI_PORT") or os.getenv("HERMES_WEBUI_PORT", "8787"))
 
 # ── TLS/HTTPS config (optional, env-overridable) ────────────────────────────
-TLS_CERT = os.getenv("HERMES_WEBUI_TLS_CERT", "").strip() or None
-TLS_KEY = os.getenv("HERMES_WEBUI_TLS_KEY", "").strip() or None
+TLS_CERT = (os.getenv("SIDEKICK_WEBUI_TLS_CERT") or os.getenv("HERMES_WEBUI_TLS_CERT", "")).strip() or None
+TLS_KEY = (os.getenv("SIDEKICK_WEBUI_TLS_KEY") or os.getenv("HERMES_WEBUI_TLS_KEY", "")).strip() or None
 TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
@@ -153,8 +153,8 @@ def _discover_python(agent_dir: Path) -> str:
       3. Local .venv inside this repo
       4. System python3
     """
-    if os.getenv("HERMES_WEBUI_PYTHON"):
-        return os.getenv("HERMES_WEBUI_PYTHON")
+    if os.getenv("SIDEKICK_WEBUI_PYTHON") or os.getenv("HERMES_WEBUI_PYTHON"):
+        return os.getenv("SIDEKICK_WEBUI_PYTHON") or os.getenv("HERMES_WEBUI_PYTHON")
 
     if agent_dir:
         venv_py = agent_dir / "venv" / "bin" / "python"
@@ -263,7 +263,7 @@ def _cfg_has_in_memory_overrides() -> bool:
 
 def _get_config_path() -> Path:
     """Return config.yaml path for the active profile."""
-    env_override = os.getenv("HERMES_CONFIG_PATH")
+    env_override = os.getenv("SIDEKICK_CONFIG_PATH") or os.getenv("HERMES_CONFIG_PATH")
     if env_override:
         return Path(env_override).expanduser()
     try:
@@ -413,8 +413,8 @@ def _workspace_candidates(raw: str | Path | None = None) -> list[Path]:
             candidates.append(path)
 
     add(raw)
-    if os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"):
-        add(os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"))
+    if os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"):
+        add(os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"))
 
     home_workspace = HOME / "workspace"
     home_work = HOME / "work"
@@ -465,7 +465,7 @@ def _discover_default_workspace() -> Path:
 
 
 DEFAULT_WORKSPACE = _discover_default_workspace()
-DEFAULT_MODEL = os.getenv("HERMES_WEBUI_DEFAULT_MODEL", "")  # Empty = use provider default; avoids showing unavailable OpenAI model to non-OpenAI users (#646)
+DEFAULT_MODEL = os.getenv("SIDEKICK_WEBUI_DEFAULT_MODEL") or os.getenv("HERMES_WEBUI_DEFAULT_MODEL", "")  # Empty = use provider default; avoids showing unavailable OpenAI model to non-OpenAI users (#646)
 
 
 # ── Startup diagnostics ───────────────────────────────────────────────────────
@@ -1940,7 +1940,7 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
             default_model = cfg_default
 
     env_model = (
-        os.getenv("HERMES_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL")
+        os.getenv("SIDEKICK_MODEL") or os.getenv("HERMES_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL")
     )
     if env_model:
         default_model = env_model.strip()
@@ -4479,7 +4479,7 @@ try:
 except OSError:
     _settings_file_exists = False
 if _settings_file_exists:
-    if not os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"):
+    if not (os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE")):
         DEFAULT_WORKSPACE = resolve_default_workspace(
             _startup_settings.get("default_workspace")
         )

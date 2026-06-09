@@ -192,7 +192,7 @@ def check_for_updates() -> Optional[int]:
     """
     hermes_home = get_sidekick_home()
     cache_file = hermes_home / ".update_check"
-    embedded_rev = os.environ.get("HERMES_REVISION") or None
+    embedded_rev = os.environ.get("SIDEKICK_REVISION") or os.environ.get("HERMES_REVISION") or None
 
     # Read cache — invalidate if the embedded rev has changed since last check
     now = time.time()

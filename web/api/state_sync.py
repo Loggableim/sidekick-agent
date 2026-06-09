@@ -35,7 +35,7 @@ def _get_state_db():
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
         logger.debug("Failed to resolve hermes home, using default")
-        hermes_home = Path(os.getenv('HERMES_HOME', str(Path.home() / '.sidekick')))
+        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(Path.home() / '.sidekick')))
 
     db_path = hermes_home / 'state.db'
     if not db_path.exists():

@@ -209,6 +209,7 @@ def start_terminal(session_id: str, workspace: Path, rows: int = 24, cols: int =
                 "COLUMNS": str(cols),
                 "LINES": str(rows),
                 "PWD": cwd,
+                "SIDEKICK_WEBUI_TERMINAL": "1",
                 "HERMES_WEBUI_TERMINAL": "1",
             }
         )

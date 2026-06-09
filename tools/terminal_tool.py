@@ -269,7 +269,7 @@ def _get_sudo_password_cache_scope() -> str:
 
         session_key = get_session_env("HERMES_SESSION_KEY", "")
     except Exception:
-        session_key = os.getenv("HERMES_SESSION_KEY", "")
+        session_key = os.getenv("SIDEKICK_SESSION_KEY") or os.getenv("HERMES_SESSION_KEY", "")
     if session_key:
         return f"session:{session_key}"
 
@@ -360,7 +360,7 @@ def _handle_sudo_failure(output: str, env_type: str) -> str:
     
     Returns enhanced output if sudo failed in messaging context, else original.
     """
-    is_gateway = os.getenv("HERMES_GATEWAY_SESSION")
+    is_gateway = os.getenv("SIDEKICK_GATEWAY_SESSION") or os.getenv("HERMES_GATEWAY_SESSION")
     
     if not is_gateway:
         return output
@@ -455,7 +455,7 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
             result["done"] = True
     
     try:
-        os.environ["HERMES_SPINNER_PAUSE"] = "1"
+        os.environ["SIDEKICK_SPINNER_PAUSE"] = "1"
         time.sleep(0.2)
         
         print()
@@ -501,8 +501,8 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
         sys.stdout.flush()
         return ""
     finally:
-        if "HERMES_SPINNER_PAUSE" in os.environ:
-            del os.environ["HERMES_SPINNER_PAUSE"]
+        if "SIDEKICK_SPINNER_PAUSE" in os.environ:
+            del os.environ["SIDEKICK_SPINNER_PAUSE"]
 
 def _safe_command_preview(command: Any, limit: int = 200) -> str:
     """Return a log-safe preview for possibly-invalid command values."""
@@ -868,7 +868,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     if not has_configured_password and not sudo_password and _sudo_nopasswd_works():
         return command, None
 
-    if not has_configured_password and not sudo_password and os.getenv("HERMES_INTERACTIVE"):
+    if not has_configured_password and not sudo_password and (os.getenv("SIDEKICK_INTERACTIVE") or os.getenv("HERMES_INTERACTIVE")):
         sudo_password = _prompt_for_sudo_password(timeout_seconds=45)
         if sudo_password:
             _set_cached_sudo_password(sudo_password)

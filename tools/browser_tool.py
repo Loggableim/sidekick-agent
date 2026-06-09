@@ -118,9 +118,9 @@ _SANE_PATH = os.pathsep.join(_SANE_PATH_DIRS)
 
 
 def _webui_browser_context() -> tuple[str, str, str]:
-    session_id = os.getenv("HERMES_WEBUI_BROWSER_SESSION_ID", "").strip()
-    base_url = os.getenv("HERMES_WEBUI_BROWSER_BASE_URL", "").strip().rstrip("/")
-    token = os.getenv("HERMES_WEBUI_BROWSER_PERMISSION_TOKEN", "").strip()
+    session_id = os.getenv("SIDEKICK_WEBUI_BROWSER_SESSION_ID") or os.getenv("HERMES_WEBUI_BROWSER_SESSION_ID", "").strip()
+    base_url = os.getenv("SIDEKICK_WEBUI_BROWSER_BASE_URL") or os.getenv("HERMES_WEBUI_BROWSER_BASE_URL", "").strip().rstrip("/")
+    token = os.getenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN") or os.getenv("HERMES_WEBUI_BROWSER_PERMISSION_TOKEN", "").strip()
     return session_id, base_url, token
 
 

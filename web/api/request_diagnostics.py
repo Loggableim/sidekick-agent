@@ -18,7 +18,7 @@ MAX_STACK_FRAMES_PER_THREAD = 40
 
 
 def _slow_request_seconds() -> float:
-    raw = os.getenv("HERMES_WEBUI_SLOW_REQUEST_SECONDS", "").strip()
+    raw = (os.getenv("SIDEKICK_WEBUI_SLOW_REQUEST_SECONDS") or os.getenv("HERMES_WEBUI_SLOW_REQUEST_SECONDS", "")).strip()
     if not raw:
         return DEFAULT_SLOW_REQUEST_SECONDS
     try:

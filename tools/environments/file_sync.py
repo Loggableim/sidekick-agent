@@ -143,7 +143,7 @@ class FileSyncManager:
         Transactional: state only committed if ALL operations succeed.
         On failure, state rolls back so the next cycle retries everything.
         """
-        if not force and not os.environ.get(_FORCE_SYNC_ENV):
+        if not force and not (os.environ.get("SIDEKICK_FORCE_FILE_SYNC") or os.environ.get(_FORCE_SYNC_ENV)):
             now = time.monotonic()
             if now - self._last_sync_time < self._sync_interval:
                 return

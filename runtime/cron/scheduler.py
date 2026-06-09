@@ -670,7 +670,7 @@ def _get_script_timeout() -> int:
         except Exception:
             logger.warning("Invalid patched _SCRIPT_TIMEOUT=%r; using env/config/default", _SCRIPT_TIMEOUT)
 
-    env_value = os.getenv("HERMES_CRON_SCRIPT_TIMEOUT", "").strip()
+    env_value = (os.getenv("SIDEKICK_CRON_SCRIPT_TIMEOUT") or os.getenv("HERMES_CRON_SCRIPT_TIMEOUT", "")).strip()
     if env_value:
         try:
             timeout = int(float(env_value))
@@ -1204,7 +1204,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     # Mark this as a cron session so the approval system can apply cron_mode.
     # This env var is process-wide and persists for the lifetime of the
     # scheduler process — every job this process runs is a cron job.
-    os.environ["HERMES_CRON_SESSION"] = "1"
+    os.environ["SIDEKICK_CRON_SESSION"] = os.environ["HERMES_CRON_SESSION"] = "1"
 
     # Use ContextVars for per-job session/delivery state so parallel jobs
     # don't clobber each other's targets (os.environ is process-global).
@@ -1287,7 +1287,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
                 else str(delivery_target["thread_id"])
             )
 
-        model = job.get("model") or os.getenv("HERMES_MODEL") or ""
+        model = job.get("model") or os.getenv("SIDEKICK_MODEL") or os.getenv("HERMES_MODEL") or ""
 
         # Load config.yaml for model, reasoning, prefill, toolsets, provider routing
         _cfg = {}
@@ -1323,7 +1323,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
 
         # Prefill messages from env or config.yaml
         prefill_messages = None
-        prefill_file = os.getenv("HERMES_PREFILL_MESSAGES_FILE", "") or _cfg.get("prefill_messages_file", "")
+        prefill_file = (os.getenv("SIDEKICK_PREFILL_MESSAGES_FILE") or os.getenv("HERMES_PREFILL_MESSAGES_FILE", "")) or _cfg.get("prefill_messages_file", "")
         if prefill_file:
             pfpath = Path(prefill_file).expanduser()
             if not pfpath.is_absolute():
@@ -1467,7 +1467,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         #
         # Uses the agent's built-in activity tracker (updated by
         # _touch_activity() on every tool call, API call, and stream delta).
-        _raw_cron_timeout = os.getenv("HERMES_CRON_TIMEOUT", "").strip()
+        _raw_cron_timeout = (os.getenv("SIDEKICK_CRON_TIMEOUT") or os.getenv("HERMES_CRON_TIMEOUT", "")).strip()
         if _raw_cron_timeout:
             try:
                 _cron_timeout = float(_raw_cron_timeout)
@@ -1709,7 +1709,7 @@ def tick(verbose: bool = True, adapters=None, loop=None) -> int:
         # Set HERMES_CRON_MAX_PARALLEL=1 to restore old serial behaviour.
         _max_workers: Optional[int] = None
         try:
-            _env_par = os.getenv("HERMES_CRON_MAX_PARALLEL", "").strip()
+            _env_par = (os.getenv("SIDEKICK_CRON_MAX_PARALLEL") or os.getenv("HERMES_CRON_MAX_PARALLEL", "")).strip()
             if _env_par:
                 _max_workers = int(_env_par) or None
         except (ValueError, TypeError):

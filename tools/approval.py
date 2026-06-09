@@ -91,7 +91,7 @@ def _get_session_platform() -> str:
 
         return get_session_env("HERMES_SESSION_PLATFORM", "") or ""
     except Exception:
-        return os.getenv("HERMES_SESSION_PLATFORM", "") or ""
+        return os.getenv("SIDEKICK_SESSION_PLATFORM") or os.getenv("HERMES_SESSION_PLATFORM", "") or ""
 
 
 def _is_gateway_approval_context() -> bool:
@@ -108,9 +108,9 @@ def _is_gateway_approval_context() -> bool:
     fall through to the gateway branch would submit a pending approval
     with no listener and block the job indefinitely.
     """
-    if os.getenv("HERMES_CRON_SESSION"):
+    if os.getenv("SIDEKICK_CRON_SESSION") or os.getenv("HERMES_CRON_SESSION"):
         return False
-    if os.getenv("HERMES_GATEWAY_SESSION"):
+    if os.getenv("SIDEKICK_GATEWAY_SESSION") or os.getenv("HERMES_GATEWAY_SESSION"):
         return True
     return bool(_get_session_platform())
 
@@ -726,7 +726,7 @@ def prompt_dangerous_approval(command: str, description: str,
         # tests, sshd, etc.).
         pass
 
-    os.environ["HERMES_SPINNER_PAUSE"] = "1"
+    os.environ["SIDEKICK_SPINNER_PAUSE"] = "1"
     try:
         # Resolve the active UI language once per prompt so we don't re-read
         # config/YAML inside the retry loop below.
@@ -781,8 +781,8 @@ def prompt_dangerous_approval(command: str, description: str,
         print("\n" + t("approval.cancelled"))
         return "deny"
     finally:
-        if "HERMES_SPINNER_PAUSE" in os.environ:
-            del os.environ["HERMES_SPINNER_PAUSE"]
+        if "SIDEKICK_SPINNER_PAUSE" in os.environ:
+            del os.environ["SIDEKICK_SPINNER_PAUSE"]
         print()
         sys.stdout.flush()
 
@@ -917,7 +917,7 @@ def check_dangerous_command(command: str, env_type: str,
 
     # --yolo: bypass all approval prompts. Gateway /yolo is session-scoped;
     # CLI --yolo remains process-scoped via the env var for local use.
-    if is_truthy_value(os.getenv("HERMES_YOLO_MODE")) or is_current_session_yolo_enabled():
+    if is_truthy_value(os.getenv("SIDEKICK_YOLO_MODE") or os.getenv("HERMES_YOLO_MODE")) or is_current_session_yolo_enabled():
         return {"approved": True, "message": None}
 
     is_dangerous, pattern_key, description = detect_dangerous_command(command)
@@ -928,12 +928,12 @@ def check_dangerous_command(command: str, env_type: str,
     if is_approved(session_key, pattern_key):
         return {"approved": True, "message": None}
 
-    is_cli = os.getenv("HERMES_INTERACTIVE")
+    is_cli = os.getenv("SIDEKICK_INTERACTIVE") or os.getenv("HERMES_INTERACTIVE")
     is_gateway = _is_gateway_approval_context()
 
     if not is_cli and not is_gateway:
         # Cron sessions: respect cron_mode config
-        if os.getenv("HERMES_CRON_SESSION"):
+        if os.getenv("SIDEKICK_CRON_SESSION") or os.getenv("HERMES_CRON_SESSION"):
             if _get_cron_approval_mode() == "deny":
                 return {
                     "approved": False,
@@ -947,7 +947,7 @@ def check_dangerous_command(command: str, env_type: str,
                 }
         return {"approved": True, "message": None}
 
-    if is_gateway or os.getenv("HERMES_EXEC_ASK"):
+    if is_gateway or os.getenv("SIDEKICK_EXEC_ASK") or os.getenv("HERMES_EXEC_ASK"):
         submit_pending(session_key, {
             "command": command,
             "pattern_key": pattern_key,
@@ -1053,18 +1053,18 @@ def check_all_command_guards(command: str, env_type: str,
     # --yolo or approvals.mode=off: bypass all approval prompts.
     # Gateway /yolo is session-scoped; CLI --yolo remains process-scoped.
     approval_mode = _get_approval_mode()
-    if is_truthy_value(os.getenv("HERMES_YOLO_MODE")) or is_current_session_yolo_enabled() or approval_mode == "off":
+    if is_truthy_value(os.getenv("SIDEKICK_YOLO_MODE") or os.getenv("HERMES_YOLO_MODE")) or is_current_session_yolo_enabled() or approval_mode == "off":
         return {"approved": True, "message": None}
 
-    is_cli = os.getenv("HERMES_INTERACTIVE")
+    is_cli = os.getenv("SIDEKICK_INTERACTIVE") or os.getenv("HERMES_INTERACTIVE")
     is_gateway = _is_gateway_approval_context()
-    is_ask = os.getenv("HERMES_EXEC_ASK")
+    is_ask = os.getenv("SIDEKICK_EXEC_ASK") or os.getenv("HERMES_EXEC_ASK")
 
     # Preserve the existing non-interactive behavior: outside CLI/gateway/ask
     # flows, we do not block on approvals and we skip external guard work.
     if not is_cli and not is_gateway and not is_ask:
         # Cron sessions: respect cron_mode config
-        if os.getenv("HERMES_CRON_SESSION"):
+        if os.getenv("SIDEKICK_CRON_SESSION") or os.getenv("HERMES_CRON_SESSION"):
             if _get_cron_approval_mode() == "deny":
                 # Run detection to get a description for the block message
                 is_dangerous, _pk, description = detect_dangerous_command(command)
