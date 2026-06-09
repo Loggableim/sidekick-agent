@@ -1303,7 +1303,7 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 # ---------------------------------------------------------------------------
 
 def generate_bash_completion() -> str:
-    """Generate a bash completion script for hermes profile names."""
+    """Generate a bash completion script for sidekick profile names."""
     return '''# Sidekick Agent profile completion
 # Add to ~/.bashrc: eval "$(hermes completion bash)"
 
@@ -1353,7 +1353,7 @@ complete -F _hermes_completion hermes
 
 
 def generate_zsh_completion() -> str:
-    """Generate a zsh completion script for hermes profile names."""
+    """Generate a zsh completion script for sidekick profile names."""
     return '''#compdef hermes
 # Sidekick Agent profile completion
 # Add to ~/.zshrc: eval "$(hermes completion zsh)"

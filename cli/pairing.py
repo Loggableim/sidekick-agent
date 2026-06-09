@@ -9,7 +9,7 @@ Usage:
 """
 
 def pairing_command(args):
-    """Handle hermes pairing subcommands."""
+    """Handle sidekick pairing subcommands."""
     from gateway.pairing import PairingStore
 
     store = PairingStore()

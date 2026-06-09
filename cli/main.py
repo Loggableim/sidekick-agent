@@ -53,7 +53,7 @@ Usage:
 # crashes between ``git reset --hard`` and ``uv pip install -e .``), the
 # new code references ``sidekick_bootstrap`` but the editable install's
 # ``.pth`` file still points at the old set of top-level modules.  Without
-# this guard, hermes crashes on import and the user can't run
+# this guard, sidekick crashes on import and the user can't run
 # ``sidekick update`` to recover.  Missing the bootstrap means UTF-8 stdio
 # setup is skipped on Windows — degraded, not broken.  POSIX is unaffected.
 try:
@@ -380,8 +380,8 @@ def _has_any_provider_configured() -> bool:
             return True
 
     # Check for Claude Code OAuth credentials (~/.claude/.credentials.json)
-    # Only count these if Hermes has been explicitly configured — Claude Code
-    # being installed doesn't mean the user wants Hermes to use their tokens.
+    # Only count these if Sidekick has been explicitly configured — Claude Code
+    # being installed doesn't mean the user wants Sidekick to use their tokens.
     if _has_hermes_config:
         try:
             from runtime.anthropic_adapter import (

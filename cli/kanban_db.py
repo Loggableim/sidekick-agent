@@ -3873,7 +3873,7 @@ def _rotate_worker_log(log_path: Path, max_bytes: int) -> None:
         pass
 
 
-def _resolve_hermes_argv() -> list[str]:
+def _resolve_sidekick_argv() -> list[str]:
     """Resolve the ``sidekick`` invocation as argv parts for ``Popen``.
 
     Tries in order:
@@ -3900,6 +3900,10 @@ def _resolve_hermes_argv() -> list[str]:
     # console-script target declared in pyproject.toml, NOT a top-level
     # ``sidekick`` package — there is no ``sidekick`` package to import.
     return [sys.executable, "-m", "sidekick_cli.main"]
+
+
+# Legacy alias for backward compatibility
+_resolve_hermes_argv = _resolve_sidekick_argv
 
 
 def _default_spawn(
@@ -3977,7 +3981,7 @@ def _default_spawn(
     env["HERMES_PROFILE"] = profile_arg
 
     cmd = [
-        *_resolve_hermes_argv(),
+        *_resolve_sidekick_argv(),
         "-p", profile_arg,
         # Auto-load the kanban-worker skill so every dispatched worker
         # has the pattern library (good summary/metadata shapes, retry

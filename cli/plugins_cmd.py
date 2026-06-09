@@ -1552,7 +1552,7 @@ def dashboard_remove_user_plugin(name: str) -> dict[str, Any]:
 
 
 def plugins_command(args) -> None:
-    """Dispatch hermes plugins subcommands."""
+    """Dispatch sidekick plugins subcommands."""
     action = getattr(args, "plugins_action", None)
 
     if action == "install":

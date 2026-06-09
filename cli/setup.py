@@ -792,7 +792,7 @@ def setup_model_provider(config: dict, *, quick: bool = False):
     print_info(f"   Guide: {_DOCS_BASE}/integrations/providers")
     print()
 
-    # Delegate to the shared hermes model flow — handles provider picker,
+    # Delegate to the shared sidekick model flow — handles provider picker,
     # credential prompting, model selection, and config persistence.
     from cli.main import select_provider_and_model
     try:

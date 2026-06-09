@@ -226,7 +226,7 @@ def _run_agent(
 ) -> str:
     """Build an AIAgent exactly like a normal CLI chat turn would, then
     run a single conversation.  Returns the final response string."""
-    # Imports are local so they don't run when hermes is invoked for
+    # Imports are local so they don't run when sidekick is invoked for
     # other commands (keeps top-level CLI startup cheap).
     from cli.config import load_config
     from cli.models import detect_provider_for_model

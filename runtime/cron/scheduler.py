@@ -133,7 +133,7 @@ _sidekick_home: Path | None = None
 
 
 def _get_sidekick_home() -> Path:
-    """Resolve Hermes home dynamically while preserving test monkeypatch hooks."""
+    """Resolve Sidekick home dynamically while preserving test monkeypatch hooks."""
     return _sidekick_home or get_sidekick_home()
 
 

@@ -42,7 +42,7 @@ _FORWARD_COMPAT_TEMPLATE_MODELS: List[tuple[str, tuple[str, ...]]] = [
     # Surface Spark whenever any compatible Codex template is present so
     # accounts hitting the live endpoint with an older lineup still see
     # Spark in the picker. Backend gates real availability by ChatGPT Pro
-    # entitlement; Hermes does not.
+    # entitlement; Sidekick does not.
     ("gpt-5.3-codex-spark", ("gpt-5.3-codex", "gpt-5.2-codex")),
 ]
 
