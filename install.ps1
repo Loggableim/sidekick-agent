@@ -87,6 +87,134 @@ function Write-Err {
     if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  ✗ $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
+# Pause before closing the elevated window on error, so the user can read
+# the error message.  Only fires in the elevated process (not the original
+# non-admin session) and only for non-zero exit codes.
+function Pause-IfElevated {
+    param([int]$ExitCode)
+    if ($script:IsElevated -and $ExitCode -ne 0) {
+        Write-Host ""
+        Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Red
+        Write-Host "│          ✗ Installation failed (exit code $ExitCode)          │" -ForegroundColor Red
+        Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  Check the log file for details:" -ForegroundColor Yellow
+        Write-Host "    $env:LOCALAPPDATA\sidekick\logs\" -ForegroundColor Yellow
+        Write-Host ""
+        Read-Host "  Press Enter to close this window"
+    }
+}
+
+# ============================================================================
+# Admin rights — REQUIRED for Sidekick installer
+# ============================================================================
+# Sidekick needs admin for:
+#   - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:8787)
+#   - Setting machine-wide environment variables (PATH, SIDEKICK_GIT_BASH_PATH)
+#   - winget (Node.js) needs elevation to install per-machine
+#   - Optional: Add/Remove Programs entry for clean uninstall
+#
+# We self-elevate via UAC. If the user clicks "No", exit with a clear error.
+$script:IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $script:IsElevated) {
+    Write-Host ""
+    Write-Host "  Sidekick Installer needs Administrator privileges to:" -ForegroundColor Yellow
+    Write-Host "    - Write to your hosts file (so http://sidekick:8787 works)" -ForegroundColor DarkGray
+    Write-Host "    - Set machine-wide PATH and SIDEKICK_GIT_BASH_PATH" -ForegroundColor DarkGray
+    Write-Host "    - Install Node.js via winget (triggers its own UAC otherwise)" -ForegroundColor DarkGray
+    Write-Host "    - Register an Add/Remove Programs entry" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Requesting elevation (UAC prompt)..." -ForegroundColor Cyan
+    Write-Host ""
+    # Determine the script path. If running via iex (no file), the script
+    # body is in memory and $MyInvocation.MyCommand.Path is null. In that
+    # case, download install.ps1 fresh to %TEMP% and re-launch elevated.
+    $scriptPath = $MyInvocation.MyCommand.Path
+    if (-not $scriptPath -or -not (Test-Path $scriptPath)) {
+        Write-Host "→ Saving installer to %TEMP% for elevated re-launch..." -ForegroundColor Cyan
+        $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
+        try {
+            $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/HEAD/install.ps1"
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
+            Write-Host "→ Saved to $scriptPath" -ForegroundColor Cyan
+        } catch {
+            Write-Host "✗ Could not download installer for elevated re-launch: $_" -ForegroundColor Red
+            Pause-IfElevated -ExitCode 7
+            exit 7
+        }
+    }
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $psi.UseShellExecute = $true
+        $psi.Verb = "runas"
+        # Ensure the elevated window is VISIBLE and stays open on error.
+        # Without WindowStyle, PowerShell 5.1 sometimes launches a hidden
+        # window that immediately exits, making it look like a "crash".
+        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+        $elevated = [System.Diagnostics.Process]::Start($psi)
+        if ($null -eq $elevated) {
+            # UAC was denied or the process could not start
+            Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
+            Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
+            Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
+            Write-Host "→   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+            exit 7
+        }
+        # Capture exit code — WaitForExit() doesn't throw on null Process.
+        # Note: WaitForExit() blocks until the elevated window closes.
+        $elevated.WaitForExit()
+        $exitCode = $elevated.ExitCode
+        exit $exitCode
+    } catch [System.InvalidOperationException], [System.ComponentModel.Win32Exception] {
+        # UAC denied: Process::Start with runas verb throws Win32Exception
+        # when the user cancels the elevation dialog.
+        Write-Host "✗ Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
+        Write-Host "→ Re-run as Administrator:" -ForegroundColor Cyan
+        Write-Host "→   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
+        Write-Host "→   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+        exit 7
+    }
+}
+Write-Host "✓ Running as Administrator (elevation OK)" -ForegroundColor Green
+
+# ============================================================================
+# Log file setup
+# ============================================================================
+$LogDir = "$env:LOCALAPPDATA\sidekick\logs"
+$script:LogFile = "$LogDir\install-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+
+# ============================================================================
+# Exit Code Schema
+# ============================================================================
+# 0  Success
+# 1  Generic failure (unhandled exception)
+# 2  Missing prerequisite (Python/Git/uv install failed)
+# 3  Network/download failure (timeout, DNS, HTTP)
+# 4  Git/update failure (clone, fetch, checkout)
+# 5  Install/venv failure (pip install, dependency install)
+# 6  Verification failure (doctor/smoke check failed)
+# ============================================================================
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+$RepoUrlSsh = "git@github.com:Loggableim/sidekick-agent.git"
+$RepoUrlHttps = "https://github.com/Loggableim/sidekick-agent.git"
+$PythonVersion = "3.11"
+$script:VenvPath = "$InstallDir\.venv"
+$script:PythonExe = "$script:VenvPath\Scripts\python.exe"
+$script:SidekickExe = "$script:VenvPath\Scripts\sidekick.exe"
+
+# ============================================================================
+# Helper functions
+# ============================================================================
+# (Helper functions are now defined at the top of the script so they're
+# available in `irm | iex` pipeline mode. See top of file.)
+
 # ============================================================================
 # Process execution helper (separated streams, no ErrorActionPreference issues)
 # ============================================================================
@@ -759,6 +887,7 @@ function Install-Repository {
                 Write-Err "Could not remove $InstallDir : $_"
                 Write-Info "Close any programs that might be using files in $InstallDir (editors,"
                 Write-Info "terminals, running sidekick processes) and try again."
+                Pause-IfElevated -ExitCode 4
                 exit 4
             }
         }
@@ -836,6 +965,7 @@ function Install-Repository {
 
         if (-not $cloneSuccess) {
             Write-Err "Failed to download repository (tried git clone SSH, HTTPS, and ZIP)"
+            Pause-IfElevated -ExitCode 4
             exit 4
         }
     }
@@ -904,6 +1034,7 @@ function Install-Dependencies {
     }
     if (-not $installed) {
         Write-Err "Failed to install sidekick-agent package even with no extras. Inspect the uv pip install output above."
+        Pause-IfElevated -ExitCode 5
         exit 5
     }
 
@@ -1629,10 +1760,41 @@ if (-not (Install-Uv)) { Write-Err "uv installation failed — cannot continue" 
                 } finally {
                     Remove-Item $tmpHosts -ErrorAction SilentlyContinue
                 }
-            }
-            $url = if ($hostsOk) { "http://sidekick:9119" } else { "http://127.0.0.1:9119" }
-            Start-Process $url
-            Write-Success "WebUI dashboard started — open $url"
+                # CRITICAL: Start dashboard DETACHED from the installer console.
+                # Using -NoNewWindow binds the process to the installer's
+                # console session — when the installer calls exit 0,
+                # Windows kills the console, and sidekick dies with it.
+                # The user sees "success" then ERR_CONNECTION_REFUSED.
+                #
+                # Solution: -WindowStyle Hidden (not -NoNewWindow) starts the
+                # process independently so it survives installer exit.
+                $proc = Start-Process -FilePath $sidekickExe -ArgumentList "dashboard" -WindowStyle Hidden -PassThru
+                # Wait for actual health check instead of a blind sleep.
+                # Slow systems (first cold-load of Python + imports) can take
+                # 5-10 seconds; Start-Sleep 3 is unreliable.
+                Write-Info "Waiting for dashboard to respond (port 8787)..."
+                $healthOk = $false
+                for ($i = 0; $i -lt 20; $i++) {
+                    Start-Sleep -Milliseconds 500
+                    try {
+                        $null = Invoke-WebRequest -Uri "http://127.0.0.1:8787/health" -UseBasicParsing -TimeoutSec 2
+                        $healthOk = $true
+                        break
+                    } catch {
+                        # Not ready yet — keep waiting
+                    }
+                }
+                if ($healthOk) {
+                    Write-Success "Dashboard health check passed"
+                } else {
+                    Write-Warn "Dashboard health check timed out — may still be starting"
+                }
+                if ($hostsOk) {
+                    Start-Process "http://sidekick:8787"
+                } else {
+                    Start-Process "http://127.0.0.1:8787"
+                }
+                Write-Success "WebUI dashboard started — open http://sidekick:8787 (or http://127.0.0.1:8787 if hosts-file is locked)"
         } else {
             Write-Warn "sidekick.exe not found — start dashboard manually with: .\start.ps1 dashboard"
         }
@@ -1659,5 +1821,6 @@ try {
     Write-Host ""
     Write-Info "→ Log file: $LogFile"
     Write-Host ""
+    Pause-IfElevated -ExitCode 1
     exit 1
 }
