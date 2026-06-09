@@ -1568,7 +1568,7 @@ function Write-Completion {
     Write-Host ""
     
     # Show file locations
-    Write-Host "📁 Your files:" -ForegroundColor Cyan
+    Write-Host "[FILES] Your files:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "   Config:    " -NoNewline -ForegroundColor Yellow
     Write-Host "$SidekickHome\config.yaml"
@@ -1582,7 +1582,7 @@ function Write-Completion {
     
     Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "🚀 Commands:" -ForegroundColor Cyan
+    Write-Host "[CMD] Commands:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "   sidekick              " -NoNewline -ForegroundColor Green
     Write-Host "Start chatting with Sidekick"
@@ -1627,12 +1627,11 @@ function Write-Completion {
     
     if (-not $HasRipgrep) {
         Write-Host 'Note: ripgrep (rg) was not installed. For faster file search:' -ForegroundColor Yellow
-        Write-Host "  winget install BurntSushi.ripgrep.MSVC" -ForegroundColor Yellow
-        Write-Host ""
+        Write-Host '  winget install BurntSushi.ripgrep.MSVC' -ForegroundColor Yellow
+        Write-Host ''
     }
-    
-    # Quick-start: open docs
-    Write-Host "📖 Documentation: https://docs.sidekick-agent.dev" -ForegroundColor Cyan
+
+    Write-Host 'Documentation: https://github.com/Loggableim/sidekick-agent' -ForegroundColor Cyan
     Write-Host ""
 }
 
@@ -1659,12 +1658,13 @@ function Main {
     Write-Completion
     try {
         $desktopPath = [Environment]::GetFolderPath("Desktop")
-        $shortcutPath = "$desktopPath\Sidekick.lnk"
-        $wshell = New-Object -ComObject WScript.Shell
-        $shortcut = $wshell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = "$InstallDir\.venv\Scripts\sidekick.exe"
-        $shortcut.Arguments = "dashboard"
-        $shortcut.Save()
+        $batPath = "$desktopPath\Sidekick WebUI.bat"
+        "@echo off
+cd /d `"$InstallDir`"
+start `"`" `"$script:VenvPath\Scripts\python.exe`" `"web\server.py`"
+echo WebUI started on http://127.0.0.1:8787
+echo Close this window to stop the WebUI.
+pause" | Set-Content -Path $batPath -Encoding ASCII
     } catch { }
     Write-Success "Desktop shortcut created"
 }
