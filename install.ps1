@@ -1205,7 +1205,7 @@ Delete the contents (or this file) to use the default personality.
     
     # Seed bundled skills into ~/.sidekick/skills/ (manifest-based, one-time per skill)
     Write-Info "Syncing bundled skills to ~/.sidekick/skills/ ..."
-    $pythonExe = "$InstallDir\venv\Scripts\python.exe"
+    $pythonExe = if (-not $NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { "$PythonExe" }
     if (Test-Path $pythonExe) {
         try {
             & $pythonExe "$InstallDir\tools\skills_sync.py" 2>$null
@@ -1391,7 +1391,7 @@ function Install-PlatformSdks {
         return
     }
 
-    $pythonExe = "$InstallDir\venv\Scripts\python.exe"
+    $pythonExe = if (-not $NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { "$PythonExe" }
     if (-not (Test-Path $pythonExe)) {
         Write-Warn "Skipping platform-SDK verification: $pythonExe not found"
         return
@@ -1493,9 +1493,9 @@ function Invoke-SetupWizard {
     
     # Run sidekick setup using the venv Python directly (no activation needed)
     if (-not $NoVenv) {
-        & ".\venv\Scripts\python.exe" -m sidekick_cli.main setup
+        & "$script:VenvPath\Scripts\python.exe" -m sidekick_app setup
     } else {
-        & $PythonExe -m sidekick_cli.main setup
+        & $PythonExe -m sidekick_app setup
     }
     
     Pop-Location
@@ -1514,10 +1514,7 @@ function Start-GatewayIfConfigured {
 
     if (-not $hasMessaging) { return }
 
-    $sidekickCmd = "$InstallDir\venv\Scripts\sidekick.exe"
-    if (-not (Test-Path $sidekickCmd)) {
-        $sidekickCmd = "sidekick"
-    }
+    $sidekickCmd = if (-not $NoVenv) { "$script:VenvPath\Scripts\sidekick.exe" } else { "sidekick" }
 
     # If WhatsApp is enabled but not yet paired, run foreground for QR scan
     $whatsappEnabled = $content | Where-Object { $_ -match "^WHATSAPP_ENABLED=true" }
