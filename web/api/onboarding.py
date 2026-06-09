@@ -26,7 +26,7 @@ from web.api.config import (
     reload_config,
     resolve_active_provider_context,
     save_settings,
-    verify_hermes_imports,
+    verify_sidekick_imports,
 )
 from web.api.providers import _write_env_file  # shared impl with _ENV_LOCK (#1164)
 from web.api.workspace import get_last_workspace, load_workspaces
@@ -835,7 +835,7 @@ def _load_nova_characters() -> list[dict]:
 def get_onboarding_status() -> dict:
     settings = load_settings()
     cfg = get_config()
-    imports_ok, missing, errors = verify_hermes_imports()
+    imports_ok, missing, errors = verify_sidekick_imports()
     runtime = _status_from_runtime(cfg, imports_ok)
     workspaces = load_workspaces()
     last_workspace = get_last_workspace()
