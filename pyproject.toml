@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sidekick"
 version = "0.1.0"
-description = "Standalone assistant — CLI, TUI, and WebUI in one installable repo"
+description = "Sidekick Agent"
+authors = [{name = "Sidekick"}]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

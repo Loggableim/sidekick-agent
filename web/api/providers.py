@@ -434,7 +434,7 @@ def _get_hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return get_active_hermes_home()
     except ImportError:
-        return Path.home() / ".hermes"
+        return Path.home() / ".sidekick"
 
 
 def _load_env_file(env_path: Path) -> dict[str, str]:

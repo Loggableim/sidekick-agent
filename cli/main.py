@@ -43,15 +43,15 @@ Usage:
     sidekick claw migrate --dry-run  # Preview migration without changes
 """
 
-# IMPORTANT: hermes_bootstrap must be the very first import — it sets up
+# IMPORTANT: sidekick_bootstrap must be the very first import — it sets up
 # UTF-8 stdio on Windows so print()/subprocess children don't hit
 # UnicodeEncodeError with non-ASCII characters.  No-op on POSIX.
 #
-# Guarded against ModuleNotFoundError because ``hermes_bootstrap`` is a
+# Guarded against ModuleNotFoundError because ``sidekick_bootstrap`` is a
 # top-level module registered via pyproject.toml's ``py-modules`` list.
 # When the user upgrades code via ``git pull`` (or ``sidekick update``
 # crashes between ``git reset --hard`` and ``uv pip install -e .``), the
-# new code references ``hermes_bootstrap`` but the editable install's
+# new code references ``sidekick_bootstrap`` but the editable install's
 # ``.pth`` file still points at the old set of top-level modules.  Without
 # this guard, hermes crashes on import and the user can't run
 # ``sidekick update`` to recover.  Missing the bootstrap means UTF-8 stdio
@@ -153,9 +153,9 @@ def _apply_profile_override() -> None:
     # still read active_profile — the user may have switched profiles via
     # `sidekick profile use` and the gateway should honour that choice.
     # See issue #22502.
-    hermes_home_env = os.environ.get("HERMES_HOME", "")
-    if profile_name is None and hermes_home_env:
-        if Path(hermes_home_env).parent.name == "profiles":
+    sidekick_home_env = os.environ.get("HERMES_HOME", "")
+    if profile_name is None and sidekick_home_env:
+        if Path(sidekick_home_env).parent.name == "profiles":
             return
 
     # 2. If no flag, check active_profile in the sidekick root
@@ -5731,7 +5731,7 @@ def _print_curator_first_run_notice() -> None:
     print("  Preview now:  sidekick curator run --dry-run")
     print("  Pause it:     sidekick curator pause")
     print(
-        "  Docs:         https://hermes-agent.nousresearch.com/docs/user-guide/features/curator"
+        "  Docs:         https://sidekick-agent.sh/docs/user-guide/features/curator"
     )
 
 
@@ -9350,7 +9350,7 @@ def main():
             "Manage the fallback provider chain.  Fallback providers are tried "
             "in order when the primary model fails with rate-limit, overload, or "
             "connection errors.  See: "
-            "https://hermes-agent.nousresearch.com/docs/user-guide/features/fallback-providers"
+            "https://sidekick-agent.sh/docs/user-guide/features/fallback-providers"
         ),
     )
     fallback_subparsers = fallback_parser.add_subparsers(dest="fallback_command")

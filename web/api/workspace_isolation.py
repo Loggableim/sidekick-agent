@@ -36,7 +36,7 @@ WORKSPACES_ROOT = (
     Path(
         os.getenv(
             "HERMES_WEBUI_WORKSPACES_DIR",
-            str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))) / "workspaces"),
+            str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
         )
     )
     .expanduser()

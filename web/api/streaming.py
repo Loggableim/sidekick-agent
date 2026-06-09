@@ -80,7 +80,7 @@ def _prewarm_skill_tool_modules():
     does lightweight attribute patching.
 
     We cannot place these at module top-level because ``tools.*`` lives
-    in the hermes-agent package which may not be on ``sys.path`` at
+    in the sidekick-agent package which may not be on ``sys.path`` at
     import time (Docker volume-mount ordering).  A dedicated helper
     keeps the lazy-import try/except in one place and makes the intent
     explicit.
@@ -165,7 +165,7 @@ def _nova_cognitive_system_block(
     )
 
 
-# Lazy import to avoid circular deps -- hermes-agent is on sys.path via api/config.py
+# Lazy import to avoid circular deps -- sidekick-agent is on sys.path via api/config.py
 try:
     from run_agent import AIAgent
 except ImportError:
@@ -228,7 +228,7 @@ def _clarify_timeout_seconds(default: int = 120) -> int:
 def _classify_provider_error(err_str: str, exc=None, *, silent_failure: bool = False) -> dict:
     """Classify provider/agent failure text for WebUI apperror UX.
 
-    Keep this string-based until hermes-agent exposes stable structured
+    Keep this string-based until sidekick-agent exposes stable structured
     provider error classes for Codex OAuth plan limits.
     """
     err_str = str(err_str or '')
@@ -2920,7 +2920,7 @@ def _run_agent_streaming(
                 print(f"[webui] WARNING: resolve_runtime_provider failed: {_e}", flush=True)
 
             # Named custom providers (custom:slug) may not be resolvable by
-            # hermes_cli.runtime_provider directly. Fall back to config.yaml
+            # sidekick_cli.runtime_provider directly. Fall back to config.yaml
             # custom_providers[] so WebUI can pass explicit creds/base_url.
             if isinstance(resolved_provider, str) and resolved_provider.startswith("custom:"):
                 _cp_key, _cp_base = resolve_custom_provider_connection(resolved_provider)

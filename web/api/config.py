@@ -212,9 +212,9 @@ PYTHON_EXE = _discover_python(_AGENT_DIR)
 if _AGENT_DIR is not None:
     if str(_AGENT_DIR) not in sys.path:
         sys.path.append(str(_AGENT_DIR))
-    _HERMES_FOUND = True
+    _SIDEKICK_FOUND = True
 else:
-    _HERMES_FOUND = False
+    _SIDEKICK_FOUND = False
 
 # ── Config file (reloadable -- supports profile switching) ──────────────────
 _cfg_cache = {}
@@ -490,7 +490,7 @@ def print_startup_config() -> None:
     ]
     print("\n".join(lines), flush=True)
 
-    if not _HERMES_FOUND:
+    if not _SIDEKICK_FOUND:
         print(
             f"{err}  Could not find the Nova agent directory.\n"
             "      The server will start but agent features will not work.\n"
@@ -505,7 +505,7 @@ def print_startup_config() -> None:
         )
 
 
-def verify_hermes_imports() -> tuple:
+def verify_sidekick_imports() -> tuple:
     """
     Attempt to import the key Hermes modules.
     Returns (ok: bool, missing: list[str], errors: dict[str, str]).

@@ -1575,8 +1575,8 @@ def has_conflicting_systemd_units() -> bool:
 # Legacy service names from older Hermes installs that predate the
 # sidekick-gateway rename. Kept as an explicit allowlist (NOT a glob) so
 # profile units (sidekick-gateway-*.service) and unrelated third-party
-# "hermes" units are never matched.
-_LEGACY_SERVICE_NAMES: tuple[str, ...] = ("hermes.service",)
+# "sidekick" units are never matched.
+_LEGACY_SERVICE_NAMES: tuple[str, ...] = ("sidekick.service",)
 
 # ExecStart content markers that identify a unit as running our gateway.
 # A legacy unit is only flagged when its file contains one of these.
@@ -1605,7 +1605,7 @@ def _find_legacy_hermes_units() -> list[tuple[str, Path, bool]]:
     """Return ``[(unit_name, unit_path, is_system)]`` for legacy Hermes gateway units.
 
     Detects unit files installed by older Hermes versions that used a
-    different service name (e.g. ``hermes.service`` before the rename to
+    different service name (e.g. ``sidekick.service`` before the rename to
     ``sidekick-gateway.service``). When both a legacy unit and the current
     ``sidekick-gateway.service`` are active, they fight over the same bot
     token — the PR #5646 signal-recovery change turns this into a 30-second
@@ -1615,9 +1615,9 @@ def _find_legacy_hermes_units() -> list[tuple[str, Path, bool]]:
 
     * Explicit allowlist of legacy names (no globbing). Profile units such
       as ``sidekick-gateway-coder.service`` and unrelated third-party
-      ``hermes-*`` services are never matched.
+      ``sidekick-*`` services are never matched.
     * ExecStart content check — only flag units that invoke our gateway
-      entrypoint. A user-created ``hermes.service`` running an unrelated
+      entrypoint. A user-created ``sidekick.service`` running an unrelated
       binary is left untouched.
     * Results are returned purely for caller inspection; this function
       never mutates or removes anything.
@@ -2263,7 +2263,7 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
     # The user-scope unit path resolves under ``Path.home()``, which is NOT
     # sandboxed by the test conftest (only HERMES_HOME is). If a test
     # exercises ``run_gateway()`` with a pytest-tmp HERMES_HOME, the freshly
-    # generated unit bakes that ``/tmp/pytest-of-.../hermes_test`` path into
+    # generated unit bakes that ``/tmp/pytest-of-.../sidekick_test`` path into
     # ``Environment="HERMES_HOME=..."``. Writing that to the developer's
     # real user systemd unit file silently breaks their gateway on the next
     # reboot (systemd loads the polluted env, the gateway looks at an empty
@@ -2275,8 +2275,8 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
     # still works.
     if not system and (
         "/pytest-of-" in new_unit
-        or "/hermes_test\"" in new_unit
-        or "/hermes_test/" in new_unit
+        or "/sidekick_test\"" in new_unit
+        or "/sidekick_test/" in new_unit
     ):
         return False
 
@@ -2410,7 +2410,7 @@ def systemd_install(force: bool = False, system: bool = False, run_as_user: str 
     if system:
         _require_root_for_system_service("install")
 
-    # Offer to remove legacy units (hermes.service from pre-rename installs)
+    # Offer to remove legacy units (sidekick.service from pre-rename installs)
     # before installing the new sidekick-gateway.service. If both remain, they
     # flap-fight for the Telegram bot token on every gateway startup.
     # Only removes units matching _LEGACY_SERVICE_NAMES + our ExecStart
@@ -2734,7 +2734,7 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
 def get_launchd_label() -> str:
     """Return the launchd service label, scoped per profile."""
     suffix = _profile_suffix()
-    return f"ai.hermes.gateway-{suffix}" if suffix else "ai.hermes.gateway"
+    return f"ai.sidekick.gateway-{suffix}" if suffix else "ai.sidekick.gateway"
 
 
 def _launchd_domain() -> str:
@@ -3070,7 +3070,7 @@ def _truthy_env(value: str | None) -> bool:
 
 def _is_official_docker_checkout() -> bool:
     return (
-        str(PROJECT_ROOT) == "/opt/hermes"
+        str(PROJECT_ROOT) == "/opt/sidekick"
         and (PROJECT_ROOT / "docker" / "entrypoint.sh").is_file()
     )
 
@@ -5376,7 +5376,7 @@ def _gateway_command_inner(args):
 
     elif subcmd == "migrate-legacy":
         # Stop, disable, and remove legacy Hermes gateway unit files from
-        # pre-rename installs (e.g. hermes.service). Profile units and
+        # pre-rename installs (e.g. sidekick.service). Profile units and
         # unrelated third-party services are never touched.
         dry_run = getattr(args, 'dry_run', False)
         yes = getattr(args, 'yes', False)

@@ -43,7 +43,7 @@ _OLD_WORKSPACES_KEY = "HERMES_WEBUI_WORKSPACES_DIR"
 SPACES_ROOT: Path = Path(
     os.getenv(
         _SPACES_ROOT_KEY,
-        str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))) / "spaces"),
+        str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "spaces"),
     )
 ).expanduser().resolve()
 
@@ -51,7 +51,7 @@ SPACES_ROOT: Path = Path(
 _OLD_ROOT: Path = Path(
     os.getenv(
         _OLD_WORKSPACES_KEY,
-        str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))) / "workspaces"),
+        str(Path(os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
     )
 ).expanduser().resolve()
 

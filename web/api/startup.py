@@ -33,7 +33,7 @@ def fix_credential_permissions() -> None:
         except ValueError:
             pass
 
-    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.sidekick')))
     if not hermes_home.is_dir():
         return
     for name in _SENSITIVE_FILES:
@@ -56,11 +56,11 @@ def fix_credential_permissions() -> None:
 
 
 def _agent_dir() -> Path | None:
-    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.sidekick')))
     for raw in [
         os.environ.get('SIDEKICK_WEBUI_AGENT_DIR', '').strip(),
         os.environ.get('HERMES_WEBUI_AGENT_DIR', '').strip(),
-        str(hermes_home / 'hermes-agent'),
+        str(hermes_home / 'sidekick-agent'),
     ]:
         if not raw:
             continue
@@ -76,7 +76,7 @@ def _trusted_agent_dir(agent_dir: Path) -> bool:
     on POSIX systems, is owned by the current process user.
 
     Intentionally does NOT enforce a canonical path (i.e. does not require
-    the dir to be ~/.hermes/hermes-agent), so custom SIDEKICK_WEBUI_AGENT_DIR
+    the dir to be ~/.sidekick/sidekick-agent), so custom SIDEKICK_WEBUI_AGENT_DIR
     or HERMES_WEBUI_AGENT_DIR paths work correctly when
     SIDEKICK_WEBUI_AUTO_INSTALL=1 is set.
     """
