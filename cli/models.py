@@ -2863,6 +2863,31 @@ def opencode_model_api_mode(provider_id: Optional[str], model_id: Optional[str])
     return "chat_completions"
 
 
+_OPENCODE_GO_SAFE_FALLBACK_MODEL = "glm-5"
+_OPENCODE_GO_UNSUPPORTED_TOOL_MODELS = {
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+}
+
+
+def opencode_model_runtime_fallback(provider_id: Optional[str], model_id: Optional[str]) -> str:
+    """Return a runtime-safe OpenCode model when the selected one is known-bad.
+
+    OpenCode Go exposes some models that are technically visible in the
+    upstream catalog but fail on Sidekick's agentic chat path with HTTP 400
+    once tool calls are involved. We keep the selection visible in the UI,
+    but route execution to a stable fallback so users do not land on a broken
+    first prompt after setup.
+    """
+    provider = normalize_provider(provider_id)
+    normalized = normalize_opencode_model_id(provider_id, model_id)
+    if provider != "opencode-go":
+        return normalized
+    if normalized.lower() in _OPENCODE_GO_UNSUPPORTED_TOOL_MODELS:
+        return _OPENCODE_GO_SAFE_FALLBACK_MODEL
+    return normalized
+
+
 def github_model_reasoning_efforts(
     model_id: Optional[str],
     *,
