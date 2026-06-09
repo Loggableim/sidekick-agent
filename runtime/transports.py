@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from runtime.lmstudio_reasoning import resolve_lmstudio_effort
 from runtime.moonshot_schema import is_moonshot_model, sanitize_moonshot_tools
 from runtime.prompt_builder import DEVELOPER_ROLE_MODELS
+from providers.base import OMIT_TEMPERATURE
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,12 @@ class ChatCompletionsTransport:
             "messages": messages,
         }
 
+        # ── Provider profile hooks ──────────────────────────────────────────
+        if provider_profile is not None:
+            # 1. Message preprocessing
+            messages = provider_profile.prepare_messages(messages)
+            kwargs["messages"] = messages
+
         # Tools
         if tools:
             sanitized = list(tools)
@@ -114,21 +121,29 @@ class ChatCompletionsTransport:
                 sanitized = sanitize_moonshot_tools(sanitized)
             kwargs["tools"] = sanitized
 
-        # Max tokens — priority: ephemeral > user > provider default
+        # Max tokens — priority: ephemeral > user > profile default > api default
         if max_tokens_param_fn is not None:
             if ephemeral_max_output_tokens is not None:
                 kwargs.update(max_tokens_param_fn(ephemeral_max_output_tokens))
             elif max_tokens is not None:
                 kwargs.update(max_tokens_param_fn(max_tokens))
-            # else: no max_tokens at all (anthropic path handles its own)
+            elif provider_profile is not None and provider_profile.default_max_tokens is not None:
+                kwargs.update(max_tokens_param_fn(provider_profile.default_max_tokens))
         elif anthropic_max_output is not None:
             kwargs["max_tokens"] = anthropic_max_output
+        elif provider_profile is not None and provider_profile.default_max_tokens is not None:
+            kwargs["max_tokens"] = provider_profile.default_max_tokens
 
         # Temperature
-        if omit_temperature:
+        _temp_override = None
+        if provider_profile is not None:
+            _temp_override = provider_profile.fixed_temperature
+        if omit_temperature or _temp_override is OMIT_TEMPERATURE:
             pass  # Don't send temperature at all
         elif fixed_temperature is not None:
             kwargs["temperature"] = fixed_temperature
+        elif _temp_override is not None:
+            kwargs["temperature"] = _temp_override
         else:
             kwargs["temperature"] = 0.6
 
@@ -141,6 +156,12 @@ class ChatCompletionsTransport:
 
         # Extra body for reasoning
         extra_body: Dict[str, Any] = {}
+
+        # Provider profile extra body
+        if provider_profile is not None:
+            extra_body.update(provider_profile.build_extra_body(
+                session_id=session_id,
+            ))
 
         if supports_reasoning:
             if reasoning_config and isinstance(reasoning_config, dict):
@@ -188,6 +209,17 @@ class ChatCompletionsTransport:
 
         if extra_body:
             kwargs["extra_body"] = extra_body
+
+        # Provider profile extra_body + top-level kwargs extras
+        if provider_profile is not None:
+            _eb_extras, _tl_extras = provider_profile.build_api_kwargs_extras(
+                reasoning_config=reasoning_config,
+                session_id=session_id,
+            )
+            if _eb_extras:
+                kwargs.setdefault("extra_body", {}).update(_eb_extras)
+            if _tl_extras:
+                kwargs.update(_tl_extras)
 
         # Anthropic max output tokens
         if anthropic_max_output is not None:
