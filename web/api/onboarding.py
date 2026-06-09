@@ -16,7 +16,7 @@ from web.api.config import (
     DEFAULT_MODEL,
     DEFAULT_WORKSPACE,
     _FALLBACK_MODELS,
-    _HERMES_FOUND,
+    _SIDEKICK_FOUND,
     _PROVIDER_DISPLAY,
     _PROVIDER_MODELS,
     _get_config_path,
@@ -694,9 +694,9 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
                 or _provider_oauth_authenticated(provider, _get_active_hermes_home())
             )
 
-    chat_ready = bool(_HERMES_FOUND and imports_ok and provider_ready)
+    chat_ready = bool(_SIDEKICK_FOUND and imports_ok and provider_ready)
 
-    if not _HERMES_FOUND or not imports_ok:
+    if not _SIDEKICK_FOUND or not imports_ok:
         state = "agent_unavailable"
         note = (
             "Sidekick is not fully importable from the Web UI yet. Finish bootstrap or fix the "
@@ -909,7 +909,7 @@ def get_onboarding_status() -> dict:
             "nova_character": settings.get("nova_character") or "nova",
         },
         "system": {
-            "hermes_found": bool(_HERMES_FOUND),
+            "sidekick_found": bool(_SIDEKICK_FOUND),
             "imports_ok": bool(imports_ok),
             "missing_modules": missing,
             "import_errors": errors,
