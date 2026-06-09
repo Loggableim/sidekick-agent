@@ -1664,14 +1664,28 @@ title Sidekick Agent
 cd /d "' + $InstallDir + '"
 set SIDEKICK_HOME=' + $SidekickHome + '
 set HERMES_HOME=' + $SidekickHome + '
+set SIDEKICK_WEBUI_PORT=8787
+set LOGDIR=' + $SidekickHome + '\logs
+if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+set LOGFILE=%LOGDIR%\desktop-shortcut.log
+echo [%date% %time%] Starting Sidekick shortcut > "%LOGFILE%"
+if not exist "' + $script:VenvPath + '\Scripts\python.exe" (
+  echo [%date% %time%] ERROR: missing Python at "' + $script:VenvPath + '\Scripts\python.exe"' >> "%LOGFILE%"
+  echo ERROR: Sidekick Python runtime not found.
+  echo Expected: ' + $script:VenvPath + '\Scripts\python.exe
+  echo See log: %LOGFILE%
+  pause
+  exit /b 1
+)
 echo [1/2] Starte Gateway (Agent-Kommunikation)...
-start "Sidekick Gateway" /min "' + $script:VenvPath + '\Scripts\python.exe" -m sidekick_app gateway run --replace --quiet
+start "Sidekick Gateway" /min cmd /c ""' + $script:VenvPath + '\Scripts\python.exe" -m sidekick_app gateway run --replace --quiet >> "%LOGFILE%" 2>&1"
 echo [2/2] Starte WebUI...
-start "Sidekick WebUI" /min "' + $script:VenvPath + '\Scripts\python.exe" "web\server.py"
+start "Sidekick WebUI" /min cmd /c ""' + $script:VenvPath + '\Scripts\python.exe" -m sidekick_app dashboard --host 127.0.0.1 --port 8787 >> "%LOGFILE%" 2>&1"
 echo.
 echo WebUI: http://127.0.0.1:8787
 echo Gateway: aktiv (minimiert)
 echo.
+echo Log: %LOGFILE%
 echo Close dieses Fenster zum Beenden aller Dienste.
 pause
 echo Shutdown...
