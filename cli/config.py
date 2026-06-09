@@ -1838,14 +1838,6 @@ OPTIONAL_ENV_VARS = {
         "category": "provider",
         "advanced": True,
     },
-    "OPENCODE_GO_BASE_URL": {
-        "description": "OpenCode Go base URL override",
-        "prompt": "OpenCode Go base URL (leave empty for default)",
-        "url": None,
-        "password": False,
-        "category": "provider",
-        "advanced": True,
-    },
     "HF_TOKEN": {
         "description": "Hugging Face token for Inference Providers (20+ open models via router.huggingface.co)",
         "prompt": "Hugging Face Token",
