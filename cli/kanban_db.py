@@ -3878,7 +3878,7 @@ def _resolve_hermes_argv() -> list[str]:
 
     Tries in order:
 
-    1. ``shutil.which("hermes")`` — the console-script shim, the same form
+    1. ``shutil.which("sidekick")`` — the console-script shim, the same form
        that shows up in ``ps`` output and existing logs. Preferred so live
        systems' diagnostics stay familiar.
     2. ``sys.executable -m sidekick_cli.main`` — fallback for setups where
