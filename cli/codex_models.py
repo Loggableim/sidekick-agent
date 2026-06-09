@@ -149,7 +149,7 @@ def _read_cache_models(codex_home: Path) -> List[str]:
                 continue
             slug = slug.strip()
             # Do not filter on ``supported_in_api`` here.  It describes the
-            # public OpenAI API, while Hermes openai-codex talks to the same
+            # public OpenAI API, while Sidekick openai-codex talks to the same
             # OAuth-backed Codex backend as Codex CLI.
             visibility = item.get("visibility")
             if isinstance(visibility, str) and visibility.strip().lower() in {"hide", "hidden"}:

@@ -1,6 +1,6 @@
 """Unified removal contract for every credential source Sidekick reads from.
 
-Hermes seeds its credential pool from many places:
+Sidekick seeds its credential pool from many places:
 
     env:<VAR>     — os.environ / ~/.sidekick/.env
     claude_code   — ~/.claude/.credentials.json
@@ -179,7 +179,7 @@ def _remove_env_source(provider: str, removed) -> RemovalResult:
             f"Note: {env_var} is still set in your shell environment "
             f"(not in ~/.sidekick/.env).",
             "  Unset it there (shell profile, systemd EnvironmentFile, "
-            "launchd plist, etc.) or it will keep being visible to Hermes.",
+            "launchd plist, etc.) or it will keep being visible to Sidekick.",
             f"  The pool entry is now suppressed — Sidekick will ignore "
             f"{env_var} until you run `sidekick auth add {provider}`.",
         ])

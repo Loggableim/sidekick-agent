@@ -847,7 +847,7 @@ def run_doctor(args):
     if _safe_which("codex"):
         check_ok("codex CLI")
     else:
-        # Native OAuth uses Hermes' own device-code flow — the Codex CLI is
+        # Native OAuth uses Sidekick's own device-code flow — the Codex CLI is
         # only needed if you want to import existing tokens from
         # ~/.codex/auth.json.  Downgrade to info so users running
         # `sidekick auth openai-codex` aren't told they're missing something.
