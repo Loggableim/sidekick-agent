@@ -53,6 +53,7 @@ py-modules = ["run_agent", "sidekick_constants", "bootstrap"]
 [tool.setuptools.packages.find]
 include = [
     "cli", "cli.*",
+    "cron", "cron.*",
     "providers", "providers.*",
     "runtime", "runtime.*", "runtime._compat", "runtime.cron", "runtime.cron.*",
     "runtime.gateway", "runtime.gateway.*",

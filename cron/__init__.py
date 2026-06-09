@@ -1,12 +1,7 @@
-"""Legacy cron package — forwards to runtime.cron.
+"""Compatibility shim for legacy ``cron`` imports.
 
-This package exists so that ``from cron import get_job`` (used by cli/cli.py)
-resolves correctly without the old ``cids-hermes-agent/cron/`` package.
+The runtime implementation lives under ``runtime.cron``. Keep this package so
+older imports like ``from cron.jobs import ...`` continue to work.
 """
-from __future__ import annotations
 
-# Re-export everything from the canonical runtime.cron module
-from runtime.cron.jobs import get_job  # noqa: F401
-from runtime.cron.scheduler import *  # noqa: F401, F403
-
-__all__: list[str] = []
+from runtime.cron.jobs import *  # noqa: F401,F403
