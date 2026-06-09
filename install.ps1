@@ -1660,10 +1660,18 @@ function Main {
         $shortcut.Arguments = "dashboard"
         $shortcut.Save()
     } catch { }
-    exit 0
+    Write-Success "Desktop shortcut created"
 }
 
-try { Main } catch {
+# ============================================================================
+# Main entry
+# ============================================================================
+try {
+    Main
+} catch {
     Write-Err "Installation failed: $_"
-    exit 1
 }
+
+Write-Host ""
+Write-Host "Press Enter to close this window..." -ForegroundColor Yellow
+$null = Read-Host
