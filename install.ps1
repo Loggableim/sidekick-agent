@@ -15,7 +15,7 @@
 param(
     [switch]$NoVenv,
     [switch]$SkipSetup,
-    [string]$Branch = "main",
+    [string]$Branch = "master",
     [string]$SidekickHome = "$env:LOCALAPPDATA\sidekick",
     [string]$InstallDir = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
 )
