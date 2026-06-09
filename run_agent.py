@@ -3239,10 +3239,10 @@ class AIAgent:
                 _aux_label = f"{aux_model} ({_aux_provider_label})"
                 msg = (
                     f"⚠ Compression model {_aux_label} context is "
-                    f"{aux_context:,} tokens, but the main model "
-                    f"{_main_label}'s compression threshold was "
-                    f"{old_threshold:,} tokens. "
-                    f"Auto-lowered this session's threshold to "
+                    f"{aux_context:,} tokens, but this session would start "
+                    f"compressing at {old_threshold:,} tokens based on the "
+                    f"current main model {_main_label}. "
+                    f"Auto-lowered the session threshold to "
                     f"{new_threshold:,} tokens so compression can run.\n"
                     f"  To make this permanent, edit config.yaml — either:\n"
                     f"  1. Use a larger compression model:\n"
@@ -3256,10 +3256,9 @@ class AIAgent:
                 self._compression_warning = msg
                 self._emit_status(msg)
                 logger.warning(
-                    "Auxiliary compression model %s has %d token context, "
-                    "below the main model's compression threshold of %d "
-                    "tokens — auto-lowered session threshold to %d to "
-                    "keep compression working.",
+                    "Auxiliary compression model %s has %d token context; "
+                    "session threshold was %d and has been lowered to %d so "
+                    "compression can run.",
                     aux_model,
                     aux_context,
                     old_threshold,
