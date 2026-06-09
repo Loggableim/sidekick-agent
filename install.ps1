@@ -1001,7 +1001,7 @@ function Install-Dependencies {
     
     if (-not $NoVenv) {
         # Tell uv to install into our venv (no activation needed)
-        $env:VIRTUAL_ENV = "$InstallDir\venv"
+        $env:VIRTUAL_ENV = $script:VenvPath
     }
     
     # Install main package.  Tiered fallback so a single flaky git+https dep
