@@ -48,6 +48,7 @@ from cli.config import (
     redact_key,
 )
 from gateway.status import get_running_pid, read_runtime_status
+from web.api.workspace import load_workspaces, get_last_workspace
 
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -688,6 +689,48 @@ def _resolve_workspace_path() -> Path:
     return PROJECT_ROOT
 
 
+@app.get("/api/workspaces")
+async def list_workspaces():
+    """List all workspaces and space-engine spaces for the current profile."""
+    ws = load_workspaces()
+    last = get_last_workspace()
+    # Also include space-engine workspaces so the "Spaces" sidebar shows them.
+    # Keep this merge best-effort, but never swallow failures silently during
+    # migration debugging.
+    try:
+        from web.api.space_engine import get_all_workspaces
+        existing_space_slugs = {
+            str(s.get("slug") or "").strip().lower()
+            for s in ws
+            if isinstance(s, dict) and s.get("slug")
+        }
+        spaces = []
+        for w in get_all_workspaces():
+            slug = str(getattr(w, "slug", "") or "").strip().lower()
+            if slug and slug in existing_space_slugs:
+                continue
+            spaces.append(
+                {
+                    "path": w.get_project_dir() or "",
+                    "name": w.name,
+                    "slug": w.slug,
+                    "is_space": True,
+                }
+            )
+        ws.extend(spaces)
+    except Exception:
+        _log.exception("GET /api/workspaces: failed to merge space-engine workspaces")
+    return {"workspaces": ws, "last": last}
+
+
+@app.get("/api/spaces")
+async def list_spaces():
+    """List all spaces for the current profile."""
+    from web.api.space_engine import DEFAULT_SPACE_SLUG, get_all_workspaces
+    workspaces = [w.to_dict() for w in get_all_workspaces()]
+    return {"spaces": workspaces, "default_space": DEFAULT_SPACE_SLUG}
+
+
 @app.get("/api/workspace/git-status")
 async def get_workspace_git_status():
     """Return git status for the current workspace directory.
@@ -1003,8 +1046,13 @@ async def get_sessions(limit: int = 20, offset: int = 0):
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
         try:
-            sessions = db.list_sessions_rich(limit=limit, offset=offset)
-            total = db.session_count()
+            sessions = db.list_sessions(limit=limit, offset=offset)
+            total = len(sessions)
+            if total == limit or offset > 0:
+                try:
+                    total = db._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                except Exception:
+                    total = len(sessions)
             now = time.time()
             for s in sessions:
                 s["is_active"] = (
