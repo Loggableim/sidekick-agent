@@ -52,3 +52,23 @@ def test_workspaces_endpoint_merges_space_engine_entries(monkeypatch, tmp_path):
     assert payload["last"] == r"C:\Users\logga\workspace"
     assert len(payload["workspaces"]) == 2
     assert any(item.get("slug") == "ltth" and item.get("is_space") for item in payload["workspaces"])
+
+
+def test_workspaces_endpoint_requires_session_token(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    monkeypatch.setattr(web_server, "load_workspaces", lambda: [])
+    monkeypatch.setattr(web_server, "get_last_workspace", lambda: "")
+
+    client = TestClient(web_server.app)
+
+    unauthorized = client.get("/api/workspaces")
+    assert unauthorized.status_code == 401
+
+    authorized = client.get(
+        "/api/workspaces",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+    assert authorized.status_code == 200

@@ -24,14 +24,14 @@
 <script>(function(){try{var t=localStorage.getItem('sidekick-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#0D0D1A':'#FEFCF7';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('sidekick-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('sidekick-webui-rail-expanded')==='1')document.documentElement.dataset.railExpanded='1';}catch(e){}})()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/gmail-panel.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/discord-panel.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/discord-chat.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/xterm.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/agents.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/agents-dashboard.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/spaces.css?v=__WEBUI_VERSION__">
+<link rel="stylesheet" href="static/style.css?v=0.8.1">
+  <link rel="stylesheet" href="static/gmail-panel.css?v=0.8.1">
+  <link rel="stylesheet" href="static/discord-panel.css?v=0.8.1">
+  <link rel="stylesheet" href="static/discord-chat.css?v=0.8.1">
+  <link rel="stylesheet" href="static/xterm.css?v=0.8.1">
+  <link rel="stylesheet" href="static/agents.css?v=0.8.1">
+  <link rel="stylesheet" href="static/agents-dashboard.css?v=0.8.1">
+  <link rel="stylesheet" href="static/spaces.css?v=0.8.1">
   <!-- KaTeX math rendering CSS (loaded eagerly to prevent layout shift) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" integrity="sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP" crossorigin="anonymous">
   <!-- streaming-markdown: incremental DOM-building markdown parser for live streams -->
@@ -62,7 +62,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__').catch(function(err) {
+        navigator.serviceWorker.register('sw.js?v=0.8.1').catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });
@@ -2067,25 +2067,25 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="static/i18n.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/icons.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/workspace.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/terminal.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/sessions.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/browser.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/spaces.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/gmail.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/power.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/discord.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/agents.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/i18n.js?v=0.8.1" defer></script>
+<script src="static/icons.js?v=0.8.1" defer></script>
+<script src="static/ui.js?v=0.8.1" defer></script>
+<script src="static/workspace.js?v=0.8.1" defer></script>
+<script src="static/terminal.js?v=0.8.1" defer></script>
+<script src="static/sessions.js?v=0.8.1" defer></script>
+<script src="static/commands.js?v=0.8.1" defer></script>
+<script src="static/messages.js?v=0.8.1" defer></script>
+<script src="static/browser.js?v=0.8.1" defer></script>
+<script src="static/panels.js?v=0.8.1" defer></script>
+<script src="static/onboarding.js?v=0.8.1" defer></script>
+<script src="static/boot.js?v=0.8.1" defer></script>
+<script src="static/spaces.js?v=0.8.1" defer></script>
+<script src="static/gmail.js?v=0.8.1" defer></script>
+<script src="static/enhancements.js?v=0.8.1" defer></script>
+<script src="static/power.js?v=0.8.1" defer></script>
+<script src="static/discord.js?v=0.8.1" defer></script>
+<script src="static/discord-chat.js?v=0.8.1" defer></script>
+<script src="static/agents.js?v=0.8.1" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">
@@ -2239,4 +2239,3 @@
 
 </body>
 </html>
-

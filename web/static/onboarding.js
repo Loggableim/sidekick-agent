@@ -433,10 +433,11 @@ async function loadOnboardingWizard(){
     const status=await api('/api/onboarding/status');
     ONBOARDING.status=status;
     const current=((status.setup||{}).current)||{};
+    const settings=status.settings||{};
     ONBOARDING.form.provider=current.provider||'openrouter';
-    ONBOARDING.form.workspace=(status.workspaces&&status.workspaces.last)||status.settings.default_workspace||'';
-    ONBOARDING.form.model=status.settings.default_model||current.model||'';
-    ONBOARDING.form.novaCharacter=((status.settings||{}).nova_character)||(((status.nova||{}).default_character))||'nova';
+    ONBOARDING.form.workspace=(status.workspaces&&status.workspaces.last)||settings.default_workspace||'';
+    ONBOARDING.form.model=settings.default_model||current.model||'';
+    ONBOARDING.form.novaCharacter=(settings.nova_character)||(((status.nova||{}).default_character))||'nova';
     ONBOARDING.form.password='';
     ONBOARDING.form.apiKey='';
     ONBOARDING.form.baseUrl=current.base_url||'';
