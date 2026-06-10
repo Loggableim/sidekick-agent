@@ -23,15 +23,49 @@ function _shouldAttachWorkspaceHeader(urlObj) {
   }
 }
 
-function _headersWithWorkspace(existing, urlObj) {
+function _dashboardSessionToken() {
+  try {
+    if (typeof window.__HERMES_SESSION_TOKEN__ === 'string' && window.__HERMES_SESSION_TOKEN__) {
+      return window.__HERMES_SESSION_TOKEN__;
+    }
+  } catch (_) {}
+  return '';
+}
+
+function _headersWithWorkspace(existing, urlObj, options={}) {
   const headers = new Headers(existing || {});
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (_shouldAttachWorkspaceHeader(urlObj) && !headers.has('X-Hermes-Workspace')) {
+  if (options.defaultJson !== false && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  const isDashboardApi = _shouldAttachWorkspaceHeader(urlObj);
+  if (isDashboardApi && !headers.has('X-Hermes-Workspace')) {
     const slug = _activeWorkspaceSlug();
     if (slug) headers.set('X-Hermes-Workspace', slug);
   }
+  if (isDashboardApi && !headers.has('X-Hermes-Session-Token')) {
+    const token = _dashboardSessionToken();
+    if (token) headers.set('X-Hermes-Session-Token', token);
+  }
   return headers;
 }
+
+(function _installDashboardFetchAuth() {
+  if (window.__SIDEKICK_FETCH_AUTH_INSTALLED__) return;
+  window.__SIDEKICK_FETCH_AUTH_INSTALLED__ = true;
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = function(input, init) {
+    try {
+      const rawUrl = input instanceof Request ? input.url : String(input);
+      const url = new URL(rawUrl, document.baseURI || location.href);
+      if (_shouldAttachWorkspaceHeader(url)) {
+        const nextInit = Object.assign({}, init || {});
+        const sourceHeaders = nextInit.headers || (input instanceof Request ? input.headers : undefined);
+        nextInit.headers = _headersWithWorkspace(sourceHeaders, url, {defaultJson:false});
+        if (input instanceof Request) return originalFetch(new Request(input, nextInit));
+        return originalFetch(input, nextInit);
+      }
+    } catch (_) {}
+    return originalFetch(input, init);
+  };
+})();
 
 async function api(path,opts={}){
   // Strip leading slash so URL resolves relative to location.href (supports subpath mounts)
@@ -42,13 +76,19 @@ async function api(path,opts={}){
   let lastErr;
   for(let attempt=0;attempt<3;attempt++){
     try{
-      const headers = _headersWithWorkspace(opts.headers, url);
+      const headers = _headersWithWorkspace(opts.headers, url, {defaultJson:true});
       const res=await fetch(url.href,{credentials:'include',...opts,headers});
       if(!res.ok){
         // 401 means the auth session expired. Redirect to login so the user can
         // re-authenticate. This is especially important for iOS PWA (standalone mode)
         // and for subpath mounts like /hermes/, where /login escapes to the site root.
-        if(res.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);return;}
+        if(res.status===401){
+          const hasDashboardToken = !!_dashboardSessionToken();
+          const onLoginPage = /\/login\/?$/.test(window.location.pathname);
+          if(!hasDashboardToken && !onLoginPage){
+            window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);
+          }
+        }
         const text=await res.text();
         // Parse JSON error body and surface the human-readable message,
         // rather than showing raw JSON like {"error":"Profile 'x' does not exist."}
@@ -80,6 +120,8 @@ async function api(path,opts={}){
             var _xhr=new XMLHttpRequest();
             _xhr.open('POST','api/errors/log',true);
             _xhr.setRequestHeader('Content-Type','application/json');
+            var _token=_dashboardSessionToken();
+            if(_token)_xhr.setRequestHeader('X-Hermes-Session-Token',_token);
             _xhr.send(JSON.stringify({
               type:'api_error',
               message:String(message).slice(0,4000),

@@ -23,6 +23,7 @@ const CACHE_NAME = 'sidekick-shell-0.8.1';
 const VQ = '?v=0.8.1';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
+  './static/api-auth.js' + VQ,
   './static/boot.js' + VQ,
   './static/ui.js' + VQ,
   './static/messages.js' + VQ,

@@ -1159,6 +1159,80 @@ _EMPTY_MODEL_INFO: dict = {
 }
 
 
+class ModelRefreshRequest(BaseModel):
+    provider: Optional[str] = None
+
+
+@app.get("/api/models")
+def get_models_catalog():
+    """Return the legacy WebUI model catalog shape.
+
+    The static dashboard still calls /api/models during boot and Settings
+    hydration. Without this route FastAPI falls through to the SPA catch-all,
+    returning index.html with HTTP 200 and causing JSON parse warnings.
+    """
+    try:
+        from web.api.config import get_available_models
+
+        return get_available_models()
+    except Exception:
+        _log.exception("GET /api/models failed")
+        raise HTTPException(status_code=500, detail="Failed to load model catalog")
+
+
+@app.get("/api/models/live")
+def get_live_models(provider: str = ""):
+    """Best-effort live-model response compatible with the legacy WebUI.
+
+    Startup must never fall through to HTML. Prefer the already-built catalog
+    here; provider-specific refreshes can invalidate the catalog via
+    /api/models/refresh and the next /api/models request will rebuild it.
+    """
+    try:
+        from web.api.config import get_available_models
+
+        catalog = get_available_models()
+        provider_id = (provider or catalog.get("active_provider") or "").strip()
+        models: list[dict] = []
+        for group in catalog.get("groups", []) or []:
+            group_provider = str(group.get("provider_id") or group.get("provider") or "").strip()
+            if provider_id and group_provider.lower() != provider_id.lower():
+                continue
+            models.extend(group.get("models", []) or [])
+            models.extend(group.get("extra_models", []) or [])
+        return {"provider": provider_id, "models": models, "count": len(models)}
+    except Exception:
+        _log.exception("GET /api/models/live failed")
+        raise HTTPException(status_code=500, detail="Failed to load live models")
+
+
+@app.post("/api/models/refresh")
+def refresh_models_catalog(body: ModelRefreshRequest | None = None):
+    """Invalidate model caches and rebuild the catalog on demand."""
+    provider = (body.provider if body else None) or ""
+    try:
+        from web.api.config import (
+            get_available_models,
+            invalidate_models_cache,
+            invalidate_provider_models_cache,
+        )
+
+        if provider:
+            invalidate_provider_models_cache(provider)
+        else:
+            invalidate_models_cache()
+        catalog = get_available_models()
+        return {
+            "ok": True,
+            "provider": provider or catalog.get("active_provider") or "",
+            "active_provider": catalog.get("active_provider"),
+            "default_model": catalog.get("default_model"),
+        }
+    except Exception as exc:
+        _log.exception("POST /api/models/refresh failed")
+        return {"ok": False, "provider": provider, "error": str(exc)}
+
+
 @app.get("/api/model/info")
 def get_model_info():
     """Return resolved model metadata for the currently configured model.
