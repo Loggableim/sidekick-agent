@@ -158,10 +158,70 @@ if (-not $script:IsElevated) {
             exit 7
         }
     }
+    $wrapperPath = Join-Path $env:TEMP "sidekick-installer-elevated-wrapper.ps1"
+    $wrapperLogDir = "$env:LOCALAPPDATA\sidekick\logs"
+    $wrapperLog = Join-Path $wrapperLogDir ("install-elevated-wrapper-{0}.log" -f (Get-Date -Format "yyyyMMdd-HHmmss"))
+    $wrapperContent = @"
+`$ErrorActionPreference = "Continue"
+`$scriptPath = @'
+$scriptPath
+'@
+`$logDir = @'
+$wrapperLogDir
+'@
+`$wrapperLog = @'
+$wrapperLog
+'@
+if (-not (Test-Path -LiteralPath `$logDir)) {
+    New-Item -ItemType Directory -Force -Path `$logDir | Out-Null
+}
+function _sidekick_line([string]`$message, [ConsoleColor]`$color = [ConsoleColor]::White) {
+    Write-Host `$message -ForegroundColor `$color
+    Add-Content -Path `$wrapperLog -Value `$message -Encoding UTF8 -ErrorAction SilentlyContinue
+}
+function _sidekick_blank {
+    Write-Host ""
+    Add-Content -Path `$wrapperLog -Value "" -Encoding UTF8 -ErrorAction SilentlyContinue
+}
+_sidekick_blank
+_sidekick_line "  ============================================================" DarkCyan
+_sidekick_line "   Sidekick elevated setup" Cyan
+_sidekick_line "  ------------------------------------------------------------" DarkCyan
+_sidekick_line "   Installer: `$scriptPath" DarkGray
+_sidekick_line "   Wrapper log: `$wrapperLog" DarkGray
+_sidekick_line "  ============================================================" DarkCyan
+_sidekick_blank
+try {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "`$scriptPath"
+    `$code = if (`$LASTEXITCODE -is [int]) { `$LASTEXITCODE } else { 0 }
+} catch {
+    `$code = 1
+    _sidekick_line "  XX Elevated setup wrapper failed before the installer could finish." Red
+    _sidekick_line ("  XX " + `$_.Exception.Message) Red
+}
+if (`$code -ne 0) {
+    _sidekick_blank
+    _sidekick_line "  ============================================================" Red
+    _sidekick_line "   Sidekick setup stopped" Red
+    _sidekick_line "  ------------------------------------------------------------" Red
+    _sidekick_line "   Exit code: `$code" White
+    _sidekick_line "   Logs: `$logDir" Yellow
+    _sidekick_line "  ============================================================" Red
+    _sidekick_blank
+    Read-Host "  Press Enter to close Sidekick setup"
+}
+exit `$code
+"@
+    try {
+        Set-Content -Path $wrapperPath -Value $wrapperContent -Encoding UTF8 -Force
+    } catch {
+        Write-Host "  XX Could not prepare elevated setup wrapper: $_" -ForegroundColor Red
+        exit 7
+    }
     try {
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = "powershell.exe"
-        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$wrapperPath`""
         $psi.UseShellExecute = $true
         $psi.Verb = "runas"
         # Ensure the elevated window is VISIBLE and stays open on error.
