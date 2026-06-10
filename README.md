@@ -18,16 +18,42 @@ sidekick doctor           # Health check (works without API key)
 sidekick dashboard        # Open WebUI at http://127.0.0.1:9119
 ```
 
-|**Key facts:**
-|- ⚠ **Windows installer requires Administrator (UAC)** by default — installs under `%LOCALAPPDATA%\sidekick\`
-|- 🏠 **Desktop shortcut** — `Sidekick.lnk` starts the dashboard
-|- 🌐 **WebUI opens automatically** in your default browser
-|- 🔄 **Update** by running the same command again (idempotent)
-|- 🔑 **No API key required** to start — configure via `sidekick setup`
-|- 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
-|- 💼 **Portable mode** available for no-admin installs: download the script and run with `-Mode Portable -NoPrompt`
+**Key facts:**
 
-> **Note:** Windows installer/launcher uses port **9119**; CLI default is **8787** (override with `SIDEKICK_WEBUI_PORT` or `--port`)
+- ⚠ **Windows installer requires Administrator (UAC)** by default — installs under `%LOCALAPPDATA%\sidekick\`
+- 🏠 **Desktop shortcut** — `Sidekick.lnk` starts the dashboard
+- 🌐 **WebUI opens automatically** in your default browser
+- 🔄 **Update** by running the same command again (idempotent)
+- 🔑 **No API key required** to start — configure via `sidekick setup`
+- 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
+- 💼 **Portable mode** available for no-admin installs (see below)
+
+**Ports:**
+
+- **Windows launcher/installer** uses port **9119**
+- **CLI default** is **8787** — use `--port 9119` to match the launcher:
+  ```powershell
+  sidekick dashboard --port 9119  # Same port used by Windows launcher
+  sidekick dashboard              # Uses CLI default (8787)
+  ```
+- Override with `SIDEKICK_WEBUI_PORT` env var or `--port` flag
+
+### Windows (Portable mode — no admin)
+
+If you cannot get admin rights or prefer not to elevate, use Portable mode:
+
+```powershell
+# 1. Download the installer script
+Invoke-WebRequest -UseBasicParsing `
+  https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 `
+  -OutFile install.ps1
+
+# 2. Run in Portable mode (no UAC prompt)
+.\install.ps1 -Mode Portable -Surface Browser -NoPrompt -SkipOptionalTools
+```
+
+Portable mode skips: UAC elevation, hosts alias, machine-wide env vars, optional toolchain installers.
+For full details see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### Update / Repair
 

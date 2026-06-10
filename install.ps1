@@ -99,7 +99,7 @@ if ($script:UnknownFlags.Count -gt 0) {
     Write-Host "    -NoPrompt             Skip all interactive prompts"
     Write-Host "    -NoDoctor             Skip sidekick doctor post-install check"
     Write-Host "    -Surface <type>       Browser (default) | Standalone | CliOnly"
-    Write-Host "    -Mode <type>          Admin (default) | Portable (future)"
+    Write-Host "    -Mode <type>          Admin (default) | Portable"
     Write-Host ""
     Write-Host "  Examples:" -ForegroundColor Yellow
     Write-Host "    .\install.ps1 -UpdateOnly"
