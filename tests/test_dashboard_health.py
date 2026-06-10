@@ -72,3 +72,50 @@ def test_workspaces_endpoint_requires_session_token(monkeypatch, tmp_path):
         headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
     )
     assert authorized.status_code == 200
+
+
+def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    class _FakeSessionDB:
+        def __init__(self, *args, **kwargs):
+            self._conn = self
+
+        def list_sessions(self, limit=0, offset=0):
+            count = max(0, min(96 - offset, limit))
+            return [
+                {
+                    "session_id": f"sess-{offset + i}",
+                    "title": f"Session {offset + i}",
+                    "started_at": 1000 + offset + i,
+                    "last_active": 1000 + offset + i,
+                    "ended_at": 1000 + offset + i,
+                }
+                for i in range(count)
+            ]
+
+        def execute(self, query):
+            class _Cursor:
+                def fetchone(self_inner):
+                    return (96,)
+
+            return _Cursor()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("runtime._compat.shim_state.SessionDB", _FakeSessionDB)
+
+    client = TestClient(web_server.app)
+    response = client.get(
+        "/api/sessions",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["limit"] == 200
+    assert len(payload["sessions"]) == 96
+    assert payload["total"] == 96

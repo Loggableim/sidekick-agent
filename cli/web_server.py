@@ -1041,7 +1041,7 @@ async def get_action_status(name: str, lines: int = 200):
 
 
 @app.get("/api/sessions")
-async def get_sessions(limit: int = 20, offset: int = 0):
+async def get_sessions(limit: int = 200, offset: int = 0):
     try:
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
