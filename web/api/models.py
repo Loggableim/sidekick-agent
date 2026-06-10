@@ -1997,6 +1997,13 @@ def get_cli_sessions() -> list:
                     _title = _webui_meta.title
             except Exception:
                 pass
+            if not _title:
+                _derived_title = title_from(
+                    get_cli_session_messages(sid),
+                    fallback='',
+                )
+                if _derived_title:
+                    _title = _derived_title
             _display_title = _title or f'{_source.title()} Session'
             cli_sessions.append({
                 'session_id': sid,

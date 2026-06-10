@@ -4150,6 +4150,14 @@ def handle_get(handler, parsed) -> bool:
                     meta = cli_by_id.get(s.get("session_id"))
                     if not meta:
                         continue
+                    current_title = str(s.get("title") or "").strip()
+                    meta_title = str(meta.get("title") or "").strip()
+                    if (
+                        current_title in {"", "Untitled", "New Chat", "CLI Session", "Cli Session"}
+                        and meta_title
+                        and meta_title not in {"Untitled", "New Chat", "CLI Session", "Cli Session"}
+                    ):
+                        s["title"] = meta_title
                     if _is_messaging_session_record(meta):
                         s.update(_merge_cli_sidebar_metadata(s, meta))
                         if s.get("session_id") != meta.get("session_id"):

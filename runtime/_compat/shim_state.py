@@ -15,6 +15,7 @@ without crashing.  The actual port of the SQLite state store lives elsewhere.
 from __future__ import annotations
 
 import logging
+import json
 import threading
 from pathlib import Path
 from typing import Any
@@ -203,6 +204,49 @@ class SessionDB:
             (title, time.time(), session_id),
         )
 
+    def _derive_title_from_messages(self, session_id: str) -> str | None:
+        """Best-effort fallback title from the first user message.
+
+        Legacy Hermes/Sidekick state.db rows often have NULL session titles.
+        The WebUI should still show something meaningful instead of ``Untitled``
+        when message history is present.
+        """
+        try:
+            row = self._conn.execute(
+                """
+                SELECT content
+                FROM messages
+                WHERE session_id = ? AND role = 'user'
+                ORDER BY timestamp ASC, id ASC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+        except Exception:
+            return None
+        if row is None:
+            return None
+
+        content = row["content"]
+        if isinstance(content, str):
+            text = content.strip()
+            if text.startswith("[") or text.startswith("{"):
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, list):
+                    text = " ".join(
+                        str(part.get("text") or "").strip()
+                        for part in parsed
+                        if isinstance(part, dict) and part.get("type") == "text"
+                    ).strip()
+                elif isinstance(parsed, dict):
+                    text = str(parsed.get("text") or parsed.get("content") or "").strip()
+            if text:
+                return text[:64]
+        return None
+
     def list_sessions(
         self,
         limit: int = 50,
@@ -216,10 +260,21 @@ class SessionDB:
             )
         else:
             cursor = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             )
-        return [dict(row) for row in cursor.fetchall()]
+        rows = [dict(row) for row in cursor.fetchall()]
+        for row in rows:
+            title = str(row.get("title") or "").strip()
+            if title:
+                continue
+            session_id = row.get("session_id") or row.get("id")
+            if not session_id:
+                continue
+            derived_title = self._derive_title_from_messages(str(session_id))
+            if derived_title:
+                row["title"] = derived_title
+        return rows
 
     def close(self) -> None:
         try:
