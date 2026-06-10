@@ -250,6 +250,7 @@ Key items:
 | v0.4.0 | `v0.4.0` | Error handling, doctor exit codes, troubleshooting |
 | v0.5.0 | `v0.5.0` | Doctor --check-providers, macOS CI, streaming stability |
 | v0.8.2 | `v0.8.2` | Windows installer portable mode finalization |
+| v0.8.4 | `v0.8.4` | WebUI first-run onboarding fix: FastAPI routes, path detection, frontend field name |
 
 ## Troubleshooting
 

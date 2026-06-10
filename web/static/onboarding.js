@@ -255,7 +255,7 @@ function _renderOnboardingBody(){
   if(nextBtn) nextBtn.textContent=key==='finish'?t('onboarding_open'):t('onboarding_continue');
 
   if(key==='system'){
-    const hermesOk=system.hermes_found&&system.imports_ok;
+    const hermesOk=system.sidekick_found&&system.imports_ok;
     const setupOk=!!system.chat_ready;
     _setOnboardingNotice(system.provider_note|| (setupOk?t('onboarding_notice_system_ready'):t('onboarding_notice_system_unavailable')),setupOk?'success':(hermesOk?'info':'warn'));
     body.innerHTML=`

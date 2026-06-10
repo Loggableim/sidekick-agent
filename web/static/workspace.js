@@ -94,7 +94,7 @@ async function api(path,opts={}){
         // rather than showing raw JSON like {"error":"Profile 'x' does not exist."}
         let message=text;
         let data=null;
-        try{const j=JSON.parse(text);message=j.message||j.error||text;}catch(e){}
+        try{const j=JSON.parse(text);message=j.detail||j.message||j.error||text;}catch(e){}
         try{data=JSON.parse(text);}catch(_){}
         if(data&&typeof data==='object'){
           const errorValue=data.error;

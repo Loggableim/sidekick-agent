@@ -49,6 +49,17 @@ from cli.config import (
 )
 from gateway.status import get_running_pid, read_runtime_status
 from web.api.workspace import load_workspaces, get_last_workspace
+from web.api.onboarding import (
+    get_onboarding_status,
+    complete_onboarding,
+    apply_onboarding_setup,
+    probe_provider_endpoint,
+)
+from web.api.oauth import (
+    start_onboarding_oauth_flow,
+    poll_onboarding_oauth_flow,
+    cancel_onboarding_oauth_flow,
+)
 
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -4756,6 +4767,74 @@ async def put_member_roles(member_id: str, body: _DiscordMemberRolesBody, reques
 
 # Mount plugin API routes before the SPA catch-all.
 _mount_plugin_api_routes()
+
+# ── Onboarding routes ──────────────────────────────────────────────────────
+
+@app.get("/api/onboarding/status")
+async def onboarding_status():
+    """Return the current onboarding/provisioning status."""
+    return get_onboarding_status()
+
+
+@app.get("/api/onboarding/oauth/poll")
+async def onboarding_oauth_poll(flow_id: str = ""):
+    """Poll the status of an ongoing onboarding OAuth flow."""
+    try:
+        return poll_onboarding_oauth_flow(flow_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/onboarding/oauth/start")
+async def onboarding_oauth_start(body: dict = {}):
+    """Start an onboarding OAuth flow (OpenAI Codex or Anthropic/Claude)."""
+    try:
+        return start_onboarding_oauth_flow(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/onboarding/oauth/cancel")
+async def onboarding_oauth_cancel(body: dict = {}):
+    """Cancel an ongoing onboarding OAuth flow."""
+    try:
+        return cancel_onboarding_oauth_flow(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/onboarding/setup")
+async def onboarding_setup(body: dict = {}):
+    """Apply onboarding setup (provider, model, API keys)."""
+    try:
+        return apply_onboarding_setup(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/onboarding/complete")
+async def onboarding_complete():
+    """Mark onboarding as complete."""
+    return complete_onboarding()
+
+
+@app.post("/api/onboarding/probe")
+async def onboarding_probe(body: dict = {}):
+    """Probe a provider endpoint for reachability and model catalog."""
+    provider = str(body.get("provider") or "").strip().lower()
+    base_url = str(body.get("base_url") or "")
+    api_key = str(body.get("api_key") or "").strip() or None
+    try:
+        return probe_provider_endpoint(provider, base_url, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"probe failed: {e}")
+
 
 mount_spa(app)
 

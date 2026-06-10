@@ -117,19 +117,27 @@ def _discover_agent_dir() -> Path:
     # 2. Monorepo — ourselves
     candidates.append(Path(__file__).resolve().parent.parent.parent)
 
-    # 3. Sidekick home / hermes-agent
+    # 3. Sidekick home directory (Sidekick install default)
+    candidates.append(HOME / ".sidekick" / "sidekick-agent")
+
+    # 4. Hermes home (legacy fallback)
     candidates.append(HOME / ".hermes" / "hermes-agent")
+
+    # 5. ~/sidekick-agent (direct checkout)
+    candidates.append(HOME / "sidekick-agent")
 
     # 6. ~/hermes-agent
     candidates.append(HOME / "hermes-agent")
 
-    # 7. XDG_DATA_HOME / hermes-agent  (e.g. ~/.local/share/hermes-agent)
+    # 7. XDG_DATA_HOME / sidekick-agent
     xdg_data = Path(os.getenv("XDG_DATA_HOME", str(HOME / ".local" / "share")))
+    candidates.append(xdg_data.expanduser() / "sidekick-agent")
     candidates.append(xdg_data.expanduser() / "hermes-agent")
 
-    # 8. Windows: LOCALAPPDATA\\hermes\\hermes-agent (Hermes installer default on Windows)
+    # 8. Windows: LOCALAPPDATA\\sidekick\\sidekick-agent (Sidekick installer default)
     local_appdata = os.getenv("LOCALAPPDATA")
     if local_appdata:
+        candidates.append(Path(local_appdata) / "sidekick" / "sidekick-agent")
         candidates.append(Path(local_appdata) / "hermes" / "hermes-agent")
 
     # 9. System-wide install paths (e.g. /opt/hermes-agent, /usr/local/hermes-agent)
@@ -271,7 +279,7 @@ def _get_config_path() -> Path:
 
         return get_active_hermes_home() / "config.yaml"
     except ImportError:
-        return HOME / ".hermes" / "config.yaml"
+        return HOME / ".sidekick" / "config.yaml"
 
 
 _WEBUI_SESSION_SAVE_MODES = {"deferred", "eager"}
@@ -510,7 +518,7 @@ def verify_sidekick_imports() -> tuple:
     Attempt to import the key Hermes modules.
     Returns (ok: bool, missing: list[str], errors: dict[str, str]).
     """
-    required = ["run_agent"]
+    required = ["run_agent", "sidekick_app"]
     missing = []
     errors = {}
     for mod in required:
