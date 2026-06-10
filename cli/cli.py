@@ -3889,6 +3889,7 @@ class SidekickCLI:
                 requested=self.requested_provider,
                 explicit_api_key=self._explicit_api_key,
                 explicit_base_url=self._explicit_base_url,
+                target_model=self.model,
             )
         except Exception as exc:
             _primary_exc = exc

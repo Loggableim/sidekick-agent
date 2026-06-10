@@ -374,8 +374,10 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "kimi-k2.5",
         "glm-5.1",
         "glm-5",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "mimo-v2.5-pro",
-"mimo-v2.5",
+        "mimo-v2.5",
         "mimo-v2-pro",
         "mimo-v2-omni",
         "minimax-m3",
@@ -2823,10 +2825,42 @@ def normalize_opencode_model_id(provider_id: Optional[str], model_id: Optional[s
     if not current or provider not in {"opencode-zen", "opencode-go"}:
         return current
 
-    prefix = f"{provider}/"
-    if current.lower().startswith(prefix):
-        return current[len(prefix):]
+    if current.startswith("@") and ":" in current:
+        hinted_provider, _, hinted_model = current[1:].partition(":")
+        if normalize_provider(hinted_provider) in {"opencode-zen", "opencode-go"}:
+            return hinted_model.strip()
+
+    # OpenCode model IDs are flat. Users and WebUI sessions may still carry
+    # provider-qualified IDs such as opencode-go/deepseek-v4-flash or
+    # deepseek/deepseek-v4-flash copied from another picker.
+    if "/" in current:
+        return current.rsplit("/", 1)[-1].strip()
     return current
+
+
+def opencode_provider_for_model(provider_id: Optional[str], model_id: Optional[str]) -> str:
+    """Return the OpenCode provider that owns a model when the catalog is unambiguous.
+
+    This repairs stale provider/model pairs such as
+    provider=opencode-zen + model=deepseek-v4-flash, which otherwise sends a
+    valid OpenCode Go model to the Zen endpoint and gets a bare HTTP 400.
+    Ambiguous models shared by both catalogs keep the caller's provider.
+    """
+    provider = normalize_provider(provider_id)
+    if provider not in {"opencode-zen", "opencode-go"}:
+        return provider
+
+    model = normalize_opencode_model_id(provider, model_id).lower()
+    if not model:
+        return provider
+
+    go_models = {m.lower() for m in _PROVIDER_MODELS.get("opencode-go", [])}
+    zen_models = {m.lower() for m in _PROVIDER_MODELS.get("opencode-zen", [])}
+    if model in go_models and model not in zen_models:
+        return "opencode-go"
+    if model in zen_models and model not in go_models:
+        return "opencode-zen"
+    return provider
 
 
 def opencode_model_api_mode(provider_id: Optional[str], model_id: Optional[str]) -> str:

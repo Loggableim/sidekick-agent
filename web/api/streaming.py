@@ -2926,12 +2926,21 @@ def _run_agent_streaming(
                 _rt = resolve_runtime_provider_with_anthropic_env_lock(
                     resolve_runtime_provider,
                     requested=resolved_provider,
+                    target_model=resolved_model,
                 )
                 resolved_api_key = _rt.get("api_key")
-                if not resolved_provider:
-                    resolved_provider = _rt.get("provider")
-                if not resolved_base_url:
-                    resolved_base_url = _rt.get("base_url")
+                _rt_provider = _rt.get("provider")
+                _rt_base_url = _rt.get("base_url")
+                if _rt_provider and (
+                    not resolved_provider
+                    or _rt_provider in {"opencode-zen", "opencode-go"}
+                ):
+                    resolved_provider = _rt_provider
+                if _rt_base_url and (
+                    not resolved_base_url
+                    or _rt_provider in {"opencode-zen", "opencode-go"}
+                ):
+                    resolved_base_url = _rt_base_url
             except Exception as _e:
                 print(f"[webui] WARNING: resolve_runtime_provider failed: {_e}", flush=True)
 

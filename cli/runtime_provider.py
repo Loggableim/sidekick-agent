@@ -977,6 +977,14 @@ def resolve_runtime_provider(
         explicit_base_url=explicit_base_url,
     )
     model_cfg = _get_model_config()
+    if provider in {"opencode-zen", "opencode-go"}:
+        try:
+            from cli.models import opencode_provider_for_model
+
+            effective_model = target_model or model_cfg.get("default", "")
+            provider = opencode_provider_for_model(provider, effective_model)
+        except Exception:
+            pass
     explicit_runtime = _resolve_explicit_runtime(
         provider=provider,
         requested_provider=requested_provider,

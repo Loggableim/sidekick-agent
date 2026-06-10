@@ -663,6 +663,7 @@ def switch_model(
     from cli.models import (
         copilot_model_api_mode,
         detect_provider_for_model,
+        opencode_provider_for_model,
         validate_requested_model,
         opencode_model_api_mode,
     )
@@ -842,6 +843,10 @@ def switch_model(
     # =================================================================
     # COMMON PATH: Resolve credentials, normalize, get metadata
     # =================================================================
+
+    corrected_opencode_provider = opencode_provider_for_model(target_provider, new_model)
+    if corrected_opencode_provider != target_provider:
+        target_provider = corrected_opencode_provider
 
     provider_changed = target_provider != current_provider
     provider_label = get_label(target_provider)
