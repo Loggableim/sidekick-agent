@@ -4,7 +4,7 @@ Wraps hermes_cli.profiles to provide profile switching for the web UI.
 
 The web UI maintains a process-level "active profile" that determines which
 HERMES_HOME directory is used for config, skills, memory, cron, and API keys.
-Profile switches update os.environ['HERMES_HOME'] and monkey-patch module-level
+Profile switches update os.environ['SIDEKICK_HOME'] / os.environ['HERMES_HOME'] and monkey-patch module-level
 cached paths in hermes-agent modules (skills_tool, skill_manager_tool,
 cron/jobs) that snapshot HERMES_HOME at import time.
 """

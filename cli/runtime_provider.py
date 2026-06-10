@@ -823,7 +823,7 @@ def _resolve_explicit_runtime(
         state = auth_mod.get_provider_auth_state("nous") or {}
         base_url = (
             explicit_base_url
-            or str(state.get("inference_base_url") or auth_mod.DEFAULT_NOUS_INFERENCE_URL).strip().rstrip("/")
+            or str(state.get("inference_base_url") or auth_mod.DEFAULT_INFERENCE_BASE_URL).strip().rstrip("/")
         )
         # Only use agent_key for inference — access_token is an OAuth token for the
         # portal API (minting keys, refreshing tokens), not for the inference API.

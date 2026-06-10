@@ -10,6 +10,7 @@ Python's ``contextvars.ContextVar``.
 The gateway processes messages concurrently via ``asyncio``.  When two
 messages arrive at the same time the old code did::
 
+    os.environ["SIDEKICK_SESSION_THREAD_ID"] = str(context.source.thread_id)
     os.environ["HERMES_SESSION_THREAD_ID"] = str(context.source.thread_id)
 
 Because ``os.environ`` is *process-global*, Message A's value was
@@ -29,7 +30,7 @@ needs to replace the import + call site::
 
     # before
     import os
-    platform = os.getenv("HERMES_SESSION_PLATFORM", "")
+    platform = os.getenv("SIDEKICK_SESSION_PLATFORM") or os.getenv("HERMES_SESSION_PLATFORM", "")
 
     # after
     from gateway.session_context import get_session_env

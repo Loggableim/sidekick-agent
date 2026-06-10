@@ -79,7 +79,6 @@ _ROUTE_MAP: dict[str, str] = {
     "skills_hub": "cli.skills_hub",
     "auth_commands": "cli.auth_commands",
     "cli_output": "cli.cli_output",
-    "nous_subscription": "cli.nous_subscription",
     "kanban_diagnostics": "cli.kanban_diagnostics",
     "kanban_specify": "cli.kanban_specify",
     "model_normalize": "cli.model_normalize",

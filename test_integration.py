@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Integrationstest für Sidekick Env-Var Migration."""
-import sys, os
+import sys, os, tempfile, time
+
 sys.path.insert(0, '.')
 
 passed = 0
@@ -15,18 +16,17 @@ def check(name, ok, detail=""):
         failed += 1
         print(f"  [FAIL] {name}: {detail}")
 
+# Temp-Verzeichnis für Tests (existiert garantiert)
+_tmpdir = tempfile.mkdtemp(prefix="sidekick_inttest_")
+_HOME = os.path.join(_tmpdir, "sidekick_home")
+
 # Phase 1: Env-Var Priorität
 print("--- Phase 1: Env-Var Priority (SIDEKICK_ > HERMES_) ---")
 
-# Saubere Ausgangslage
-for k in list(os.environ.keys()):
-    if k.startswith('SIDEKICK_') or k.startswith('HERMES_'):
-        if k not in ('SIDEKICK_HOME', 'HERMES_HOME'):
-            pass
+# Nur Test-Vars setzen, keine realen überschreiben
+os.environ['SIDEKICK_HOME'] = os.path.join(_tmpdir, 'sidekick')
+os.environ['HERMES_HOME'] = os.path.join(_tmpdir, 'hermes')
 
-# Test: SIDEKICK_ > HERMES_
-os.environ['SIDEKICK_HOME'] = 'D:/test/sidekick'
-os.environ['HERMES_HOME'] = 'D:/test/hermes'
 from shared.paths import sidekick_home
 h = sidekick_home()
 check("SIDEKICK_ bevorzugt", 'sidekick' in str(h), f"got {h}")
@@ -70,36 +70,52 @@ for f in ['run_agent.py', 'cli/auth.py', 'cli/cli.py', 'cli/gateway.py',
 if syntax_ok:
     check("alle 16 patched Files kompilieren", True)
 
-# Phase 3: Config laden
+# Phase 3: Config laden (mit Timeout)
 print("--- Phase 3: Config & Shims ---")
-from cli.config import load_config
-cfg = load_config()
-check("config geladen", len(cfg) > 0)
 
-# Shim-Test übersprungen (braucht hermes_constants Paket)
+# SIDEKICK_HOME auf existierendes Temp-Verzeichnis setzen
+os.environ['SIDEKICK_HOME'] = _HOME
+os.makedirs(_HOME, exist_ok=True)
+
+try:
+    from cli.config import load_config
+    cfg = load_config()
+    check("config geladen", len(cfg) > 0)
+except Exception as e:
+    check("config geladen", False, str(e))
 
 # Phase 4: SIDEKICK_ Vars im Codebase
 print("--- Phase 4: SIDEKICK_* env-var Erkennung ---")
 import re
 all_vars = set()
+_skip_dirs = {'.git', '__pycache__', '.venv', 'venv', 'home', 'node_modules', '.wrangler'}
+
 for root, dirs, fnames in os.walk('.'):
-    if '.git' in root or '__pycache__' in root:
+    # Explizit große/irrelevante Dirs ausschließen
+    rel = os.path.relpath(root)
+    parts = rel.replace('\\', '/').split('/')
+    if any(p in _skip_dirs for p in parts):
+        dirs.clear()  # nicht in Unterverzeichnisse gehen
         continue
     for fn in fnames:
         if not fn.endswith('.py'):
             continue
         fpath = os.path.join(root, fn)
         try:
-            with open(fpath) as f:
+            with open(fpath, encoding='utf-8', errors='replace') as f:
                 content = f.read()
             for m in re.finditer(r'SIDEKICK_[A-Z][A-Z_]+', content):
                 all_vars.add(m.group(0))
-        except:
+        except Exception:
             pass
 
 check(f"{len(all_vars)} unique SIDEKICK_* vars gefunden", len(all_vars) > 50)
 for v in sorted(all_vars):
     print(f"     {v}")
+
+# Aufräumen
+import shutil
+shutil.rmtree(_tmpdir, ignore_errors=True)
 
 # Summary
 total = passed + failed

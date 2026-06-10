@@ -9089,19 +9089,28 @@ def cmd_dashboard(args):
         print(f"Import error: {e}")
         sys.exit(1)
 
-    if "HERMES_WEB_DIST" not in os.environ and not getattr(args, "skip_build", False):
+    web_dist_env = os.environ.get("SIDEKICK_WEB_DIST") or os.environ.get("HERMES_WEB_DIST")
+    if not web_dist_env and not getattr(args, "skip_build", False):
         if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):
             sys.exit(1)
-    elif getattr(args, "skip_build", False):
-        # --skip-build trusts the caller to have pre-built the web UI.
-        # Verify the dist actually exists; otherwise the server will start
-        # and serve 404s with no obvious cause (issue #23817).
+
+    # Auto-detect static fallback (nur wenn --skip-build nicht explizit gesetzt)
+    if not getattr(args, "skip_build", False):
+        if not shutil.which("npm") and (PROJECT_ROOT / "web" / "static" / "index.html").exists():
+            os.environ["SIDEKICK_WEB_DIST"] = str(PROJECT_ROOT / "web" / "static")
+            args.skip_build = True
+
+    if getattr(args, "skip_build", False):
         _dist_root = (
             Path(os.environ.get("SIDEKICK_WEB_DIST") or os.environ["HERMES_WEB_DIST"])
             if os.environ.get("SIDEKICK_WEB_DIST") or "HERMES_WEB_DIST" in os.environ
             else PROJECT_ROOT / "sidekick_cli" / "web_dist"
         )
-        if not (_dist_root / "index.html").exists():
+        # PRÜFE ZUERST ob web/static/index.html existiert (static fallback!)
+        static_index = PROJECT_ROOT / "web" / "static" / "index.html"
+        if static_index.exists():
+            os.environ["SIDEKICK_WEB_DIST"] = str(PROJECT_ROOT / "web" / "static")
+        elif not (_dist_root / "index.html").exists():
             print(f"✗ --skip-build was passed but no web dist found at: {_dist_root}")
             print("  Pre-build first:  cd web && npm install && npm run build")
             print("  Or drop --skip-build to build automatically.")

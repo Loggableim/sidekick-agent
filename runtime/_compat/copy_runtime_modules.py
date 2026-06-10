@@ -35,7 +35,6 @@ AGENT_FILES = [
     "image_gen_provider.py",
     "models_dev.py",
     "moonshot_schema.py",
-    "nous_rate_guard.py",
     "prompt_caching.py",
     "rate_limit_tracker.py",
     "shell_hooks.py",

@@ -16,6 +16,7 @@
 $NoVenv = $false
 $SkipSetup = $false
 $Branch = "master"
+$script:WebUIStarted = $false
 $SidekickHome = "$env:LOCALAPPDATA\sidekick"
 $InstallDir = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
 
@@ -1686,13 +1687,67 @@ function Start-GatewayIfConfigured {
     }
 }
 
+function Start-WebUI {
+    $sidekickCmd = if (-not $NoVenv) { "$script:VenvPath\Scripts\sidekick.exe" } else { "sidekick" }
+
+    Write-Host ""
+    Write-Info "The WebUI provides a browser interface for Sidekick."
+    Write-Host ""
+    $response = Read-Host "Would you like to start the WebUI now? [Y/n]"
+
+    if ($response -eq "" -or $response -match "^[Yy]") {
+        Write-Info "Starting WebUI in background..."
+        try {
+            $webuiLogFile = "$SidekickHome\logs\webui.log"
+            Start-Process -FilePath $sidekickCmd -ArgumentList "dashboard --port 8787 --no-open --skip-build" `
+                -RedirectStandardOutput $webuiLogFile `
+                -RedirectStandardError "$SidekickHome\logs\webui-error.log" `
+                -WindowStyle Hidden
+
+            Write-Info "Waiting for WebUI to become ready..."
+            $ready = $false
+            $maxAttempts = 30
+            for ($i = 0; $i -lt $maxAttempts; $i++) {
+                Start-Sleep -Seconds 2
+                try {
+                    $healthResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8787/health" -TimeoutSec 2
+                    if ($healthResponse.StatusCode -eq 200) {
+                        $ready = $true
+                        break
+                    }
+                } catch {
+                    # Not ready yet
+                }
+            }
+
+            if ($ready) {
+                Write-Success "WebUI is ready!"
+                Write-Info "Opening http://127.0.0.1:8787 in your browser..."
+                Start-Process "http://127.0.0.1:8787"
+                $script:WebUIStarted = $true
+            } else {
+                Write-Warn "WebUI did not become ready within 60 seconds."
+                Write-Info "Start it manually: sidekick dashboard --port 8787"
+            }
+        } catch {
+            Write-Warn "Failed to start WebUI. Start it manually: sidekick dashboard --port 8787"
+        }
+    } else {
+        Write-Info "Skipped. Start the WebUI later with: sidekick dashboard"
+    }
+}
+
 function Write-Completion {
     Write-Host ""
     Write-Host "  ============================================================" -ForegroundColor Green
     Write-Host "   Sidekick is ready" -ForegroundColor Green
     Write-Host "  ------------------------------------------------------------" -ForegroundColor Green
-    Write-Host "   The desktop launcher starts the gateway, waits for WebUI" -ForegroundColor DarkGray
-    Write-Host "   readiness, then opens http://127.0.0.1:8787." -ForegroundColor DarkGray
+    if ($script:WebUIStarted) {
+        Write-Host "   WebUI is running at http://127.0.0.1:8787" -ForegroundColor DarkGray
+    } else {
+        Write-Host "   The desktop launcher starts the gateway, waits for WebUI" -ForegroundColor DarkGray
+        Write-Host "   readiness, then opens http://127.0.0.1:8787." -ForegroundColor DarkGray
+    }
     Write-Host "  ============================================================" -ForegroundColor Green
     Write-Host ""
 
@@ -1758,6 +1813,7 @@ function Main {
     Install-PlatformSdks
     Invoke-SetupWizard
     Start-GatewayIfConfigured
+    Start-WebUI
     Write-Completion
     try {
         $desktopPath = [Environment]::GetFolderPath("Desktop")

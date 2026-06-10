@@ -1219,9 +1219,6 @@ def build_skills_system_prompt(
     return result
 
 
-def build_nous_subscription_prompt(valid_tool_names: "set[str] | None" = None) -> str:
-    """Stub — Nous branding removed during Sidekick migration."""
-    return ""
 
 
 # =========================================================================

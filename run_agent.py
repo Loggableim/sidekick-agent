@@ -147,7 +147,6 @@ from runtime.prompt_builder import (
     MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE,
     KANBAN_GUIDANCE,
-    build_nous_subscription_prompt,
 )
 from runtime.model_metadata import (
     fetch_model_metadata,
@@ -1986,8 +1985,7 @@ class AIAgent:
         # Skip tools whose names already exist (plugins may register the
         # same tools via ctx.register_tool(), which lands in self.tools
         # through get_tool_definitions()).  Duplicate function names cause
-        # 400 errors on providers that enforce unique names (e.g. Xiaomi
-        # MiMo via Nous Portal).
+        # 400 errors on providers that enforce unique names (e.g. Xiaomi MiMo).
         if self._memory_manager and self.tools is not None:
             _existing_tool_names = {
                 t.get("function", {}).get("name")
@@ -3430,10 +3428,6 @@ class AIAgent:
         provider_lower = eff_provider.lower()
         is_claude = "claude" in model_lower
         is_openrouter = base_url_host_matches(eff_base_url, "openrouter.ai")
-        # Nous Portal proxies to OpenRouter behind the scenes — identical
-        # OpenAI-wire envelope cache_control semantics. Treat it as an
-        # OpenRouter-equivalent endpoint for caching layout purposes.
-        is_nous_portal = "nousresearch" in eff_base_url.lower()
         is_anthropic_wire = eff_api_mode == "anthropic_messages"
         is_native_anthropic = (
             is_anthropic_wire
@@ -3442,16 +3436,7 @@ class AIAgent:
 
         if is_native_anthropic:
             return True, True
-        if (is_openrouter or is_nous_portal) and is_claude:
-            return True, False
-        # Nous Portal Qwen (e.g. qwen3.6-plus) takes the same envelope-layout
-        # cache_control path as Portal Claude. Portal proxies to OpenRouter
-        # and the upstream Qwen route accepts cache_control markers; without
-        # this branch the alibaba-family check below only matches
-        # provider=opencode/alibaba and Portal traffic falls through to
-        # (False, False), serving 0% cache hits and re-billing the full
-        # prompt on every turn.
-        if is_nous_portal and "qwen" in model_lower:
+        if is_openrouter and is_claude:
             return True, False
         if is_anthropic_wire and is_claude:
             # Third-party Anthropic-compatible gateway.
@@ -3515,10 +3500,6 @@ class AIAgent:
     ) -> bool:
         """Return True when this provider/model pair should use Responses API."""
         normalized_provider = (provider or "").strip().lower()
-        # Nous serves GPT-5.x models via its OpenAI-compatible chat
-        # completions endpoint; its /v1/responses endpoint returns 404.
-        if normalized_provider == "nous":
-            return False
         if normalized_provider == "copilot":
             try:
                 from cli.models import _should_use_copilot_responses_api
@@ -5700,9 +5681,6 @@ class AIAgent:
             from runtime.prompt_builder import COMPUTER_USE_GUIDANCE
             stable_parts.append(COMPUTER_USE_GUIDANCE)
 
-        nous_subscription_prompt = build_nous_subscription_prompt(self.valid_tool_names)
-        if nous_subscription_prompt:
-            stable_parts.append(nous_subscription_prompt)
         # Tool-use enforcement: tells the model to actually call tools instead
         # of describing intended actions.  Controlled by config.yaml
         # agent.tool_use_enforcement:
@@ -6904,41 +6882,6 @@ class AIAgent:
         self._client_kwargs["base_url"] = self.base_url
 
         if not self._replace_primary_openai_client(reason="codex_credential_refresh"):
-            return False
-
-        return True
-
-    def _try_refresh_nous_client_credentials(self, *, force: bool = True) -> bool:
-        if self.api_mode != "chat_completions" or self.provider != "nous":
-            return False
-
-        try:
-            from cli.auth import resolve_nous_runtime_credentials
-
-            creds = resolve_nous_runtime_credentials(
-                min_key_ttl_seconds=max(60, int(os.getenv("SIDEKICK_NOUS_MIN_KEY_TTL_SECONDS") or os.getenv("HERMES_NOUS_MIN_KEY_TTL_SECONDS", "1800"))),
-                timeout_seconds=float(os.getenv("SIDEKICK_NOUS_TIMEOUT_SECONDS") or os.getenv("HERMES_NOUS_TIMEOUT_SECONDS", "15")),
-                force_mint=force,
-            )
-        except Exception as exc:
-            logger.debug("Nous credential refresh failed: %s", exc)
-            return False
-
-        api_key = creds.get("api_key")
-        base_url = creds.get("base_url")
-        if not isinstance(api_key, str) or not api_key.strip():
-            return False
-        if not isinstance(base_url, str) or not base_url.strip():
-            return False
-
-        self.api_key = api_key.strip()
-        self.base_url = base_url.strip().rstrip("/")
-        self._client_kwargs["api_key"] = self.api_key
-        self._client_kwargs["base_url"] = self.base_url
-        # Nous requests should not inherit OpenRouter-only attribution headers.
-        self._client_kwargs.pop("default_headers", None)
-
-        if not self._replace_primary_openai_client(reason="nous_credential_refresh"):
             return False
 
         return True
@@ -8764,7 +8707,7 @@ class AIAgent:
         Anthropic, OpenAI, local models) where a TCP-level hiccup does not
         mean the provider is down.
 
-        Skipped for proxy/aggregator providers (OpenRouter, Nous) which
+        Skipped for proxy/aggregator providers (OpenRouter) which
         already manage connection pools and retries server-side — if our
         retries through them are exhausted, one more rebuilt client won't help.
         """
@@ -8778,9 +8721,6 @@ class AIAgent:
 
         # Skip for aggregator providers — they manage their own retry infra
         if self._is_openrouter_url():
-            return False
-        provider_lower = (self.provider or "").strip().lower()
-        if provider_lower in {"nous", "nous-research"}:
             return False
 
         try:
@@ -9358,7 +9298,6 @@ class AIAgent:
             base_url_host_matches(self._base_url_lower, "models.github.ai")
             or base_url_host_matches(self._base_url_lower, "api.githubcopilot.com")
         )
-        _is_nous = "nousresearch" in self._base_url_lower
         _is_nvidia = "integrate.api.nvidia.com" in self._base_url_lower
         _is_kimi = (
             base_url_host_matches(self.base_url, "api.kimi.com")
@@ -9396,7 +9335,7 @@ class AIAgent:
 
         # Claude max-output override on aggregators
         _ant_max = None
-        if (_is_or or _is_nous) and "claude" in (self.model or "").lower():
+        if _is_or and "claude" in (self.model or "").lower():
             try:
                 from runtime.anthropic_adapter import _get_anthropic_max_output
                 _ant_max = _get_anthropic_max_output(self.model)
@@ -9471,7 +9410,6 @@ class AIAgent:
             session_id=getattr(self, "session_id", None),
             model_lower=(self.model or "").lower(),
             is_openrouter=_is_or,
-            is_nous=_is_nous,
             is_qwen_portal=_is_qwen,
             is_github_models=_is_gh,
             is_nvidia_nim=_is_nvidia,
@@ -9499,10 +9437,8 @@ class AIAgent:
 
         OpenRouter forwards unknown extra_body fields to upstream providers.
         Some providers/routes reject `reasoning` with 400s, so gate it to
-        known reasoning-capable model families and direct Nous Portal.
+        known reasoning-capable model families.
         """
-        if base_url_host_matches(self._base_url_lower, "nousresearch.com"):
-            return True
         if base_url_host_matches(self._base_url_lower, "ai-gateway.vercel.sh"):
             return True
         if (
@@ -11335,7 +11271,6 @@ class AIAgent:
             )
             _omit_summary_temperature = _raw_summary_temp is _OMIT_TEMP
             _summary_temperature = None if _omit_summary_temperature else _raw_summary_temp
-            _is_nous = "nousresearch" in self._base_url_lower
             # LM Studio uses top-level `reasoning_effort` (not extra_body.reasoning).
             # Mirror ChatCompletionsTransport.build_kwargs() so the summary path
             # — which calls chat.completions.create() directly without going
@@ -11356,8 +11291,6 @@ class AIAgent:
                         "enabled": True,
                         "effort": "medium"
                     }
-            if _is_nous:
-                summary_extra_body["tags"] = ["product=hermes-agent"]
 
             if self.api_mode == "codex_responses":
                 codex_kwargs = self._build_api_kwargs(api_messages)
@@ -12240,7 +12173,6 @@ class AIAgent:
             max_compression_attempts = 3
             codex_auth_retry_attempted=False
             anthropic_auth_retry_attempted=False
-            nous_auth_retry_attempted=False
             copilot_auth_retry_attempted=False
             thinking_sig_retry_attempted = False
             image_shrink_retry_attempted = False
@@ -12255,53 +12187,6 @@ class AIAgent:
             api_kwargs = None  # Guard against UnboundLocalError in except handler
 
             while retry_count < max_retries:
-                # ── Nous Portal rate limit guard ──────────────────────
-                # If another session already recorded that Nous is rate-
-                # limited, skip the API call entirely.  Each attempt
-                # (including SDK-level retries) counts against RPH and
-                # deepens the rate limit hole.
-                if self.provider == "nous":
-                    try:
-                        from runtime.nous_rate_guard import (
-                            nous_rate_limit_remaining,
-                            format_remaining as _fmt_nous_remaining,
-                        )
-                        _nous_remaining = nous_rate_limit_remaining()
-                        if _nous_remaining is not None and _nous_remaining > 0:
-                            _nous_msg = (
-                                f"Nous Portal rate limit active — "
-                                f"resets in {_fmt_nous_remaining(_nous_remaining)}."
-                            )
-                            self._vprint(
-                                f"{self.log_prefix}⏳ {_nous_msg} Trying fallback...",
-                                force=True,
-                            )
-                            self._emit_status(f"⏳ {_nous_msg}")
-                            if self._try_activate_fallback():
-                                retry_count = 0
-                                compression_attempts = 0
-                                primary_recovery_attempted = False
-                                continue
-                            # No fallback available — return with clear message
-                            self._persist_session(messages, conversation_history)
-                            return {
-                                "final_response": (
-                                    f"⏳ {_nous_msg}\n\n"
-                                    "No fallback provider available. "
-                                    "Try again after the reset, or add a "
-                                    "fallback provider in config.yaml."
-                                ),
-                                "messages": messages,
-                                "api_calls": api_call_count,
-                                "completed": False,
-                                "failed": True,
-                                "error": _nous_msg,
-                            }
-                    except ImportError:
-                        pass
-                    except Exception:
-                        pass  # Never let rate guard break the agent loop
-
                 try:
                     self._reset_stream_delivery_tracking()
                     api_kwargs = self._build_api_kwargs(api_messages)
@@ -12965,15 +12850,6 @@ class AIAgent:
                             )
                     
                     has_retried_429 = False  # Reset on success
-                    # Clear Nous rate limit state on successful request —
-                    # proves the limit has reset and other sessions can
-                    # resume hitting Nous.
-                    if self.provider == "nous":
-                        try:
-                            from runtime.nous_rate_guard import clear_nous_rate_limit
-                            clear_nous_rate_limit()
-                        except Exception:
-                            pass
                     self._touch_activity(f"API call #{api_call_count} completed")
                     break  # Success, exit retry loop
 
@@ -13334,37 +13210,6 @@ class AIAgent:
                             self._vprint(f"{self.log_prefix}🔐 Codex auth refreshed after 401. Retrying request...")
                             continue
                     if (
-                        self.api_mode == "chat_completions"
-                        and self.provider == "nous"
-                        and status_code == 401
-                        and not nous_auth_retry_attempted
-                    ):
-                        nous_auth_retry_attempted = True
-                        if self._try_refresh_nous_client_credentials(force=True):
-                            print(f"{self.log_prefix}🔐 Nous agent key refreshed after 401. Retrying request...")
-                            continue
-                        # Credential refresh didn't help — show diagnostic info.
-                        # Most common causes: Portal OAuth expired/revoked,
-                        # account out of credits, or agent key blocked.
-                        from runtime._compat.shim_constants import display_sidekick_home as _dhh_fn
-                        _dhh = _dhh_fn()
-                        _body_text = ""
-                        try:
-                            _body = getattr(api_error, "body", None) or getattr(api_error, "response", None)
-                            if _body is not None:
-                                _body_text = str(_body)[:200]
-                        except Exception:
-                            pass
-                        print(f"{self.log_prefix}🔐 Nous 401 — Portal authentication failed.")
-                        if _body_text:
-                            print(f"{self.log_prefix}   Response: {_body_text}")
-                        print(f"{self.log_prefix}   Most likely: Portal OAuth expired, account out of credits, or agent key revoked.")
-                        print(f"{self.log_prefix}   Troubleshooting:")
-                        print(f"{self.log_prefix}     • Re-authenticate: hermes login --provider nous")
-                        print(f"{self.log_prefix}     • Check credits / billing: https://portal.nousresearch.com")
-                        print(f"{self.log_prefix}     • Verify stored credentials: {_dhh}/auth.json")
-                        print(f"{self.log_prefix}     • Switch providers temporarily: /model <model> --provider openrouter")
-                    if (
                         self.provider == "copilot"
                         and status_code == 401
                         and not copilot_auth_retry_attempted
@@ -13630,71 +13475,6 @@ class AIAgent:
                                 compression_attempts = 0
                                 primary_recovery_attempted = False
                                 continue
-
-                    # ── Nous Portal: record rate limit & skip retries ─────
-                    # When Nous returns a 429 that is a genuine account-
-                    # level rate limit, record the reset time to a shared
-                    # file so ALL sessions (cron, gateway, auxiliary) know
-                    # not to pile on, then skip further retries -- each
-                    # one burns another RPH request and deepens the hole.
-                    # The retry loop's top-of-iteration guard will catch
-                    # this on the next pass and try fallback or bail.
-                    #
-                    # IMPORTANT: Nous Portal multiplexes multiple upstream
-                    # providers (DeepSeek, Kimi, MiMo, Sidekick).  A 429 can
-                    # also mean an UPSTREAM provider is out of capacity
-                    # for one specific model -- transient, clears in
-                    # seconds, nothing to do with the caller's quota.
-                    # Tripping the cross-session breaker on that would
-                    # block every Nous model for minutes.  We use
-                    # ``is_genuine_nous_rate_limit`` to tell the two
-                    # apart via the 429's own x-ratelimit-* headers and
-                    # the last-known-good state captured on the previous
-                    # successful response.
-                    if (
-                        is_rate_limited
-                        and self.provider == "nous"
-                        and classified.reason == FailoverReason.rate_limit
-                        and not recovered_with_pool
-                    ):
-                        _genuine_nous_rate_limit = False
-                        try:
-                            from runtime.nous_rate_guard import (
-                                is_genuine_nous_rate_limit,
-                                record_nous_rate_limit,
-                            )
-                            _err_resp = getattr(api_error, "response", None)
-                            _err_hdrs = (
-                                getattr(_err_resp, "headers", None)
-                                if _err_resp else None
-                            )
-                            _genuine_nous_rate_limit = is_genuine_nous_rate_limit(
-                                headers=_err_hdrs,
-                                last_known_state=self._rate_limit_state,
-                            )
-                            if _genuine_nous_rate_limit:
-                                record_nous_rate_limit(
-                                    headers=_err_hdrs,
-                                    error_context=error_context,
-                                )
-                            else:
-                                logging.info(
-                                    "Nous 429 looks like upstream capacity "
-                                    "(no exhausted bucket in headers or "
-                                    "last-known state) -- not tripping "
-                                    "cross-session breaker."
-                                )
-                        except Exception:
-                            pass
-                        if _genuine_nous_rate_limit:
-                            # Skip straight to max_retries -- the
-                            # top-of-loop guard will handle fallback or
-                            # bail cleanly.
-                            retry_count = max_retries
-                            continue
-                        # Upstream capacity 429: fall through to normal
-                        # retry logic.  A different model (or the same
-                        # model a moment later) will typically succeed.
 
                     is_payload_too_large = (
                         classified.reason == FailoverReason.payload_too_large
