@@ -1,3 +1,5 @@
+# GitHub Actions CI for sidekick
+# Runs pytest unit tests + integration test on push/PR to master
 name: CI
 
 on:
@@ -6,154 +8,41 @@ on:
   pull_request:
     branches: [master]
 
-jobs:
-  smoke:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python-version: ["3.11", "3.12"]
-        exclude:
-          # macOS only runs Python 3.12 to reduce CI time
-          - os: macos-latest
-            python-version: "3.11"
+env:
+  PYTHONUTF8: "1"
+  PIP_NO_INPUT: "1"
 
-    runs-on: ${{ matrix.os }}
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+          - "3.14"
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[all]"
+          pip install --upgrade pip
+          pip install -e .[all]
 
-      - name: CLI smoke
+      - name: Run pytest (unit tests)
         run: |
-          sidekick --help > /dev/null 2>&1 && echo "CLI help: OK" || echo "CLI help: FAIL"
-          sidekick --version > /dev/null 2>&1 && echo "CLI version: OK" || echo "CLI version: FAIL"
-          sidekick doctor > /dev/null 2>&1 && echo "CLI doctor: OK" || echo "CLI doctor: FAIL"
+          python -m pytest tests/ -v --tb=short
 
-      - name: Python import smoke
+      - name: Run integration test
         run: |
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          import cli.cli
-          import run_agent
-          from tools.registry import registry
-          n = len(registry._snapshot_entries())
-          import web.server
-          print(f'ALL IMPORTS OK - tools={n}')
-          "
-
-      - name: Session layer tests
-        run: |
-          python -c "
-          from shared.sessions import *
-          s = new_session(title='ci-test')
-          s = append_message(s.session_id, role='user', content='hello')
-          s = append_message(s.session_id, role='assistant', content='world')
-          r = retry_last(s.session_id)
-          assert r['removed_count'] == 1
-          r = undo_last(s.session_id)
-          assert r['removed_count'] == 1
-          s = new_session(title='ci-list')
-          assert len(list_sessions()) >= 1
-          print('SESSION TESTS OK')
-          "
-
-      - name: Session integrity test
-        run: |
-          python -c "
-          from shared.sessions import new_session, append_message, sessions_dir
-          import json
-          s = new_session(title='integrity-test')
-          s = append_message(s.session_id, role='user', content='hello integrity')
-          s = append_message(s.session_id, role='assistant', content='check passed')
-          sess_dir = sessions_dir()
-          json_files = list(sess_dir.glob('*.json'))
-          found = [f for f in json_files if s.session_id in f.name or s.session_id[:8] in f.name]
-          assert found, f'No session JSON file found for {s.session_id}'
-          with open(found[0], encoding='utf-8') as f:
-              data = json.load(f)
-          msgs = data.get('messages', data.get('history', []))
-          assert any('hello integrity' in str(m) for m in msgs), f'Expected message not found in {msgs}'
-          assert any('check passed' in str(m) for m in msgs), f'Expected response not found in {msgs}'
-          print('SESSION INTEGRITY OK')
-          "
-
-      - name: Path/env priority test
-        run: |
-          python -c "
-          import os
-          os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-test'
-          os.environ['HERMES_HOME'] = '/tmp/hermes-prio-test'
-          from shared.paths import sidekick_home
-          h = sidekick_home()
-          os.environ.pop('SIDEKICK_HOME', None)
-          os.environ.pop('HERMES_HOME', None)
-          assert 'sk-prio-test' in str(h), f'Expected SIDEKICK_HOME priority, got {h}'
-          print('PATH/ENV PRIORITY OK')
-          "
-
-      # ── Ubuntu-only: full test suite ──
-      - name: Gateway import (no warnings)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          python -c "
-          import io, logging
-          log = io.StringIO()
-          handler = logging.StreamHandler(log)
-          logging.getLogger().addHandler(handler)
-          logging.getLogger().setLevel(logging.WARNING)
-          from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
-          _ensure_self_first(); _bootstrap_aliases()
-          import runtime.gateway.run
-          output = log.getvalue()
-          if 'Warning' in output or 'cannot import' in output:
-              print('GATEWAY WARNINGS:', output[:200])
-              exit(1)
-          print('GATEWAY OK')
-          "
-
-      - name: Env alias tests
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          python -c "
-          # SIDEKICK_HOME has priority
-          import os, tempfile
-          os.environ['SIDEKICK_HOME'] = '/tmp/sk-fresh'
-          from shared.paths import sidekick_home
-          assert 'sk-fresh' in str(sidekick_home())
-          print('SIDEKICK_HOME: OK')
-          os.environ.pop('SIDEKICK_HOME')
-
-          # HERMES_HOME fallback
-          os.environ['HERMES_HOME'] = '/tmp/hermes-fallback'
-          from shared.paths import sidekick_home
-          assert 'hermes-fallback' in str(sidekick_home())
-          print('HERMES_HOME fallback: OK')
-          os.environ.pop('HERMES_HOME')
-
-          # Default to ~/.sidekick
-          from shared.paths import sidekick_home
-          assert '.sidekick' in str(sidekick_home())
-          print('Default ~/.sidekick: OK')
-          print('ENV ALIAS TESTS OK')
-          "
-
-      - name: Cleanup test sessions
-        run: |
-          python -c "
-          import shutil, os
-          from shared.sessions import sessions_dir
-          d = sessions_dir()
-          for f in list(d.glob('*.json')):
-              f.unlink()
-          print('Cleanup OK')
-          "
+          python test_integration.py
