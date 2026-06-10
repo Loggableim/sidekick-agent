@@ -107,7 +107,7 @@ function Ensure-PythonRuntime {
                 }
                 if ($LASTEXITCODE -ne 0) { throw "uv venv failed with exit code $LASTEXITCODE" }
             }
-            & $uv pip install -e ".[web,all]"
+            & $uv pip install --python "$venvPython" -e ".[web,all]"
             if ($LASTEXITCODE -ne 0) { throw "uv pip install failed with exit code $LASTEXITCODE" }
         } finally {
             Pop-Location

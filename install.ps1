@@ -13,7 +13,7 @@
 # ============================================================================
 
 # ============================================================================
-# Flag parsing — simple $args parser (not param()) so irm | iex works
+# Flag parsing - simple $args parser (not param()) so irm | iex works
 # ============================================================================
 # Usage:
 #   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
@@ -31,7 +31,7 @@ $script:SkipOptionalTools = $false
 $script:NoPrompt         = $false
 $script:NoDoctor         = $false
 $script:Surface          = "Browser"   # Browser | Standalone | CliOnly
-$script:Mode             = "Admin"     # Admin | Portable (Portable = future)
+$script:Mode             = "Admin"     # Admin | Portable
 $Branch                  = "master"
 $script:WebUIStarted     = $false
 $SidekickHome            = "$env:LOCALAPPDATA\sidekick"
@@ -213,17 +213,26 @@ function Pause-IfElevated {
 }
 
 # ============================================================================
-# Admin rights - REQUIRED for Sidekick installer
+# Admin rights - OPTIONAL for Sidekick installer
 # ============================================================================
-# Sidekick needs admin for:
-#   - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:9119)
-#   - Setting machine-wide environment variables (PATH, SIDEKICK_GIT_BASH_PATH)
-#   - winget (Node.js) needs elevation to install per-machine
-#   - Optional: Add/Remove Programs entry for clean uninstall
+# Mode Admin (default):
+#   Requires admin/UAC for:
+#     - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:9119)
+#     - Setting machine-wide environment variables (PATH, SIDEKICK_GIT_BASH_PATH)
+#     - winget (Node.js) needs elevation to install per-machine
+#     - Optional: Add/Remove Programs entry for clean uninstall
 #
-# We self-elevate via UAC. If the user clicks "No", exit with a clear error.
+# Mode Portable (opt-in via -Mode Portable):
+#   No admin/UAC needed. Core functionality works but hosts alias,
+#   machine-wide env vars, and winget toolchains are skipped.
+#   Use when you cannot get admin rights or prefer no elevation.
+#
+# We self-elevate via UAC in Admin mode. If the user clicks "No", offer
+# a clear fallback to Portable mode.
+# ============================================================================
 $script:IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $script:IsElevated) {
+
+if (-not $script:IsElevated -and $script:Mode -eq "Admin") {
     Write-Host ""
     Write-Host "  Sidekick needs an elevated PowerShell for setup:" -ForegroundColor Yellow
     Write-Host "    - local hostname registration for http://sidekick:9119" -ForegroundColor DarkGray
@@ -323,9 +332,12 @@ exit `$code
         $elevated = [System.Diagnostics.Process]::Start($psi)
         if ($null -eq $elevated) {
             # UAC was denied or the process could not start
-            Write-Host "  XX Administrator privileges were not granted. Setup cannot continue." -ForegroundColor Red
-            Write-Host "  >  Re-run from an elevated PowerShell:" -ForegroundColor DarkCyan
+            Write-Host "  XX Administrator privileges were not granted." -ForegroundColor Red
+            Write-Host "  >  To install with admin rights, re-run from an elevated PowerShell:" -ForegroundColor DarkCyan
             Write-Host "     irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor White
+            Write-Host "  >  Or run without admin rights using Portable mode:" -ForegroundColor DarkCyan
+            Write-Host "     irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor White
+            Write-Host "     .\install.ps1 -Mode Portable -Surface CliOnly -NoPrompt" -ForegroundColor White
             exit 7
         }
         # Capture exit code - WaitForExit() doesn't throw on null Process.
@@ -336,13 +348,21 @@ exit `$code
     } catch [System.InvalidOperationException], [System.ComponentModel.Win32Exception] {
         # UAC denied: Process::Start with runas verb throws Win32Exception
         # when the user cancels the elevation dialog.
-        Write-Host "  XX Administrator privileges were not granted. Setup cannot continue." -ForegroundColor Red
-        Write-Host "  >  Re-run from an elevated PowerShell:" -ForegroundColor DarkCyan
+        Write-Host "  XX Administrator privileges were not granted." -ForegroundColor Red
+        Write-Host "  >  To install with admin rights, run from an elevated PowerShell:" -ForegroundColor DarkCyan
         Write-Host "     irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor White
+        Write-Host "  >  Or run without admin rights using Portable mode:" -ForegroundColor DarkCyan
+        Write-Host "     irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 -OutFile install.ps1; .\install.ps1 -Mode Portable -NoPrompt" -ForegroundColor White
         exit 7
     }
 }
-Write-Host "  OK Elevated shell ready" -ForegroundColor Green
+if ($script:Mode -eq "Portable") {
+    Write-Host "  >  Portable mode selected - skipping UAC elevation." -ForegroundColor DarkCyan
+    Write-Host "  >  Hosts alias, machine-wide env vars, and winget toolchains are not available." -ForegroundColor DarkGray
+    Write-Host ""
+} else {
+    Write-Host "  OK Elevated shell ready" -ForegroundColor Green
+}
 
 # ============================================================================
 # Log file setup
@@ -883,6 +903,28 @@ function Install-SystemPackages {
     if ($script:SkipOptionalTools) {
         $script:HasRipgrep = $false
         $script:HasFfmpeg = $false
+        return
+    }
+    # In Portable mode, skip winget/choco/scoop (they typically require admin).
+    # Just check for existing tools and report what's available.
+    if ($script:Mode -eq "Portable") {
+        Write-Info "Checking ripgrep (fast file search)..."
+        if (Get-Command rg -ErrorAction SilentlyContinue) {
+            $version = rg --version | Select-Object -First 1
+            Write-Success "$version found"
+            $script:HasRipgrep = $true
+        } else {
+            Write-Warn "ripgrep not found - install manually: winget install BurntSushi.ripgrep.MSVC"
+            $script:HasRipgrep = $false
+        }
+        Write-Info "Checking ffmpeg (TTS voice messages)..."
+        if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+            Write-Success "ffmpeg found"
+            $script:HasFfmpeg = $true
+        } else {
+            Write-Warn "ffmpeg not found - install manually: winget install Gyan.FFmpeg"
+            $script:HasFfmpeg = $false
+        }
         return
     }
     $script:HasRipgrep = $false
@@ -1911,7 +1953,7 @@ function Main {
     try { $null = (Get-Location).ProviderPath } catch {}
 
     if ($script:UpdateOnly) {
-        Write-Info "UpdateOnly mode — skipping prerequisites, tools, and prompts"
+        Write-Info "UpdateOnly mode - skipping prerequisites, tools, and prompts"
         if (-not (Test-Path $InstallDir)) {
             Write-Err "No existing installation found at $InstallDir. Run without -UpdateOnly for a fresh install."
             Pause-IfElevated -ExitCode 1

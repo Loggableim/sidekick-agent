@@ -29,6 +29,23 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.p
 
 **Admin/UAC required.** The standard installer needs admin rights for: configuring `hosts` aliases, setting system environment variables, installing optional toolchains (e.g. build tools), and registering an uninstall entry. While most files are installed under your user profile, these operations require elevation.
 
+**Portable mode (no admin):** If you cannot or prefer not to grant admin rights, use Portable mode:
+
+```powershell
+# Download the script first, then run with -Mode Portable
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1' -OutFile install.ps1
+.\install.ps1 -Mode Portable -NoPrompt -SkipOptionalTools
+```
+
+Portable mode skips:
+- UAC elevation / admin check
+- Hosts file alias (`http://sidekick:9119`)
+- Machine-wide environment variables
+- winget/choco/scoop package installation (use `-SkipOptionalTools`)
+- Windows uninstall entry registration
+
+Core functionality (CLI, WebUI, Git, Python venv, skills, sessions) works identically.
+
 **Common failures:**
 - **PowerShell execution policy:** If you see a security error, run:
   ```powershell

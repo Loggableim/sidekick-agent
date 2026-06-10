@@ -18,13 +18,14 @@ sidekick doctor           # Health check (works without API key)
 sidekick dashboard        # Open WebUI at http://127.0.0.1:9119
 ```
 
-**Key facts:**
-- ⚠ **Windows installer requires Administrator (UAC)** — see docs/troubleshooting.md for details
-- 🏠 **Desktop shortcut** — `Sidekick.lnk` starts the dashboard
-- 🌐 **WebUI opens automatically** in your default browser
-- 🔄 **Update** by running the same command again (idempotent)
-- 🔑 **No API key required** to start — configure via `sidekick setup`
-- 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
+|**Key facts:**
+|- ⚠ **Windows installer requires Administrator (UAC)** by default — installs under `%LOCALAPPDATA%\sidekick\`
+|- 🏠 **Desktop shortcut** — `Sidekick.lnk` starts the dashboard
+|- 🌐 **WebUI opens automatically** in your default browser
+|- 🔄 **Update** by running the same command again (idempotent)
+|- 🔑 **No API key required** to start — configure via `sidekick setup`
+|- 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
+|- 💼 **Portable mode** available for no-admin installs: download the script and run with `-Mode Portable -NoPrompt`
 
 > **Note:** Windows installer/launcher uses port **9119**; CLI default is **8787** (override with `SIDEKICK_WEBUI_PORT` or `--port`)
 
@@ -222,6 +223,7 @@ Key items:
 | v0.3.0 | `v0.3.0` | Session contract, gateway warnings, CI smoke |
 | v0.4.0 | `v0.4.0` | Error handling, doctor exit codes, troubleshooting |
 | v0.5.0 | `v0.5.0` | Doctor --check-providers, macOS CI, streaming stability |
+| v0.8.2 | `v0.8.2` | Windows installer portable mode finalization |
 
 ## Troubleshooting
 
