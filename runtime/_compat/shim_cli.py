@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import types
 
-__version__ = "0.1.0-migration"
+from sidekick_cli import __version__  # single source of truth
 # Map of already-ported submodule names to their canonical runtime module path
 _PORTED_ROUTES: dict[str, str] = {
     "config": "runtime.config",
