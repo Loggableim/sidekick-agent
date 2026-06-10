@@ -15,16 +15,18 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.p
 **After install:**
 ```powershell
 sidekick doctor           # Health check (works without API key)
-sidekick dashboard        # Open WebUI at http://127.0.0.1:8787
+sidekick dashboard        # Open WebUI at http://127.0.0.1:9119
 ```
 
 **Key facts:**
-- 🚫 **No admin rights** — installs under `%LOCALAPPDATA%\sidekick\`
+- ⚠ **Windows installer requires Administrator (UAC)** — see docs/troubleshooting.md for details
 - 🏠 **Desktop shortcut** — `Sidekick.lnk` starts the dashboard
 - 🌐 **WebUI opens automatically** in your default browser
 - 🔄 **Update** by running the same command again (idempotent)
 - 🔑 **No API key required** to start — configure via `sidekick setup`
 - 📖 [Troubleshooting](docs/troubleshooting.md) — common install issues
+
+> **Note:** Windows installer/launcher uses port **9119**; CLI default is **8787** (override with `SIDEKICK_WEBUI_PORT` or `--port`)
 
 ### Update / Repair
 
@@ -61,7 +63,7 @@ sidekick doctor
 ```bash
 sidekick                     # Interactive REPL
 sidekick --tui               # Terminal UI mode
-sidekick dashboard           # WebUI at http://127.0.0.1:8787
+sidekick dashboard           # WebUI at http://127.0.0.1:9119
 ```
 
 ### Legacy alias
@@ -131,7 +133,7 @@ sidekick/
 | `sidekick` | Interactive chat with the agent |
 | `sidekick doctor` | System health check |
 | `sidekick doctor -p` | Doctor + provider connectivity check |
-| `sidekick dashboard` | Start the WebUI (http://127.0.0.1:8787) |
+| `sidekick dashboard` | Start the WebUI (http://127.0.0.1:9119) |
 | `sidekick setup` | Interactive setup wizard |
 | `sidekick --tui` | Terminal UI (TUI) mode |
 | `sidekick status` | Show component status |

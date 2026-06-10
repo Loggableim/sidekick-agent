@@ -15,7 +15,7 @@
 | **Betriebssystem** | Windows 10 22H2+ oder Windows 11 |
 | **PowerShell** | 5.1+ (Standard unter Windows 10/11) |
 | **Internetverbindung** | Erforderlich (Download uv, PortableGit, Repository) |
-| **Admin-Rechte** | Nicht erforderlich — Test muss als **Standard-User** durchgeführt werden |
+|| **Admin-Rechte** | **ERFORDERLICH** — Test muss als **Administrator** durchgeführt werden |
 | **RAM** | ≥ 4 GB |
 | **Festplatte** | ≥ 2 GB freier Speicher |
 | **Browser** | Edge, Chrome oder Firefox (für WebUI Auto-Open) |
@@ -41,7 +41,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 
 **Steps:**
 
-1. Öffne **PowerShell** als Standard-User (nicht als Admin)
+1. Öffne **PowerShell** als Administrator (nicht als Standard-User)
 2. Führe den One-Liner aus:
    ```powershell
    irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
@@ -60,7 +60,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 | 5 | venv wird erstellt | `Test-Path "$env:LOCALAPPDATA\sidekick\sidekick-agent\.venv\Scripts\python.exe"` |
 | 6 | `pip install -e ".[all]"` läuft erfolgreich | Keine Fehler in der Ausgabe |
 | 7 | Desktop Shortcut `Sidekick.lnk` auf Desktop | `Test-Path "$env:USERPROFILE\Desktop\Sidekick.lnk"` |
-| 8 | WebUI öffnet sich im Browser auf `http://127.0.0.1:8787` | Sichtbare Prüfung |
+| 8 | WebUI öffnet sich im Browser auf `http://127.0.0.1:9119` | Sichtbare Prüfung |
 | 9 | `SIDEKICK_HOME` und `SIDEKICK_GIT_BASH_PATH` gesetzt | `$env:SIDEKICK_HOME` |
 | 10 | Keine Fehler / `throw` in der Ausgabe | Konsolenausgabe prüfen |
 
@@ -155,7 +155,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 | 1 | `sidekick doctor` exit 0 (healthy) oder exit 1 (warnings) | `$LASTEXITCODE` |
 | 2 | Kein Traceback / Stacktrace in der Ausgabe | Konsolenausgabe prüfen |
 | 3 | "No API keys configured" als Warnung (kein Fehler) | Ausgabe enthält Warnung |
-| 4 | `sidekick dashboard` startet WebUI | Browser öffnet `http://127.0.0.1:8787` |
+| 4 | `sidekick dashboard` startet WebUI | Browser öffnet `http://127.0.0.1:9119` |
 
 **Pass Criteria:** Keine Crashs, klare Warnungen, WebUI erreichbar
 
@@ -298,7 +298,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 | 2 | Target: Pfad zu `sidekick.exe` (in `.venv\Scripts\`) | Eigenschaften-Dialog → Ziel |
 | 3 | Arguments: `dashboard` | Eigenschaften-Dialog → Argumente |
 | 4 | Icon: `sidekick-taskbar.ico` oder `favicon.ico` | Eigenschaften-Dialog → Icon |
-| 5 | Doppelklick startet `sidekick dashboard` + WebUI | Browser öffnet `http://127.0.0.1:8787` |
+| 5 | Doppelklick startet `sidekick dashboard` + WebUI | Browser öffnet `http://127.0.0.1:9119` |
 
 **Pass Criteria:** Shortcut ist korrekt konfiguriert und funktional
 
@@ -323,16 +323,16 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 
 | # | Erwartung | Prüfmethode |
 |---|-----------|-------------|
-| 1 | Browser öffnet `http://127.0.0.1:8787` | Sichtbare Prüfung |
-| 2 | `/health`-Endpoint retourniert HTTP 200 | `curl.exe http://127.0.0.1:8787/health` (in zweitem Terminal) |
+| 1 | Browser öffnet `http://127.0.0.1:9119` | Sichtbare Prüfung |
+| 2 | `/health`-Endpoint retourniert HTTP 200 | `curl.exe http://127.0.0.1:9119/health` (in zweitem Terminal) |
 | 3 | WebUI-Seite wird geladen (kein White-Screen) | Sichtbare Prüfung |
-| 4 | Kein Port-Konflikt (8787 nicht belegt) | `netstat -an | findstr ":8787"` zeigt LISTENING |
+| 4 | Kein Port-Konflikt (9119 nicht belegt) | `netstat -an | findstr ":9119"` zeigt LISTENING |
 
 **Pass Criteria:** WebUI erreichbar, Health-Endpoint antwortet mit 200
 
 ---
 
-### TC-11: Kein Admin-Test (Standard-User ohne Rechte)
+### TC-11: Admin-Erforderlich-Test (Standard-User wird abgewiesen)
 
 | Feld | Wert |
 |------|------|
@@ -351,12 +351,12 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 
 | # | Erwartung | Prüfmethode |
 |---|-----------|-------------|
-| 1 | Keine UAC-Prompt | Kein Fenster "Möchten Sie zulassen..." |
-| 2 | Keine "Access denied"-Fehler | Konsolenausgabe prüfen |
-| 3 | Alle Dateien unter `%LOCALAPPDATA%` | `Get-ChildItem "$env:LOCALAPPDATA\sidekick" -Recurse` |
-| 4 | Kein einziger File außerhalb von User-Profil | `Get-ChildItem C:\Program* -ErrorAction SilentlyContinue` → kein Sidekick |
+| 1 | Installer bricht ab mit klarer Fehlermeldung zu fehlenden Admin-Rechten | Konsolenausgabe enthält "Administrator" oder "Admin" oder "UAC" |
+| 2 | Keine UAC-Prompt (da kein Admin) | Kein Fenster "Möchten Sie zulassen..." |
+| 3 | Keine Dateien unter `%LOCALAPPDATA%\sidekick\` | `Test-Path "$env:LOCALAPPDATA\sidekick"` → `False` |
+| 4 | Exit-Code ≠ 0 | `$LASTEXITCODE` |
 
-**Pass Criteria:** Vollständige Installation ohne Admin-Rechte
+**Pass Criteria:** Installer verweigert die Installation ohne Admin-Rechte mit klarer Fehlermeldung
 
 ---
 
@@ -459,7 +459,7 @@ Wegen der zerstörerischen Natur einiger Testfälle (dirty tree, Neuinstallation
 | TC-08 | Pfad mit Leerzeichen | 🟡 Mittel | Edge Case | 15 min | 15 min |
 | TC-09 | Desktop Shortcut | 🟡 Mittel | Visuell | 0 min (TC-01) | 5 min |
 | TC-10 | WebUI Auto-Open | 🔴 Hoch | Smoke | 0 min (TC-01) | 5 min |
-| TC-11 | Kein Admin | 🔴 Hoch | Sicherheit | 15 min | 15 min |
+| TC-11 | Admin erforderlich | 🔴 Hoch | Sicherheit | 5 min | 10 min |
 | TC-12 | Execution Policy | 🟡 Mittel | Edge Case | 5 min | 10 min |
 | TC-13 | Kein Internet | 🟢 Niedrig | Edge Case | 5 min | 10 min |
 | TC-14 | NoDoctor Flag | 🟢 Niedrig | Funktional | 0 min (TC-01) | 5 min |
@@ -472,7 +472,7 @@ Für einen schnellen Smoke-Test reichen folgende Testfälle in dieser Reihenfolg
 2. **TC-02** — Idempotenz (wichtig für Updates)
 3. **TC-03** — UpdateOnly (wichtig für den Update-Pfad)
 4. **TC-10** — WebUI Auto-Open (Kernerwartung)
-5. **TC-11** — Kein Admin (Sicherheitsversprechen)
+5. **TC-11** — Admin-Erforderlich (Sicherheitsprüfung)
 
 ### Test-Reihenfolge (Vollständig)
 
@@ -490,7 +490,7 @@ Für einen vollständigen Testlauf inklusive Edge Cases:
 10. TC-08 (Pfad mit Leerzeichen — spezielle VM)
 11. TC-09 (Desktop Shortcut)
 12. TC-10 (WebUI Auto-Open)
-13. TC-11 (Kein Admin — spezielle VM)
+13. TC-11 (Admin erforderlich — spezielle VM)
 14. TC-14 (NoDoctor)
 
 ---

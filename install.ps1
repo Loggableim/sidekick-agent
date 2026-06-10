@@ -12,13 +12,104 @@
 #
 # ============================================================================
 
-# Configuration defaults (works with irm | iex - param() is NOT compatible with iex)
-$NoVenv = $false
-$SkipSetup = $false
-$Branch = "master"
-$script:WebUIStarted = $false
-$SidekickHome = "$env:LOCALAPPDATA\sidekick"
-$InstallDir = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
+# ============================================================================
+# Flag parsing — simple $args parser (not param()) so irm | iex works
+# ============================================================================
+# Usage:
+#   irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex
+#   .\install.ps1 -UpdateOnly
+#   .\install.ps1 -UpdateOnly -NoPrompt
+#   .\install.ps1 -SkipSetup -NoVenv -SkipOptionalTools
+#   .\install.ps1 -Surface CliOnly -NoPrompt
+# ============================================================================
+
+# Defaults
+$script:UpdateOnly       = $false
+$script:NoVenv           = $false
+$script:SkipSetup        = $false
+$script:SkipOptionalTools = $false
+$script:NoPrompt         = $false
+$script:NoDoctor         = $false
+$script:Surface          = "Browser"   # Browser | Standalone | CliOnly
+$script:Mode             = "Admin"     # Admin | Portable (Portable = future)
+$Branch                  = "master"
+$script:WebUIStarted     = $false
+$SidekickHome            = "$env:LOCALAPPDATA\sidekick"
+$InstallDir              = "$env:LOCALAPPDATA\sidekick\sidekick-agent"
+
+# Parse $args manually
+$script:UnknownFlags = @()
+$i = 0
+while ($i -lt $args.Count) {
+    $arg = $args[$i]
+    $consumed = $true
+    switch -Wildcard ($arg) {
+        '-UpdateOnly'         { $script:UpdateOnly = $true }
+        '-NoVenv'             { $script:NoVenv = $true }
+        '-SkipSetup'          { $script:SkipSetup = $true }
+        '-SkipOptionalTools'  { $script:SkipOptionalTools = $true }
+        '-NoPrompt'           { $script:NoPrompt = $true }
+        '-NoDoctor'           { $script:NoDoctor = $true }
+        '-Surface' {
+            $i++
+            if ($i -lt $args.Count) {
+                $val = $args[$i]
+                if ($val -in @('Browser','Standalone','CliOnly')) {
+                    $script:Surface = $val
+                } else {
+                    $script:UnknownFlags += "-Surface $val (invalid value)"
+                }
+            } else {
+                $script:UnknownFlags += '-Surface (missing value)'
+            }
+        }
+        '-Mode' {
+            $i++
+            if ($i -lt $args.Count) {
+                $val = $args[$i]
+                if ($val -in @('Admin','Portable')) {
+                    $script:Mode = $val
+                } else {
+                    $script:UnknownFlags += "-Mode $val (invalid value)"
+                }
+            } else {
+                $script:UnknownFlags += '-Mode (missing value)'
+            }
+        }
+        default { $script:UnknownFlags += $arg }
+    }
+    $i++
+}
+
+if ($script:UnknownFlags.Count -gt 0) {
+    Write-Host ""
+    Write-Host "  Sidekick Installer" -ForegroundColor Cyan
+    Write-Host "  ============================================================" -ForegroundColor DarkCyan
+    Write-Host ""
+    Write-Host "  Unknown flags: $($script:UnknownFlags -join ', ')" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  Usage:" -ForegroundColor Yellow
+    Write-Host "    irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex"
+    Write-Host ""
+    Write-Host "  Flags (all optional):" -ForegroundColor Yellow
+    Write-Host "    -UpdateOnly           Update an existing install (skip clone, deps, tools)"
+    Write-Host "    -NoVenv               Skip venv creation (use system Python)"
+    Write-Host "    -SkipSetup            Skip the sidekick setup wizard"
+    Write-Host "    -SkipOptionalTools    Skip Node.js, ripgrep, ffmpeg"
+    Write-Host "    -NoPrompt             Skip all interactive prompts"
+    Write-Host "    -NoDoctor             Skip sidekick doctor post-install check"
+    Write-Host "    -Surface <type>       Browser (default) | Standalone | CliOnly"
+    Write-Host "    -Mode <type>          Admin (default) | Portable (future)"
+    Write-Host ""
+    Write-Host "  Examples:" -ForegroundColor Yellow
+    Write-Host "    .\install.ps1 -UpdateOnly"
+    Write-Host "    .\install.ps1 -UpdateOnly -NoPrompt"
+    Write-Host "    .\install.ps1 -SkipSetup -SkipOptionalTools -Surface CliOnly"
+    Write-Host "    .\install.ps1 -Surface Standalone -NoPrompt"
+    Write-Host ""
+    Pause-IfElevated -ExitCode 1
+    exit 1
+}
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -150,7 +241,7 @@ if (-not $script:IsElevated) {
         Write-Host "  >  Preparing elevated installer copy..." -ForegroundColor DarkCyan
         $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
         try {
-            $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/HEAD/install.ps1"
+            $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/$Branch/install.ps1"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
             Write-Host "  OK Elevated installer ready: $scriptPath" -ForegroundColor Green
         } catch {
@@ -758,6 +849,10 @@ function Test-Node {
     and the optional TUI.  This function is informational only - it does not
     attempt to install Node.js.
     #>
+    if ($script:SkipOptionalTools) {
+        $script:HasNode = $false
+        return $true
+    }
     Write-Info "Checking Node.js (optional - for browser tools and TUI)..."
 
     if (Get-Command node -ErrorAction SilentlyContinue) {
@@ -785,6 +880,11 @@ function Test-Node {
 }
 
 function Install-SystemPackages {
+    if ($script:SkipOptionalTools) {
+        $script:HasRipgrep = $false
+        $script:HasFfmpeg = $false
+        return
+    }
     $script:HasRipgrep = $false
     $script:HasFfmpeg = $false
     $needRipgrep = $false
@@ -1126,7 +1226,7 @@ function Install-Dependencies {
     Push-Location $InstallDir
     Stop-RunningSidekickProcesses
     
-    if (-not $NoVenv) {
+    if (-not $script:NoVenv) {
         # Tell uv to install into our venv (no activation needed)
         $env:VIRTUAL_ENV = $script:VenvPath
     }
@@ -1158,7 +1258,7 @@ function Install-Dependencies {
     $venvPython = "$script:VenvPath\Scripts\python.exe"
     foreach ($tier in $installTiers) {
         Write-Info "Trying tier: $($tier.Name) ..."
-        & $UvCmd pip install -e $tier.Spec
+        & $UvCmd pip install --python "$script:PythonExe" -e $tier.Spec
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Main package installed ($($tier.Name))"
             $script:InstalledTier = $tier.Name
@@ -1177,7 +1277,7 @@ function Install-Dependencies {
     # users hit and lazy-import errors from `sidekick dashboard` are confusing.
     # If tier 1 failed (the common case), [web] was still picked up by tiers
     # 2-3; only tier 4 leaves you without it.
-    $pythonExe = if (-not $NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
+    $pythonExe = if (-not $script:NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { (& $UvCmd python find $PythonVersion) }
     if (Test-Path $pythonExe) {
         $webOk = $false
         try {
@@ -1187,7 +1287,7 @@ function Install-Dependencies {
         if (-not $webOk) {
             Write-Warn "fastapi/uvicorn not importable - `sidekick dashboard` will not work."
             Write-Info "Attempting targeted install of [web] extra as last resort..."
-            & $UvCmd pip install -e ".[web]"
+            & $UvCmd pip install --python "$script:PythonExe" -e ".[web]"
             if ($LASTEXITCODE -eq 0) {
                 Write-Success "[web] extra installed; `sidekick dashboard` should now work."
             } else {
@@ -1217,7 +1317,7 @@ function Install-Dependencies {
 function Set-PathVariable {
     Write-Info "Setting up sidekick command..."
     
-    if ($NoVenv) {
+    if ($script:NoVenv) {
         $sidekickBin = "$InstallDir"
     } else {
         $sidekickBin = "$script:VenvPath\Scripts"
@@ -1333,7 +1433,7 @@ Delete the contents (or this file) to use the default personality.
     
     # Seed bundled skills into ~/.sidekick/skills/ (manifest-based, one-time per skill)
     Write-Info "Syncing bundled skills to ~/.sidekick/skills/ ..."
-    $pythonExe = if (-not $NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { "$PythonExe" }
+    $pythonExe = if (-not $script:NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { "$PythonExe" }
     if (Test-Path $pythonExe) {
         try {
             & $pythonExe "$InstallDir\tools\skills_sync.py" 2>$null
@@ -1351,6 +1451,10 @@ Delete the contents (or this file) to use the default personality.
 }
 
 function Install-NodeDeps {
+    if ($script:SkipOptionalTools) {
+        Write-Info "Skipping Node.js dependencies (-SkipOptionalTools)"
+        return
+    }
     if (-not $HasNode) {
         Write-Info "Skipping Node.js dependencies (Node not installed)"
         return
@@ -1514,12 +1618,12 @@ function Install-PlatformSdks {
     # run one targeted `pip install` as last-chance recovery.  Keeps fresh
     # Windows installs from hitting silent "python-telegram-bot not installed"
     # at runtime.
-    if ($NoVenv) {
+    if ($script:NoVenv) {
         Write-Info "Skipping platform-SDK verification (-NoVenv: no venv to bootstrap)"
         return
     }
 
-    $pythonExe = if (-not $NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { "$PythonExe" }
+    $pythonExe = if (-not $script:NoVenv) { "$script:VenvPath\Scripts\python.exe" } else { "$PythonExe" }
     if (-not (Test-Path $pythonExe)) {
         Write-Warn "Skipping platform-SDK verification: $pythonExe not found"
         return
@@ -1608,7 +1712,7 @@ function Install-PlatformSdks {
 }
 
 function Invoke-SetupWizard {
-    if ($SkipSetup) {
+    if ($script:SkipSetup) {
         Write-Info "Skipping setup wizard (-SkipSetup)"
         return
     }
@@ -1620,7 +1724,7 @@ function Invoke-SetupWizard {
     Push-Location $InstallDir
     
     # Run sidekick setup using the venv Python directly (no activation needed)
-    if (-not $NoVenv) {
+    if (-not $script:NoVenv) {
         & "$script:VenvPath\Scripts\python.exe" -m sidekick_app setup
     } else {
         & $PythonExe -m sidekick_app setup
@@ -1642,7 +1746,7 @@ function Start-GatewayIfConfigured {
 
     if (-not $hasMessaging) { return }
 
-    $sidekickCmd = if (-not $NoVenv) { "$script:VenvPath\Scripts\sidekick.exe" } else { "sidekick" }
+    $sidekickCmd = if (-not $script:NoVenv) { "$script:VenvPath\Scripts\sidekick.exe" } else { "sidekick" }
 
     # If WhatsApp is enabled but not yet paired, run foreground for QR scan
     $whatsappEnabled = $content | Where-Object { $_ -match "^WHATSAPP_ENABLED=true" }
@@ -1652,8 +1756,8 @@ function Start-GatewayIfConfigured {
         Write-Info "WhatsApp is enabled but not yet paired."
         Write-Info "Running 'sidekick whatsapp' to pair via QR code..."
         Write-Host ""
-        $response = Read-Host "Pair WhatsApp now? [Y/n]"
-        if ($response -eq "" -or $response -match "^[Yy]") {
+        if (-not $script:NoPrompt) { $waResponse = Read-Host "Pair WhatsApp now? [Y/n]" } else { $waResponse = "y" }
+        if ($waResponse -eq "" -or $waResponse -match "^[Yy]") {
             try {
                 & $sidekickCmd whatsapp
             } catch {
@@ -1666,9 +1770,9 @@ function Start-GatewayIfConfigured {
     Write-Info "Messaging platform token detected!"
     Write-Info "The gateway handles messaging platforms and cron job execution."
     Write-Host ""
-    $response = Read-Host "Would you like to start the gateway now? [Y/n]"
+    if (-not $script:NoPrompt) { $gwResponse = Read-Host "Would you like to start the gateway now? [Y/n]" } else { $gwResponse = "y" }
 
-    if ($response -eq "" -or $response -match "^[Yy]") {
+    if ($gwResponse -eq "" -or $gwResponse -match "^[Yy]") {
         Write-Info "Starting gateway in background..."
         try {
             $logFile = "$SidekickHome\logs\gateway.log"
@@ -1688,12 +1792,16 @@ function Start-GatewayIfConfigured {
 }
 
 function Start-WebUI {
-    $sidekickCmd = if (-not $NoVenv) { "$script:VenvPath\Scripts\sidekick.exe" } else { "sidekick" }
+    if ($script:Surface -eq "CliOnly") {
+        Write-Info "Skipping WebUI (-Surface CliOnly)"
+        return
+    }
+    $sidekickCmd = if (-not $script:NoVenv) { "$script:VenvPath\Scripts\sidekick.exe" } else { "sidekick" }
 
     Write-Host ""
     Write-Info "The WebUI provides a browser interface for Sidekick."
     Write-Host ""
-    $response = Read-Host "Would you like to start the WebUI now? [Y/n]"
+    if (-not $script:NoPrompt) { $response = Read-Host "Would you like to start the WebUI now? [Y/n]" } else { $response = "y" }
 
     if ($response -eq "" -or $response -match "^[Yy]") {
         Write-Info "Starting WebUI in background..."
@@ -1801,6 +1909,23 @@ function Write-Completion {
 function Main {
     Write-Banner
     try { $null = (Get-Location).ProviderPath } catch {}
+
+    if ($script:UpdateOnly) {
+        Write-Info "UpdateOnly mode — skipping prerequisites, tools, and prompts"
+        if (-not (Test-Path $InstallDir)) {
+            Write-Err "No existing installation found at $InstallDir. Run without -UpdateOnly for a fresh install."
+            Pause-IfElevated -ExitCode 1
+            exit 1
+        }
+        Install-Repository
+        Ensure-Venv -VenvPath "$InstallDir\.venv"
+        Install-Dependencies
+        Set-PathVariable
+        Copy-ConfigTemplates
+        Write-Completion
+        return
+    }
+
     Install-Uv
     Install-Git
     [void](Test-Node)
@@ -1988,5 +2113,5 @@ try {
 
 Write-Host ""
 Write-Host "Press Enter to close Sidekick setup..." -ForegroundColor Yellow
-$null = Read-Host
+if (-not $script:NoPrompt) { $null = Read-Host }
 exit 0

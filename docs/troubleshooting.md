@@ -15,8 +15,8 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.p
 
 **What it does:**
 - Installs Sidekick under `%LOCALAPPDATA%\sidekick\`
-- Installs Python 3.11+ via `uv` (if not found) — no admin needed
-- Installs Portable Git (if not found) — no admin needed
+- Installs Python 3.11+ via `uv` (if not found) — requires admin/UAC
+- Installs Portable Git (if not found) — requires admin/UAC
 - Creates a Python virtual environment and installs Sidekick + all dependencies
 - Creates a **desktop shortcut** for the WebUI dashboard
 - **Opens the WebUI dashboard** in your default browser
@@ -27,7 +27,7 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.p
 - PowerShell 5.1+ (comes with Windows 10+)
 - Internet connection
 
-**No admin rights required.** The installer installs everything under your user profile.
+**Admin/UAC required.** The standard installer needs admin rights for: configuring `hosts` aliases, setting system environment variables, installing optional toolchains (e.g. build tools), and registering an uninstall entry. While most files are installed under your user profile, these operations require elevation.
 
 **Common failures:**
 - **PowerShell execution policy:** If you see a security error, run:
@@ -52,7 +52,7 @@ irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.p
 .\install.ps1 -UpdateOnly
 ```
 
-**To skip post-install health check:**
+**To skip post-install health check (now implemented):**
 ```powershell
 .\install.ps1 -NoDoctor
 ```
