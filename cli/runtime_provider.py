@@ -1042,7 +1042,7 @@ def resolve_runtime_provider(
             if not _agent_key_is_usable(nous_state, min_ttl):
                 logger.debug("Nous pool entry agent_key expired/missing, falling through to runtime resolution")
                 pool_api_key = ""
-        if entry is not None and pool_api_key:
+        if entry is not None and pool_api_key and has_usable_secret(pool_api_key):
             return _resolve_runtime_from_pool_entry(
                 provider=provider,
                 entry=entry,
