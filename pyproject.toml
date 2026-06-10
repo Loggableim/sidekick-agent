@@ -58,6 +58,7 @@ include = [
     "runtime", "runtime.*", "runtime._compat", "runtime.cron", "runtime.cron.*",
     "runtime.gateway", "runtime.gateway.*",
     "shared", "shared.*",
+    "sidekick_cli", "sidekick_cli.*",
     "tests", "tests.*",
     "tools", "tools.*", "tools.environments", "tools.environments.*",
     "tools.web_providers", "tools.web_providers.*",

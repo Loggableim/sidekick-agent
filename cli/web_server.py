@@ -124,6 +124,18 @@ _PUBLIC_API_PATHS: frozenset = frozenset({
 })
 
 
+@app.get("/health")
+async def health():
+    """Lightweight readiness probe for launchers and installers."""
+    return {
+        "ok": True,
+        "service": "sidekick-dashboard",
+        "version": __version__,
+        "web_dist": str(WEB_DIST),
+        "web_dist_ready": (WEB_DIST / "index.html").exists(),
+    }
+
+
 def _has_valid_session_token(request: Request) -> bool:
     """True if the request carries a valid dashboard session token.
 
@@ -3783,7 +3795,7 @@ def mount_spa(application: FastAPI):
         ``prefix`` is the normalised ``X-Forwarded-Prefix`` (e.g. ``/hermes``)
         or empty string when served at root.
         """
-        html = _index_path.read_text()
+        html = _index_path.read_text(encoding="utf-8")
         chat_js = "true" if _DASHBOARD_EMBEDDED_CHAT_ENABLED else "false"
         token_script = (
             f'<script>window.__HERMES_SESSION_TOKEN__="{_SESSION_TOKEN}";'
@@ -3820,7 +3832,7 @@ def mount_spa(application: FastAPI):
         ):
             return JSONResponse({"error": "not found"}, status_code=404)
         prefix = _normalise_prefix(request.headers.get("x-forwarded-prefix"))
-        css = css_path.read_text()
+        css = css_path.read_text(encoding="utf-8")
         if prefix:
             for asset_dir in ("/fonts/", "/fonts-terminal/", "/ds-assets/", "/assets/"):
                 css = css.replace(f"url({asset_dir}", f"url({prefix}{asset_dir}")
@@ -3828,20 +3840,26 @@ def mount_spa(application: FastAPI):
                 css = css.replace(f"url('{asset_dir}", f"url('{prefix}{asset_dir}")
         return Response(content=css, media_type="text/css")
 
-    application.mount("/assets", StaticFiles(directory=WEB_DIST / "assets"), name="assets")
+    assets_dir = WEB_DIST / "assets"
+    if assets_dir.is_dir():
+        application.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @application.get("/{full_path:path}")
     async def serve_spa(full_path: str, request: Request):
         prefix = _normalise_prefix(request.headers.get("x-forwarded-prefix"))
-        file_path = WEB_DIST / full_path
+        candidate_paths = [WEB_DIST / full_path]
+        if full_path.startswith("static/") and not (WEB_DIST / "static").is_dir():
+            candidate_paths.append(WEB_DIST / full_path[len("static/"):])
+
         # Prevent path traversal via url-encoded sequences (%2e%2e/)
-        if (
-            full_path
-            and file_path.resolve().is_relative_to(WEB_DIST.resolve())
-            and file_path.exists()
-            and file_path.is_file()
-        ):
-            return FileResponse(file_path)
+        for file_path in candidate_paths:
+            if (
+                full_path
+                and file_path.resolve().is_relative_to(WEB_DIST.resolve())
+                and file_path.exists()
+                and file_path.is_file()
+            ):
+                return FileResponse(file_path)
         return _serve_index(prefix)
 
 

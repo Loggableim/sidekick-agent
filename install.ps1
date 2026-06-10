@@ -1016,10 +1016,29 @@ function Stop-RunningSidekickProcesses {
         } catch { }
     }
 
+    try {
+        $runtimeProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and
+                $_.CommandLine.IndexOf($InstallDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                $_.Name -in @("python.exe", "pythonw.exe", "sidekick.exe", "cmd.exe")
+            }
+        foreach ($proc in @($runtimeProcs)) {
+            try {
+                Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+                $stopped += $proc.ProcessId
+            } catch {
+                Write-Warn "Could not stop Sidekick runtime PID $($proc.ProcessId): $_"
+            }
+        }
+    } catch {
+        Write-Warn "Could not inspect Sidekick runtime processes: $_"
+    }
+
     if ($stopped.Count -gt 0) {
         Write-Success "Stopped running Sidekick process(es): $($stopped -join ', ')"
     } else {
-        Write-Info "No running sidekick.exe process found"
+        Write-Info "No running Sidekick runtime process found"
     }
 }
 
@@ -1691,33 +1710,83 @@ function Main {
     try {
         $desktopPath = [Environment]::GetFolderPath("Desktop")
         $batPath = "$desktopPath\Sidekick.bat"
+        $lnkPath = "$desktopPath\Sidekick.lnk"
+        $launcherDir = "$SidekickHome\launcher"
+        $gatewayCmdPath = "$launcherDir\Sidekick-Gateway.cmd"
+        $webuiCmdPath = "$launcherDir\Sidekick-WebUI.cmd"
+        New-Item -ItemType Directory -Force -Path $launcherDir | Out-Null
+
+        $commonLauncherLines = @(
+            'cd /d "' + $InstallDir + '"'
+            'set "SIDEKICK_HOME=' + $SidekickHome + '"'
+            'set "HERMES_HOME=' + $SidekickHome + '"'
+            'set "SIDEKICK_WEBUI_PORT=8787"'
+            'set "PYTHONUTF8=1"'
+            'set "PYTHONIOENCODING=utf-8"'
+            'set "PYTHON_EXE=' + $script:VenvPath + '\Scripts\python.exe"'
+            'set "PATH=' + $script:VenvPath + '\Scripts;' + $SidekickHome + '\git\cmd;' + $SidekickHome + '\git\bin;' + $SidekickHome + '\git\usr\bin;' + $SidekickHome + '\node;%PATH%"'
+            'if exist "' + $SidekickHome + '\git\bin\bash.exe" set "SIDEKICK_GIT_BASH_PATH=' + $SidekickHome + '\git\bin\bash.exe"'
+            'if not defined SIDEKICK_GIT_BASH_PATH if exist "' + $SidekickHome + '\git\usr\bin\bash.exe" set "SIDEKICK_GIT_BASH_PATH=' + $SidekickHome + '\git\usr\bin\bash.exe"'
+            'set "LOGDIR=' + $SidekickHome + '\logs"'
+            'if not exist "%LOGDIR%" mkdir "%LOGDIR%"'
+            'set "LOGFILE=%LOGDIR%\desktop-shortcut.log"'
+            'set "GATEWAY_LOGFILE=%LOGDIR%\desktop-gateway.log"'
+            'set "WEBUI_LOGFILE=%LOGDIR%\desktop-webui.log"'
+        )
+
+        $gatewayContent = @(
+            '@echo off'
+            'title Sidekick Gateway'
+        ) + $commonLauncherLines + @(
+            'echo [%date% %time%] Gateway child starting >> "%LOGFILE%"'
+            '"%PYTHON_EXE%" -m sidekick_app gateway run --replace --quiet >> "%GATEWAY_LOGFILE%" 2>&1'
+            'set "EXIT_CODE=%ERRORLEVEL%"'
+            'echo [%date% %time%] Gateway child exited with %EXIT_CODE% >> "%LOGFILE%"'
+            'exit /b %EXIT_CODE%'
+        )
+        Set-Content -Path $gatewayCmdPath -Value ($gatewayContent -join [Environment]::NewLine) -Encoding ASCII
+
+        $webuiContent = @(
+            '@echo off'
+            'title Sidekick WebUI'
+        ) + $commonLauncherLines + @(
+            'echo [%date% %time%] WebUI child starting >> "%LOGFILE%"'
+            '"%PYTHON_EXE%" -m sidekick_app dashboard --host 127.0.0.1 --port 8787 --no-open >> "%WEBUI_LOGFILE%" 2>&1'
+            'set "EXIT_CODE=%ERRORLEVEL%"'
+            'echo [%date% %time%] WebUI child exited with %EXIT_CODE% >> "%LOGFILE%"'
+            'exit /b %EXIT_CODE%'
+        )
+        Set-Content -Path $webuiCmdPath -Value ($webuiContent -join [Environment]::NewLine) -Encoding ASCII
+
         $batContent = @(
             '@echo off'
             'title Sidekick Agent'
-            'cd /d "' + $InstallDir + '"'
-            'set SIDEKICK_HOME=' + $SidekickHome
-            'set HERMES_HOME=' + $SidekickHome
-            'set SIDEKICK_WEBUI_PORT=8787'
-            'set LOGDIR=' + $SidekickHome + '\logs'
-            'if not exist "%LOGDIR%" mkdir "%LOGDIR%"'
-            'set LOGFILE=%LOGDIR%\desktop-shortcut.log'
+        ) + $commonLauncherLines + @(
             'echo [%date% %time%] Starting Sidekick shortcut > "%LOGFILE%"'
-            'if not exist "' + $script:VenvPath + '\Scripts\python.exe" ('
-            '  echo [%date% %time%] ERROR: missing Python at "' + $script:VenvPath + '\Scripts\python.exe" >> "%LOGFILE%"'
+            'type nul > "%GATEWAY_LOGFILE%"'
+            'type nul > "%WEBUI_LOGFILE%"'
+            'echo [%date% %time%] PATH=%PATH% >> "%LOGFILE%"'
+            'echo [%date% %time%] Gateway log: %GATEWAY_LOGFILE% >> "%LOGFILE%"'
+            'echo [%date% %time%] WebUI log: %WEBUI_LOGFILE% >> "%LOGFILE%"'
+            'if not exist "%PYTHON_EXE%" ('
+            '  echo [%date% %time%] ERROR: missing Python at "%PYTHON_EXE%" >> "%LOGFILE%"'
             '  echo ERROR: Sidekick Python runtime not found.'
-            '  echo Expected: ' + $script:VenvPath + '\Scripts\python.exe'
+            '  echo Expected: %PYTHON_EXE%'
             '  echo See log: %LOGFILE%'
             '  pause'
             '  exit /b 1'
             ')'
             'echo [1/2] Starte Gateway (Agent-Kommunikation)...'
-            'start "Sidekick Gateway" /min cmd /c ""' + $script:VenvPath + '\Scripts\python.exe" -m sidekick_app gateway run --replace --quiet >> "%LOGFILE%" 2>&1"'
+            'echo [%date% %time%] Starting gateway >> "%LOGFILE%"'
+            'start "Sidekick Gateway" /min "%ComSpec%" /c call "' + $gatewayCmdPath + '"'
             'echo [2/2] Starte WebUI...'
-            'start "Sidekick WebUI" /min cmd /c ""' + $script:VenvPath + '\Scripts\python.exe" -m sidekick_app dashboard --host 127.0.0.1 --port 8787 >> "%LOGFILE%" 2>&1"'
-            'set HEALTH_URL=http://127.0.0.1:8787/health'
-            'set WEBUI_URL=http://127.0.0.1:8787'
+            'echo [%date% %time%] Starting dashboard >> "%LOGFILE%"'
+            'start "Sidekick WebUI" /min "%ComSpec%" /c call "' + $webuiCmdPath + '"'
+            'set "HEALTH_URL=http://127.0.0.1:8787/health"'
+            'set "WEBUI_URL=http://127.0.0.1:8787"'
             'set /a READY=0'
-            'for /l %%I in (1,1,30) do ('
+            'echo Waiting for WebUI health check: %HEALTH_URL%'
+            'for /l %%I in (1,1,180) do ('
             '  powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 ''%HEALTH_URL%''; if ($r.StatusCode -eq 200) { exit 0 } } catch { exit 1 }; exit 1"'
             '  if not errorlevel 1 ('
             '    set READY=1'
@@ -1732,9 +1801,16 @@ function Main {
             '  echo [%date% %time%] Opening browser at %WEBUI_URL% >> "%LOGFILE%"'
             '  start "" "%WEBUI_URL%"'
             ') else ('
-            '  echo [%date% %time%] ERROR: WebUI did not become ready at %HEALTH_URL% within 30s >> "%LOGFILE%"'
-            '  echo ERROR: WebUI did not become ready within 30 seconds.'
+            '  echo [%date% %time%] ERROR: WebUI did not become ready at %HEALTH_URL% within 180s >> "%LOGFILE%"'
+            '  echo ERROR: WebUI did not become ready within 180 seconds.'
             '  echo See log: %LOGFILE%'
+            '  echo.'
+            '  echo --- launcher log ---'
+            '  powershell -NoProfile -Command "if (Test-Path -LiteralPath ''%LOGFILE%'') { Get-Content -LiteralPath ''%LOGFILE%'' -Tail 80 }"'
+            '  echo --- webui log ---'
+            '  powershell -NoProfile -Command "if (Test-Path -LiteralPath ''%WEBUI_LOGFILE%'') { Get-Content -LiteralPath ''%WEBUI_LOGFILE%'' -Tail 80 }"'
+            '  echo --- gateway log ---'
+            '  powershell -NoProfile -Command "if (Test-Path -LiteralPath ''%GATEWAY_LOGFILE%'') { Get-Content -LiteralPath ''%GATEWAY_LOGFILE%'' -Tail 40 }"'
             '  pause'
             '  exit /b 2'
             ')'
@@ -1749,9 +1825,24 @@ function Main {
             'taskkill /f /fi "WINDOWTITLE eq Sidekick WebUI" >nul 2>&1'
             'taskkill /f /fi "WINDOWTITLE eq Sidekick Gateway" >nul 2>&1'
             'echo Done.'
-        ) -join [Environment]::NewLine
+        )
+        $batContent = $batContent -join [Environment]::NewLine
         Set-Content -Path $batPath -Value $batContent -Encoding ASCII
-    } catch { }
+        try {
+            $shell = New-Object -ComObject WScript.Shell
+            $shortcut = $shell.CreateShortcut($lnkPath)
+            $shortcut.TargetPath = $batPath
+            $shortcut.Arguments = ""
+            $shortcut.WorkingDirectory = $InstallDir
+            $shortcut.Description = "Start Sidekick WebUI"
+            $shortcut.IconLocation = "$script:PythonExe,0"
+            $shortcut.Save()
+        } catch {
+            Write-Warn "Could not create .lnk shortcut, .bat launcher is available: $batPath"
+        }
+    } catch {
+        throw "Desktop launcher creation failed: $_"
+    }
     Write-Success "Desktop shortcut created"
 }
 
@@ -1762,8 +1853,11 @@ try {
     Main
 } catch {
     Write-Err "Installation failed: $_"
+    Pause-IfElevated -ExitCode 1
+    exit 1
 }
 
 Write-Host ""
 Write-Host "Press Enter to close this window..." -ForegroundColor Yellow
 $null = Read-Host
+exit 0
