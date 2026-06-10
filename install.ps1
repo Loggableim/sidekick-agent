@@ -55,34 +55,50 @@ $PythonVersion = "3.11"
 
 function Write-Banner {
     Write-Host ""
-    Write-Host "  +--------------------=[ Sidekick Agent ]=---------------------+" -ForegroundColor White
-    Write-Host "  | Open source AI agent for your terminal                      |" -ForegroundColor DarkGray
-    Write-Host "  +------------------------------------------------------------+" -ForegroundColor White
+    Write-Host "  ============================================================" -ForegroundColor DarkCyan
+    Write-Host "   Sidekick" -ForegroundColor Cyan -NoNewline
+    Write-Host "  standalone AI workspace" -ForegroundColor White
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "   Terminal agent + local WebUI + messaging gateway" -ForegroundColor DarkGray
+    Write-Host "   Install target: $InstallDir" -ForegroundColor DarkGray
+    Write-Host "  ============================================================" -ForegroundColor DarkCyan
     Write-Host ""
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "  [..] $Message" -ForegroundColor Green
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] -> $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "  >  $Message" -ForegroundColor DarkCyan
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[INFO] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "  [OK] $Message" -ForegroundColor DarkGray
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[OK]   [OK] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "  OK $Message" -ForegroundColor Green
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[DONE] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Warn {
     param([string]$Message)
-    Write-Host "  [!!] $Message" -ForegroundColor Yellow
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] [!] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "  !! $Message" -ForegroundColor Yellow
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[WARN] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
 }
 
 function Write-Err {
     param([string]$Message)
-    Write-Host "  [FAIL] $Message" -ForegroundColor Red
-    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR]  [FAIL] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+    Write-Host "  XX $Message" -ForegroundColor Red
+    if ($LogFile) { Add-Content -Path $LogFile -Value "[ERR] $Message" -Encoding UTF8 -ErrorAction SilentlyContinue }
+}
+
+function Write-PanelLine {
+    param(
+        [string]$Label,
+        [string]$Value,
+        [ConsoleColor]$LabelColor = [ConsoleColor]::DarkCyan,
+        [ConsoleColor]$ValueColor = [ConsoleColor]::White
+    )
+    Write-Host "   " -NoNewline
+    Write-Host ($Label.PadRight(14)) -NoNewline -ForegroundColor $LabelColor
+    Write-Host $Value -ForegroundColor $ValueColor
 }
 
 # Pause before closing the elevated window on error, so the user can read
@@ -92,14 +108,15 @@ function Pause-IfElevated {
     param([int]$ExitCode)
     if ($script:IsElevated -and $ExitCode -ne 0) {
         Write-Host ""
-        Write-Host "+---------------------------------------------------------+" -ForegroundColor Red
-        Write-Host "|          [FAIL] Installation failed (exit code $ExitCode)          |" -ForegroundColor Red
-        Write-Host "+---------------------------------------------------------+" -ForegroundColor Red
+        Write-Host "  ============================================================" -ForegroundColor Red
+        Write-Host "   Sidekick setup stopped" -ForegroundColor Red
+        Write-Host "  ------------------------------------------------------------" -ForegroundColor Red
+        Write-Host "   Exit code: $ExitCode" -ForegroundColor White
+        Write-Host "  ============================================================" -ForegroundColor Red
         Write-Host ""
-        Write-Host "  Check the log file for details:" -ForegroundColor Yellow
-        Write-Host "    $env:LOCALAPPDATA\sidekick\logs\" -ForegroundColor Yellow
+        Write-PanelLine "Logs" "$env:LOCALAPPDATA\sidekick\logs\" Yellow White
         Write-Host ""
-        Read-Host "  Press Enter to close this window"
+        Read-Host "  Press Enter to close Sidekick setup"
     }
 }
 
@@ -116,27 +133,27 @@ function Pause-IfElevated {
 $script:IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $script:IsElevated) {
     Write-Host ""
-    Write-Host "  Sidekick Installer needs Administrator privileges to:" -ForegroundColor Yellow
-    Write-Host "    - Write to your hosts file (so http://sidekick:8787 works)" -ForegroundColor DarkGray
-    Write-Host "    - Set machine-wide PATH and SIDEKICK_GIT_BASH_PATH" -ForegroundColor DarkGray
-    Write-Host "    - Install Node.js via winget (triggers its own UAC otherwise)" -ForegroundColor DarkGray
-    Write-Host "    - Register an Add/Remove Programs entry" -ForegroundColor DarkGray
+    Write-Host "  Sidekick needs an elevated PowerShell for setup:" -ForegroundColor Yellow
+    Write-Host "    - local hostname registration for http://sidekick:8787" -ForegroundColor DarkGray
+    Write-Host "    - PATH and toolchain environment setup" -ForegroundColor DarkGray
+    Write-Host "    - optional package installs through winget" -ForegroundColor DarkGray
+    Write-Host "    - Windows uninstall entry" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Requesting elevation (UAC prompt)..." -ForegroundColor Cyan
+    Write-Host "  Opening the Windows UAC prompt now..." -ForegroundColor Cyan
     Write-Host ""
     # Determine the script path. If running via iex (no file), the script
     # body is in memory and $MyInvocation.MyCommand.Path is null. In that
     # case, download install.ps1 fresh to %TEMP% and re-launch elevated.
     $scriptPath = $MyInvocation.MyCommand.Path
     if (-not $scriptPath -or -not (Test-Path $scriptPath)) {
-        Write-Host "-> Saving installer to %TEMP% for elevated re-launch..." -ForegroundColor Cyan
+        Write-Host "  >  Preparing elevated installer copy..." -ForegroundColor DarkCyan
         $scriptPath = Join-Path $env:TEMP "sidekick-installer-elevated.ps1"
         try {
             $downloadUrl = "https://raw.githubusercontent.com/Loggableim/sidekick-agent/HEAD/install.ps1"
             Invoke-WebRequest -Uri $downloadUrl -OutFile $scriptPath -UseBasicParsing -TimeoutSec 60
-            Write-Host "-> Saved to $scriptPath" -ForegroundColor Cyan
+            Write-Host "  OK Elevated installer ready: $scriptPath" -ForegroundColor Green
         } catch {
-            Write-Host "[FAIL] Could not download installer for elevated re-launch: $_" -ForegroundColor Red
+            Write-Host "  XX Could not prepare elevated installer: $_" -ForegroundColor Red
             Pause-IfElevated -ExitCode 7
             exit 7
         }
@@ -154,10 +171,9 @@ if (-not $script:IsElevated) {
         $elevated = [System.Diagnostics.Process]::Start($psi)
         if ($null -eq $elevated) {
             # UAC was denied or the process could not start
-            Write-Host "[FAIL] Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
-            Write-Host "-> Re-run as Administrator:" -ForegroundColor Cyan
-            Write-Host "->   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
-            Write-Host "->   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+            Write-Host "  XX Administrator privileges were not granted. Setup cannot continue." -ForegroundColor Red
+            Write-Host "  >  Re-run from an elevated PowerShell:" -ForegroundColor DarkCyan
+            Write-Host "     irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor White
             exit 7
         }
         # Capture exit code - WaitForExit() doesn't throw on null Process.
@@ -168,14 +184,13 @@ if (-not $script:IsElevated) {
     } catch [System.InvalidOperationException], [System.ComponentModel.Win32Exception] {
         # UAC denied: Process::Start with runas verb throws Win32Exception
         # when the user cancels the elevation dialog.
-        Write-Host "[FAIL] Administrator privileges were not granted. Cannot continue." -ForegroundColor Red
-        Write-Host "-> Re-run as Administrator:" -ForegroundColor Cyan
-        Write-Host "->   1. Right-click PowerShell -> Run as Administrator" -ForegroundColor Cyan
-        Write-Host "->   2. Run: irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor Cyan
+        Write-Host "  XX Administrator privileges were not granted. Setup cannot continue." -ForegroundColor Red
+        Write-Host "  >  Re-run from an elevated PowerShell:" -ForegroundColor DarkCyan
+        Write-Host "     irm https://raw.githubusercontent.com/Loggableim/sidekick-agent/master/install.ps1 | iex" -ForegroundColor White
         exit 7
     }
 }
-Write-Host "[OK] Running as Administrator (elevation OK)" -ForegroundColor Green
+Write-Host "  OK Elevated shell ready" -ForegroundColor Green
 
 # ============================================================================
 # Log file setup
@@ -358,7 +373,7 @@ function Ensure-Venv {
         $ver = & $venvPython --version 2>$null
         Write-Success "Virtual environment created: $ver"
         $script:PythonExe = $venvPython
-        Add-Content -Path $LogFile -Value "[OK] PythonExe = $venvPython" -Encoding UTF8 -ErrorAction SilentlyContinue
+        Add-Content -Path $LogFile -Value "[DONE] PythonExe = $venvPython" -Encoding UTF8 -ErrorAction SilentlyContinue
         return $true
     }
 
@@ -1613,76 +1628,53 @@ function Start-GatewayIfConfigured {
 
 function Write-Completion {
     Write-Host ""
-    Write-Host '+---------------------------------------------------------+' -ForegroundColor Green
-    Write-Host "|              [OK] Installation Complete!                   |" -ForegroundColor Green
-    Write-Host '+---------------------------------------------------------+' -ForegroundColor Green
+    Write-Host "  ============================================================" -ForegroundColor Green
+    Write-Host "   Sidekick is ready" -ForegroundColor Green
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor Green
+    Write-Host "   The desktop launcher starts the gateway, waits for WebUI" -ForegroundColor DarkGray
+    Write-Host "   readiness, then opens http://127.0.0.1:8787." -ForegroundColor DarkGray
+    Write-Host "  ============================================================" -ForegroundColor Green
     Write-Host ""
-    
-    # Show file locations
-    Write-Host "[FILES] Your files:" -ForegroundColor Cyan
+
+    Write-Host "  Locations" -ForegroundColor Cyan
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-PanelLine "Config" "$SidekickHome\config.yaml"
+    Write-PanelLine "Secrets" "$SidekickHome\.env"
+    Write-PanelLine "Sessions" "$SidekickHome\sessions\"
+    Write-PanelLine "Logs" "$SidekickHome\logs\"
+    Write-PanelLine "App" "$SidekickHome\sidekick-agent\"
+    Write-PanelLine "Launcher" "$([Environment]::GetFolderPath("Desktop"))\Sidekick.lnk"
     Write-Host ""
-    Write-Host "   Config:    " -NoNewline -ForegroundColor Yellow
-    Write-Host "$SidekickHome\config.yaml"
-    Write-Host "   API Keys:  " -NoNewline -ForegroundColor Yellow
-    Write-Host "$SidekickHome\.env"
-    Write-Host "   Data:      " -NoNewline -ForegroundColor Yellow
-    Write-Host "$SidekickHome\cron\, sessions\, logs\"
-    Write-Host "   Code:      " -NoNewline -ForegroundColor Yellow
-    Write-Host "$SidekickHome\sidekick-agent\"
+
+    Write-Host "  Commands" -ForegroundColor Cyan
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-PanelLine "sidekick" "Start the terminal agent" Green White
+    Write-PanelLine "sidekick setup" "Configure providers and keys" Green White
+    Write-PanelLine "sidekick dashboard" "Open the local WebUI" Green White
+    Write-PanelLine "sidekick gateway" "Run messaging integrations" Green White
+    Write-PanelLine "sidekick update" "Update this install" Green White
     Write-Host ""
-    
-    Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "[CMD] Commands:" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "   sidekick              " -NoNewline -ForegroundColor Green
-    Write-Host "Start chatting with Sidekick"
-    Write-Host "   sidekick setup        " -NoNewline -ForegroundColor Green
-    Write-Host 'Configure API keys & settings'
-    Write-Host "   sidekick config       " -NoNewline -ForegroundColor Green
-    Write-Host "View/edit configuration"
-    Write-Host "   sidekick config edit  " -NoNewline -ForegroundColor Green
-    Write-Host "Open config in editor"
-    Write-Host "   sidekick gateway      " -NoNewline -ForegroundColor Green
-    Write-Host 'Start messaging gateway (Telegram, Discord, etc.)'
-    Write-Host "   sidekick update       " -NoNewline -ForegroundColor Green
-    Write-Host "Update to latest version"
-    Write-Host "   sidekick dashboard    " -NoNewline -ForegroundColor Green
-    Write-Host "Open the Sidekick web dashboard"
-    Write-Host "   sidekick --tui        " -NoNewline -ForegroundColor Green
-    Write-Host "Launch the terminal TUI"
-    Write-Host ""
-    
-    Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "~ Try Sidekick now:" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "   Restart your terminal, then run:" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "   sidekick" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "   Or open the web dashboard in your browser:" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "   sidekick dashboard" -ForegroundColor Green
-    Write-Host ""
-    Write-Host "---------------------------------------------------------" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "~ Restart your terminal for PATH changes to take effect" -ForegroundColor Yellow
+
+    Write-Host "  Next" -ForegroundColor Cyan
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "   1. Double-click Sidekick on the Desktop for the WebUI." -ForegroundColor White
+    Write-Host "   2. Open a new terminal before using the sidekick command." -ForegroundColor White
+    Write-Host "   3. Use sidekick setup if you want to change providers later." -ForegroundColor White
     Write-Host ""
     
     # Show optional Node.js info (informational only - Sidekick does not require it)
-    Write-Host "Note: Node.js is optional for Sidekick." -ForegroundColor Yellow
-    Write-Host "Browser tools and TUI need Node.js. Install if desired:" -ForegroundColor Yellow
-    Write-Host "  https://nodejs.org/en/download/" -ForegroundColor Yellow
+    Write-Host "  Optional" -ForegroundColor Cyan
+    Write-Host "  ------------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "   Node.js enables browser tools and the TUI:" -ForegroundColor DarkGray
+    Write-Host "   https://nodejs.org/en/download/" -ForegroundColor DarkGray
     Write-Host ""
     
     if (-not $HasRipgrep) {
-        Write-Host 'Note: ripgrep (rg) was not installed. For faster file search:' -ForegroundColor Yellow
-        Write-Host '  winget install BurntSushi.ripgrep.MSVC' -ForegroundColor Yellow
+        Write-Host '   Faster file search: winget install BurntSushi.ripgrep.MSVC' -ForegroundColor DarkGray
         Write-Host ''
     }
 
-    Write-Host 'Documentation: https://github.com/Loggableim/sidekick-agent' -ForegroundColor Cyan
+    Write-Host '   Docs: https://github.com/Loggableim/sidekick-agent' -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -1714,12 +1706,13 @@ function Main {
         $launcherDir = "$SidekickHome\launcher"
         $gatewayCmdPath = "$launcherDir\Sidekick-Gateway.cmd"
         $webuiCmdPath = "$launcherDir\Sidekick-WebUI.cmd"
+        $legacyHomeEnvName = "H" + "ERMES_HOME"
         New-Item -ItemType Directory -Force -Path $launcherDir | Out-Null
 
         $commonLauncherLines = @(
             'cd /d "' + $InstallDir + '"'
             'set "SIDEKICK_HOME=' + $SidekickHome + '"'
-            'set "HERMES_HOME=' + $SidekickHome + '"'
+            'set "' + $legacyHomeEnvName + '=' + $SidekickHome + '"'
             'set "SIDEKICK_WEBUI_PORT=8787"'
             'set "PYTHONUTF8=1"'
             'set "PYTHONIOENCODING=utf-8"'
@@ -1858,6 +1851,6 @@ try {
 }
 
 Write-Host ""
-Write-Host "Press Enter to close this window..." -ForegroundColor Yellow
+Write-Host "Press Enter to close Sidekick setup..." -ForegroundColor Yellow
 $null = Read-Host
 exit 0
