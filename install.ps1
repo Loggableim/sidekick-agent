@@ -125,7 +125,7 @@ function Pause-IfElevated {
 # Admin rights - REQUIRED for Sidekick installer
 # ============================================================================
 # Sidekick needs admin for:
-#   - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:8787)
+#   - Writing to C:\Windows\System32\drivers\etc\hosts (http://sidekick:9119)
 #   - Setting machine-wide environment variables (PATH, SIDEKICK_GIT_BASH_PATH)
 #   - winget (Node.js) needs elevation to install per-machine
 #   - Optional: Add/Remove Programs entry for clean uninstall
@@ -135,7 +135,7 @@ $script:IsElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.W
 if (-not $script:IsElevated) {
     Write-Host ""
     Write-Host "  Sidekick needs an elevated PowerShell for setup:" -ForegroundColor Yellow
-    Write-Host "    - local hostname registration for http://sidekick:8787" -ForegroundColor DarkGray
+    Write-Host "    - local hostname registration for http://sidekick:9119" -ForegroundColor DarkGray
     Write-Host "    - PATH and toolchain environment setup" -ForegroundColor DarkGray
     Write-Host "    - optional package installs through winget" -ForegroundColor DarkGray
     Write-Host "    - Windows uninstall entry" -ForegroundColor DarkGray
@@ -1699,7 +1699,7 @@ function Start-WebUI {
         Write-Info "Starting WebUI in background..."
         try {
             $webuiLogFile = "$SidekickHome\logs\webui.log"
-            Start-Process -FilePath $sidekickCmd -ArgumentList "dashboard --port 8787 --no-open --skip-build" `
+            Start-Process -FilePath $sidekickCmd -ArgumentList "dashboard --port 9119 --no-open --skip-build" `
                 -RedirectStandardOutput $webuiLogFile `
                 -RedirectStandardError "$SidekickHome\logs\webui-error.log" `
                 -WindowStyle Hidden
@@ -1710,7 +1710,7 @@ function Start-WebUI {
             for ($i = 0; $i -lt $maxAttempts; $i++) {
                 Start-Sleep -Seconds 2
                 try {
-                    $healthResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8787/health" -TimeoutSec 2
+                    $healthResponse = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:9119/health" -TimeoutSec 2
                     if ($healthResponse.StatusCode -eq 200) {
                         $ready = $true
                         break
@@ -1722,15 +1722,15 @@ function Start-WebUI {
 
             if ($ready) {
                 Write-Success "WebUI is ready!"
-                Write-Info "Opening http://127.0.0.1:8787 in your browser..."
-                Start-Process "http://127.0.0.1:8787"
+                Write-Info "Opening http://127.0.0.1:9119 in your browser..."
+                Start-Process "http://127.0.0.1:9119"
                 $script:WebUIStarted = $true
             } else {
                 Write-Warn "WebUI did not become ready within 60 seconds."
-                Write-Info "Start it manually: sidekick dashboard --port 8787"
+                Write-Info "Start it manually: sidekick dashboard --port 9119"
             }
         } catch {
-            Write-Warn "Failed to start WebUI. Start it manually: sidekick dashboard --port 8787"
+            Write-Warn "Failed to start WebUI. Start it manually: sidekick dashboard --port 9119"
         }
     } else {
         Write-Info "Skipped. Start the WebUI later with: sidekick dashboard"
@@ -1743,10 +1743,10 @@ function Write-Completion {
     Write-Host "   Sidekick is ready" -ForegroundColor Green
     Write-Host "  ------------------------------------------------------------" -ForegroundColor Green
     if ($script:WebUIStarted) {
-        Write-Host "   WebUI is running at http://127.0.0.1:8787" -ForegroundColor DarkGray
+        Write-Host "   WebUI is running at http://127.0.0.1:9119" -ForegroundColor DarkGray
     } else {
         Write-Host "   The desktop launcher starts the gateway, waits for WebUI" -ForegroundColor DarkGray
-        Write-Host "   readiness, then opens http://127.0.0.1:8787." -ForegroundColor DarkGray
+        Write-Host "   readiness, then opens http://127.0.0.1:9119." -ForegroundColor DarkGray
     }
     Write-Host "  ============================================================" -ForegroundColor Green
     Write-Host ""
@@ -1758,6 +1758,7 @@ function Write-Completion {
     Write-PanelLine "Sessions" "$SidekickHome\sessions\"
     Write-PanelLine "Logs" "$SidekickHome\logs\"
     Write-PanelLine "App" "$SidekickHome\sidekick-agent\"
+    Write-PanelLine "Local start" "$SidekickHome\launcher.bat"
     Write-PanelLine "Launcher" "$([Environment]::GetFolderPath("Desktop"))\Sidekick.lnk"
     Write-Host ""
 
@@ -1823,13 +1824,23 @@ function Main {
         $gatewayCmdPath = "$launcherDir\Sidekick-Gateway.cmd"
         $webuiCmdPath = "$launcherDir\Sidekick-WebUI.cmd"
         $legacyHomeEnvName = "H" + "ERMES_HOME"
+        $portableLauncherBat = "$SidekickHome\launcher.bat"
+        $portableLauncherPs1 = "$SidekickHome\Sidekick-Launcher.ps1"
         New-Item -ItemType Directory -Force -Path $launcherDir | Out-Null
+        foreach ($copySpec in @(
+            @{ Source = "$InstallDir\launcher.bat"; Destination = $portableLauncherBat },
+            @{ Source = "$InstallDir\Sidekick-Launcher.ps1"; Destination = $portableLauncherPs1 }
+        )) {
+            if (Test-Path $copySpec.Source) {
+                Copy-Item -LiteralPath $copySpec.Source -Destination $copySpec.Destination -Force
+            }
+        }
 
         $commonLauncherLines = @(
             'cd /d "' + $InstallDir + '"'
             'set "SIDEKICK_HOME=' + $SidekickHome + '"'
             'set "' + $legacyHomeEnvName + '=' + $SidekickHome + '"'
-            'set "SIDEKICK_WEBUI_PORT=8787"'
+            'set "SIDEKICK_WEBUI_PORT=9119"'
             'set "PYTHONUTF8=1"'
             'set "PYTHONIOENCODING=utf-8"'
             'set "PYTHON_EXE=' + $script:VenvPath + '\Scripts\python.exe"'
@@ -1860,7 +1871,7 @@ function Main {
             'title Sidekick WebUI'
         ) + $commonLauncherLines + @(
             'echo [%date% %time%] WebUI child starting >> "%LOGFILE%"'
-            '"%PYTHON_EXE%" -m sidekick_app dashboard --host 127.0.0.1 --port 8787 --no-open >> "%WEBUI_LOGFILE%" 2>&1'
+            '"%PYTHON_EXE%" -m sidekick_app dashboard --host 127.0.0.1 --port 9119 --no-open >> "%WEBUI_LOGFILE%" 2>&1'
             'set "EXIT_CODE=%ERRORLEVEL%"'
             'echo [%date% %time%] WebUI child exited with %EXIT_CODE% >> "%LOGFILE%"'
             'exit /b %EXIT_CODE%'
@@ -1891,8 +1902,8 @@ function Main {
             'echo [2/2] Starte WebUI...'
             'echo [%date% %time%] Starting dashboard >> "%LOGFILE%"'
             'start "Sidekick WebUI" /min "%ComSpec%" /c call "' + $webuiCmdPath + '"'
-            'set "HEALTH_URL=http://127.0.0.1:8787/health"'
-            'set "WEBUI_URL=http://127.0.0.1:8787"'
+            'set "HEALTH_URL=http://127.0.0.1:9119/health"'
+            'set "WEBUI_URL=http://127.0.0.1:9119"'
             'set /a READY=0'
             'echo Waiting for WebUI health check: %HEALTH_URL%'
             'for /l %%I in (1,1,180) do ('
@@ -1924,7 +1935,7 @@ function Main {
             '  exit /b 2'
             ')'
             'echo.'
-            'echo WebUI: http://127.0.0.1:8787'
+            'echo WebUI: http://127.0.0.1:9119'
             'echo Gateway: aktiv (minimiert)'
             'echo.'
             'echo Log: %LOGFILE%'
@@ -1937,12 +1948,21 @@ function Main {
         )
         $batContent = $batContent -join [Environment]::NewLine
         Set-Content -Path $batPath -Value $batContent -Encoding ASCII
+        if (Test-Path $portableLauncherBat) {
+            $desktopWrapperContent = @(
+                '@echo off'
+                'cd /d "' + $SidekickHome + '"'
+                'call "' + $portableLauncherBat + '" %*'
+                'exit /b %ERRORLEVEL%'
+            ) -join [Environment]::NewLine
+            Set-Content -Path $batPath -Value $desktopWrapperContent -Encoding ASCII
+        }
         try {
             $shell = New-Object -ComObject WScript.Shell
             $shortcut = $shell.CreateShortcut($lnkPath)
             $shortcut.TargetPath = $batPath
             $shortcut.Arguments = ""
-            $shortcut.WorkingDirectory = $InstallDir
+            $shortcut.WorkingDirectory = $SidekickHome
             $shortcut.Description = "Start Sidekick WebUI"
             $shortcut.IconLocation = "$script:PythonExe,0"
             $shortcut.Save()

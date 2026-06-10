@@ -1477,6 +1477,32 @@ def _is_expiring(expires_at_iso: Any, skew_seconds: int) -> bool:
     return expires_epoch <= (time.time() + skew_seconds)
 
 
+def _agent_key_is_usable(state: Any, min_ttl_seconds: int = 60) -> bool:
+    """Return True when a short-lived agent key exists and is not expiring."""
+    if not isinstance(state, dict):
+        return False
+    key = state.get("agent_key") or state.get("api_key")
+    if not has_usable_secret(key):
+        return False
+    expires_at = state.get("agent_key_expires_at") or state.get("expires_at")
+    return not _is_expiring(expires_at, max(0, int(min_ttl_seconds or 0)))
+
+
+def resolve_nous_runtime_credentials(*args, **kwargs) -> Dict[str, Any]:
+    """Compatibility stub for legacy Nous Portal imports.
+
+    Sidekick no longer ships the Nous Portal OAuth flow. Keep this symbol so
+    shared runtime modules can import without crashing; explicit Nous usage
+    still fails closed with a clear provider error.
+    """
+    raise AuthError(
+        "Nous Portal authentication is not available in this Sidekick build. "
+        "Choose a configured provider with `sidekick model`.",
+        provider="nous",
+        code="provider_unavailable",
+    )
+
+
 def _coerce_ttl_seconds(expires_in: Any) -> int:
     try:
         ttl = int(expires_in)
