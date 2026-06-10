@@ -4443,14 +4443,15 @@ function syncWorkspaceDisplays(){
   const mobileAction=$('composerMobileWorkspaceAction');
   const mobileLabel=$('composerMobileWorkspaceLabel');
   const composerDropdown=$('composerWsDropdown');
+  const canChooseWorkspace = hasWorkspace || ((Array.isArray(_workspaceList) ? _workspaceList.length : 0) > 0);
   if(!hasWorkspace && composerDropdown) composerDropdown.classList.remove('open');
   // Only show workspace label once boot has finished to prevent
   // flash of "No workspace" before the saved session finishes loading.
   if(composerLabel) composerLabel.textContent=((S._bootReady?label:'') + (hasWorkspace && window._activeSpaceConfig?.project_dir && ws === window._activeSpaceConfig.project_dir ? ' ★' : ''));
   if(mobileLabel) mobileLabel.textContent=S._bootReady?label:'';
   if(composerChip){
-    composerChip.disabled=!hasWorkspace;
-    composerChip.title=hasWorkspace?ws:t('no_workspace');
+    composerChip.disabled=!canChooseWorkspace;
+    composerChip.title=hasWorkspace ? ws : ((S._bootReady && canChooseWorkspace) ? 'Choose workspace' : t('no_workspace'));
     composerChip.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
   }
   if(mobileAction){
