@@ -148,6 +148,7 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
+    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
 
     class _FakeSessionDB:
         def __init__(self, *args, **kwargs):

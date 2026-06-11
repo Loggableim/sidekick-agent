@@ -95,6 +95,27 @@ _log = logging.getLogger(__name__)
 
 app = FastAPI(title="Sidekick Agent", version=__version__)
 
+
+def _webui_version_token() -> str:
+    try:
+        from web.api.updates import WEBUI_VERSION
+
+        token = str(WEBUI_VERSION or __version__)
+    except Exception:
+        token = str(__version__)
+
+    if token.endswith("-dirty"):
+        try:
+            newest_mtime = max(
+                int(path.stat().st_mtime)
+                for path in WEB_DIST.rglob("*")
+                if path.is_file()
+            )
+            token = f"{token}-{newest_mtime:x}"
+        except Exception:
+            pass
+    return urllib.parse.quote(token, safe="")
+
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).
 # Generated fresh on every server start — dies when the process exits.
@@ -1055,7 +1076,9 @@ async def get_action_status(name: str, lines: int = 200):
 
 
 @app.get("/api/sessions")
-async def get_sessions(limit: int = 200, offset: int = 0):
+async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
+    if _is_old_frontend():
+        return await _proxy_request_to_stdlib(request)
     try:
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
@@ -1082,8 +1105,10 @@ async def get_sessions(limit: int = 200, offset: int = 0):
 
 
 @app.get("/api/sessions/search")
-async def search_sessions(q: str = "", limit: int = 20):
+async def search_sessions(request: Request, q: str = "", limit: int = 20):
     """Full-text search across session message content using FTS5."""
+    if _is_old_frontend():
+        return await _proxy_request_to_stdlib(request)
     if not q or not q.strip():
         return {"results": []}
     try:
@@ -3817,7 +3842,9 @@ def mount_spa(application: FastAPI):
         ``prefix`` is the normalised ``X-Forwarded-Prefix`` (e.g. ``/hermes``)
         or empty string when served at root.
         """
-        html = _index_path.read_text(encoding="utf-8")
+        html = _index_path.read_text(encoding="utf-8").replace(
+            "__WEBUI_VERSION__", _webui_version_token()
+        )
         chat_js = "true" if _DASHBOARD_EMBEDDED_CHAT_ENABLED else "false"
         token_script = (
             f'<script>window.__HERMES_SESSION_TOKEN__="{_SESSION_TOKEN}";'
@@ -3881,6 +3908,18 @@ def mount_spa(application: FastAPI):
                 and file_path.exists()
                 and file_path.is_file()
             ):
+                if file_path.name == "sw.js":
+                    text = file_path.read_text(encoding="utf-8").replace(
+                        "__WEBUI_VERSION__", _webui_version_token()
+                    )
+                    return Response(
+                        content=text,
+                        media_type="application/javascript; charset=utf-8",
+                        headers={
+                            "Cache-Control": "no-store",
+                            "Service-Worker-Allowed": "/",
+                        },
+                    )
                 return FileResponse(file_path)
         return _serve_index(prefix)
 
@@ -5027,30 +5066,13 @@ def _proxy_stream(
 _STREAMING_PREFIXES = ("/api/chat/stream", "/api/chat/stream/")
 
 
-@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
-async def api_stdlib_proxy(request: Request, path: str):
-    """Proxy /api/* requests that no FastAPI route matched → stdlib backend."""
-    # Build the full path + query string
-    full_path = "/api/" + path
+async def _proxy_request_to_stdlib(request: Request) -> Response:
+    full_path = request.url.path
     if request.url.query:
         full_path += "?" + request.url.query
 
     body = await request.body()
     headers = dict(request.headers)
-
-    is_stream = any(full_path.startswith(p) for p in _STREAMING_PREFIXES)
-
-    if is_stream:
-        loop = asyncio.get_event_loop()
-        gen = await loop.run_in_executor(
-            None,
-            functools.partial(_proxy_stream, request.method, full_path, headers, body),
-        )
-        return StreamingResponse(
-            gen, media_type="text/event-stream",
-            headers={"Cache-Control": "no-store", "Connection": "keep-alive"},
-        )
-
     loop = asyncio.get_event_loop()
     status, resp_body, resp_headers, content_type = await loop.run_in_executor(
         None,
@@ -5062,6 +5084,32 @@ async def api_stdlib_proxy(request: Request, path: str):
         media_type=content_type,
         headers=_safe_proxy_response_headers(resp_headers),
     )
+
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+async def api_stdlib_proxy(request: Request, path: str):
+    """Proxy /api/* requests that no FastAPI route matched → stdlib backend."""
+    # Build the full path + query string
+    full_path = "/api/" + path
+    if request.url.query:
+        full_path += "?" + request.url.query
+
+    is_stream = any(full_path.startswith(p) for p in _STREAMING_PREFIXES)
+
+    if is_stream:
+        body = await request.body()
+        headers = dict(request.headers)
+        loop = asyncio.get_event_loop()
+        gen = await loop.run_in_executor(
+            None,
+            functools.partial(_proxy_stream, request.method, full_path, headers, body),
+        )
+        return StreamingResponse(
+            gen, media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "Connection": "keep-alive"},
+        )
+
+    return await _proxy_request_to_stdlib(request)
 
 
 mount_spa(app)

@@ -975,10 +975,24 @@ function _isCliSession(session) {
     || session.source_label
     || ''
   ).toLowerCase();
+  if (raw === 'webui') return false;
   if (raw === 'cli') return true;
   // If messaging-like, don't classify as legacy CLI even when is_cli_session is true.
   if (_isMessagingSession(session)) return false;
   return session.is_cli_session === true;
+}
+
+function _isCronSession(session) {
+  if (!session) return false;
+  const raw = (
+    session.session_source
+    || session.raw_source
+    || session.source_tag
+    || session.source
+    || session.source_label
+    || ''
+  ).toLowerCase();
+  return raw === 'cron' || raw === 'scheduled' || raw === 'automation' || session.is_cron_session === true;
 }
 
 function _normalizeMessageForCliImportComparison(message) {
@@ -2336,7 +2350,8 @@ function _formatSessionDate(timestampMs, nowMs) {
 }
 
 function _formatRelativeSessionTime(timestampMs, nowMs) {
-  if (!timestampMs) return t('session_time_unknown');
+  if (!Number.isFinite(Number(timestampMs)) || Number(timestampMs) <= 0) return '';
+  timestampMs = Number(timestampMs);
   nowMs = nowMs || _serverNowMs();
   const diffMs = Math.max(0, nowMs - timestampMs);
   const minute = 60 * 1000;
@@ -2798,9 +2813,10 @@ function renderSessionListFromCache(){
   // Separate pinned from unpinned
   const pinned=orderedSessions.filter(s=>s.pinned);
   const unpinned=orderedSessions.filter(s=>!s.pinned);
-  // Separate CLI sessions into their own collapsible group
-  const cliSessions=unpinned.filter(s=>s.is_cli_session);
-  const nonCliUnpinned=unpinned.filter(s=>!s.is_cli_session);
+  // Keep machine-generated sessions out of the main chat chronology.
+  const cronSessions=unpinned.filter(s=>_isCronSession(s));
+  const cliSessions=unpinned.filter(s=>!_isCronSession(s)&&_isCliSession(s));
+  const nonCliUnpinned=unpinned.filter(s=>!_isCronSession(s)&&!_isCliSession(s));
   // Date grouping: Pinned / Today / Yesterday / This week / Last week / Older
   const now=_serverNowMs();
   // Collapse state persisted in localStorage
@@ -2825,6 +2841,11 @@ function renderSessionListFromCache(){
     const cliLabel='CLI ('+cliSessions.length+')';
     if(!_groupCollapsed.hasOwnProperty('__cli__')) _groupCollapsed['__cli__']=true; // collapsed by default
     groups.push({label:cliLabel,items:cliSessions,isCli:true,collapseKey:'__cli__'});
+  }
+  if(cronSessions.length){
+    const cronLabel='Automations ('+cronSessions.length+')';
+    if(!_groupCollapsed.hasOwnProperty('__cron__')) _groupCollapsed['__cron__']=true; // collapsed by default
+    groups.push({label:cronLabel,items:cronSessions,isCron:true,collapseKey:'__cron__'});
   }
   const flatSessionRows=[];
   for(const g of groups){
@@ -2879,12 +2900,12 @@ function renderSessionListFromCache(){
     const wrapper=document.createElement('div');
     wrapper.className='session-date-group';
     const hdr=document.createElement('div');
-    hdr.className='session-date-header'+(g.isPinned?' pinned':'')+(g.isCli?' cli-group-header':'');
+    hdr.className='session-date-header'+(g.isPinned?' pinned':'')+((g.isCli||g.isCron)?' cli-group-header':'');
     const caret=document.createElement('span');
     caret.className='session-date-caret';
     caret.textContent='\u25BE'; // down when expanded; rotated right when collapsed
     const label=document.createElement('span');
-    label.textContent=g.isCli?'\u25A8 '+g.label:g.label;
+    label.textContent=(g.isCli||g.isCron)?'\u25A8 '+g.label:g.label;
     hdr.appendChild(caret);hdr.appendChild(label);
     const body=document.createElement('div');
     body.className='session-date-body';
@@ -2943,7 +2964,7 @@ function renderSessionListFromCache(){
     const hasUnread=_hasUnreadForSession(s)&&!isActive;
     const readOnly=_isReadOnlySession(s);
     el.className='session-item'+(isActive?' active':'')+(isActive&&S.session&&S.session._flash?' new-flash':'')+(s.archived?' archived':'')+(isStreaming?' streaming':'')+(hasUnread?' unread':'');
-    if(s.is_cli_session){
+    if(_isCliSession(s)){
       el.classList.add('cli-session');
       el.dataset.source=_getChannelLabel(s)||'CLI';
       el.dataset.sourceKey=_sourceKeyForSession(s)||'cli';
@@ -3010,7 +3031,9 @@ function renderSessionListFromCache(){
     const ts=document.createElement('span');
     const hasAttentionState=isStreaming||hasUnread;
     ts.className='session-time'+(hasAttentionState?' is-hidden':'');
-    ts.textContent=hasAttentionState?'':_formatRelativeSessionTime(tsMs);
+    const relativeSessionTime=hasAttentionState?'':_formatRelativeSessionTime(tsMs);
+    ts.textContent=relativeSessionTime;
+    if(!relativeSessionTime) ts.classList.add('is-hidden');
     titleRow.appendChild(title);
     // Project color dot: placed BETWEEN title and timestamp, not inside the
     // title span. Inside the title span it would be clipped by the ellipsis

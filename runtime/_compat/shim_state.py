@@ -158,15 +158,39 @@ class SessionDB:
     # Minimal public API — matches what agent modules call
     # ------------------------------------------------------------------
 
+    def _table_columns(self, table: str) -> set[str]:
+        try:
+            rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        except Exception:
+            return set()
+        return {str(row["name"]) for row in rows}
+
+    def _session_pk_column(self) -> str:
+        columns = self._table_columns("sessions")
+        if "session_id" in columns:
+            return "session_id"
+        if "id" in columns:
+            return "id"
+        return "session_id"
+
+    def _normalize_session_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Expose a stable session_id key for legacy state.db schemas."""
+        if "session_id" not in row and row.get("id"):
+            row["session_id"] = row["id"]
+        if "id" not in row and row.get("session_id"):
+            row["id"] = row["session_id"]
+        return row
+
     def get_session(self, session_id: str) -> dict[str, Any] | None:
+        pk_col = self._session_pk_column()
         cursor = self._conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?",
+            f"SELECT * FROM sessions WHERE {pk_col} = ?",
             (session_id,),
         )
         row = cursor.fetchone()
         if row is None:
             return None
-        return dict(row)
+        return self._normalize_session_row(dict(row))
 
     def create_session(
         self,
@@ -180,11 +204,26 @@ class SessionDB:
         import time
 
         now = time.time()
+        columns = self._table_columns("sessions")
+        pk_col = "session_id" if "session_id" in columns else "id"
+        insert_cols = [pk_col]
+        values: list[Any] = [session_id]
+        for col, value in (
+            ("title", title),
+            ("source", source),
+            ("model", model),
+            ("system_prompt", system_prompt),
+            ("created_at", now),
+            ("started_at", now),
+            ("updated_at", now),
+        ):
+            if col in columns:
+                insert_cols.append(col)
+                values.append(value)
+        placeholders = ", ".join("?" for _ in insert_cols)
         self._conn.execute(
-            """INSERT OR IGNORE INTO sessions
-               (session_id, title, source, model, system_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (session_id, title, source, model, system_prompt, now, now),
+            f"INSERT OR IGNORE INTO sessions ({', '.join(insert_cols)}) VALUES ({placeholders})",
+            values,
         )
         return {
             "session_id": session_id,
@@ -199,9 +238,29 @@ class SessionDB:
     def update_title(self, session_id: str, title: str) -> None:
         import time
 
+        columns = self._table_columns("sessions")
+        pk_col = "session_id" if "session_id" in columns else "id"
+        set_clause = "title = ?"
+        values: list[Any] = [title]
+        if "updated_at" in columns:
+            set_clause += ", updated_at = ?"
+            values.append(time.time())
+        values.append(session_id)
         self._conn.execute(
-            "UPDATE sessions SET title = ?, updated_at = ? WHERE session_id = ?",
-            (title, time.time(), session_id),
+            f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?",
+            values,
+        )
+
+    def _is_internal_title_text(self, text: str) -> bool:
+        normalized = " ".join(str(text or "").strip().split()).lower()
+        if not normalized:
+            return True
+        return (
+            normalized.startswith("[important:")
+            or normalized.startswith("[system:")
+            or normalized.startswith("important:")
+            or "you are running as a scheduled cron job" in normalized
+            or "the user has invoked the" in normalized
         )
 
     def _derive_title_from_messages(self, session_id: str) -> str | None:
@@ -212,23 +271,25 @@ class SessionDB:
         when message history is present.
         """
         try:
-            row = self._conn.execute(
+            rows = self._conn.execute(
                 """
                 SELECT content
                 FROM messages
                 WHERE session_id = ? AND role = 'user'
                 ORDER BY timestamp ASC, id ASC
-                LIMIT 1
+                LIMIT 10
                 """,
                 (session_id,),
-            ).fetchone()
+            ).fetchall()
         except Exception:
             return None
-        if row is None:
+        if not rows:
             return None
 
-        content = row["content"]
-        if isinstance(content, str):
+        for row in rows:
+            content = row["content"]
+            if not isinstance(content, str):
+                continue
             text = content.strip()
             if text.startswith("[") or text.startswith("{"):
                 try:
@@ -243,7 +304,7 @@ class SessionDB:
                     ).strip()
                 elif isinstance(parsed, dict):
                     text = str(parsed.get("text") or parsed.get("content") or "").strip()
-            if text:
+            if text and not self._is_internal_title_text(text):
                 return text[:64]
         return None
 
@@ -263,17 +324,29 @@ class SessionDB:
         offset: int = 0,
         source: str | None = None,
     ) -> list[dict[str, Any]]:
-        if source:
+        columns = self._table_columns("sessions")
+        if "updated_at" in columns:
+            order_col = "updated_at"
+        elif "last_active" in columns:
+            order_col = "last_active"
+        elif "started_at" in columns:
+            order_col = "started_at"
+        elif "created_at" in columns:
+            order_col = "created_at"
+        else:
+            order_col = self._session_pk_column()
+
+        if source and "source" in columns:
             cursor = self._conn.execute(
-                "SELECT * FROM sessions WHERE source = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM sessions WHERE source = ? ORDER BY {order_col} DESC LIMIT ? OFFSET ?",
                 (source, limit, offset),
             )
         else:
             cursor = self._conn.execute(
-                "SELECT * FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM sessions ORDER BY {order_col} DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             )
-        rows = [dict(row) for row in cursor.fetchall()]
+        rows = [self._normalize_session_row(dict(row)) for row in cursor.fetchall()]
         for row in rows:
             title = str(row.get("title") or "").strip()
             if title and title.lower() not in {"untitled", "no title", "no-title"}:

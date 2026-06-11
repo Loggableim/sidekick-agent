@@ -69,6 +69,15 @@ DEFAULT_SPACE_NAME = (
     or os.getenv("HERMES_WEBUI_DEFAULT_SPACE_NAME", "Nova").strip()
     or "Nova"
 )
+DEFAULT_SPACE_ALIASES = {
+    alias.strip().lower()
+    for alias in (
+        os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE_ALIASES", "")
+        or os.getenv("HERMES_WEBUI_DEFAULT_SPACE_ALIASES", "novaspace,nova-space,nova_space")
+    ).split(",")
+    if alias.strip()
+}
+DEFAULT_SPACE_ALIASES.discard(DEFAULT_SPACE_SLUG)
 LEGACY_DEFAULT_SPACE_SLUG = "default"
 PROTECTED_SPACE_SLUGS = {DEFAULT_SPACE_SLUG, LEGACY_DEFAULT_SPACE_SLUG}
 CONSCIOUSNESS_SOURCE_SPACE_SLUG = (
@@ -82,6 +91,33 @@ DEFAULT_NOVA_CHARACTER = (
     or "nova"
 )
 _GENERIC_DEFAULT_SOUL_MARKER = "Customize this SOUL.md to define your personality and behavior."
+
+
+def _normalize_space_slug(slug: str) -> str:
+    value = str(slug or "").strip().lower()
+    if value in DEFAULT_SPACE_ALIASES:
+        return DEFAULT_SPACE_SLUG
+    return value
+
+
+def _is_empty_configless_space_dir(path: Path) -> bool:
+    """Return True for migration artefacts such as an empty ``novaspace`` dir."""
+    if not path.is_dir():
+        return False
+    if (path / "space.yaml").exists() or (path / "workspace.yaml").exists():
+        return False
+    sessions_dir = path / "sessions"
+    if sessions_dir.is_dir() and any(sessions_dir.glob("*.json")):
+        return False
+    allowed_dirs = {"agents", "memory", "sessions"}
+    allowed_files = {"nul"}
+    for child in path.iterdir():
+        if child.is_dir() and child.name in allowed_dirs:
+            continue
+        if child.is_file() and child.name.lower() in allowed_files:
+            continue
+        return False
+    return True
 
 # ── Exceptions ──────────────────────────────────────────────────────────────
 
@@ -504,6 +540,9 @@ def _scan_fs_for_spaces() -> list[Space]:
             if not child.is_dir():
                 continue
             slug = child.name.strip().lower()
+            if slug in DEFAULT_SPACE_ALIASES and _is_empty_configless_space_dir(child):
+                continue
+            slug = _normalize_space_slug(slug)
             if slug in seen_slugs:
                 continue  # new-format wins over old-format
             if slug == CONSCIOUSNESS_SOURCE_SPACE_SLUG and _uses_legacy_consciousness_alias():
@@ -564,7 +603,7 @@ def get_all_spaces() -> list[Space]:
 
 def get_space(slug: str) -> Space | None:
     """Look up a space by slug."""
-    slug = slug.strip().lower()
+    slug = _normalize_space_slug(slug)
     if slug == CONSCIOUSNESS_SOURCE_SPACE_SLUG and _uses_legacy_consciousness_alias():
         slug = DEFAULT_SPACE_SLUG
     for s in get_all_spaces():
@@ -575,6 +614,7 @@ def get_space(slug: str) -> Space | None:
 
 def get_or_create_space(slug: str, name: str = "") -> Space:
     """Return existing space or create a new one with default agent."""
+    slug = _normalize_space_slug(slug)
     existing = get_space(slug)
     if existing:
         existing.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -585,6 +625,9 @@ def get_or_create_space(slug: str, name: str = "") -> Space:
     space.root.mkdir(parents=True, exist_ok=True)
     space.memory_dir.mkdir(parents=True, exist_ok=True)
     space.ensure_agent("default", create_soul=True)
+    cfg = space.load_config()
+    cfg["name"] = name or (DEFAULT_SPACE_NAME if space.slug == DEFAULT_SPACE_SLUG else space.slug)
+    space.save_config(cfg)
     if space.slug == DEFAULT_SPACE_SLUG:
         _seed_default_space_from_consciousness()
     _invalidate_space_cache()
@@ -600,16 +643,18 @@ def create_space(
     nova_character: str = "",
 ) -> Space:
     """Create a brand-new space. Raises SpaceExists if slug taken."""
+    slug = _normalize_space_slug(slug)
     if get_space(slug):
         raise SpaceExists(f"space {slug!r} already exists")
     space = Space(slug, name or slug)
     space.root.mkdir(parents=True, exist_ok=True)
     space.memory_dir.mkdir(parents=True, exist_ok=True)
     space.ensure_agent("default", create_soul=True)
+    cfg = space.load_config()
+    cfg["name"] = name or (DEFAULT_SPACE_NAME if space.slug == DEFAULT_SPACE_SLUG else space.slug)
     if color:
-        cfg = space.load_config()
         cfg["color"] = color
-        space.save_config(cfg)
+    space.save_config(cfg)
     if space.slug == DEFAULT_SPACE_SLUG:
         _seed_default_space_from_consciousness()
     elif nova_instance:
