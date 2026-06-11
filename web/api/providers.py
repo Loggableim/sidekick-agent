@@ -1010,8 +1010,9 @@ def get_provider_quota(provider_id: str | None = None) -> dict[str, Any]:
 
 
 def _load_nova_state_snapshot_module():
-    root = Path(__file__).resolve().parents[2]
-    snapshot_path = root / "home" / "spaces" / "nova" / "state_snapshot.py"
+    from web.api.nova_paths import get_nova_state_snapshot_path
+
+    snapshot_path = get_nova_state_snapshot_path()
     nova_dir = str(snapshot_path.parent)
     if not snapshot_path.exists():
         return None

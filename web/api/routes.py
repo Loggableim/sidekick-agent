@@ -30,6 +30,7 @@ from web.api.agent_sessions import (
     read_session_lineage_report,
 )
 from web.api.compression_anchor import visible_messages_for_anchor
+from web.api.nova_paths import get_nova_state_snapshot_path
 
 logger = logging.getLogger(__name__)
 
@@ -232,8 +233,7 @@ def _load_nova_route_status() -> dict:
     Keep this loader self-contained and defensive so the WebUI never depends on
     the Nova space being importable at process start.
     """
-    root = Path(__file__).resolve().parents[2]
-    snapshot_path = root / "home" / "spaces" / "nova" / "state_snapshot.py"
+    snapshot_path = get_nova_state_snapshot_path()
     nova_dir = str(snapshot_path.parent)
     if not snapshot_path.exists():
         return {"healthy": False, "reason": "state_snapshot_missing"}

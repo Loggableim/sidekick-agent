@@ -36,6 +36,7 @@ from web.api.config import (
 from web.api.helpers import redact_session_data, _redact_text
 from web.api.compression_anchor import visible_messages_for_anchor
 from web.api.metering import meter
+from web.api.nova_paths import get_nova_session_start_path
 from web.api.turn_journal import append_turn_journal_event_for_stream
 
 # Global lock for os.environ writes. Per-session locks (_agent_lock) prevent
@@ -93,8 +94,7 @@ def _prewarm_skill_tool_modules():
 
 
 def _load_nova_session_start_module():
-    root = Path(__file__).resolve().parents[2]
-    session_start_path = root / "home" / "spaces" / "nova" / "session_start.py"
+    session_start_path = get_nova_session_start_path()
     nova_dir = str(session_start_path.parent)
     if not session_start_path.exists():
         return None

@@ -25,6 +25,11 @@ web = [
     "python-dotenv>=1.0",
     "cryptography>=41.0",
 ]
+nova = [
+    "numpy>=2.0",
+    "chromadb>=1.0",
+    "sentence-transformers>=5.0",
+]
 all = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
@@ -36,6 +41,9 @@ all = [
     "tiktoken>=0.5",
     "croniter>=2.0",
     "beautifulsoup4>=4.12",
+    "numpy>=2.0",
+    "chromadb>=1.0",
+    "sentence-transformers>=5.0",
 ]
 
 [project.scripts]
