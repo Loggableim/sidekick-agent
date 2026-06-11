@@ -1,5 +1,6 @@
 import pytest
 from pathlib import Path
+from starlette.requests import Request
 
 TestClient = pytest.importorskip("fastapi.testclient").TestClient
 
@@ -269,3 +270,60 @@ def test_proxy_forwards_original_host_for_legacy_csrf():
     assert forwarded["X-Forwarded-Host"] == "127.0.0.1:9119"
     assert forwarded["X-Real-Host"] == "127.0.0.1:9119"
     assert "content-length" not in {key.lower() for key in forwarded}
+
+
+def test_query_token_only_authenticates_event_streams():
+    from cli import web_server
+
+    good_stream_request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/chat/stream",
+            "headers": [],
+            "query_string": f"stream_id=s1&token={web_server._SESSION_TOKEN}".encode(),
+            "scheme": "http",
+            "server": ("127.0.0.1", 9119),
+            "client": ("127.0.0.1", 50000),
+        }
+    )
+    normal_api_request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/workspaces",
+            "headers": [],
+            "query_string": f"token={web_server._SESSION_TOKEN}".encode(),
+            "scheme": "http",
+            "server": ("127.0.0.1", 9119),
+            "client": ("127.0.0.1", 50000),
+        }
+    )
+
+    assert web_server._has_valid_session_token(good_stream_request)
+    assert not web_server._has_valid_session_token(normal_api_request)
+
+
+def test_proxy_stream_yields_sse_lines_without_buffering(monkeypatch):
+    from cli import web_server
+
+    class FakeResponse:
+        def __init__(self):
+            self.lines = iter([b"event: heartbeat\n", b"data: {}\n", b"\n", b""])
+
+        def readline(self):
+            return next(self.lines)
+
+    monkeypatch.setattr(web_server, "_ensure_stdlib_backend", lambda: 9123)
+    monkeypatch.setattr(web_server.urllib.request, "urlopen", lambda req, timeout: FakeResponse())
+
+    chunks = list(
+        web_server._proxy_stream(
+            "GET",
+            "/api/chat/stream?stream_id=s1",
+            {"host": "127.0.0.1:9119"},
+            None,
+        )
+    )
+
+    assert chunks == [b"event: heartbeat\n", b"data: {}\n", b"\n"]

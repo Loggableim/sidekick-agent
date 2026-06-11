@@ -124,6 +124,18 @@ def _webui_version_token() -> str:
 _SESSION_TOKEN = secrets.token_urlsafe(32)
 _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
 
+
+def _allows_query_session_token(request: Request) -> bool:
+    """EventSource cannot send custom headers, so allow token= for SSE only."""
+    if request.method.upper() != "GET":
+        return False
+    path = request.url.path
+    return (
+        path.endswith("/stream")
+        or "/stream/" in path
+        or path.endswith("/events")
+    )
+
 # In-browser Chat tab (/chat, /api/pty, …).  Off unless ``sidekick dashboard --tui``
 # or HERMES_DASHBOARD_TUI=1.  Set from :func:`start_server`.
 _DASHBOARD_EMBEDDED_CHAT_ENABLED = False
@@ -184,6 +196,14 @@ def _has_valid_session_token(request: Request) -> bool:
     if session_header and hmac.compare_digest(
         session_header.encode(),
         _SESSION_TOKEN.encode(),
+    ):
+        return True
+
+    query_token = request.query_params.get("token", "")
+    if (
+        query_token
+        and _allows_query_session_token(request)
+        and hmac.compare_digest(query_token.encode(), _SESSION_TOKEN.encode())
     ):
         return True
 
@@ -5064,7 +5084,7 @@ def _proxy_stream(
     try:
         resp = urllib.request.urlopen(req, timeout=300)
         while True:
-            chunk = resp.read(65536)
+            chunk = resp.readline()
             if not chunk:
                 break
             yield chunk

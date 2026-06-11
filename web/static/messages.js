@@ -569,6 +569,15 @@ function _renderPlanBanner(){
   }
 }
 
+function _eventSourceUrl(path){
+  const url=new URL(path,document.baseURI||location.href);
+  try{
+    const token=(typeof _dashboardSessionToken==='function')?_dashboardSessionToken():'';
+    if(token) url.searchParams.set('token',token);
+  }catch(_){}
+  return url.href;
+}
+
 function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   if(!activeSid||!streamId) return;
   const reconnecting=!!options.reconnecting;
@@ -716,7 +725,7 @@ let _latestGoalStatus=null;
     if(_streamSettledPollTimer){clearTimeout(_streamSettledPollTimer);_streamSettledPollTimer=null;}
   }
   function _openEventSource(){
-    const es=new EventSource(new URL(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`,document.baseURI||location.href).href,{withCredentials:true});
+    const es=new EventSource(_eventSourceUrl(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`),{withCredentials:true});
     _wireSSE(es);
     return es;
   }
@@ -3099,7 +3108,7 @@ function sendBrowserNotification(title,body){
 
 function attachBtwStream(parentSid, streamId, question){
   if(!parentSid||!streamId) return;
-  const src=new EventSource(new URL('api/chat/stream?stream_id='+encodeURIComponent(streamId), document.baseURI||location.href).href);
+  const src=new EventSource(_eventSourceUrl('api/chat/stream?stream_id='+encodeURIComponent(streamId)));
   let answer='';
   let btwRow=null;
   let _streamDone=false;
