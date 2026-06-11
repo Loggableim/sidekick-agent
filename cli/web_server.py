@@ -4994,11 +4994,20 @@ except Exception:
 
 
 def _forward_request_headers(headers: dict) -> dict[str, str]:
-    return {
+    forwarded = {
         str(k): str(v)
         for k, v in headers.items()
         if str(k).lower() not in _PROXY_DROP_HEADERS
     }
+    original_host = ""
+    for key, value in headers.items():
+        if str(key).lower() == "host":
+            original_host = str(value).strip()
+            break
+    if original_host:
+        forwarded.setdefault("X-Forwarded-Host", original_host)
+        forwarded.setdefault("X-Real-Host", original_host)
+    return forwarded
 
 
 def _safe_proxy_response_headers(headers: dict[str, str]) -> dict[str, str]:

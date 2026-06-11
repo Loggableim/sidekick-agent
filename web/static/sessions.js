@@ -19,6 +19,21 @@ let _loadingSessionId = null;
 let _activeSessionLoadAbortController = null;
 let _liveStreamRehydrateTimer = null;
 
+function _markExplicitSessionNavigation(skipBootRestore){
+  const nextEpoch = (Number(window.__sidekickSessionNavigationEpoch || 0) || 0) + 1;
+  window.__sidekickSessionNavigationEpoch = nextEpoch;
+  if (skipBootRestore) window.__sidekickSkipBootSessionRestore = true;
+  return nextEpoch;
+}
+
+function _cancelActiveSessionLoad(){
+  if (_activeSessionLoadAbortController) {
+    try { _activeSessionLoadAbortController.abort(); } catch (_) {}
+  }
+  _activeSessionLoadAbortController = null;
+  _loadingSessionId = null;
+}
+
 function _abortStaleSessionLoad(sid, previousState) {
   const newerLoadActive = _loadingSessionId && _loadingSessionId !== sid;
   if (newerLoadActive) return;
@@ -542,6 +557,78 @@ async function newSession(flash, options={}){
     try { browserSyncToCurrentSession({force:true, allowPending:true}); } catch (_) {}
   }
   // don't call renderSessionList here - callers do it when needed
+  return data;
+}
+
+function _currentSessionIsEmptyIdle(){
+  return !!(
+    S.session
+    && (S.session.message_count || 0) === 0
+    && !S.busy
+    && !S.session.active_stream_id
+    && !S.session.pending_user_message
+  );
+}
+
+function _clearStaleSidebarActiveForEmptySession(){
+  if (!_currentSessionIsEmptyIdle()) return;
+  document.querySelectorAll('.session-item.active').forEach((el) => {
+    if (el.dataset.sid !== S.session.session_id) el.classList.remove('active');
+  });
+}
+
+async function sidekickNewChat(){
+  try {
+    _markExplicitSessionNavigation(true);
+    _cancelActiveSessionLoad();
+    if (_currentSessionIsEmptyIdle()) {
+      if (S.session && S.session.session_id) {
+        localStorage.setItem('sidekick-webui-session', S.session.session_id);
+        if (typeof _setActiveSessionUrl === 'function') _setActiveSessionUrl(S.session.session_id);
+      } else {
+        localStorage.removeItem('sidekick-webui-session');
+      }
+      if (typeof renderSessionList === 'function') await renderSessionList();
+      _clearStaleSidebarActiveForEmptySession();
+      const msg = $('msg');
+      if (msg && typeof msg.focus === 'function') msg.focus();
+      if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
+      return S.session;
+    }
+    const data = await newSession();
+    if (typeof renderSessionList === 'function') await renderSessionList();
+    _clearStaleSidebarActiveForEmptySession();
+    if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
+    const msg = $('msg');
+    if (msg && typeof msg.focus === 'function') msg.focus();
+    return data && data.session ? data.session : S.session;
+  } catch (e) {
+    console.error('[sidekickNewChat] FAILED', e);
+    if (e && e.status) console.error('[sidekickNewChat] HTTP', e.status, e.statusText);
+    throw e;
+  }
+}
+
+window.sidekickNewChat = sidekickNewChat;
+
+function bindSidekickNewChatButtons(){
+  const buttons = document.querySelectorAll('#btnNewChat,.new-chat-btn');
+  buttons.forEach((button) => {
+    if (!button || button.dataset.sidekickNewChatBound === '1') return;
+    button.dataset.sidekickNewChatBound = '1';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      sidekickNewChat().catch(() => {});
+    });
+  });
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindSidekickNewChatButtons, {once: true});
+} else {
+  bindSidekickNewChatButtons();
 }
 
 async function loadSession(sid, options){

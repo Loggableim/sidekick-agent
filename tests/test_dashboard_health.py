@@ -251,3 +251,21 @@ def test_proxy_response_keeps_safe_stdlib_headers(monkeypatch):
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-accel-buffering"] == "no"
     assert "connection" not in {key.lower() for key in response.headers}
+
+
+def test_proxy_forwards_original_host_for_legacy_csrf():
+    from cli import web_server
+
+    forwarded = web_server._forward_request_headers(
+        {
+            "host": "127.0.0.1:9119",
+            "origin": "http://127.0.0.1:9119",
+            "content-length": "2",
+        }
+    )
+
+    assert "host" not in {key.lower() for key in forwarded}
+    assert forwarded["origin"] == "http://127.0.0.1:9119"
+    assert forwarded["X-Forwarded-Host"] == "127.0.0.1:9119"
+    assert forwarded["X-Real-Host"] == "127.0.0.1:9119"
+    assert "content-length" not in {key.lower() for key in forwarded}

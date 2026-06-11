@@ -1024,30 +1024,7 @@ window._micPendingSend=window._micPendingSend||false;
 })();
 $('fileInput').onchange=e=>{addFiles(Array.from(e.target.files));e.target.value='';};
 $('btnNewChat').onclick=async()=>{
-  try {
-    // If the current session has no messages AND nothing is in flight, just focus
-    // the composer rather than creating another empty session that will clutter the
-    // sidebar list (#1171).
-    //
-    // The "nothing in flight" half is critical (#1432): if the user clicks + while
-    // their first message is still streaming (or queued), `message_count` is still 0
-    // server-side because the user turn hasn't been merged yet. The old guard treated
-    // that as "empty" and made + a no-op for the entire stream duration, so users
-    // couldn't actually start a parallel chat. Use the same in-flight signal as
-    // `_restoreSettledSession()` in messages.js: an active stream id or a queued
-    // pending user message means the session is real, not empty.
-    if(S.session
-       && (S.session.message_count||0)===0
-       && !S.busy
-       && !S.session.active_stream_id
-       && !S.session.pending_user_message){
-      $('msg').focus();closeMobileSidebar();return;
-    }
-    await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
-  } catch(e) {
-    console.error('[btnNewChat] FAILED', e);
-    if(e && e.status) console.error('[btnNewChat] HTTP', e.status, e.statusText);
-  }
+  if (typeof sidekickNewChat === 'function') await sidekickNewChat();
 };
 $('btnDownload').onclick=()=>{
   if(!S.session)return;
@@ -1888,11 +1865,18 @@ async function _loadActiveSpaceConfig() {
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
   const savedLocal=localStorage.getItem('sidekick-webui-session');
   const saved=urlSession||savedLocal;
+  const _bootRestoreEpoch=Number(window.__sidekickSessionNavigationEpoch||0)||0;
+  const _bootRestoreCanceled=()=>(
+    !!window.__sidekickSkipBootSessionRestore ||
+    ((Number(window.__sidekickSessionNavigationEpoch||0)||0)!==_bootRestoreEpoch)
+  );
   let _bootSavedSessionLoadPromise = null;
-  if (urlSession && saved) {
+  if (urlSession && saved && !_bootRestoreCanceled()) {
     // Direct session URLs should start loading immediately instead of waiting
     // for sidebar/session-list rendering to finish.
-    _bootSavedSessionLoadPromise = loadSession(saved);
+    _bootSavedSessionLoadPromise = loadSession(saved).catch((e) => {
+      if (!_bootRestoreCanceled()) throw e;
+    });
   }
   await renderSessionList();
   _initResizePanels();
@@ -1905,9 +1889,10 @@ async function _loadActiveSpaceConfig() {
   const _srch = document.getElementById('sessionSearch'); if (_srch) _srch.value = '';
   // Initialize reasoning chip on boot (fixes #1103 — chip hidden until session load)
   if(typeof fetchReasoningChip==='function') fetchReasoningChip();
-  if(saved){
+  if(saved&&!_bootRestoreCanceled()){
     try{
-      if(!urlSession&&savedLocal&&await _savedSessionShouldStaySidebarOnly(savedLocal)){
+      if(!urlSession&&savedLocal&&!_bootRestoreCanceled()&&await _savedSessionShouldStaySidebarOnly(savedLocal)){
+        if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
         S.session=null; S.messages=[]; S.activeStreamId=null; S.busy=false;
         S._bootReady=true;
         syncTopbar();syncWorkspacePanelState();
@@ -1915,8 +1900,10 @@ async function _loadActiveSpaceConfig() {
         await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();
         return;
       }
+      if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
       if (_bootSavedSessionLoadPromise) await _bootSavedSessionLoadPromise;
-      else await loadSession(saved);
+      else if(!_bootRestoreCanceled()) await loadSession(saved);
+      if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
       // If the restored session has no messages it is an ephemeral scratch pad —
       // treat the page as a fresh start rather than resuming a blank conversation.
       // loadSession() already ran, so loadDir() has populated the workspace file tree.
@@ -1955,7 +1942,7 @@ async function _loadActiveSpaceConfig() {
       _applyFileTreePanelPref();
       S._bootReady=true;
       syncTopbar();syncWorkspacePanelState();await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();await checkInflightOnBoot(saved);return;}
-    catch(e){localStorage.removeItem('sidekick-webui-session');}
+    catch(e){if(!_bootRestoreCanceled()) localStorage.removeItem('sidekick-webui-session');}
   }
   // no saved session - show empty state, wait for user to hit +
   S._bootReady=true;
