@@ -47,7 +47,7 @@ def _diff_ansi() -> dict[str, str]:
         skin = get_active_skin()
 
         def _hex_fg(key: str, fallback_rgb: tuple[int, int, int]) -> str:
-            h = skin.get_color(key, "")
+            h = _skin_get_color(skin, key, "")
             if h and len(h) == 7 and h[0] == "#":
                 r, g, b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
                 return f"\033[38;2;{r};{g};{b}m"
@@ -58,8 +58,8 @@ def _diff_ansi() -> dict[str, str]:
         file_c = _hex_fg("session_label", (180, 160, 255))
         hunk = _hex_fg("session_border", (120, 120, 140))
         # minus/plus use background colors — derive from ui_error/ui_ok
-        err_h = skin.get_color("ui_error", "#ef5350")
-        ok_h = skin.get_color("ui_ok", "#4caf50")
+        err_h = _skin_get_color(skin, "ui_error", "#ef5350")
+        ok_h = _skin_get_color(skin, "ui_ok", "#4caf50")
         if err_h and len(err_h) == 7:
             er, eg, eb = int(err_h[1:3], 16), int(err_h[3:5], 16), int(err_h[5:7], 16)
             # Use a dark tinted version as background
@@ -124,11 +124,49 @@ def _get_skin():
         return None
 
 
+def _skin_get(skin, key: str, default=None):
+    """Read a skin field from either SkinConfig or the runtime dict shim."""
+    if isinstance(skin, dict):
+        return skin.get(key, default)
+    return getattr(skin, key, default)
+
+
+def _skin_get_color(skin, key: str, default: str = "") -> str:
+    """Resolve a color from either SkinConfig.get_color() or a dict skin."""
+    if not skin:
+        return default
+    get_color = getattr(skin, "get_color", None)
+    if callable(get_color):
+        return get_color(key, default)
+    colors = _skin_get(skin, "colors", {}) or {}
+    if isinstance(colors, dict):
+        return colors.get(key, default)
+    return default
+
+
+def _skin_spinner(skin) -> dict:
+    spinner = _skin_get(skin, "spinner", {}) if skin else {}
+    return spinner if isinstance(spinner, dict) else {}
+
+
+def _skin_get_spinner_wings(skin) -> list[tuple[str, str]]:
+    get_wings = getattr(skin, "get_spinner_wings", None)
+    if callable(get_wings):
+        return get_wings()
+
+    wings = _skin_spinner(skin).get("wings", [])
+    normalized: list[tuple[str, str]] = []
+    for pair in wings:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+            normalized.append((str(pair[0]), str(pair[1])))
+    return normalized
+
+
 def get_skin_tool_prefix() -> str:
     """Get tool output prefix character from active skin."""
     skin = _get_skin()
     if skin:
-        return skin.tool_prefix
+        return str(_skin_get(skin, "tool_prefix", "┊") or "┊")
     return "┊"
 
 
@@ -142,8 +180,9 @@ def get_tool_emoji(tool_name: str, default: str = "⚡") -> str:
     """
     # 1. Skin override
     skin = _get_skin()
-    if skin and skin.tool_emojis:
-        override = skin.tool_emojis.get(tool_name)
+    tool_emojis = _skin_get(skin, "tool_emojis", {}) if skin else {}
+    if isinstance(tool_emojis, dict):
+        override = tool_emojis.get(tool_name)
         if override:
             return override
     # 2. Registry default
@@ -608,7 +647,7 @@ class KawaiiSpinner:
         try:
             skin = _get_skin()
             if skin:
-                faces = skin.spinner.get("waiting_faces", [])
+                faces = _skin_spinner(skin).get("waiting_faces", [])
                 if faces:
                     return faces
         except Exception:
@@ -621,7 +660,7 @@ class KawaiiSpinner:
         try:
             skin = _get_skin()
             if skin:
-                faces = skin.spinner.get("thinking_faces", [])
+                faces = _skin_spinner(skin).get("thinking_faces", [])
                 if faces:
                     return faces
         except Exception:
@@ -634,7 +673,7 @@ class KawaiiSpinner:
         try:
             skin = _get_skin()
             if skin:
-                verbs = skin.spinner.get("thinking_verbs", [])
+                verbs = _skin_spinner(skin).get("thinking_verbs", [])
                 if verbs:
                     return verbs
         except Exception:
@@ -722,7 +761,7 @@ class KawaiiSpinner:
 
         # Cache skin wings at start (avoid per-frame imports)
         skin = _get_skin()
-        wings = skin.get_spinner_wings() if skin else []
+        wings = _skin_get_spinner_wings(skin) if skin else []
 
         while self.running:
             if os.getenv("SIDEKICK_SPINNER_PAUSE") or os.getenv("HERMES_SPINNER_PAUSE"):

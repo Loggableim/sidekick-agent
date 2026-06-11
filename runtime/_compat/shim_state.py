@@ -192,6 +192,27 @@ class SessionDB:
             return None
         return self._normalize_session_row(dict(row))
 
+    def resolve_session_id(self, session_id: str) -> str | None:
+        if not session_id:
+            return None
+        pk_col = self._session_pk_column()
+        row = self._conn.execute(
+            f"SELECT {pk_col} FROM sessions WHERE {pk_col} = ?",
+            (session_id,),
+        ).fetchone()
+        if row is not None:
+            return str(row[pk_col])
+        columns = self._table_columns("sessions")
+        alt_col = "id" if pk_col == "session_id" and "id" in columns else None
+        if alt_col:
+            row = self._conn.execute(
+                f"SELECT {pk_col} FROM sessions WHERE {alt_col} = ?",
+                (session_id,),
+            ).fetchone()
+            if row is not None:
+                return str(row[pk_col])
+        return None
+
     def create_session(
         self,
         session_id: str,
@@ -200,6 +221,10 @@ class SessionDB:
         source: str = "unknown",
         model: str = "",
         system_prompt: str = "",
+        model_config: Any = None,
+        user_id: str | None = None,
+        parent_session_id: str | None = None,
+        **extra: Any,
     ) -> dict[str, Any]:
         import time
 
@@ -208,11 +233,19 @@ class SessionDB:
         pk_col = "session_id" if "session_id" in columns else "id"
         insert_cols = [pk_col]
         values: list[Any] = [session_id]
+        metadata = dict(extra)
+        if model_config is not None:
+            metadata["model_config"] = model_config
+        if user_id is not None:
+            metadata["user_id"] = user_id
         for col, value in (
             ("title", title),
             ("source", source),
             ("model", model),
             ("system_prompt", system_prompt),
+            ("user_id", user_id),
+            ("parent_session_id", parent_session_id),
+            ("metadata", json.dumps(metadata, ensure_ascii=False) if metadata else "{}"),
             ("created_at", now),
             ("started_at", now),
             ("updated_at", now),
@@ -231,9 +264,25 @@ class SessionDB:
             "source": source,
             "model": model,
             "system_prompt": system_prompt,
+            "user_id": user_id,
+            "parent_session_id": parent_session_id,
+            "metadata": metadata,
             "created_at": now,
             "updated_at": now,
         }
+
+    @staticmethod
+    def sanitize_title(title: str) -> str:
+        value = " ".join(str(title or "").replace("\x00", "").split())
+        if not value:
+            return ""
+        return value[:120]
+
+    def set_session_title(self, session_id: str, title: str) -> None:
+        sanitized = self.sanitize_title(title)
+        if not sanitized:
+            raise ValueError("title is empty")
+        self.update_title(session_id, sanitized)
 
     def update_title(self, session_id: str, title: str) -> None:
         import time
@@ -250,6 +299,169 @@ class SessionDB:
             f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?",
             values,
         )
+
+    def update_system_prompt(self, session_id: str, system_prompt: str) -> None:
+        import time
+
+        columns = self._table_columns("sessions")
+        if "system_prompt" not in columns:
+            return
+        pk_col = "session_id" if "session_id" in columns else "id"
+        set_clause = "system_prompt = ?"
+        values: list[Any] = [system_prompt or ""]
+        if "updated_at" in columns:
+            set_clause += ", updated_at = ?"
+            values.append(time.time())
+        values.append(session_id)
+        self._conn.execute(f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?", values)
+
+    def end_session(self, session_id: str, status: str = "ended") -> None:
+        import time
+
+        columns = self._table_columns("sessions")
+        pk_col = "session_id" if "session_id" in columns else "id"
+        updates: list[str] = []
+        values: list[Any] = []
+        if "status" in columns:
+            updates.append("status = ?")
+            values.append(status)
+        if "ended_at" in columns:
+            updates.append("ended_at = ?")
+            values.append(time.time())
+        if "updated_at" in columns:
+            updates.append("updated_at = ?")
+            values.append(time.time())
+        if not updates:
+            return
+        values.append(session_id)
+        self._conn.execute(
+            f"UPDATE sessions SET {', '.join(updates)} WHERE {pk_col} = ?",
+            values,
+        )
+
+    def append_message(
+        self,
+        session_id: str,
+        role: str,
+        content: Any = "",
+        *,
+        tool_name: str | None = None,
+        tool_calls: Any = None,
+        tool_call_id: str | None = None,
+        finish_reason: str | None = None,
+        reasoning: Any = None,
+        reasoning_content: Any = None,
+        reasoning_details: Any = None,
+        codex_reasoning_items: Any = None,
+        codex_message_items: Any = None,
+        model: str | None = None,
+        token_count: int | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        import time
+
+        now = time.time()
+        columns = self._table_columns("messages")
+        session_col = "session_id" if "session_id" in columns else "sid"
+
+        def _json_or_none(value: Any) -> str | None:
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except Exception:
+                return str(value)
+
+        if content is None:
+            content_text = ""
+        elif isinstance(content, str):
+            content_text = content
+        else:
+            content_text = _json_or_none(content) or ""
+
+        candidates: dict[str, Any] = {
+            session_col: session_id,
+            "role": role,
+            "content": content_text,
+            "tool_name": tool_name,
+            "tool_calls": _json_or_none(tool_calls),
+            "tool_call_id": tool_call_id,
+            "finish_reason": finish_reason,
+            "reasoning": _json_or_none(reasoning),
+            "reasoning_content": _json_or_none(reasoning_content),
+            "reasoning_details": _json_or_none(reasoning_details),
+            "codex_reasoning_items": _json_or_none(codex_reasoning_items),
+            "codex_message_items": _json_or_none(codex_message_items),
+            "model": model,
+            "timestamp": now,
+            "created_at": now,
+            "token_count": token_count or 0,
+            "metadata": _json_or_none(extra) if extra else None,
+        }
+        insert_cols = [col for col, value in candidates.items() if col in columns and value is not None]
+        values = [candidates[col] for col in insert_cols]
+        if insert_cols:
+            placeholders = ", ".join("?" for _ in insert_cols)
+            self._conn.execute(
+                f"INSERT INTO messages ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                values,
+            )
+
+        session_columns = self._table_columns("sessions")
+        pk_col = "session_id" if "session_id" in session_columns else "id"
+        updates: list[str] = []
+        update_values: list[Any] = []
+        if "message_count" in session_columns:
+            updates.append("message_count = COALESCE(message_count, 0) + 1")
+        if "updated_at" in session_columns:
+            updates.append("updated_at = ?")
+            update_values.append(now)
+        if updates:
+            update_values.append(session_id)
+            self._conn.execute(
+                f"UPDATE sessions SET {', '.join(updates)} WHERE {pk_col} = ?",
+                update_values,
+            )
+
+        return {"session_id": session_id, "role": role, "content": content_text}
+
+    def get_messages(self, session_id: str, limit: int | None = None) -> list[dict[str, Any]]:
+        columns = self._table_columns("messages")
+        session_col = "session_id" if "session_id" in columns else "sid"
+        if "timestamp" in columns:
+            order_cols = "timestamp ASC, id ASC"
+        elif "created_at" in columns:
+            order_cols = "created_at ASC, id ASC"
+        else:
+            order_cols = "id ASC"
+        sql = f"SELECT * FROM messages WHERE {session_col} = ? ORDER BY {order_cols}"
+        params: list[Any] = [session_id]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        rows = [dict(row) for row in self._conn.execute(sql, params).fetchall()]
+        for row in rows:
+            if session_col != "session_id" and session_col in row:
+                row["session_id"] = row[session_col]
+        return rows
+
+    def delete_session(self, session_id: str) -> bool:
+        sid = self.resolve_session_id(session_id)
+        if not sid:
+            return False
+        session_columns = self._table_columns("sessions")
+        pk_col = "session_id" if "session_id" in session_columns else "id"
+        message_columns = self._table_columns("messages")
+        message_session_col = "session_id" if "session_id" in message_columns else "sid"
+        self._conn.execute(f"DELETE FROM messages WHERE {message_session_col} = ?", (sid,))
+        cur = self._conn.execute(f"DELETE FROM sessions WHERE {pk_col} = ?", (sid,))
+        return cur.rowcount > 0
+
+    def get_next_title_in_lineage(self, title: str) -> str:
+        base = self.sanitize_title(title) or "Session"
+        return f"{base} (continued)"
 
     def _is_internal_title_text(self, text: str) -> bool:
         normalized = " ".join(str(text or "").strip().split()).lower()

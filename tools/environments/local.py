@@ -45,6 +45,19 @@ def _resolve_safe_cwd(cwd: str) -> str:
     return tempfile.gettempdir()
 
 
+def _windows_posix_path_to_native(path: str) -> str:
+    """Convert Git Bash drive paths like /c/sidekick to native Windows paths."""
+    if not (_IS_WINDOWS and path):
+        return path
+    if re.match(r"^/[a-zA-Z](/|$)", path):
+        drive = path[1].upper()
+        rest = path[2:].replace("/", "\\")
+        if not rest:
+            rest = "\\"
+        return f"{drive}:{rest}"
+    return path
+
+
 # Hermes-internal env vars that should NOT leak into terminal subprocesses.
 _HERMES_PROVIDER_ENV_FORCE_PREFIX = "_HERMES_FORCE_"
 
@@ -381,7 +394,7 @@ class LocalEnvironment(BaseEnvironment):
 
     def __init__(self, cwd: str = "", timeout: int = 60, env: dict = None):
         if cwd:
-            cwd = os.path.expanduser(cwd)
+            cwd = _windows_posix_path_to_native(os.path.expanduser(cwd))
         super().__init__(cwd=cwd or os.getcwd(), timeout=timeout, env=env)
         self.init_session()
 
@@ -455,6 +468,7 @@ class LocalEnvironment(BaseEnvironment):
         # (issue #17558).  Popen would otherwise raise FileNotFoundError on
         # the cwd before bash starts, wedging every subsequent call until the
         # gateway restarts.
+        self.cwd = _windows_posix_path_to_native(self.cwd)
         safe_cwd = _resolve_safe_cwd(self.cwd)
         if safe_cwd != self.cwd:
             logger.warning(
@@ -467,9 +481,7 @@ class LocalEnvironment(BaseEnvironment):
 
         # On Windows, self.cwd may be a Git Bash-style path (/c/Users/...)
         # from pwd output. subprocess.Popen needs a native Windows path.
-        _popen_cwd = self.cwd
-        if _IS_WINDOWS and _popen_cwd and re.match(r'^/[a-zA-Z]/', _popen_cwd):
-            _popen_cwd = _popen_cwd[1].upper() + ':' + _popen_cwd[2:].replace('/', '\\')
+        _popen_cwd = _windows_posix_path_to_native(self.cwd)
 
         proc = subprocess.Popen(
             args,
@@ -574,7 +586,7 @@ class LocalEnvironment(BaseEnvironment):
         """
         try:
             with open(self._cwd_file, encoding="utf-8") as f:
-                cwd_path = f.read().strip()
+                cwd_path = _windows_posix_path_to_native(f.read().strip())
             if cwd_path and os.path.isdir(cwd_path):
                 self.cwd = cwd_path
         except (OSError, FileNotFoundError):

@@ -240,3 +240,54 @@ def test_session_db_ignores_internal_important_prompt_for_cron_title(tmp_path):
         db.close()
 
     assert sessions[0]["title"] == "Cron session"
+
+
+def test_session_db_accepts_agent_create_kwargs_and_appends_messages(tmp_path):
+    db_path = tmp_path / "state.db"
+    db = SessionDB(db_path=db_path)
+    try:
+        db.create_session(
+            session_id="agent-session",
+            source="webui",
+            model="deepseek-v4-flash",
+            model_config={"max_iterations": 90},
+            user_id=None,
+            parent_session_id=None,
+        )
+        db.append_message(
+            session_id="agent-session",
+            role="user",
+            content="Please run pwd",
+            tool_calls=[{"name": "terminal", "arguments": {"command": "pwd"}}],
+            finish_reason="tool_calls",
+        )
+        db.append_message(
+            session_id="agent-session",
+            role="assistant",
+            content="C:/sidekick/home/spaces/nova",
+            reasoning_content={"summary": "checked cwd"},
+        )
+
+        row = db.get_session("agent-session")
+        assert row is not None
+        assert row["message_count"] == 2
+        assert db.resolve_session_id("agent-session") == "agent-session"
+        api_messages = db.get_messages("agent-session")
+        assert len(api_messages) == 2
+
+        messages = db._conn.execute(
+            """
+            SELECT role, content, tool_calls, reasoning_content
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY id
+            """,
+            ("agent-session",),
+        ).fetchall()
+    finally:
+        db.close()
+
+    assert [msg["role"] for msg in messages] == ["user", "assistant"]
+    assert messages[0]["content"] == "Please run pwd"
+    assert "terminal" in messages[0]["tool_calls"]
+    assert "checked cwd" in messages[1]["reasoning_content"]
