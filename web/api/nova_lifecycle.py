@@ -40,6 +40,78 @@ SECRET_PATTERNS = (
 )
 EXTERNAL_MUTATION_TYPES = {"post", "send", "write_external", "delete", "payment", "admin", "mutate"}
 LOCAL_STATE_MUTATION_TYPES = {"memory", "personality", "dream", "reflection", "journal", "local_state"}
+AUTONOMY_LEVELS: dict[int, dict[str, Any]] = {
+    0: {
+        "name": "reactive",
+        "description": "Only direct chat context is used. No autonomous ticks.",
+        "allows": ["chat_context"],
+        "external_mutations": False,
+    },
+    1: {
+        "name": "inner_processes",
+        "description": "Emotion, memory, diary, goals, dreams, and reflection may update local state.",
+        "allows": ["local_memory", "emotion", "dreams", "journal", "reflection"],
+        "external_mutations": False,
+    },
+    2: {
+        "name": "read_and_analyze",
+        "description": "Level 1 plus allowed-scope reads and analysis. External mutations remain blocked.",
+        "allows": ["local_memory", "emotion", "dreams", "journal", "reflection", "read", "analyze"],
+        "external_mutations": False,
+    },
+    3: {
+        "name": "allowlisted_mutations",
+        "description": "Allowlisted external mutations with audit log. Secrets/admin/payment/delete remain blocked.",
+        "allows": ["level_2", "allowlisted_external_mutations"],
+        "external_mutations": "allowlist_only",
+    },
+    4: {
+        "name": "full_eigenleben",
+        "description": "Broad autonomous external actions, still guarded against secrets/admin/payment/destructive actions.",
+        "allows": ["level_3", "broad_external_actions"],
+        "external_mutations": "guarded",
+    },
+}
+MODEL_STRATEGY: dict[str, dict[str, Any]] = {
+    "fast_classifier": {
+        "model": "MiniCPM5-1B",
+        "port": 8081,
+        "used_for": ["event_classification", "lightweight_emotion_updates", "fast_state_labels"],
+        "sync_allowed": True,
+        "blocks_chat": False,
+    },
+    "deep_reflection": {
+        "model": "Qwen3.6-12B",
+        "port": 8082,
+        "used_for": ["dream_tick", "async_reflection", "personality_synthesis"],
+        "sync_allowed": False,
+        "requires_gpu": True,
+        "blocks_chat": False,
+    },
+}
+NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "nova-substrate-heartbeat",
+        "name": "Nova substrate heartbeat",
+        "schedule": "every 1m",
+        "script": "nova_substrate_heartbeat.py",
+        "action": "background_tick",
+    },
+    {
+        "id": "nova-background-tick",
+        "name": "Nova background tick",
+        "schedule": "every 5m",
+        "script": "nova_background_tick.py",
+        "action": "background_tick",
+    },
+    {
+        "id": "nova-dream-reflection-tick",
+        "name": "Nova dream/reflection tick",
+        "schedule": "every 30m",
+        "script": "nova_dream_reflection_tick.py",
+        "action": "dream_tick",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -242,6 +314,16 @@ def guard_autonomous_action(action: dict[str, Any], autonomy_level: int | None =
     return {"allowed": False, "reason": "unknown_action_type", "autonomy_level": level}
 
 
+def autonomy_definition(level: int | None = None) -> dict[str, Any]:
+    state = load_personality_state()
+    resolved = int(level if level is not None else state.get("autonomy_level", 2))
+    return {
+        "level": resolved,
+        "definition": AUTONOMY_LEVELS.get(resolved, AUTONOMY_LEVELS[2]),
+        "levels": AUTONOMY_LEVELS,
+    }
+
+
 def load_events(limit: int = 50, *, include_private: bool = False) -> list[dict[str, Any]]:
     events = _read_json(get_nova_state_paths().events, [])
     if not isinstance(events, list):
@@ -310,11 +392,37 @@ def repair_incomplete_events() -> list[str]:
     repaired = []
     changed = False
     for event in events:
-        if event.get("status") == "started":
+        if event.get("status") not in {"started", "running"}:
+            continue
+        steps = set(event.get("steps") or [])
+        missing_steps = [
+            step
+            for step in ("memory_done", "emotion_done", "continuity_done", "personality_queued")
+            if step not in steps
+        ]
+        if (
+            event.get("type") == "post_turn"
+            and {"memory_done", "emotion_done", "continuity_done"}.issubset(steps)
+            and "personality_queued" not in steps
+        ):
+            _queue_reflection(event, str(event.get("user", "")), str(event.get("assistant", "")))
+            event.setdefault("steps", []).append("personality_queued")
+            event["status"] = "completed"
+            event["completed_at"] = _now()
+            event["updated_at"] = _now()
+            event["repair"] = {
+                "reason": "missing_personality_queue_repaired",
+                "missing_steps": missing_steps,
+                "repaired_at": _now(),
+            }
+            repaired.append(str(event.get("event_id")))
+            changed = True
+        else:
             event["status"] = "failed"
             event["updated_at"] = _now()
             event["repair"] = {
                 "reason": "incomplete_event_detected",
+                "missing_steps": missing_steps,
                 "repaired_at": _now(),
             }
             repaired.append(str(event.get("event_id")))
@@ -613,14 +721,172 @@ def dream_tick() -> dict[str, Any]:
     return {"ok": False, "event_id": event["event_id"], "error": status}
 
 
+def _parse_model_health(model_status: dict[str, Any]) -> dict[str, Any]:
+    raw = str(model_status.get("stdout") or "")
+    parsed: dict[str, Any] = {"raw_ok": bool(model_status.get("ok")), "models": {}}
+    start = raw.find("{")
+    if start >= 0:
+        try:
+            data, _ = json.JSONDecoder().raw_decode(raw[start:])
+            if isinstance(data, dict):
+                parsed.update(data)
+        except Exception:
+            pass
+    if not isinstance(parsed.get("models"), dict):
+        parsed["models"] = {}
+    text = raw.lower()
+    for role, spec in MODEL_STRATEGY.items():
+        port = str(spec["port"])
+        model_info = dict(parsed["models"].get(port, {}))
+        online = bool(model_info.get("online")) or (port in text and "online" in text)
+        model_info.update(
+            {
+                "role": role,
+                "port": spec["port"],
+                "expected_model": spec["model"],
+                "online": online,
+                "used_for": spec["used_for"],
+                "sync_allowed": spec["sync_allowed"],
+                "blocks_chat": spec["blocks_chat"],
+            }
+        )
+        if "requires_gpu" in spec:
+            model_info["requires_gpu"] = spec["requires_gpu"]
+        parsed["models"][port] = model_info
+    return parsed
+
+
+def _cron_script_body(action: str) -> str:
+    return f'''"""Generated local Nova lifecycle cron script.
+
+Lives under SIDEKICK_HOME/scripts so cron can run it as a no-agent job.
+"""
+
+from __future__ import annotations
+
+import json
+
+from web.api import nova_lifecycle
+
+ACTION = {action!r}
+
+if ACTION == "dream_tick":
+    result = nova_lifecycle.dream_tick()
+else:
+    result = nova_lifecycle.background_tick()
+
+print(json.dumps({{"wakeAgent": False, "nova": result}}, ensure_ascii=False))
+'''
+
+
+def _ensure_cron_scripts() -> list[str]:
+    scripts_dir = get_nova_state_paths().space.parents[1] / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+    for spec in NOVA_CRON_SPECS:
+        path = scripts_dir / str(spec["script"])
+        body = _cron_script_body(str(spec["action"]))
+        if not path.exists() or path.read_text(encoding="utf-8") != body:
+            path.write_text(body, encoding="utf-8")
+            written.append(path.name)
+    return written
+
+
+def ensure_background_cron_jobs() -> dict[str, Any]:
+    written_scripts = _ensure_cron_scripts()
+    try:
+        import cron.jobs as cron_jobs
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "cron_module_unavailable",
+            "error": repr(exc),
+            "specs": list(NOVA_CRON_SPECS),
+            "written_scripts": written_scripts,
+        }
+
+    sidekick_home = get_nova_state_paths().space.parents[1].resolve()
+    try:
+        cron_jobs.HERMES_DIR = sidekick_home
+        cron_jobs.CRON_DIR = sidekick_home / "cron"
+        cron_jobs.JOBS_FILE = cron_jobs.CRON_DIR / "jobs.json"
+        cron_jobs.OUTPUT_DIR = cron_jobs.CRON_DIR / "output"
+    except Exception:
+        pass
+
+    create_job = cron_jobs.create_job
+    list_jobs = cron_jobs.list_jobs
+    update_job = cron_jobs.update_job
+    jobs = list_jobs(include_disabled=True)
+    active: list[dict[str, Any]] = []
+    created: list[str] = []
+    updated: list[str] = []
+    for spec in NOVA_CRON_SPECS:
+        existing = next((job for job in jobs if job.get("name") == spec["name"] or job.get("id") == spec["id"]), None)
+        updates = {
+            "name": spec["name"],
+            "prompt": "",
+            "script": spec["script"],
+            "no_agent": True,
+            "deliver": "local",
+            "enabled": True,
+        }
+        if existing:
+            schedule_display = str(existing.get("schedule_display") or "")
+            needs_schedule = schedule_display != spec["schedule"]
+            if needs_schedule:
+                updates["schedule"] = spec["schedule"]
+            job = update_job(str(existing["id"]), updates) or existing
+            updated.append(str(job.get("id")))
+        else:
+            job = create_job(
+                prompt="",
+                schedule=str(spec["schedule"]),
+                name=str(spec["name"]),
+                deliver="local",
+                script=str(spec["script"]),
+                no_agent=True,
+            )
+            created.append(str(job.get("id")))
+        active.append(
+            {
+                "name": spec["name"],
+                "schedule": spec["schedule"],
+                "script": spec["script"],
+                "action": spec["action"],
+                "job_id": job.get("id"),
+                "state": job.get("state"),
+                "next_run_at": job.get("next_run_at"),
+            }
+        )
+    return {
+        "ok": True,
+        "mode": "sidekick_cron_no_agent",
+        "ticker": "web.server cron ticker runs due jobs every 60s",
+        "written_scripts": written_scripts,
+        "created": created,
+        "updated": updated,
+        "active": active,
+    }
+
+
 def get_nova_status() -> dict[str, Any]:
     migration_tick()
     state = load_personality_state()
     model_status = _run_local_script("local_llm_bridge.py", "--health", timeout=15)
+    parsed_models = _parse_model_health(model_status)
+    cron_status = ensure_background_cron_jobs()
+    autonomy = autonomy_definition(int(state.get("autonomy_level", 2)))
     return {
         "ok": True,
         "autonomy_level": state.get("autonomy_level", 2),
-        "qwen": "online" if "8082" in str(model_status.get("stdout", "")) and "online" in str(model_status.get("stdout", "")) else "unknown",
+        "autonomy": autonomy,
+        "autonomy_levels": AUTONOMY_LEVELS,
+        "model_strategy": MODEL_STRATEGY,
+        "models": parsed_models,
+        "qwen": "online" if parsed_models["models"].get("8082", {}).get("online") else "queued_or_offline",
+        "minicpm": "online" if parsed_models["models"].get("8081", {}).get("online") else "unknown",
+        "cron": cron_status,
         "memory": {"vector": _vector_memory_count(), "ltm": _ltm_count()},
         "last_events": load_events(limit=10, include_private=True),
         "paths": {

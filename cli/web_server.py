@@ -2858,6 +2858,34 @@ async def list_cron_jobs():
     return list_jobs(include_disabled=True)
 
 
+@app.get("/api/nova/status")
+async def nova_status_endpoint():
+    from web.api.nova_lifecycle import get_nova_status
+
+    return get_nova_status()
+
+
+@app.get("/api/nova/personality")
+async def nova_personality_endpoint(scope: str = "public"):
+    from web.api.nova_lifecycle import personality_snapshot
+
+    requested = (scope or "public").strip().lower()
+    if requested not in {"public", "private", "sensitive"}:
+        requested = "public"
+    if requested == "sensitive":
+        requested = "private"
+    return personality_snapshot(requested)
+
+
+@app.get("/api/nova/events")
+async def nova_events_endpoint(scope: str = "public", limit: int = 50):
+    from web.api.nova_lifecycle import load_events
+
+    requested = (scope or "public").strip().lower()
+    capped = max(1, min(200, int(limit or 50)))
+    return {"events": load_events(limit=capped, include_private=(requested == "private"))}
+
+
 @app.get("/api/cron/jobs/{job_id}")
 async def get_cron_job(job_id: str):
     from cron.jobs import get_job
