@@ -154,8 +154,16 @@ def _read_json(path: Path, default: Any) -> Any:
 
 def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    for attempt in range(5):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt == 4:
+                raise
+            time.sleep(0.05 * (attempt + 1))
     tmp.replace(path)
 
 
@@ -607,11 +615,153 @@ def _ltm_count() -> int:
         return 0
 
 
+def _merge_json_values(old: Any, new: Any) -> Any:
+    if isinstance(old, dict) and isinstance(new, dict):
+        merged = dict(old)
+        for key, value in new.items():
+            merged[key] = _merge_json_values(merged[key], value) if key in merged else value
+        return merged
+    if isinstance(old, list) and isinstance(new, list):
+        seen = {json.dumps(item, sort_keys=True, ensure_ascii=False) for item in old}
+        merged = list(old)
+        for item in new:
+            marker = json.dumps(item, sort_keys=True, ensure_ascii=False)
+            if marker not in seen:
+                merged.append(item)
+                seen.add(marker)
+        return merged
+    return new
+
+
+def _merge_json_file(source: Path, target: Path) -> str:
+    if not source.exists() or not target.exists():
+        return "unresolved"
+    old_data = _read_json(source, None)
+    new_data = _read_json(target, None)
+    if old_data is None or new_data is None:
+        return "unresolved"
+    merged = _merge_json_values(old_data, new_data)
+    if merged == new_data:
+        return "already_merged"
+    _write_json(target, merged)
+    return "merged"
+
+
+def _merge_ltm_facts_db(source: Path, target: Path) -> str:
+    if not source.exists() or not target.exists():
+        return "unresolved"
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(str(target))
+        try:
+            source_sql = str(source).replace("'", "''")
+            conn.execute(f"ATTACH DATABASE '{source_sql}' AS legacy")
+            try:
+                target_cols = [row[1] for row in conn.execute("PRAGMA table_info(ltm_facts)")]
+                source_cols = [row[1] for row in conn.execute("PRAGMA legacy.table_info(ltm_facts)")]
+                common = [col for col in target_cols if col in source_cols]
+                if not common or "id" not in common:
+                    return "unresolved"
+                cols = ", ".join(f'"{col}"' for col in common)
+                before = conn.execute("SELECT COUNT(*) FROM ltm_facts").fetchone()[0]
+                conn.execute(
+                    f"""
+                    INSERT OR IGNORE INTO ltm_facts ({cols})
+                    SELECT {cols}
+                    FROM legacy.ltm_facts
+                    """
+                )
+                conn.commit()
+                after = conn.execute("SELECT COUNT(*) FROM ltm_facts").fetchone()[0]
+                if after > before:
+                    return "merged"
+                missing = conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM legacy.ltm_facts legacy
+                    LEFT JOIN ltm_facts current ON current.id = legacy.id
+                    WHERE current.id IS NULL
+                    """
+                ).fetchone()[0]
+                return "already_merged" if int(missing or 0) == 0 else "unresolved"
+            finally:
+                conn.execute("DETACH DATABASE legacy")
+        finally:
+            conn.close()
+    except Exception:
+        return "unresolved"
+
+
+def _repair_migration_conflicts(paths: NovaStatePaths, marker: dict[str, Any]) -> dict[str, Any]:
+    archive = paths.space.parent / "_bewusstsein_archived_20260605"
+    conflicts = [str(item) for item in marker.get("conflicts", []) if item]
+    result = {"merged_json": [], "merged_sqlite": [], "already_merged": [], "unresolved": []}
+    for name in conflicts:
+        source = archive / name
+        target = paths.space / name
+        if name.endswith(".json"):
+            status = _merge_json_file(source, target)
+            if status == "merged":
+                result["merged_json"].append(name)
+            elif status == "already_merged":
+                result["already_merged"].append(name)
+            else:
+                result["unresolved"].append(name)
+        elif name == "ltm_facts.db":
+            status = _merge_ltm_facts_db(source, target)
+            if status == "merged":
+                result["merged_sqlite"].append(name)
+            elif status == "already_merged":
+                result["already_merged"].append(name)
+            else:
+                result["unresolved"].append(name)
+        else:
+            result["unresolved"].append(name)
+    marker["conflict_repair"] = result
+    marker["conflicts"] = result["unresolved"]
+    marker["conflict_repair_checked_at"] = _now()
+    _write_json(paths.migration, marker)
+    return result
+
+
+def repair_local_agents_md() -> dict[str, Any]:
+    agents = get_nova_state_paths().space / "AGENTS.md"
+    if not agents.exists():
+        return {"ok": True, "updated": False, "reason": "missing"}
+    text = agents.read_text(encoding="utf-8", errors="replace")
+    replacements = {
+        "Dolphin 8B (8080), 3B (8081), Qwen 9B (8082)": "MiniCPM5-1B (8081), Qwen3.6-12B (8082)",
+        "Ports: 8080 Dolphin 8B  |  8081 3B uncensored  |  8082 Qwen 9B UNZENSIERT (Traum-Modell)": "Ports: 8081 MiniCPM5-1B (fast classifier)  |  8082 Qwen3.6-12B (GPU dream/reflection model)",
+        "Ports: 8080 Dolphin 8B | 8081 3B uncensored | 8082 Qwen 9B": "Ports: 8081 MiniCPM5-1B | 8082 Qwen3.6-12B",
+        "Dolphin 8B:8080, 3B:8081, Qwen 9B:8082": "MiniCPM5-1B:8081, Qwen3.6-12B:8082",
+        "Qwen 9B": "Qwen3.6-12B",
+        "3B uncensored": "MiniCPM5-1B",
+        "3B:8081": "MiniCPM5-1B:8081",
+        "Dolphin 8B": "MiniCPM5-1B",
+    }
+    updated = text
+    for old, new in replacements.items():
+        updated = updated.replace(old, new)
+    if updated == text:
+        return {"ok": True, "updated": False}
+    agents.write_text(updated, encoding="utf-8")
+    return {"ok": True, "updated": True, "path": str(agents)}
+
+
 def migration_tick() -> dict[str, Any]:
     paths = get_nova_state_paths()
     paths.state_dir.mkdir(parents=True, exist_ok=True)
     if paths.migration.exists():
-        return {"ok": True, "already_ran": True}
+        marker = _read_json(paths.migration, {})
+        if not isinstance(marker, dict):
+            marker = {"ok": True}
+        marker["ok"] = True
+        marker["already_ran"] = True
+        if marker.get("conflicts"):
+            marker["conflict_repair"] = _repair_migration_conflicts(paths, marker)
+        repair_local_agents_md()
+        return marker
 
     archive = paths.space.parent / "_bewusstsein_archived_20260605"
     skipped: list[str] = []
@@ -666,6 +816,9 @@ def migration_tick() -> dict[str, Any]:
         "visibility": "private",
     }
     _write_json(paths.migration, marker)
+    if marker.get("conflicts"):
+        marker["conflict_repair"] = _repair_migration_conflicts(paths, marker)
+    repair_local_agents_md()
     return marker
 
 
@@ -713,6 +866,16 @@ def background_tick() -> dict[str, Any]:
 
 def dream_tick() -> dict[str, Any]:
     event = _append_event(_new_event("dream_tick"))
+    model_health = _parse_model_health(_run_local_script("local_llm_bridge.py", "--health", timeout=15))
+    if not model_health["models"].get("8082", {}).get("online"):
+        _update_event(
+            event,
+            step="qwen_offline_deferred",
+            status="deferred",
+            deferred_reason="qwen_offline",
+            completed_at=None,
+        )
+        return {"ok": True, "event_id": event["event_id"], "deferred": True, "reason": "qwen_offline"}
     status = _run_local_script("dream_narrator.py", "--mode", "simple", "--type", "rem", "--port", "8082", "--scenes", "1", timeout=180)
     if status.get("ok"):
         _update_event(event, step="dream_done", status="completed", completed_at=_now())
@@ -738,7 +901,10 @@ def _parse_model_health(model_status: dict[str, Any]) -> dict[str, Any]:
     for role, spec in MODEL_STRATEGY.items():
         port = str(spec["port"])
         model_info = dict(parsed["models"].get(port, {}))
-        online = bool(model_info.get("online")) or (port in text and "online" in text)
+        if "online" in model_info:
+            online = bool(model_info.get("online"))
+        else:
+            online = port in text and "online" in text
         model_info.update(
             {
                 "role": role,
@@ -862,7 +1028,7 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
     return {
         "ok": True,
         "mode": "sidekick_cron_no_agent",
-        "ticker": "web.server cron ticker runs due jobs every 60s",
+        "ticker": "cli.web_server and web.server start cron.scheduler.tick background threads every 60s",
         "written_scripts": written_scripts,
         "created": created,
         "updated": updated,
@@ -877,6 +1043,9 @@ def get_nova_status() -> dict[str, Any]:
     parsed_models = _parse_model_health(model_status)
     cron_status = ensure_background_cron_jobs()
     autonomy = autonomy_definition(int(state.get("autonomy_level", 2)))
+    reflection_queue = _read_json(get_nova_state_paths().reflection_queue, [])
+    if not isinstance(reflection_queue, list):
+        reflection_queue = []
     return {
         "ok": True,
         "autonomy_level": state.get("autonomy_level", 2),
@@ -887,6 +1056,11 @@ def get_nova_status() -> dict[str, Any]:
         "qwen": "online" if parsed_models["models"].get("8082", {}).get("online") else "queued_or_offline",
         "minicpm": "online" if parsed_models["models"].get("8081", {}).get("online") else "unknown",
         "cron": cron_status,
+        "reflection_queue": {
+            "queued": len([item for item in reflection_queue if item.get("status") == "queued"]),
+            "total": len(reflection_queue),
+            "blocked_by_qwen_offline": not parsed_models["models"].get("8082", {}).get("online"),
+        },
         "memory": {"vector": _vector_memory_count(), "ltm": _ltm_count()},
         "last_events": load_events(limit=10, include_private=True),
         "paths": {

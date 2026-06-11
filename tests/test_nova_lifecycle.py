@@ -196,6 +196,94 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     assert all(job["no_agent"] is True for job in jobs if job["name"].startswith("Nova "))
 
 
+def test_dream_tick_defers_when_qwen_offline(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    def fake_run(script, *args, **kwargs):
+        assert script == "local_llm_bridge.py"
+        return {"ok": True, "stdout": json.dumps({"models": {"8082": {"online": False}}})}
+
+    monkeypatch.setattr(lifecycle, "_run_local_script", fake_run)
+
+    result = lifecycle.dream_tick()
+    events = lifecycle.load_events(limit=1, include_private=True)
+
+    assert result["ok"] is True
+    assert result["deferred"] is True
+    assert events[0]["status"] == "deferred"
+    assert events[0]["steps"][-1] == "qwen_offline_deferred"
+
+
+def test_agents_md_model_names_are_repaired(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import get_nova_state_paths, repair_local_agents_md
+
+    agents = get_nova_state_paths().space / "AGENTS.md"
+    agents.parent.mkdir(parents=True)
+    agents.write_text(
+        "Ports: 8080 Dolphin 8B | 8081 3B uncensored | 8082 Qwen 9B\n"
+        "Dolphin 8B:8080, 3B:8081, Qwen 9B:8082",
+        encoding="utf-8",
+    )
+
+    result = repair_local_agents_md()
+    text = agents.read_text(encoding="utf-8")
+
+    assert result["updated"] is True
+    assert "MiniCPM5-1B:8081" in text
+    assert "Qwen3.6-12B:8082" in text
+    assert "Dolphin 8B" not in text
+
+
+def test_migration_conflict_repair_merges_json_and_ltm(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(home))
+    archive = home / "spaces" / "_bewusstsein_archived_20260605"
+    nova = home / "spaces" / "nova"
+    archive.mkdir(parents=True)
+    nova.mkdir(parents=True)
+    (archive / "emotion_state.json").write_text('{"old_only":1,"shared":{"old":true}}', encoding="utf-8")
+    (nova / "emotion_state.json").write_text('{"new_only":2,"shared":{"new":true}}', encoding="utf-8")
+
+    import sqlite3
+
+    for path, rows in (
+        (archive / "ltm_facts.db", [("old", "legacy fact")]),
+        (nova / "ltm_facts.db", [("new", "current fact")]),
+    ):
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE ltm_facts (id TEXT PRIMARY KEY, fact TEXT)")
+        conn.executemany("INSERT INTO ltm_facts (id, fact) VALUES (?, ?)", rows)
+        conn.commit()
+        conn.close()
+
+    from web.api.nova_lifecycle import get_nova_state_paths, migration_tick
+
+    paths = get_nova_state_paths()
+    paths.state_dir.mkdir(parents=True)
+    paths.migration.write_text(
+        json.dumps({"conflicts": ["emotion_state.json", "ltm_facts.db"], "counts": {}, "skipped": []}),
+        encoding="utf-8",
+    )
+
+    result = migration_tick()
+    merged = json.loads((nova / "emotion_state.json").read_text(encoding="utf-8"))
+    conn = sqlite3.connect(nova / "ltm_facts.db")
+    try:
+        facts = {row[0] for row in conn.execute("SELECT id FROM ltm_facts")}
+    finally:
+        conn.close()
+
+    assert result["conflict_repair"]["merged_json"] == ["emotion_state.json"]
+    assert result["conflict_repair"]["merged_sqlite"] == ["ltm_facts.db"]
+    assert merged["old_only"] == 1
+    assert merged["new_only"] == 2
+    assert facts == {"old", "new"}
+
+
 def test_migration_tick_imports_legacy_state_without_secrets(monkeypatch, tmp_path):
     home = tmp_path / "home"
     monkeypatch.setenv("SIDEKICK_HOME", str(home))

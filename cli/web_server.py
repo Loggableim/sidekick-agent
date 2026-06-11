@@ -94,6 +94,37 @@ WEB_DIST = Path(_web_dist) if _web_dist else next(
 _log = logging.getLogger(__name__)
 
 app = FastAPI(title="Sidekick Agent", version=__version__)
+_CRON_TICKER_STARTED = False
+
+
+def _start_dashboard_cron_ticker() -> None:
+    """Start the file-backed Sidekick cron scheduler for dashboard-only runs."""
+    global _CRON_TICKER_STARTED
+    if _CRON_TICKER_STARTED or os.environ.get("SIDEKICK_DISABLE_CRON_TICKER") == "1":
+        return
+    _CRON_TICKER_STARTED = True
+
+    def _loop() -> None:
+        while True:
+            try:
+                from cron.scheduler import tick as cron_tick
+
+                cron_tick(verbose=False)
+            except Exception:
+                _log.debug("Dashboard cron ticker failed", exc_info=True)
+            time.sleep(60)
+
+    thread = threading.Thread(target=_loop, daemon=True, name="dashboard-cron-ticker")
+    thread.start()
+    app.state.cron_ticker = {
+        "running": True,
+        "process": "cli.web_server",
+        "thread": thread.name,
+        "interval_seconds": 60,
+    }
+
+
+app.router.on_startup.append(_start_dashboard_cron_ticker)
 
 
 def _webui_version_token() -> str:
