@@ -10,12 +10,14 @@ Usage:
 """
 
 import asyncio
+import functools
 import hmac
 import importlib.util
 import json
 import logging
 import os
 import secrets
+import socket
 import subprocess
 import sys
 import threading
@@ -64,7 +66,7 @@ from web.api.oauth import (
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
 except ImportError:
@@ -4834,6 +4836,171 @@ async def onboarding_probe(body: dict = {}):
         return probe_provider_endpoint(provider, base_url, api_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"probe failed: {e}")
+
+
+# ── API proxy / fallback ─────────────────────────────────────────────────────────
+# The old frontend (web/static/) was designed for the stdlib HTTP server
+# (web/server.py + web/api/routes.py) which has ~100+ API routes.  The FastAPI
+# server only has a subset.  When the old frontend is served (no new Vite
+# dashboard build), we proxy unknown /api/* requests to an internal stdlib
+# server instance so all routes continue to work.
+# ============================================================================
+
+_STDLIB_PORT: int | None = None
+_STDLIB_PROC: subprocess.Popen | None = None
+_STDLIB_LOCK = threading.Lock()
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+def _is_old_frontend() -> bool:
+    """True when the old web/static/ frontend is being served (needs stdlib backend)."""
+    try:
+        static_index = WEB_DIST / "index.html"
+        if not static_index.exists():
+            return False
+        # New dashboard build serves from cli/web_dist/ or web_dist/ at repo root.
+        dist_name = str(WEB_DIST.resolve()).lower()
+        if "web_dist" in dist_name or "cli\\web_dist" in dist_name:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _ensure_stdlib_backend() -> int:
+    """Start the stdlib API server on a random port if not running. Thread-safe."""
+    global _STDLIB_PORT, _STDLIB_PROC
+    if _STDLIB_PORT is not None:
+        return _STDLIB_PORT
+    with _STDLIB_LOCK:
+        if _STDLIB_PORT is not None:
+            return _STDLIB_PORT
+        if not _is_old_frontend():
+            _STDLIB_PORT = 0  # sentinel: never start
+            return 0
+        port = _find_free_port()
+        env = os.environ.copy()
+        env["SIDEKICK_WEBUI_PORT"] = str(port)
+        env["SIDEKICK_WEBUI_SKIP_ONBOARDING"] = "1"
+        _STDLIB_PROC = subprocess.Popen(
+            [sys.executable, "-m", "web.server"],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        # Wait for readiness (up to 10 seconds)
+        for _ in range(30):
+            try:
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/health", method="GET"
+                )
+                with urllib.request.urlopen(req, timeout=1) as resp:
+                    if resp.status == 200:
+                        _STDLIB_PORT = port
+                        return port
+            except Exception:
+                time.sleep(0.3)
+        # Timeout — kill the process and raise
+        _STDLIB_PROC.kill()
+        _STDLIB_PROC = None
+        raise RuntimeError(
+            f"Stdlib API backend did not start on port {port} within 10s"
+        )
+
+
+def _proxy_sync(
+    method: str, path: str, headers: dict, body: bytes | None
+) -> tuple[int, bytes, dict[str, str], str | None]:
+    """Forward a single HTTP request to the stdlib backend.
+
+    Returns (status, body, response_headers, content_type).
+    """
+    port = _ensure_stdlib_backend()
+    if port == 0:
+        return 502, b'{"error":"stdlib backend not available"}', {"content-type": "application/json"}, "application/json"
+
+    url = f"http://127.0.0.1:{port}{path}"
+    req = urllib.request.Request(url, data=body, method=method)
+    for k, v in headers.items():
+        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection", "accept-encoding"):
+            req.add_header(k, v)
+    try:
+        resp = urllib.request.urlopen(req, timeout=120)
+        resp_body = resp.read()
+        resp_headers = dict(resp.getheaders())
+        ct = resp_headers.get("Content-Type", resp_headers.get("content-type", "application/json"))
+        return resp.status, resp_body, resp_headers, ct
+    except urllib.error.HTTPError as e:
+        err_body = e.read()
+        err_headers = dict(e.headers)
+        ct = err_headers.get("Content-Type", err_headers.get("content-type", "application/json"))
+        return e.code, err_body, err_headers, ct
+    except urllib.error.URLError as e:
+        return 502, json.dumps({"error": f"proxy failed: {e.reason}"}).encode(), {"content-type": "application/json"}, "application/json"
+
+
+def _proxy_stream(
+    method: str, path: str, headers: dict, body: bytes | None
+):
+    """Generator that yields chunks from the stdlib backend (for SSE / streaming)."""
+    port = _ensure_stdlib_backend()
+    if port == 0:
+        yield b'{"error":"stdlib backend not available"}'
+        return
+    url = f"http://127.0.0.1:{port}{path}"
+    req = urllib.request.Request(url, data=body, method=method)
+    for k, v in headers.items():
+        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection", "accept-encoding"):
+            req.add_header(k, v)
+    try:
+        resp = urllib.request.urlopen(req, timeout=300)
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            yield chunk
+    except Exception:
+        yield b""
+
+
+_STREAMING_PREFIXES = ("/api/chat/stream", "/api/chat/stream/")
+
+
+@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+async def api_stdlib_proxy(request: Request, path: str):
+    """Proxy /api/* requests that no FastAPI route matched → stdlib backend."""
+    # Build the full path + query string
+    full_path = "/api/" + path
+    if request.url.query:
+        full_path += "?" + request.url.query
+
+    body = await request.body()
+    headers = dict(request.headers)
+
+    is_stream = any(full_path.startswith(p) for p in _STREAMING_PREFIXES)
+
+    if is_stream:
+        loop = asyncio.get_event_loop()
+        gen = await loop.run_in_executor(
+            None,
+            functools.partial(_proxy_stream, request.method, full_path, headers, body),
+        )
+        return StreamingResponse(
+            gen, media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "Connection": "keep-alive"},
+        )
+
+    loop = asyncio.get_event_loop()
+    status, resp_body, resp_headers, content_type = await loop.run_in_executor(
+        None,
+        functools.partial(_proxy_sync, request.method, full_path, headers, body),
+    )
+    return Response(content=resp_body, status_code=status, media_type=content_type)
 
 
 mount_spa(app)

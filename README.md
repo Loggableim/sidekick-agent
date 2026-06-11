@@ -251,6 +251,7 @@ Key items:
 | v0.5.0 | `v0.5.0` | Doctor --check-providers, macOS CI, streaming stability |
 | v0.8.2 | `v0.8.2` | Windows installer portable mode finalization |
 | v0.8.4 | `v0.8.4` | WebUI first-run onboarding fix: FastAPI routes, path detection, frontend field name |
+| v0.8.5 | `v0.8.5` | WebUI API proxy: auto-start stdlib backend, proxy all missing /api/* routes |
 
 ## Troubleshooting
 
