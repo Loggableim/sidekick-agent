@@ -131,6 +131,34 @@ def _nova_cognitive_system_block(
     path = str(workspace_path or "").replace("\\", "/").lower()
     if slug != "nova" and "/home/spaces/nova" not in path:
         return ""
+    try:
+        from web.api.nova_lifecycle import pre_turn
+
+        payload = pre_turn(workspace_slug=slug or "nova", user_text=user_message)
+        context = str((payload or {}).get("context") or "").strip()
+        if context:
+            extra_rule = ""
+            if _is_nova_self_query(user_message):
+                extra_rule = (
+                    "For this turn, the user is asking about Nova directly.\n"
+                    "- answer from this block first\n"
+                    "- let it shape tone and self-description\n"
+                    "- do not search for internal files or run internal scripts just to rediscover the same state\n"
+                    "- keep the answer bounded and subjective rather than generic or absolute\n"
+                    "- use tools only if the user explicitly asks for deeper inspection or technical evidence\n"
+                )
+            return (
+                "\n\n=== NOVA COGNITIVE CONTEXT ===\n"
+                "This is Nova's current internal state. Use it as live first-class context, not as flavor text.\n"
+                "It reflects the current snapshot of emotion, continuity, memory, will, personality, and active threads.\n"
+                "Treat this block as the authoritative internal readout for this turn.\n"
+                f"{extra_rule}"
+                f"{context}\n"
+                "=== END NOVA COGNITIVE CONTEXT ===\n"
+            )
+    except Exception:
+        logger.debug("Nova lifecycle pre_turn failed; falling back to session_start", exc_info=True)
+
     module = _load_nova_session_start_module()
     if module is None:
         return ""
@@ -3908,6 +3936,23 @@ def _run_agent_streaming(
                         )
                     except Exception:
                         logger.debug("Failed to append completed turn journal event", exc_info=True)
+                    try:
+                        _nova_slug = str(getattr(s, 'workspace_slug', '') or _ws_slug or '').strip().lower()
+                        _nova_path = str(getattr(s, 'workspace', '') or '').replace('\\', '/').lower()
+                        if _nova_slug == 'nova' or '/home/spaces/nova' in _nova_path:
+                            from web.api.nova_lifecycle import post_turn as _nova_post_turn
+
+                            _nu, _na = _latest_exchange_snippets(s.messages)
+                            if _nu and _na:
+                                _nova_post_turn(
+                                    session_id=s.session_id,
+                                    user_text=_nu,
+                                    assistant_text=_na,
+                                    workspace_slug='nova',
+                                    blocking=False,
+                                )
+                    except Exception:
+                        logger.debug("Nova lifecycle post_turn hook failed", exc_info=True)
             # Sync to state.db for /insights (opt-in setting)
             try:
                 from web.api.config import load_settings as _load_settings

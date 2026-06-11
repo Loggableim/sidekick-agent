@@ -3690,6 +3690,30 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/nova/routes":
         return j(handler, _load_nova_route_status())
 
+    if parsed.path == "/api/nova/status":
+        from web.api.nova_lifecycle import get_nova_status
+
+        return j(handler, get_nova_status())
+
+    if parsed.path == "/api/nova/personality":
+        from web.api.nova_lifecycle import personality_snapshot
+
+        query = parse_qs(parsed.query or "")
+        scope = (query.get("scope", ["public"])[0] or "public").strip().lower()
+        return j(handler, personality_snapshot(scope))
+
+    if parsed.path == "/api/nova/events":
+        from web.api.nova_lifecycle import load_events
+
+        query = parse_qs(parsed.query or "")
+        scope = (query.get("scope", ["public"])[0] or "public").strip().lower()
+        limit_raw = query.get("limit", ["50"])[0]
+        try:
+            limit = max(1, min(200, int(limit_raw)))
+        except (TypeError, ValueError):
+            limit = 50
+        return j(handler, {"events": load_events(limit=limit, include_private=(scope == "private"))})
+
     if parsed.path == "/api/dashboard/status":
         from web.api import dashboard_probe
 
