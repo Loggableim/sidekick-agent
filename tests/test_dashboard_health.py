@@ -212,3 +212,41 @@ def test_api_auth_script_loads_before_app_fetches():
     assert index_html.index("static/api-auth.js") < index_html.index("static/ui.js")
     assert index_html.index("static/api-auth.js") < index_html.index("static/boot.js")
     assert "'./static/api-auth.js' + VQ" in sw_js
+
+
+def test_proxy_response_keeps_safe_stdlib_headers(monkeypatch):
+    from cli import web_server
+
+    captured = {}
+
+    def fake_proxy(method, path, headers, body):
+        captured["path"] = path
+        return (
+            200,
+            b"{}",
+            {
+                "Content-Type": "application/json; charset=utf-8",
+                "Set-Cookie": "profile=default; Path=/; SameSite=Lax",
+                "Content-Disposition": 'attachment; filename="session.json"',
+                "Cache-Control": "no-store",
+                "X-Accel-Buffering": "no",
+                "Connection": "close",
+            },
+            "application/json; charset=utf-8",
+        )
+
+    monkeypatch.setattr(web_server, "_proxy_sync", fake_proxy)
+
+    client = TestClient(web_server.app)
+    response = client.get(
+        "/api/not-native-route",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert captured["path"] == "/api/not-native-route"
+    assert response.headers["set-cookie"] == "profile=default; Path=/; SameSite=Lax"
+    assert response.headers["content-disposition"] == 'attachment; filename="session.json"'
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert "connection" not in {key.lower() for key in response.headers}

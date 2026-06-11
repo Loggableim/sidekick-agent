@@ -247,6 +247,16 @@ class SessionDB:
                 return text[:64]
         return None
 
+    def _fallback_title(self, row: dict[str, Any]) -> str:
+        source = str(row.get("source") or "").strip().lower()
+        if source == "cron":
+            return "Cron session"
+        if source == "cli":
+            return "CLI session"
+        if source:
+            return source.replace("_", " ").replace("-", " ").title() + " session"
+        return "Session"
+
     def list_sessions(
         self,
         limit: int = 50,
@@ -266,7 +276,7 @@ class SessionDB:
         rows = [dict(row) for row in cursor.fetchall()]
         for row in rows:
             title = str(row.get("title") or "").strip()
-            if title:
+            if title and title.lower() not in {"untitled", "no title", "no-title"}:
                 continue
             session_id = row.get("session_id") or row.get("id")
             if not session_id:
@@ -274,6 +284,8 @@ class SessionDB:
             derived_title = self._derive_title_from_messages(str(session_id))
             if derived_title:
                 row["title"] = derived_title
+            else:
+                row["title"] = self._fallback_title(row)
         return rows
 
     def close(self) -> None:

@@ -5280,6 +5280,17 @@ def cmd_doctor(args):
     run_doctor(args)
 
 
+def cmd_repair(args):
+    """Repair local Sidekick state."""
+    sub = getattr(args, "repair_command", None)
+    if sub == "local-state":
+        from cli.local_state_repair import run_local_state_repair
+
+        return run_local_state_repair(args)
+    print("usage: sidekick repair local-state [--from PATH] [--to PATH] [--apply]", file=sys.stderr)
+    return 1
+
+
 def cmd_dump(args):
     """Dump setup summary for support/debugging."""
     from cli.dump import run_dump
@@ -9195,7 +9206,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "config", "cron", "curator", "dashboard", "debug", "doctor",
         "dump", "fallback", "gateway", "hooks", "import", "insights",
         "kanban", "login", "logout", "logs", "mcp", "memory", "model",
-        "pairing", "plugins", "profile", "sessions", "setup", "skills",
+        "pairing", "plugins", "profile", "repair", "sessions", "setup", "skills",
         "slack", "status", "tools", "uninstall", "update", "version",
         "webhook", "whatsapp", "chat",
         # Help-ish invocations — plugin commands not being listed in
@@ -10108,6 +10119,43 @@ def main():
         help="Check provider connectivity (online reachability test)"
     )
     doctor_parser.set_defaults(func=cmd_doctor)
+
+    # =========================================================================
+    # repair command
+    # =========================================================================
+    repair_parser = subparsers.add_parser(
+        "repair",
+        help="Repair local Sidekick state",
+        description="Local repair utilities for Sidekick installations",
+    )
+    repair_subparsers = repair_parser.add_subparsers(dest="repair_command")
+    local_state = repair_subparsers.add_parser(
+        "local-state",
+        help="Migrate legacy HermesPortable state into the Sidekick home",
+    )
+    local_state.add_argument(
+        "--from",
+        dest="source",
+        default=r"C:\hermesportable\home",
+        help=r"Legacy source home (default: C:\hermesportable\home)",
+    )
+    local_state.add_argument(
+        "--to",
+        dest="target",
+        default=r"C:\sidekick\home",
+        help=r"Target Sidekick home (default: C:\sidekick\home)",
+    )
+    local_state.add_argument(
+        "--apply",
+        action="store_true",
+        help="Copy local state. Without this flag the command only prints a dry-run report.",
+    )
+    local_state.add_argument(
+        "--no-user-env",
+        action="store_true",
+        help="Do not set the Windows User env var SIDEKICK_HOME during --apply.",
+    )
+    repair_parser.set_defaults(func=cmd_repair)
 
     # =========================================================================
     # dump command

@@ -10,6 +10,7 @@ Usage:
 """
 
 import asyncio
+import atexit
 import functools
 import hmac
 import importlib.util
@@ -4849,6 +4850,21 @@ async def onboarding_probe(body: dict = {}):
 _STDLIB_PORT: int | None = None
 _STDLIB_PROC: subprocess.Popen | None = None
 _STDLIB_LOCK = threading.Lock()
+_PROXY_RESPONSE_HEADERS = {
+    "set-cookie",
+    "content-disposition",
+    "cache-control",
+    "accept-ranges",
+    "content-range",
+    "x-accel-buffering",
+}
+_PROXY_DROP_HEADERS = {
+    "host",
+    "content-length",
+    "transfer-encoding",
+    "connection",
+    "accept-encoding",
+}
 
 
 def _find_free_port() -> int:
@@ -4913,6 +4929,48 @@ def _ensure_stdlib_backend() -> int:
         )
 
 
+def _stop_stdlib_backend() -> None:
+    global _STDLIB_PORT, _STDLIB_PROC
+    proc = _STDLIB_PROC
+    _STDLIB_PROC = None
+    _STDLIB_PORT = None
+    if proc is None:
+        return
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+    except Exception:
+        _log.debug("Failed to stop stdlib backend", exc_info=True)
+
+
+atexit.register(_stop_stdlib_backend)
+try:
+    app.router.on_shutdown.append(_stop_stdlib_backend)
+except Exception:
+    _log.debug("Could not register stdlib backend shutdown handler", exc_info=True)
+
+
+def _forward_request_headers(headers: dict) -> dict[str, str]:
+    return {
+        str(k): str(v)
+        for k, v in headers.items()
+        if str(k).lower() not in _PROXY_DROP_HEADERS
+    }
+
+
+def _safe_proxy_response_headers(headers: dict[str, str]) -> dict[str, str]:
+    safe: dict[str, str] = {}
+    for key, value in headers.items():
+        lk = key.lower()
+        if lk in _PROXY_RESPONSE_HEADERS:
+            safe[key] = value
+    return safe
+
+
 def _proxy_sync(
     method: str, path: str, headers: dict, body: bytes | None
 ) -> tuple[int, bytes, dict[str, str], str | None]:
@@ -4926,9 +4984,8 @@ def _proxy_sync(
 
     url = f"http://127.0.0.1:{port}{path}"
     req = urllib.request.Request(url, data=body, method=method)
-    for k, v in headers.items():
-        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection", "accept-encoding"):
-            req.add_header(k, v)
+    for k, v in _forward_request_headers(headers).items():
+        req.add_header(k, v)
     try:
         resp = urllib.request.urlopen(req, timeout=120)
         resp_body = resp.read()
@@ -4954,9 +5011,8 @@ def _proxy_stream(
         return
     url = f"http://127.0.0.1:{port}{path}"
     req = urllib.request.Request(url, data=body, method=method)
-    for k, v in headers.items():
-        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection", "accept-encoding"):
-            req.add_header(k, v)
+    for k, v in _forward_request_headers(headers).items():
+        req.add_header(k, v)
     try:
         resp = urllib.request.urlopen(req, timeout=300)
         while True:
@@ -5000,7 +5056,12 @@ async def api_stdlib_proxy(request: Request, path: str):
         None,
         functools.partial(_proxy_sync, request.method, full_path, headers, body),
     )
-    return Response(content=resp_body, status_code=status, media_type=content_type)
+    return Response(
+        content=resp_body,
+        status_code=status,
+        media_type=content_type,
+        headers=_safe_proxy_response_headers(resp_headers),
+    )
 
 
 mount_spa(app)

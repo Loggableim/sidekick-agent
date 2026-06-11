@@ -233,6 +233,61 @@ function Test-DashboardHealth {
     }
 }
 
+function Get-DirectoryCount {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return 0 }
+    try {
+        return @((Get-ChildItem -LiteralPath $Path -Directory -Force -ErrorAction SilentlyContinue)).Count
+    } catch {
+        return 0
+    }
+}
+
+function Get-SqliteTableCount {
+    param([string]$DbPath, [string]$Table)
+    if (-not (Test-Path -LiteralPath $DbPath)) { return 0 }
+    $python = Get-Command "python" -ErrorAction SilentlyContinue
+    if (-not $python) { return -1 }
+    try {
+        $script = "import sqlite3,sys; con=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro', uri=True, timeout=1); print(con.execute('select count(*) from '+sys.argv[2]).fetchone()[0]); con.close()"
+        $out = & $python.Source -c $script $DbPath $Table 2>$null
+        if ($LASTEXITCODE -eq 0) { return [int]($out | Select-Object -First 1) }
+    } catch {}
+    return -1
+}
+
+function Show-StateSummary {
+    $repoDir = ""
+    try { $repoDir = Resolve-RepoDir } catch { $repoDir = "(not found)" }
+    $webuiStateDir = Join-Path $HomeDir "webui"
+    $spacesRoot = Join-Path $HomeDir "spaces"
+    $stateDb = Join-Path $HomeDir "state.db"
+    $spaceCount = Get-DirectoryCount $spacesRoot
+    $sessionCount = Get-SqliteTableCount $stateDb "sessions"
+    $messageCount = Get-SqliteTableCount $stateDb "messages"
+
+    Write-Line "repo       $repoDir" DarkGray
+    Write-Line "home       $HomeDir" DarkGray
+    Write-Line "webui      $webuiStateDir" DarkGray
+    Write-Line "spaces     $spacesRoot ($spaceCount)" DarkGray
+    Write-Line "state.db   $stateDb (sessions=$sessionCount messages=$messageCount)" DarkGray
+
+    $legacyCandidates = @(
+        "C:\hermesportable\home\state.db",
+        (Join-Path $env:LOCALAPPDATA "hermes\state.db")
+    )
+    $emptyCurrent = (-not (Test-Path -LiteralPath $stateDb)) -or ((Get-Item -LiteralPath $stateDb -ErrorAction SilentlyContinue).Length -le 4096)
+    if ($emptyCurrent) {
+        foreach ($legacyDb in $legacyCandidates) {
+            if ((Test-Path -LiteralPath $legacyDb) -and ((Get-Item -LiteralPath $legacyDb).Length -gt 4096)) {
+                Write-Line "migration  old Hermes state detected: $legacyDb" Yellow
+                Write-Line "migration  run: sidekick repair local-state --from C:\hermesportable\home --to $HomeDir --apply" Yellow
+                break
+            }
+        }
+    }
+}
+
 function Wait-DashboardHealth {
     param([int]$TargetPort, [int]$Seconds = 120)
     $deadline = (Get-Date).AddSeconds($Seconds)
@@ -295,6 +350,7 @@ function Stop-All {
 function Show-Status {
     Ensure-Dirs
     Write-Header
+    Show-StateSummary
     $pids = Read-Pids
     foreach ($name in @("dashboard", "gateway")) {
         $procId = if ($pids.ContainsKey($name)) { $pids[$name] } else { 0 }
