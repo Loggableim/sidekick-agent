@@ -53,7 +53,19 @@ logger = logging.getLogger(__name__)
 # constant was cached at import time and could go stale if a profile switch
 # happened after the first import.
 def get_memory_dir() -> Path:
-    """Return the profile-scoped memories directory."""
+    """Return the active Space memory directory, falling back to profile memory."""
+    try:
+        from web.api.space_engine import get_active_space_slug, get_space
+    except Exception:
+        logger.debug("Space engine unavailable; using profile memory directory", exc_info=True)
+        return get_sidekick_home() / "memories"
+
+    slug = get_active_space_slug()
+    if slug:
+        space = get_space(slug)
+        if space is not None:
+            return space.memory_dir
+
     return get_sidekick_home() / "memories"
 
 ENTRY_DELIMITER = "\n§\n"

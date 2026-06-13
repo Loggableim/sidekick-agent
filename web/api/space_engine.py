@@ -173,7 +173,17 @@ class Space:
 
     @property
     def memory_dir(self) -> Path:
-        return self.root / "memory"
+        configured = str(self.load_config().get("memory_path") or "").strip()
+        if not configured:
+            return self.root / "memory"
+        raw = Path(configured).expanduser()
+        if raw.is_absolute():
+            return raw.resolve()
+        resolved = (self.root / raw).resolve()
+        root = self.root.resolve()
+        if not resolved.is_relative_to(root):
+            raise ValueError(f"memory_path for space {self.slug!r} must stay inside the space directory")
+        return resolved
 
     # ── Config ──────────────────────────────────────────────────────────────
 
@@ -184,6 +194,7 @@ class Space:
         "personality": "",
         "description": "",
         "project_dir": "",
+        "memory_path": "",
         "color": "#4FC3F7",
         "emoji": "📁",
         "nova": {
