@@ -393,6 +393,17 @@ def _is_generic_default_agent_soul(path: Path) -> bool:
     return bool(text and _GENERIC_DEFAULT_SOUL_MARKER in text)
 
 
+def ensure_bundled_nova_template(space: "Space") -> list[Path]:
+    """Install sanitized bundled Nova template files into a space if missing."""
+    try:
+        from web.api.nova_template_distribution import install_bundled_nova_template
+
+        return install_bundled_nova_template(space.root)
+    except Exception:
+        logger.exception("failed to install bundled Nova template into %s", space.root)
+        return []
+
+
 def _resolve_consciousness_source_slug() -> str:
     canonical_default = Space(DEFAULT_SPACE_SLUG, DEFAULT_SPACE_NAME)
     if (canonical_default.root / "SOUL.md").exists():
@@ -419,6 +430,7 @@ def _seed_default_space_from_consciousness() -> None:
     source_slug = _resolve_consciousness_source_slug()
     if source_slug == DEFAULT_SPACE_SLUG:
         target = Space(DEFAULT_SPACE_SLUG, DEFAULT_SPACE_NAME)
+        ensure_bundled_nova_template(target)
         if target.root.is_dir():
             cfg = target.load_config()
             changed = False
@@ -441,12 +453,26 @@ def _seed_default_space_from_consciousness() -> None:
 
     source = Space(source_slug, source_slug)
     if not source.root.is_dir():
+        target = Space(DEFAULT_SPACE_SLUG, DEFAULT_SPACE_NAME)
+        ensure_bundled_nova_template(target)
+        cfg = target.load_config()
+        nova_cfg = dict(cfg.get("nova") or {})
+        cfg["name"] = cfg.get("name") or DEFAULT_SPACE_NAME
+        cfg["description"] = cfg.get("description") or "Canonical Nova space seeded from the bundled Sidekick template."
+        cfg["nova"] = {
+            "enabled": True,
+            "character": nova_cfg.get("character", "") or DEFAULT_NOVA_CHARACTER,
+            "source_space": DEFAULT_SPACE_SLUG,
+            "communication_mode": "pingpong",
+        }
+        target.save_config(cfg)
         return
 
     target = Space(DEFAULT_SPACE_SLUG, DEFAULT_SPACE_NAME)
     target.root.mkdir(parents=True, exist_ok=True)
     target.memory_dir.mkdir(parents=True, exist_ok=True)
     target.ensure_agent("default", create_soul=True)
+    ensure_bundled_nova_template(target)
 
     source_config = source.config_path
     target_config = target.config_path
@@ -499,11 +525,27 @@ def seed_space_with_nova(
     source_slug = source_slug or _resolve_consciousness_source_slug()
     source = Space(source_slug, source_slug)
     if not source.root.is_dir():
+        ensure_bundled_nova_template(space)
+        current = space.load_config()
+        nova_cfg = dict(current.get("nova") or {})
+        nova_cfg.update(
+            {
+                "enabled": True,
+                "character": character or nova_cfg.get("character", "") or DEFAULT_NOVA_CHARACTER,
+                "source_space": DEFAULT_SPACE_SLUG,
+                "communication_mode": "pingpong",
+            }
+        )
+        current["nova"] = nova_cfg
+        if not current.get("description"):
+            current["description"] = "Space with its own Nova instance seeded from the bundled Sidekick template."
+        space.save_config(current)
         return
 
     space.root.mkdir(parents=True, exist_ok=True)
     space.memory_dir.mkdir(parents=True, exist_ok=True)
     space.ensure_agent("default", create_soul=True)
+    ensure_bundled_nova_template(space)
 
     source_root_soul = source.root / "SOUL.md"
     target_root_soul = space.root / "SOUL.md"
