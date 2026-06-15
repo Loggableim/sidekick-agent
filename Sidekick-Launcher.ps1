@@ -217,6 +217,45 @@ function Stop-PortIfUnhealthy {
     }
 }
 
+function Stop-PortProcesses {
+    param([int]$TargetPort, [string]$Reason = "restart")
+    foreach ($portProcId in Get-PortPids $TargetPort) {
+        if ($portProcId -gt 0) {
+            Write-Line "Stopping process on port $TargetPort (PID $portProcId, $Reason)..." Yellow
+            Stop-Process -Id $portProcId -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Stop-UntrackedDashboardOnPort {
+    param([int]$TargetPort)
+    $pids = Read-Pids
+    $trackedDashboard = if ($pids.ContainsKey("dashboard")) { [int]$pids["dashboard"] } else { 0 }
+    foreach ($portProcId in Get-PortPids $TargetPort) {
+        if ($portProcId -le 0) { continue }
+        if ($trackedDashboard -gt 0 -and $portProcId -eq $trackedDashboard -and (Test-ProcessAlive $trackedDashboard)) {
+            continue
+        }
+        Write-Line "Stopping untracked dashboard on port $TargetPort (PID $portProcId)..." Yellow
+        Stop-Process -Id $portProcId -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Stop-OrphanStdlibBackends {
+    param([string]$Reason = "cleanup")
+    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -and
+        $_.CommandLine -match "python(\.exe)?[`" ]" -and
+        $_.CommandLine -match "\-m\s+web\.server"
+    })
+    foreach ($proc in $procs) {
+        $procId = [int]$proc.ProcessId
+        if ($procId -le 0) { continue }
+        Write-Line "Stopping orphan stdlib backend (PID $procId, $Reason)..." Yellow
+        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Test-DashboardHealth {
     param([int]$TargetPort)
     try {
@@ -343,6 +382,7 @@ function Stop-All {
             $pids.Remove($name)
         }
     }
+    Stop-OrphanStdlibBackends "launcher stop"
     Save-Pids $pids
     Write-Line "Stopped tracked Sidekick components." Green
 }
@@ -375,7 +415,14 @@ function Start-All {
     Write-Line "Repo: $repoDir" DarkGray
     Write-Line "Python: $pythonExe" DarkGray
 
-    if ($ForceRestart) { Stop-All }
+    if ($ForceRestart) {
+        Stop-All
+        Stop-PortProcesses $Port "force restart"
+        Stop-OrphanStdlibBackends "force restart"
+    } else {
+        Stop-UntrackedDashboardOnPort $Port
+        Stop-OrphanStdlibBackends "pre-start cleanup"
+    }
     Stop-PortIfUnhealthy $Port
 
     if (-not $NoGateway) {

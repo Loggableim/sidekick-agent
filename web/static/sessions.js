@@ -795,6 +795,7 @@ async function loadSession(sid, options){
         messages:Array.isArray(stored.messages)&&stored.messages.length?stored.messages:[],
         uploaded:Array.isArray(stored.uploaded)?stored.uploaded:[],
         toolCalls:Array.isArray(stored.toolCalls)?stored.toolCalls:[],
+        workspace_slug:stored.workspace_slug||stored.space_slug||stored.space||'',
         reattach:true,
       };
     }
@@ -1410,9 +1411,11 @@ let _messagesTruncated = false;
 // Called after loadSession fetches metadata (messages=0).
 // Idempotent: if messages are already in S.messages, resolves immediately.
 // Handles streaming sessions specially: restores from INFLIGHT cache or API.
-// msg_limit (default 6): only fetch the last N messages for fast switching.
-// Older messages are loaded on-demand via _loadOlderMessages().
-const _INITIAL_MSG_LIMIT = 6;
+// msg_limit: fetch a bounded tail window for fast switching.
+// Keep this above a single exchange because tool-heavy agent sessions often
+// have many hidden `tool` rows at the tail; too small a raw window renders as
+// an almost-empty chat and can pin the viewport to the load-older sentinel.
+const _INITIAL_MSG_LIMIT = 24;
 const _SESSION_MESSAGES_TIMEOUT_MS = 45000;
 
 async function _ensureMessagesLoaded(sid, signal) {
@@ -1511,6 +1514,7 @@ async function _loadOlderMessages() {
     // Use $('messages') — the scrollable container (#msgInner is not scrollable).
     const container = $('messages');
     const prevScrollH = container ? container.scrollHeight : 0;
+    const prevScrollTop = container ? container.scrollTop : 0;
     S.messages = [...olderMsgs, ...S.messages];
     // renderMessages() windows long transcripts from the end. If we do not
     // expand that window before rendering, the newly prepended page stays
@@ -1531,11 +1535,10 @@ async function _loadOlderMessages() {
     if (container) {
       // Prepending older messages must not teleport the reader. Preserve the
       // currently visible viewport by adding the inserted height to scrollTop.
-      const oldTop = container.scrollTop;
       const newScrollH = container.scrollHeight;
       const addedHeight = Math.max(0, newScrollH - prevScrollH);
       _programmaticScroll = true;
-      container.scrollTop = oldTop + addedHeight;
+      container.scrollTop = prevScrollTop + addedHeight;
       requestAnimationFrame(()=>{ _programmaticScroll = false; });
     }
     _scrollPinned = false;
@@ -2048,15 +2051,31 @@ window.addEventListener('resize',()=>{
 // with stale data, causing sessions to vanish from the sidebar.
 let _renderSessionListGen = 0;
 
+function _sessionBelongsToActiveWorkspace(s){
+  if(!s) return false;
+  let active='';
+  try{
+    active=(typeof getActiveSpaceQuery==='function')
+      ? (new URLSearchParams(getActiveSpaceQuery().slice(1)).get('workspace')||'')
+      : '';
+  }catch(_){}
+  active=String(active||'').trim().toLowerCase();
+  if(!active) return true;
+  const sessionSpace=String(s.workspace_slug||s.space_slug||s.space||'').trim().toLowerCase();
+  return sessionSpace===active;
+}
+
 function _isOptimisticFirstTurnSessionRow(s){
   if(!s||!s.session_id||s.archived) return false;
+  if(!_sessionBelongsToActiveWorkspace(s)) return false;
   const messageCount=Number(s.message_count||0);
   if(messageCount<=0&&!s.pending_user_message) return false;
+  const updated=Number(s.updated_at||s.last_message_at||0);
+  const serverNow=(typeof _serverNowMs==='function')?_serverNowMs():Date.now();
+  const ageMs=updated>0 ? Math.max(0, serverNow - updated*1000) : 0;
+  const freshEnough=!updated || ageMs < 10*60*1000;
   return Boolean(
-    s.is_streaming||
-    s.active_stream_id||
-    s.pending_user_message||
-    s.pending_started_at||
+    (freshEnough && (s.is_streaming||s.active_stream_id||s.pending_user_message||s.pending_started_at))||
     _isSessionLocallyStreaming(s)||
     _sessionStreamingById.get(s.session_id)===true
   );
@@ -2100,6 +2119,35 @@ let _sessionListInFlightKey = '';
 let _sessionListInFlightPromise = null;
 let _sessionListAbortController = null;
 
+function _apiWithTimeout(path, options, ms, label){
+  const opts = options || {};
+  const parentSignal = opts.signal;
+  const controller = new AbortController();
+  let timer = null;
+  let timedOut = false;
+  const abortChild = () => {
+    try { controller.abort(); } catch (_) {}
+  };
+  if (parentSignal) {
+    if (parentSignal.aborted) abortChild();
+    else parentSignal.addEventListener('abort', abortChild, {once:true});
+  }
+  timer = setTimeout(() => {
+    timedOut = true;
+    abortChild();
+  }, ms);
+  return api(path, Object.assign({}, opts, {signal: controller.signal})).catch((e) => {
+    if (!parentSignal || !parentSignal.aborted) {
+      e._sidekickTimeoutLabel = label || path;
+      e._sidekickTimedOut = timedOut;
+    }
+    throw e;
+  }).finally(() => {
+    if (timer) clearTimeout(timer);
+    if (parentSignal) parentSignal.removeEventListener('abort', abortChild);
+  });
+}
+
 async function renderSessionList(){
   const spaceLoadKey = (typeof _activeSpaceLoadKey === 'function') ? _activeSpaceLoadKey() : '';
   const activeWorkspace = (typeof getActiveSpaceQuery === 'function')
@@ -2132,10 +2180,22 @@ async function renderSessionList(){
     }
     const sessionsUrl = '/api/sessions' + (sessionParams.toString() ? '?' + sessionParams.toString() : '');
     const projectsUrl = '/api/projects' + (projectParams.toString() ? '?' + projectParams.toString() : '');
-    const [sessData, projData] = await Promise.all([
-      api(sessionsUrl, {signal: listAbortController.signal}),
-      api(projectsUrl, {signal: listAbortController.signal}),
-    ]);
+    const sessData = await _apiWithTimeout(
+      sessionsUrl,
+      {signal: listAbortController.signal},
+      8000,
+      'sessions'
+    );
+    const projData = await _apiWithTimeout(
+      projectsUrl,
+      {signal: listAbortController.signal},
+      2500,
+      'projects'
+    ).catch((e) => {
+      if (listAbortController.signal.aborted) throw e;
+      console.warn('renderSessionList projects unavailable, continuing without projects', e);
+      return {projects: []};
+    });
     // Discard stale response — a newer renderSessionList() call superseded us.
     if (_gen !== _renderSessionListGen) return;
     if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
@@ -2263,7 +2323,7 @@ function startGatewaySSE(){
   stopGatewaySSE();
   if(!window._showCliSessions) return;
   try{
-    _gatewaySSE = new EventSource('api/sessions/gateway/stream');
+    _gatewaySSE = new EventSource(_eventSourceUrl('api/sessions/gateway/stream'));
     _gatewaySSE.addEventListener('sessions_changed', (ev) => {
       try{
         const data = JSON.parse(ev.data);

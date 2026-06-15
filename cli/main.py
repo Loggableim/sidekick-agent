@@ -107,6 +107,36 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
+def _apply_portable_home_default() -> None:
+    """Prefer the bundled portable home when running from a Sidekick bundle.
+
+    Windows installs launch from ``C:\\sidekick\\sidekick`` with state in
+    ``C:\\sidekick\\home``.  Existing machines can still have a user-scoped
+    ``HERMES_HOME`` from the old Hermes install; if ``SIDEKICK_HOME`` is not
+    explicitly set that legacy value would silently move the WebUI back to the
+    old state.  Keep library-level Hermes compatibility intact, but make the
+    standalone CLI deterministic for portable installs.
+    """
+    if os.environ.get("SIDEKICK_HOME", "").strip():
+        return
+    if os.environ.get("SIDEKICK_DISABLE_PORTABLE_HOME", "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    portable_home = PROJECT_ROOT.parent / "home"
+    if not portable_home.exists():
+        return
+    if PROJECT_ROOT.parent.name.lower() != "sidekick":
+        return
+    if PROJECT_ROOT.name.lower() not in {"sidekick", "sidekick-agent"}:
+        return
+
+    os.environ["SIDEKICK_HOME"] = str(portable_home)
+    os.environ["HERMES_HOME"] = str(portable_home)
+
+
+_apply_portable_home_default()
+
+
 # ---------------------------------------------------------------------------
 # Profile override — MUST happen before any hermes module import.
 #

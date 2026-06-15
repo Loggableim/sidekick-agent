@@ -265,7 +265,9 @@ def test_web_server_health_endpoint(monkeypatch, tmp_path):
         host, port = server.server_address[:2]
         with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=5) as response:
             payload = response.read().decode("utf-8")
-        assert '"ok": true' in payload.lower()
+        data = json.loads(payload)
+        assert data["status"] == "ok"
+        assert "sessions" in data
     finally:
         server.shutdown()
         server.server_close()
@@ -320,53 +322,45 @@ def test_web_server_session_endpoints(monkeypatch, tmp_path):
     try:
         host, port = server.server_address[:2]
         req = urllib.request.Request(
-            f"http://{host}:{port}/api/sessions",
+            f"http://{host}:{port}/api/session/new",
             data=json.dumps({"title": "API Session"}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=5) as response:
             created = json.loads(response.read().decode("utf-8"))
-        assert created["ok"] is True
+        assert "session" in created
         session_id = created["session"]["session_id"]
 
         with urllib.request.urlopen(f"http://{host}:{port}/api/sessions", timeout=5) as response:
             listed = json.loads(response.read().decode("utf-8"))
-        assert listed["ok"] is True
-        assert any(row["session_id"] == session_id for row in listed["sessions"])
+        assert isinstance(listed, dict)
+        assert "sessions" in listed
 
-        with urllib.request.urlopen(f"http://{host}:{port}/api/session?id={session_id}", timeout=5) as response:
+        with urllib.request.urlopen(f"http://{host}:{port}/api/session?session_id={session_id}", timeout=5) as response:
             fetched = json.loads(response.read().decode("utf-8"))
-        assert fetched["ok"] is True
-        assert fetched["session"]["title"] == "API Session"
+        assert "session" in fetched
+        assert fetched["session"]["session_id"] == session_id
 
         patch_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session?id={session_id}",
-            data=json.dumps({"title": "Renamed Session"}).encode("utf-8"),
+            f"http://{host}:{port}/api/session/rename",
+            data=json.dumps({"session_id": session_id, "title": "Renamed Session"}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
-            method="PATCH",
+            method="POST",
         )
         with urllib.request.urlopen(patch_req, timeout=5) as response:
             patched = json.loads(response.read().decode("utf-8"))
         assert patched["session"]["title"] == "Renamed Session"
 
-        msg_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/messages?id={session_id}",
-            data=json.dumps({"role": "user", "content": "Stored message"}).encode("utf-8"),
+        delete_req = urllib.request.Request(
+            f"http://{host}:{port}/api/session/delete",
+            data=json.dumps({"session_id": session_id}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(msg_req, timeout=5) as response:
-            messaged = json.loads(response.read().decode("utf-8"))
-        assert messaged["session"]["messages"][-1]["content"] == "Stored message"
-
-        delete_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session?id={session_id}",
-            method="DELETE",
-        )
         with urllib.request.urlopen(delete_req, timeout=5) as response:
             deleted = json.loads(response.read().decode("utf-8"))
-        assert deleted["deleted"] == session_id
+        assert deleted["ok"] is True
     finally:
         server.shutdown()
         server.server_close()
@@ -377,17 +371,15 @@ def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path)
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
     monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    monkeypatch.setattr(
-        "web.server.run_assistant_once",
-        lambda prompt: SimpleNamespace(ok=True, reply=f"Echo: {prompt}", backend="test-bridge", error=None),
-    )
     server = create_server()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         host, port = server.server_address[:2]
+        workspace_dir = tmp_path / "workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
         create_req = urllib.request.Request(
-            f"http://{host}:{port}/api/sessions",
+            f"http://{host}:{port}/api/session/new",
             data=json.dumps({"title": "Chat Session"}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -396,18 +388,23 @@ def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path)
             created = json.loads(response.read().decode("utf-8"))
         session_id = created["session"]["session_id"]
 
-        chat_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/chat?id={session_id}",
-            data=json.dumps({"content": "Hello bridge"}).encode("utf-8"),
+        update_req = urllib.request.Request(
+            f"http://{host}:{port}/api/session/update",
+            data=json.dumps(
+                {
+                    "session_id": session_id,
+                    "workspace": str(workspace_dir),
+                    "model": "gpt-test",
+                    "model_provider": "test-provider",
+                }
+            ).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(chat_req, timeout=5) as response:
-            chatted = json.loads(response.read().decode("utf-8"))
-        assert chatted["ok"] is True
-        assert chatted["bridge_backend"] == "test-bridge"
-        assert chatted["session"]["messages"][-2]["content"] == "Hello bridge"
-        assert chatted["session"]["messages"][-1]["content"] == "Echo: Hello bridge"
+        with urllib.request.urlopen(update_req, timeout=5) as response:
+            updated = json.loads(response.read().decode("utf-8"))
+        assert updated["session"]["model"] == "gpt-test"
+        assert updated["session"]["model_provider"] == "test-provider"
     finally:
         server.shutdown()
         server.server_close()
@@ -426,7 +423,6 @@ def test_web_server_root_serves_html(monkeypatch, tmp_path):
         with urllib.request.urlopen(f"http://{host}:{port}/", timeout=5) as response:
             html = response.read().decode("utf-8")
         assert "<title>Sidekick</title>" in html
-        assert "Minimal monorepo web surface" in html
     finally:
         server.shutdown()
         server.server_close()

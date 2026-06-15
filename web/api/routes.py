@@ -477,6 +477,7 @@ def _skill_view_from_active_dir(name: str) -> dict:
 # Trivial; many production SSE deployments run 5-15s heartbeats specifically
 # to handle proxies and mobile NAT.
 _SSE_HEARTBEAT_INTERVAL_SECONDS = 5
+_PROMPT_SSE_MAX_AGE_SECONDS = 120
 
 
 def _normalize_messaging_source(raw_source) -> str:
@@ -4202,12 +4203,17 @@ def handle_get(handler, parsed) -> bool:
                 # low-value imported artifacts do not leak into the sidebar.
                 webui_sessions = [s for s in webui_sessions if is_cli_session_row_visible(s)]
                 webui_ids = {s["session_id"] for s in webui_sessions}
-                deduped_cli = [s for s in state_sessions if s["session_id"] not in webui_ids and is_cli_session_row_visible(s) and not _cron_hide(s)]
+                deduped_cli = [] if (workspace_slug and workspace_slug != "default") else [
+                    s for s in state_sessions
+                    if s["session_id"] not in webui_ids
+                    and is_cli_session_row_visible(s)
+                    and not _cron_hide(s)
+                ]
             else:
                 diag.stage("filter_webui_sessions")
                 webui_sessions = [s for s in webui_sessions if not _is_cli_session_for_settings(s)]
                 webui_ids = {s["session_id"] for s in webui_sessions}
-                deduped_cli = [
+                deduped_cli = [] if (workspace_slug and workspace_slug != "default") else [
                     s for s in migrated_webui_sessions
                     if s["session_id"] not in webui_ids
                 ]
@@ -4993,7 +4999,8 @@ def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
         return j(handler, {
             "active": False,
             "available": False,
-            "error": _sanitize_error(exc),
+            "error": "Hub nicht erreichbar",
+            "detail": _sanitize_error(exc),
             "host": _cast_api_host(),
         }, status=502)
 
@@ -8016,7 +8023,8 @@ def _handle_approval_sse_stream(handler, parsed):
     initial_pending = None
     initial_count = 0
     with _lock:
-        _approval_sse_subscribers.setdefault(sid, []).append(q)
+        old_subs = list(_approval_sse_subscribers.get(sid) or [])
+        _approval_sse_subscribers[sid] = [q]
         q_list = _pending.get(sid)
         if isinstance(q_list, list):
             initial_pending = dict(q_list[0]) if q_list else None
@@ -8024,6 +8032,11 @@ def _handle_approval_sse_stream(handler, parsed):
         elif q_list:
             initial_pending = dict(q_list)
             initial_count = 1
+    for old_q in old_subs:
+        try:
+            old_q.put_nowait(None)
+        except Exception:
+            pass
 
     handler.send_response(200)
     handler.send_header('Content-Type', 'text/event-stream; charset=utf-8')
@@ -8038,7 +8051,10 @@ def _handle_approval_sse_stream(handler, parsed):
     _sse(handler, 'initial', {"pending": initial_pending, "pending_count": initial_count})
 
     try:
+        started_at = time.monotonic()
         while True:
+            if time.monotonic() - started_at > _PROMPT_SSE_MAX_AGE_SECONDS:
+                break
             try:
                 payload = q.get(timeout=_SSE_HEARTBEAT_INTERVAL_SECONDS)
             except queue.Empty:
@@ -8118,7 +8134,8 @@ def _handle_clarify_sse_stream(handler, parsed):
     initial_pending = None
     initial_count = 0
     with _clarify_lock:
-        _clarify_subs.setdefault(sid, []).append(q)
+        old_subs = list(_clarify_subs.get(sid) or [])
+        _clarify_subs[sid] = [q]
         gw_q = _clarify_gateway_queues.get(sid) or []
         if gw_q:
             initial_pending = dict(gw_q[0].data)
@@ -8128,6 +8145,11 @@ def _handle_clarify_sse_stream(handler, parsed):
             if _legacy:
                 initial_pending = dict(_legacy)
                 initial_count = 1
+    for old_q in old_subs:
+        try:
+            old_q.put_nowait(None)
+        except Exception:
+            pass
 
     handler.send_response(200)
     handler.send_header('Content-Type', 'text/event-stream; charset=utf-8')
@@ -8142,12 +8164,18 @@ def _handle_clarify_sse_stream(handler, parsed):
     _sse(handler, 'initial', {"pending": initial_pending, "pending_count": initial_count})
 
     try:
+        started_at = time.monotonic()
         while True:
+            if time.monotonic() - started_at > _PROMPT_SSE_MAX_AGE_SECONDS:
+                break
             try:
                 payload = q.get(timeout=_SSE_HEARTBEAT_INTERVAL_SECONDS)
             except queue.Empty:
-                handler.wfile.write(b': keepalive\n\n')
-                handler.wfile.flush()
+                try:
+                    handler.wfile.write(b': keepalive\n\n')
+                    handler.wfile.flush()
+                except _CLIENT_DISCONNECT_ERRORS:
+                    break
                 continue
             if payload is None:
                 break

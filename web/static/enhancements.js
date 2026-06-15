@@ -1129,13 +1129,14 @@
     // Re-apply enhancements when panels switch
     const origSwitchPanel = window.switchPanel;
     if (typeof origSwitchPanel === 'function') {
-      window.switchPanel = function(panel) {
-        origSwitchPanel.call(this, panel);
+      window.switchPanel = function(panel, opts) {
+        const result = origSwitchPanel.call(this, panel, opts);
         setTimeout(() => {
           if (panel === 'sessions' || panel === 'chat') {
             enhanceSessionList();
           }
         }, 100);
+        return result;
       };
     }
   }

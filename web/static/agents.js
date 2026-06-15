@@ -635,7 +635,7 @@ function showCreatorResult(agent) {
       workspaceEventSource.close();
     }
 
-    workspaceEventSource = new EventSource('/api/agents/workspace/stream/' + sessionId);
+    workspaceEventSource = new EventSource(_eventSourceUrl('/api/agents/workspace/stream/' + sessionId));
 
     workspaceEventSource.onmessage = function(e) {
       try {
@@ -1331,13 +1331,14 @@ function showCreatorResult(agent) {
   var origSwitchPanel = window.switchPanel;
   if (origSwitchPanel) {
     var patched = function(panel, opts) {
-      origSwitchPanel(panel, opts);
+      var result = origSwitchPanel.call(this, panel, opts);
       if (panel === 'agents') {
         if (!isSplashDone) {
           checkSplashStatus();
         }
         loadAgents();
       }
+      return result;
     };
     window.switchPanel = patched;
   }

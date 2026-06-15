@@ -375,7 +375,7 @@ function _connectTerminalOutput(){
   }
   const url=new URL('api/terminal/output',document.baseURI||location.href);
   url.searchParams.set('session_id',sid);
-  const source=new EventSource(url.href,{withCredentials:true});
+  const source=new EventSource(_eventSourceUrl(url.href),{withCredentials:true});
   TERMINAL_UI.source=source;
   source.addEventListener('output',ev=>{
     if(TERMINAL_UI.source!==source)return;
@@ -665,7 +665,7 @@ const TerminalStream = {
     this.active = true;
     const url = new URL('api/terminal/stream', document.baseURI || location.href);
     url.searchParams.set('session_id', sessionId);
-    const source = new EventSource(url.href, { withCredentials: true });
+    const source = new EventSource(_eventSourceUrl(url.href), { withCredentials: true });
     this.source = source;
 
     source.addEventListener('stdout', ev => {
@@ -859,7 +859,7 @@ const TerminalStreamDuplicate = {
     this.active = true;
     const url = new URL('api/terminal/stream', document.baseURI || location.href);
     url.searchParams.set('session_id', sessionId);
-    const source = new EventSource(url.href, { withCredentials: true });
+    const source = new EventSource(_eventSourceUrl(url.href), { withCredentials: true });
     this.source = source;
 
     source.addEventListener('stdout', ev => {

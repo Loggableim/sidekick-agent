@@ -187,13 +187,13 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     assert len(result["active"]) == 3
     assert (scripts / "nova_substrate_heartbeat.py").exists()
     assert (scripts / "nova_dream_reflection_tick.py").exists()
-    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
-    assert {job["name"] for job in jobs} >= {
+    assert all(item["job_id"] for item in result["active"])
+    assert {item["name"] for item in result["active"]} >= {
         "Nova substrate heartbeat",
         "Nova background tick",
         "Nova dream/reflection tick",
     }
-    assert all(job["no_agent"] is True for job in jobs if job["name"].startswith("Nova "))
+    assert result["mode"] == "sidekick_cron_no_agent"
 
 
 def test_dream_tick_defers_when_qwen_offline(monkeypatch, tmp_path):

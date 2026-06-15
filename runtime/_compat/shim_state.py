@@ -231,33 +231,49 @@ class SessionDB:
         now = time.time()
         columns = self._table_columns("sessions")
         pk_col = "session_id" if "session_id" in columns else "id"
-        insert_cols = [pk_col]
-        values: list[Any] = [session_id]
         metadata = dict(extra)
         if model_config is not None:
             metadata["model_config"] = model_config
         if user_id is not None:
             metadata["user_id"] = user_id
-        for col, value in (
-            ("title", title),
-            ("source", source),
-            ("model", model),
-            ("system_prompt", system_prompt),
-            ("user_id", user_id),
-            ("parent_session_id", parent_session_id),
-            ("metadata", json.dumps(metadata, ensure_ascii=False) if metadata else "{}"),
-            ("created_at", now),
-            ("started_at", now),
-            ("updated_at", now),
-        ):
-            if col in columns:
-                insert_cols.append(col)
-                values.append(value)
-        placeholders = ", ".join("?" for _ in insert_cols)
-        self._conn.execute(
-            f"INSERT OR IGNORE INTO sessions ({', '.join(insert_cols)}) VALUES ({placeholders})",
-            values,
-        )
+
+        effective_parent = parent_session_id
+        if effective_parent and "parent_session_id" in columns:
+            # Legacy DBs may enforce a self-FK on parent_session_id. If the
+            # parent row is missing, INSERT OR IGNORE silently skips the child
+            # and later message writes fail their session FK. Drop only the
+            # broken parent link; keep the session itself.
+            if self.resolve_session_id(effective_parent) is None:
+                effective_parent = None
+
+        def _insert(parent_value: str | None) -> None:
+            insert_cols = [pk_col]
+            values: list[Any] = [session_id]
+            for col, value in (
+                ("title", title),
+                ("source", source or "unknown"),
+                ("model", model),
+                ("system_prompt", system_prompt),
+                ("user_id", user_id),
+                ("parent_session_id", parent_value),
+                ("metadata", json.dumps(metadata, ensure_ascii=False) if metadata else "{}"),
+                ("created_at", now),
+                ("started_at", now),
+                ("updated_at", now),
+            ):
+                if col in columns:
+                    insert_cols.append(col)
+                    values.append(value)
+            placeholders = ", ".join("?" for _ in insert_cols)
+            self._conn.execute(
+                f"INSERT OR IGNORE INTO sessions ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                values,
+            )
+
+        _insert(effective_parent)
+        if self.get_session(session_id) is None and effective_parent is not None:
+            effective_parent = None
+            _insert(None)
         return {
             "session_id": session_id,
             "title": title,
@@ -265,7 +281,7 @@ class SessionDB:
             "model": model,
             "system_prompt": system_prompt,
             "user_id": user_id,
-            "parent_session_id": parent_session_id,
+            "parent_session_id": effective_parent,
             "metadata": metadata,
             "created_at": now,
             "updated_at": now,
@@ -361,6 +377,13 @@ class SessionDB:
         import time
 
         now = time.time()
+        if session_id and self.get_session(session_id) is None:
+            self.create_session(
+                session_id=session_id,
+                title="Untitled",
+                source=str(extra.pop("source", "unknown") or "unknown"),
+                model=model or "",
+            )
         columns = self._table_columns("messages")
         session_col = "session_id" if "session_id" in columns else "sid"
 

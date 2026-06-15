@@ -3615,19 +3615,19 @@ def get_available_models() -> dict:
                         )
                 elif pid == "openai-codex":
                     # Codex account catalogs drift faster than WebUI releases
-                    # (for example gpt-5.3-codex-spark in #1680). Ask the
-                    # agent's Codex resolver first so /api/models inherits the
-                    # live Codex API / local ~/.codex cache / static fallback
-                    # chain instead of freezing the picker to WebUI's curated
-                    # _PROVIDER_MODELS snapshot.
+                    # (for example gpt-5.3-codex-spark in #1680). For WebUI
+                    # chat-start compatibility checks this path must stay
+                    # non-blocking: do not hit the live Codex HTTP API while
+                    # holding the model-cache lock. Use local Codex cache and
+                    # static defaults; explicit model refresh can do network IO.
                     raw_models = []
                     codex_ids = []
                     try:
-                        from cli.models import provider_model_ids as _provider_model_ids
+                        from cli.codex_models import get_codex_model_ids
 
-                        codex_ids = [mid for mid in (_provider_model_ids("openai-codex") or []) if mid]
+                        codex_ids = [mid for mid in (get_codex_model_ids(access_token=None) or []) if mid]
                     except Exception:
-                        logger.warning("Failed to load OpenAI Codex models from hermes_cli")
+                        logger.warning("Failed to load OpenAI Codex models from local cache")
 
                     for mid in _read_visible_codex_cache_model_ids():
                         if mid not in codex_ids:

@@ -919,7 +919,7 @@ function _browserStartStream(sessionId) {
   if (!sid) return;
   _browserCloseStream();
   try {
-    const es = new EventSource('/api/browser/events?session_id=' + encodeURIComponent(sid));
+    const es = new EventSource(_eventSourceUrl('/api/browser/events?session_id=' + encodeURIComponent(sid)));
     _browserEventSource = es;
     es.addEventListener('initial', function(ev) {
       try {

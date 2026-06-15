@@ -3684,6 +3684,9 @@ body.discord-mode .split-resize-handle{display:none !important;}
 
 /* Main canvas: centered, comfortable max-width */
 .settings-main{padding:24px;max-width:768px;width:100%;margin:0 auto;min-width:0;}
+.settings-section-switcher{display:none;margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--sidebar);}
+.settings-section-switcher label{display:block;margin-bottom:6px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
+.settings-section-switcher select{width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;}
 .settings-pane{display:none;}
 .settings-pane.active{display:block;}
 
@@ -3823,6 +3826,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 /* Responsive: tighten canvas on small screens. */
 @media (max-width: 768px){
   .settings-main{padding:16px 12px;}
+  .settings-section-switcher{display:block;}
   .settings-section-title{font-size:16px;}
   .sidekick-action-grid{grid-template-columns:1fr;}
   #mainSettings .settings-field{padding:14px;}
@@ -8119,4 +8123,21 @@ body.focus-mode aside.rightpanel {
 }
 .websearch-session-list{max-height:200px;overflow-y:auto;}
 .websearch-deep-results{flex:1;overflow-y:auto;min-height:0;}
+
+/* Final mobile layout guard: keep the slide-out sidebar out of flex flow.
+   Some later desktop/right-panel rules can otherwise leave position:relative
+   active on narrow browser drawers, shrinking the main canvas behind the hidden
+   sidebar. */
+@media(max-width:640px){
+  .sidebar{
+    position:fixed!important;
+    left:-300px!important;
+    top:0!important;
+    bottom:0!important;
+    width:280px!important;
+    z-index:200!important;
+  }
+  .sidebar.mobile-open{left:0!important;}
+  main.main{width:100%!important;flex:1 1 auto!important;}
+}
 

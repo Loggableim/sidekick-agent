@@ -8,7 +8,9 @@ bedrock_converse).  Each transport implements ``build_kwargs()``.
 from __future__ import annotations
 
 import copy
+import json
 import logging
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 from runtime.lmstudio_reasoning import resolve_lmstudio_effort
@@ -263,4 +265,206 @@ class ChatCompletionsTransport:
         return kwargs
 
 
+class AnthropicMessagesTransport:
+    """Builds and normalizes native Anthropic Messages-compatible requests."""
+
+    def build_kwargs(
+        self,
+        *,
+        model: str,
+        messages: list,
+        tools: Optional[list] = None,
+        max_tokens: Optional[int] = None,
+        reasoning_config: Optional[dict] = None,
+        tool_choice: Optional[str] = None,
+        is_oauth: bool = False,
+        preserve_dots: bool = False,
+        context_length: Optional[int] = None,
+        base_url: Optional[str] = None,
+        fast_mode: bool = False,
+        drop_context_1m_beta: bool = False,
+        **_: Any,
+    ) -> dict:
+        from runtime.anthropic_adapter import build_anthropic_kwargs
+
+        return build_anthropic_kwargs(
+            model=model,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens,
+            reasoning_config=reasoning_config,
+            tool_choice=tool_choice,
+            is_oauth=is_oauth,
+            preserve_dots=preserve_dots,
+            context_length=context_length,
+            base_url=base_url,
+            fast_mode=fast_mode,
+            drop_context_1m_beta=drop_context_1m_beta,
+        )
+
+    def normalize_response(self, response: Any, *, strip_tool_prefix: bool = False, **_: Any) -> Any:
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[Any] = []
+        content_blocks = getattr(response, "content", None) or []
+
+        for block in content_blocks:
+            block_type = getattr(block, "type", None)
+            if block_type == "text":
+                text = getattr(block, "text", "")
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+            elif block_type in {"thinking", "redacted_thinking"}:
+                text = getattr(block, "thinking", None) or getattr(block, "text", None)
+                if isinstance(text, str) and text:
+                    reasoning_parts.append(text)
+            elif block_type == "tool_use":
+                name = getattr(block, "name", "") or ""
+                if strip_tool_prefix and isinstance(name, str) and name.startswith("mcp_"):
+                    name = name[4:]
+                tool_input = getattr(block, "input", {})
+                try:
+                    arguments = json.dumps(tool_input or {}, ensure_ascii=False)
+                except Exception:
+                    arguments = str(tool_input or {})
+                tool_calls.append(
+                    SimpleNamespace(
+                        id=getattr(block, "id", "") or "",
+                        type="function",
+                        function=SimpleNamespace(name=name, arguments=arguments),
+                    )
+                )
+
+        stop_reason = getattr(response, "stop_reason", None) or "end_turn"
+        finish_reason = {
+            "end_turn": "stop",
+            "stop_sequence": "stop",
+            "max_tokens": "length",
+            "tool_use": "tool_calls",
+            "pause_turn": "stop",
+            "refusal": "stop",
+        }.get(str(stop_reason), str(stop_reason))
+        if tool_calls and finish_reason == "stop":
+            finish_reason = "tool_calls"
+
+        return SimpleNamespace(
+            role="assistant",
+            content="\n".join(text_parts) if text_parts else None,
+            tool_calls=tool_calls or None,
+            reasoning_content="\n\n".join(reasoning_parts) if reasoning_parts else None,
+            finish_reason=finish_reason,
+        )
+
+    def preflight_kwargs(self, api_kwargs: dict, *, allow_stream: bool = True) -> dict:
+        return copy.deepcopy(api_kwargs)
+
+
+class BedrockConverseTransport(ChatCompletionsTransport):
+    """Builds and normalizes AWS Bedrock Converse requests."""
+
+    def build_kwargs(
+        self,
+        *,
+        model: str,
+        messages: list,
+        tools: Optional[list] = None,
+        max_tokens: Optional[int] = None,
+        guardrail_config: Optional[dict] = None,
+        **_: Any,
+    ) -> dict:
+        from runtime.bedrock_adapter import build_converse_kwargs
+
+        return build_converse_kwargs(
+            model=model,
+            messages=messages,
+            tools=tools,
+            max_tokens=max_tokens or 4096,
+            guardrail_config=guardrail_config,
+        )
+
+    def normalize_response(self, response: Any, **_: Any) -> Any:
+        from runtime.bedrock_adapter import normalize_converse_response
+
+        normalized = normalize_converse_response(response)
+        return super().normalize_response(normalized)
+
+
+class CodexResponsesTransport:
+    """Builds and normalizes Responses API requests used by Codex-compatible backends."""
+
+    def build_kwargs(
+        self,
+        *,
+        model: str,
+        messages: list,
+        tools: Optional[list] = None,
+        reasoning_config: Optional[dict] = None,
+        session_id: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        request_overrides: Optional[dict] = None,
+        is_github_responses: bool = False,
+        is_codex_backend: bool = False,
+        is_xai_responses: bool = False,
+        github_reasoning_extra: Optional[dict] = None,
+        **_: Any,
+    ) -> dict:
+        from runtime.codex_responses_adapter import (
+            _chat_messages_to_responses_input,
+            _responses_tools,
+        )
+        from runtime.prompt_builder import DEFAULT_AGENT_IDENTITY
+
+        instructions = DEFAULT_AGENT_IDENTITY
+        chat_messages = list(messages or [])
+        if chat_messages and chat_messages[0].get("role") == "system":
+            instructions = str(chat_messages[0].get("content") or "").strip() or instructions
+            chat_messages = chat_messages[1:]
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "instructions": instructions,
+            "input": _chat_messages_to_responses_input(chat_messages),
+            "store": False,
+        }
+
+        converted_tools = _responses_tools(tools)
+        if converted_tools:
+            kwargs["tools"] = converted_tools
+
+        if max_tokens:
+            kwargs["max_output_tokens"] = int(max_tokens)
+        if reasoning_config:
+            kwargs["reasoning"] = reasoning_config
+        if github_reasoning_extra:
+            kwargs.setdefault("reasoning", {}).update(github_reasoning_extra)
+
+        overrides = request_overrides or {}
+        for key in ("temperature", "tool_choice", "parallel_tool_calls", "prompt_cache_key", "service_tier"):
+            if key in overrides and overrides[key] is not None:
+                kwargs[key] = overrides[key]
+
+        if session_id and (is_codex_backend or is_github_responses or is_xai_responses):
+            kwargs["prompt_cache_key"] = kwargs.get("prompt_cache_key") or session_id
+
+        return kwargs
+
+    def preflight_kwargs(self, api_kwargs: dict, *, allow_stream: bool = False) -> dict:
+        from runtime.codex_responses_adapter import _preflight_codex_api_kwargs
+
+        return _preflight_codex_api_kwargs(api_kwargs, allow_stream=allow_stream)
+
+    def normalize_response(self, response: Any, **_: Any) -> Any:
+        from runtime.codex_responses_adapter import _normalize_codex_response
+
+        message, finish_reason = _normalize_codex_response(response)
+        try:
+            setattr(message, "finish_reason", finish_reason)
+        except Exception:
+            pass
+        return message
+
+
 register_transport("chat_completions", ChatCompletionsTransport)
+register_transport("anthropic_messages", AnthropicMessagesTransport)
+register_transport("bedrock_converse", BedrockConverseTransport)
+register_transport("codex_responses", CodexResponsesTransport)

@@ -143,6 +143,10 @@ def _looks_like_gateway_process(pid: int) -> bool:
         return False
 
     patterns = (
+        "-m sidekick_app gateway",
+        "sidekick_app gateway",
+        "sidekick_app\\__main__.py gateway",
+        "sidekick_app/__main__.py gateway",
         "sidekick_cli.main gateway",
         "sidekick_cli/main.py gateway",
         "sidekick gateway",
@@ -163,6 +167,10 @@ def _record_looks_like_gateway(record: dict[str, Any]) -> bool:
 
     cmdline = " ".join(str(part) for part in argv)
     patterns = (
+        "-m sidekick_app gateway",
+        "sidekick_app gateway",
+        "sidekick_app\\__main__.py gateway",
+        "sidekick_app/__main__.py gateway",
         "sidekick_cli.main gateway",
         "sidekick_cli/main.py gateway",
         "sidekick gateway",

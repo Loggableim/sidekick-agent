@@ -227,9 +227,14 @@ async function send(){
   if(typeof upsertActiveSessionForLocalTurn==='function'){
     upsertActiveSessionForLocalTurn({title:displayText.slice(0,64),messageCount:S.messages.length,timestampMs:Date.now()});
   }
-  INFLIGHT[activeSid]={messages:[...S.messages],uploaded:uploadedNames,toolCalls:[]};
+  const ownerWorkspaceSlug=String(
+    (S.session&&(S.session.workspace_slug||S.session.space_slug||S.session.space))||
+    (typeof _activeSpace!=='undefined'&&_activeSpace)||
+    ''
+  ).trim().toLowerCase();
+  INFLIGHT[activeSid]={messages:[...S.messages],uploaded:uploadedNames,toolCalls:[],workspace_slug:ownerWorkspaceSlug};
   if(typeof saveInflightState==='function'){
-    saveInflightState(activeSid,{streamId:null,messages:INFLIGHT[activeSid].messages,uploaded:uploadedNames,toolCalls:[]});
+    saveInflightState(activeSid,{streamId:null,messages:INFLIGHT[activeSid].messages,uploaded:uploadedNames,toolCalls:[],workspace_slug:ownerWorkspaceSlug});
   }
   if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
   startApprovalPolling(activeSid);
@@ -306,7 +311,7 @@ async function send(){
     }
     markInflight(activeSid, streamId);
     if(typeof saveInflightState==='function'){
-      saveInflightState(activeSid,{streamId,messages:INFLIGHT[activeSid].messages,uploaded:uploadedNames,toolCalls:INFLIGHT[activeSid].toolCalls||[]});
+      saveInflightState(activeSid,{streamId,messages:INFLIGHT[activeSid].messages,uploaded:uploadedNames,toolCalls:INFLIGHT[activeSid].toolCalls||[],workspace_slug:ownerWorkspaceSlug});
     }
     // Refresh session list so background streaming indicators appear immediately for the
     // session that was just started and any others that may already be running.
@@ -575,27 +580,44 @@ function _eventSourceUrl(path){
     const token=(typeof _dashboardSessionToken==='function')?_dashboardSessionToken():'';
     if(token) url.searchParams.set('token',token);
   }catch(_){}
+  try{
+    if(!url.searchParams.get('workspace')&&typeof _activeWorkspaceSlug==='function'){
+      const slug=_activeWorkspaceSlug();
+      if(slug) url.searchParams.set('workspace',slug);
+    }
+  }catch(_){}
   return url.href;
 }
 
 function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   if(!activeSid||!streamId) return;
   const reconnecting=!!options.reconnecting;
+  const ownerVisibleNow=!!(S.session&&S.session.session_id===activeSid);
+  const ownerWorkspaceSlug=String(
+    options.workspace_slug||options.workspace||
+    (S.session&&S.session.session_id===activeSid&&(S.session.workspace_slug||S.session.space_slug||S.session.space))||
+    (INFLIGHT[activeSid]&&(INFLIGHT[activeSid].workspace_slug||INFLIGHT[activeSid].space_slug||INFLIGHT[activeSid].space))||
+    (typeof _activeSpace!=='undefined'&&_activeSpace)||
+    ''
+  ).trim().toLowerCase();
   if(!reconnecting) _clearPlanState();
   // Restore the live state immediately on reattach so the chat shell knows the
   // session is still active before the SSE transport has produced a new event.
-  S.activeStreamId = streamId;
-  if (typeof setBusy === 'function') setBusy(true);
-  else S.busy = true;
-  if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id = streamId;
-  if(typeof updateSendBtn==='function') updateSendBtn();
-  if (reconnecting && typeof appendThinking === 'function') {
+  if(ownerVisibleNow){
+    S.activeStreamId = streamId;
+    if (typeof setBusy === 'function') setBusy(true);
+    else S.busy = true;
+    if(S.session) S.session.active_stream_id = streamId;
+    if(typeof updateSendBtn==='function') updateSendBtn();
+  }
+  if (ownerVisibleNow && reconnecting && typeof appendThinking === 'function') {
     try { appendThinking(); } catch (_) {}
   }
-  if(!INFLIGHT[activeSid]) INFLIGHT[activeSid]={messages:[...S.messages],uploaded:[...uploaded],toolCalls:[]};
+  if(!INFLIGHT[activeSid]) INFLIGHT[activeSid]={messages:ownerVisibleNow?[...S.messages]:[],uploaded:[...uploaded],toolCalls:[],workspace_slug:ownerWorkspaceSlug};
   else {
     if(uploaded.length) INFLIGHT[activeSid].uploaded=[...uploaded];
     if(!Array.isArray(INFLIGHT[activeSid].toolCalls)) INFLIGHT[activeSid].toolCalls=[];
+    if(ownerWorkspaceSlug) INFLIGHT[activeSid].workspace_slug=ownerWorkspaceSlug;
   }
   const existingLive=LIVE_STREAMS[activeSid];
   if(
@@ -703,6 +725,7 @@ let _latestGoalStatus=null;
       messages:cappedMessages,
       uploaded:inflight.uploaded||[...uploaded],
       toolCalls:inflight.toolCalls||[],
+      workspace_slug:inflight.workspace_slug||ownerWorkspaceSlug||'',
     });
   }
   // Throttled variant for token-by-token updates. persistInflightState()
@@ -725,9 +748,91 @@ let _latestGoalStatus=null;
     if(_streamSettledPollTimer){clearTimeout(_streamSettledPollTimer);_streamSettledPollTimer=null;}
   }
   function _openEventSource(){
-    const es=new EventSource(_eventSourceUrl(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`),{withCredentials:true});
+    const es=new EventSource(_eventSourceUrl(_ownerScopedApiPath(`api/chat/stream?stream_id=${encodeURIComponent(streamId)}`)),{withCredentials:true});
     _wireSSE(es);
     return es;
+  }
+  function _ownerScopedApiPath(path){
+    if(!ownerWorkspaceSlug) return path;
+    try{
+      const url=new URL(String(path||'').replace(/^\//,''),document.baseURI||location.href);
+      url.searchParams.set('workspace',ownerWorkspaceSlug);
+      return url.pathname.replace(/^\//,'')+url.search;
+    }catch(_){
+      const sep=String(path||'').includes('?')?'&':'?';
+      return String(path||'')+sep+'workspace='+encodeURIComponent(ownerWorkspaceSlug);
+    }
+  }
+  function _goalContinuationRequestBody(goalNext){
+    return {
+      session_id:goalNext.sid,
+      message:goalNext.text,
+      model:goalNext.model||undefined,
+      model_provider:goalNext.model_provider||null,
+      profile:goalNext.profile||'default',
+      workspace:goalNext.workspace||undefined,
+      mode:'action',
+      chat_mode:S.mode||'chat',
+      attachments:[],
+      sandbox_disabled:window._sandboxDisabled||false,
+    };
+  }
+  function _startGoalContinuation(goalNext, attempt=0){
+    if(!goalNext||!goalNext.sid||!goalNext.text) return;
+    const visible=!!(S.session&&S.session.session_id===goalNext.sid);
+    if(visible&&S.busy){
+      _queueDrainSid=goalNext.sid;
+      queueSessionMessage(goalNext.sid,{
+        text:goalNext.text,
+        files:[],
+        model:goalNext.model,
+        model_provider:goalNext.model_provider,
+        profile:goalNext.profile,
+      });
+      if(typeof updateQueueBadge==='function')updateQueueBadge(goalNext.sid);
+      return;
+    }
+    api(_ownerScopedApiPath('/api/chat/start'),{
+      method:'POST',
+      body:JSON.stringify(_goalContinuationRequestBody(goalNext)),
+    }).then((startData)=>{
+      const nextStreamId=startData&&startData.stream_id;
+      if(!nextStreamId) return;
+      if(typeof markInflight==='function') markInflight(goalNext.sid,nextStreamId);
+      if(typeof saveInflightState==='function'){
+        saveInflightState(goalNext.sid,{
+          streamId:nextStreamId,
+          messages:[],
+          uploaded:[],
+          toolCalls:[],
+          workspace_slug:goalNext.workspace_slug||ownerWorkspaceSlug||'',
+        });
+      }
+      attachLiveStream(goalNext.sid,nextStreamId,[],{
+        reconnecting:true,
+        workspace_slug:goalNext.workspace_slug||ownerWorkspaceSlug||'',
+        workspace:goalNext.workspace||'',
+        model:goalNext.model||'',
+        model_provider:goalNext.model_provider||null,
+        profile:goalNext.profile||'default',
+      });
+      if(typeof renderSessionList==='function') void renderSessionList();
+    }).catch((e)=>{
+      const msg=String((e&&e.message)||'');
+      if(/already has an active stream/i.test(msg)&&attempt<8){
+        setTimeout(()=>_startGoalContinuation(goalNext,attempt+1),500+attempt*250);
+        return;
+      }
+      queueSessionMessage(goalNext.sid,{
+        text:goalNext.text,
+        files:[],
+        model:goalNext.model,
+        model_provider:goalNext.model_provider,
+        profile:goalNext.profile,
+      });
+      if(typeof updateQueueBadge==='function')updateQueueBadge(goalNext.sid);
+      if(typeof showToast==='function')showToast('Goal continuation queued; it will continue when this session is opened.',3500,'warning');
+    });
   }
   function _pollSettledSessionUntilDone(){
     if(_streamSettledPollTimer||_terminalStateReached||_streamFinalized) return;
@@ -737,7 +842,7 @@ let _latestGoalStatus=null;
       if(_terminalStateReached||_streamFinalized) return;
       if(await _restoreSettledSession()) return;
       try{
-        const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
+        const st=await api(_ownerScopedApiPath(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`));
         if(st&&st.active){
           _scheduleStreamReconnect(2500);
           _streamSettledPollTimer=setTimeout(tick,5000);
@@ -757,7 +862,7 @@ let _latestGoalStatus=null;
       _streamReconnectTimer=null;
       if(_terminalStateReached||_streamFinalized) return;
       try{
-        const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
+        const st=await api(_ownerScopedApiPath(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`));
         if(st&&st.active){
           if(_streamReconnectAttempts>=_STREAM_RECONNECT_MAX_ATTEMPTS){
             _pollSettledSessionUntilDone();
@@ -1419,9 +1524,11 @@ source.addEventListener('goal',e=>{
         _pendingGoalContinuation={
           sid,
           text:continuation_prompt,
-          model:S.session&&S.session.model||'',
-          model_provider:S.session&&S.session.model_provider||null,
-          profile:S.activeProfile||'default',
+          model:(S.session&&S.session.session_id===sid&&S.session.model)||options.model||'',
+          model_provider:(S.session&&S.session.session_id===sid&&S.session.model_provider)||options.model_provider||null,
+          profile:options.profile||S.activeProfile||'default',
+          workspace:(S.session&&S.session.session_id===sid&&S.session.workspace)||options.workspace||'',
+          workspace_slug:ownerWorkspaceSlug||'',
         };
         const toast=t('goal_continuing_toast');
         const cmsg=_resolveGoalMessage(d);
@@ -1608,17 +1715,10 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
         // TTS auto-read: speak the last assistant response if enabled (#499)
         if(typeof autoReadLastAssistant==='function') setTimeout(()=>autoReadLastAssistant(), 300);
       }
-      if(isActiveSession&&_pendingGoalContinuation&&typeof queueSessionMessage==='function'){
+      if(_pendingGoalContinuation&&typeof queueSessionMessage==='function'){
         const _goalNext=_pendingGoalContinuation;
         _pendingGoalContinuation=null;
-        queueSessionMessage(_goalNext.sid,{
-          text:_goalNext.text,
-          files:[],
-          model:_goalNext.model,
-          model_provider:_goalNext.model_provider,
-          profile:_goalNext.profile,
-        });
-        if(typeof updateQueueBadge==='function')updateQueueBadge(_goalNext.sid);
+        setTimeout(()=>_startGoalContinuation(_goalNext),250);
       }
       if(isActiveSession) _queueDrainSid=activeSid;
       renderSessionList();
@@ -1852,11 +1952,10 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
       // "*Task cancelled.*" message gets lost when done event overwrites S.messages
       (async()=>{
         try{
-          const data=await api(`/api/session?session_id=${encodeURIComponent(activeSid)}`);
+          const data=await api(_ownerScopedApiPath(`/api/session?session_id=${encodeURIComponent(activeSid)}&messages=0&resolve_model=0`));
           if(data&&data.session&&S.session&&S.session.session_id===activeSid){
-            S.session=data.session;
-            S.messages=(data.session.messages||[]).filter(m=>m&&m.role);
-            // Re-apply stopped marking after server data replaces local messages
+            S.session={...S.session,...data.session};
+            // Re-apply stopped marking while preserving locally streamed messages.
             if(typeof _markLastAssistantStopped==='function') _markLastAssistantStopped();
             clearLiveToolCards();if(!assistantText)removeThinking();
             _markSessionViewed(activeSid, data.session.message_count ?? S.messages.length);
@@ -1878,7 +1977,7 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
 
   async function _restoreSettledSession(){
     try{
-      const data=await api(`/api/session?session_id=${encodeURIComponent(activeSid)}`);
+      const data=await api(_ownerScopedApiPath(`/api/session?session_id=${encodeURIComponent(activeSid)}&messages=0&resolve_model=0`));
       const session=data&&data.session;
       if(!session) return false;
       if(session.active_stream_id||session.pending_user_message) return false;
@@ -1896,7 +1995,7 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
       if(isActiveSession){
         S.activeStreamId=null;
         clearLiveToolCards();if(!assistantText)removeThinking();
-        S.session=session;S.messages=(session.messages||[]).filter(m=>m&&m.role);
+        S.session={...S.session,...session};
         if(S.session&&S.session.session_id){
           localStorage.setItem('sidekick-webui-session',S.session.session_id);
           if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(S.session.session_id);
@@ -1960,7 +2059,7 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
     // status avoids opening a dead SSE URL that will 404 in the console.
     if(reconnecting){
       try{
-        const st=await api(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`);
+        const st=await api(_ownerScopedApiPath(`/api/chat/stream/status?stream_id=${encodeURIComponent(streamId)}`));
         if(!st.active){
           _clearOwnerInflightState();
           _clearApprovalForOwner();
@@ -2472,7 +2571,7 @@ function startApprovalPolling(sid) {
   _approvalPollingSessionId = sid || null;
   // ── SSE (preferred): long-lived connection, server pushes instantly ──
   try {
-    const es = new EventSource(new URL('api/approval/stream?session_id=' + encodeURIComponent(sid), document.baseURI || location.href).href);
+    const es = new EventSource(_eventSourceUrl('api/approval/stream?session_id=' + encodeURIComponent(sid)));
     let _fallbackActive = false;
 
     es.addEventListener('initial', e => {
@@ -2984,7 +3083,7 @@ function startClarifyPolling(sid) {
 
   // SSE primary path: long-lived connection pushes events instantly.
   try {
-    _clarifyEventSource = new EventSource(new URL('api/clarify/stream?session_id=' + encodeURIComponent(sid), document.baseURI || location.href).href);
+    _clarifyEventSource = new EventSource(_eventSourceUrl('api/clarify/stream?session_id=' + encodeURIComponent(sid)));
   } catch(e) {
     _startClarifyFallbackPoll(sid);
     return;

@@ -217,6 +217,18 @@ class QuietHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+def create_server(host: str | None = None, port: int | None = None) -> QuietHTTPServer:
+    """Create a dashboard-compatible HTTP server for tests and callers.
+
+    Older tests import ``create_server()`` directly. Keep that compatibility
+    shim so they can bind the legacy web surface without duplicating the
+    ``QuietHTTPServer`` construction logic.
+    """
+    resolved_host = HOST if host is None else host
+    resolved_port = PORT if port is None else int(port)
+    return QuietHTTPServer((resolved_host, resolved_port), Handler)
+
+
 class Handler(BaseHTTPRequestHandler):
     timeout = 30  # seconds — kills idle/incomplete connections to prevent thread exhaustion
     

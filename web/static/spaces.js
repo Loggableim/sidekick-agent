@@ -19,7 +19,19 @@ function _shouldTrustUnscopedSessionsForSpace(slug) {
   const s = String(slug || '').toLowerCase();
   return s === DEFAULT_SPACE_SLUG || s === LEGACY_DEFAULT_SPACE_SLUG;
 }
-let _activeSpace = localStorage.getItem('sidekick-active-workspace') || DEFAULT_SPACE_SLUG;
+function _spaceSlugFromLocation() {
+  try {
+    const slug = new URLSearchParams(window.location.search || '').get('workspace');
+    return String(slug || '').trim().toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+const _urlActiveSpace = _spaceSlugFromLocation();
+let _activeSpace = _urlActiveSpace || localStorage.getItem('sidekick-active-workspace') || DEFAULT_SPACE_SLUG;
+if (_urlActiveSpace) {
+  try { localStorage.setItem('sidekick-active-workspace', _urlActiveSpace); } catch (_) {}
+}
 let _spacesCache = [];
 window._hermesSpaceSwitchRev = Number(window._hermesSpaceSwitchRev || 0);
 let _spacesPanelRenderRev = 0;
@@ -41,6 +53,62 @@ function safeSpaceColor(color) {
 
 function getActiveSpaceQuery() {
   return '?workspace=' + encodeURIComponent(_activeSpace);
+}
+
+function _withSpaceTimeout(promise, ms, label) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error((label || 'space operation') + ' timed out')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function _syncActiveSpaceUrl(slug) {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('workspace', slug);
+    window.history.replaceState(window.history.state || {}, '', url.pathname + url.search + url.hash);
+  } catch (_) {}
+}
+
+function _publishSpaceGlobals() {
+  const descriptors = {
+    _activeSpace: {
+      configurable: true,
+      get: () => _activeSpace,
+      set: (value) => {
+        const slug = String(value || '').trim().toLowerCase();
+        if (slug) _activeSpace = slug;
+      },
+    },
+    _spacesCache: {
+      configurable: true,
+      get: () => _spacesCache,
+    },
+  };
+  for (const [name, descriptor] of Object.entries(descriptors)) {
+    try { Object.defineProperty(window, name, descriptor); } catch (_) {}
+  }
+  Object.assign(window, {
+    getActiveSpaceQuery,
+    loadSpaces,
+    selectSpace,
+    createSpace,
+    deleteSpace,
+    renderSpacesPanel,
+    filterSpaces,
+    isActiveSpaceLoadKey,
+    _activeSpaceLoadKey,
+    updateTitlebarSpace,
+    updateSidebarSpaceSelector,
+    closeSpaceDropdowns,
+    toggleTitlebarSpaceDropdown,
+    toggleSidebarSpaceDropdown,
+    openSidebarSpaceSelector,
+    showCreateSpaceDialog,
+  });
 }
 
 function _spaceSwitchRev() {
@@ -68,7 +136,7 @@ function isActiveSpaceLoadKey(key) {
 
 async function loadSpaces() {
   try {
-    const data = await api('/api/spaces');
+    const data = await _withSpaceTimeout(api('/api/spaces'), 5000, 'load spaces');
     _spacesCache = data.spaces || [];
     if (data.default_space) {
       DEFAULT_SPACE_SLUG = String(data.default_space || 'nova').toLowerCase() || 'nova';
@@ -159,7 +227,10 @@ function _refreshActiveSpaceScopedPanel() {
 function closeSpaceDropdowns() {
   for (const id of ['titlebarSpaceDropdown', 'sidebarSpaceDropdown', 'spaceSelectorDropdown']) {
     const dd = document.getElementById(id);
-    if (dd) dd.hidden = true;
+    if (dd) {
+      dd.hidden = true;
+      dd.innerHTML = '';
+    }
   }
   const titlebarBtn = document.getElementById('titlebarSpaceBtn');
   const sidebarBtn = document.getElementById('sidebarSpaceBtn');
@@ -194,12 +265,13 @@ async function selectSpace(slug) {
     _activeSpace = slug;
     const switchRev = _beginSpaceSwitch();
     localStorage.setItem('sidekick-active-workspace', slug);
+    _syncActiveSpaceUrl(slug);
     _showSpaceSwitchLoading(slug);
     _syncSpacesPanelActiveState(slug);
     // ── Space Default Config laden ──
     let nextSpaceConfig = null;
     try {
-      const configResp = await api(`/api/space/config?slug=${encodeURIComponent(slug)}`);
+      const configResp = await _withSpaceTimeout(api(`/api/space/config?slug=${encodeURIComponent(slug)}`), 5000, 'load space config');
       nextSpaceConfig = configResp.config || null;
     } catch(e) {
       nextSpaceConfig = null;
@@ -214,7 +286,7 @@ async function selectSpace(slug) {
     }
     let sessionsInSpace = [];
     if (typeof renderSessionList === 'function') {
-      await renderSessionList();
+      await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
       if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
       try {
         if (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)) {
@@ -233,12 +305,12 @@ async function selectSpace(slug) {
     const hasCurrentInSpace = !!(currentSid && sessionsInSpace.some(s => s && s.session_id === currentSid));
     if (!currentSid || !hasCurrentInSpace) {
       if (sessionsInSpace.length && typeof loadSession === 'function') {
-        await loadSession(sessionsInSpace[0].session_id, {expectedSpace: slug});
+        await _withSpaceTimeout(Promise.resolve(loadSession(sessionsInSpace[0].session_id, {expectedSpace: slug})), 12000, 'load session');
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
       } else if (typeof newSession === 'function') {
-        await newSession();
+        await _withSpaceTimeout(Promise.resolve(newSession()), 12000, 'create session');
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-        if (typeof renderSessionList === 'function') await renderSessionList();
+        if (typeof renderSessionList === 'function') await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
       }
     }
@@ -387,6 +459,7 @@ function renderSpacesPanel() {
       item.className = 'space-item' + (ws.slug === _activeSpace ? ' active' : '');
       item.style.setProperty('--space-color', color);
       item.dataset.slug = ws.slug;
+      item.dataset.spaceSlug = ws.slug;
       item.onclick = () => selectSpace(ws.slug);
 
       // Emoji statt/in Ergänzung zum farbigen Punkt
@@ -679,6 +752,8 @@ function renderSpacesPanel() {
   const container = document.getElementById('workspacesPanel');
   if (!container) return;
   const renderRev = ++_spacesPanelRenderRev;
+  container.classList.add('spaces-sidebar-list');
+  container.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Loading spaces...</div>';
   loadSpaces().then(spaces => {
     if (renderRev !== _spacesPanelRenderRev) return;
     spaces = Array.isArray(spaces) ? spaces.slice() : [];
@@ -706,6 +781,7 @@ function renderSpacesPanel() {
       item.className = 'space-item' + (ws.slug === _activeSpace ? ' active' : '');
       item.style.setProperty('--space-color', color);
       item.dataset.slug = ws.slug;
+      item.dataset.spaceSlug = ws.slug;
       item.onclick = () => selectSpace(ws.slug);
       const modelStr = (ws.model && ws.model.default) ? ws.model.default : 'No model';
       item.innerHTML = `
@@ -728,6 +804,9 @@ function renderSpacesPanel() {
     }
     if (renderRev !== _spacesPanelRenderRev) return;
     renderSpaceDetail(active);
+  }).catch(e => {
+    if (renderRev !== _spacesPanelRenderRev) return;
+    container.innerHTML = `<div style="padding:12px;color:var(--danger,#ff6b6b);font-size:12px">Failed to load spaces: ${spaceEsc(e && e.message ? e.message : e)}</div>`;
   });
 }
 
@@ -1035,58 +1114,82 @@ function _positionSpaceDropdown(dd, anchor) {
   dd.style.overflowY = 'auto';
 }
 
+function _renderSpaceDropdownItems(dd, spaces) {
+  dd.innerHTML = '';
+  for (const ws of spaces) {
+    const item = document.createElement('div');
+    item.className = 'titlebar-space-dd-item';
+    if (ws.slug === _activeSpace) item.classList.add('active');
+    const itemColor = safeSpaceColor(ws.color);
+    item.style.setProperty('--item-color', itemColor);
+    item.dataset.spaceSlug = ws.slug;
+    item.innerHTML = `<span class="titlebar-space-dd-swatch"></span><span class="tdd-emoji">${spaceEsc(_spaceEmoji(ws))}</span><span class="tdd-name" style="color:${itemColor}">${spaceEsc(ws.name || ws.slug)}</span>`;
+    item.onclick = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeSpaceDropdowns();
+      selectSpace(ws.slug);
+    };
+    dd.appendChild(item);
+  }
+  const sep = document.createElement('div');
+  sep.className = 'titlebar-space-dd-sep';
+  dd.appendChild(sep);
+  const newItem = document.createElement('div');
+  newItem.className = 'titlebar-space-dd-item titlebar-space-dd-new';
+  newItem.innerHTML = '<span style="opacity:0.7">+</span><span>New space...</span>';
+  newItem.onclick = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeSpaceDropdowns();
+    if (typeof switchPanel === 'function') switchPanel('workspaces');
+    setTimeout(() => {
+      if (typeof showCreateSpaceDialog === 'function') showCreateSpaceDialog();
+    }, 100);
+  };
+  dd.appendChild(newItem);
+}
+
+function _showSpaceDropdownLoading(dd, btn) {
+  dd.innerHTML = '<div class="titlebar-space-dd-item" style="opacity:.75;cursor:default">Loading spaces...</div>';
+  dd.hidden = false;
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  _positionSpaceDropdown(dd, btn);
+}
+
+function _showSpaceDropdownError(dd, message) {
+  dd.innerHTML = `<div class="titlebar-space-dd-item" style="color:var(--danger,#ff6b6b);cursor:default">${spaceEsc(message || 'Failed to load spaces')}</div>`;
+}
+
+function _installSpaceDropdownCloser(dd, btn) {
+  const closer = (e) => {
+    if (!dd.parentElement || !dd.parentElement.contains(e.target)) {
+      dd.hidden = true;
+      dd.innerHTML = '';
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', closer);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closer), 0);
+}
+
 function toggleTitlebarSpaceDropdown() {
   const dd = document.getElementById('titlebarSpaceDropdown');
   const btn = document.getElementById('titlebarSpaceBtn');
   if (!dd) return;
   if (!dd.hidden) {
     dd.hidden = true;
+    dd.innerHTML = '';
     if (btn) btn.setAttribute('aria-expanded', 'false');
     return;
   }
+  _showSpaceDropdownLoading(dd, btn);
   loadSpaces().then(spaces => {
-    dd.innerHTML = '';
-    for (const ws of spaces) {
-      const item = document.createElement('div');
-      item.className = 'titlebar-space-dd-item';
-      if (ws.slug === _activeSpace) item.classList.add('active');
-      const itemColor = safeSpaceColor(ws.color);
-      item.style.setProperty('--item-color', itemColor);
-      item.innerHTML = `<span class="titlebar-space-dd-swatch"></span><span class="tdd-emoji">${spaceEsc(_spaceEmoji(ws))}</span><span class="tdd-name" style="color:${itemColor}">${spaceEsc(ws.name || ws.slug)}</span>`;
-      item.onclick = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        closeSpaceDropdowns();
-        selectSpace(ws.slug);
-      };
-      dd.appendChild(item);
-    }
-    const sep = document.createElement('div');
-    sep.className = 'titlebar-space-dd-sep';
-    dd.appendChild(sep);
-    const newItem = document.createElement('div');
-    newItem.className = 'titlebar-space-dd-item titlebar-space-dd-new';
-    newItem.innerHTML = '<span style="opacity:0.7">+</span><span>New space...</span>';
-    newItem.onclick = (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeSpaceDropdowns();
-      if (typeof switchPanel === 'function') switchPanel('workspaces');
-      setTimeout(() => {
-        if (typeof showCreateSpaceDialog === 'function') showCreateSpaceDialog();
-      }, 100);
-    };
-    dd.appendChild(newItem);
-    dd.hidden = false;
-    if (btn) btn.setAttribute('aria-expanded', 'true');
-    const closer = (e) => {
-      if (!dd.parentElement.contains(e.target)) {
-        dd.hidden = true;
-        if (btn) btn.setAttribute('aria-expanded', 'false');
-        document.removeEventListener('click', closer);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', closer), 0);
+    _renderSpaceDropdownItems(dd, spaces);
+    _positionSpaceDropdown(dd, btn);
+    _installSpaceDropdownCloser(dd, btn);
+  }).catch(e => {
+    _showSpaceDropdownError(dd, e && e.message);
   });
 }
 
@@ -1130,53 +1233,18 @@ function toggleSidebarSpaceDropdown() {
   if (!dd) return;
   if (!dd.hidden) {
     dd.hidden = true;
+    dd.innerHTML = '';
     if (btn) btn.setAttribute('aria-expanded', 'false');
     return;
   }
+  _showSpaceDropdownLoading(dd, btn);
   loadSpaces().then(spaces => {
-    dd.innerHTML = '';
     dd.className = 'sidebar-space-dropdown';
-    for (const ws of spaces) {
-      const item = document.createElement('div');
-      item.className = 'titlebar-space-dd-item';
-      if (ws.slug === _activeSpace) item.classList.add('active');
-      const itemColor = safeSpaceColor(ws.color);
-      item.style.setProperty('--item-color', itemColor);
-      item.innerHTML = `<span class="titlebar-space-dd-swatch"></span><span class="tdd-emoji">${spaceEsc(_spaceEmoji(ws))}</span><span class="tdd-name" style="color:${itemColor}">${spaceEsc(ws.name || ws.slug)}</span>`;
-      item.onclick = (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        closeSpaceDropdowns();
-        selectSpace(ws.slug);
-      };
-      dd.appendChild(item);
-    }
-    const sep = document.createElement('div');
-    sep.className = 'titlebar-space-dd-sep';
-    dd.appendChild(sep);
-    const newItem = document.createElement('div');
-    newItem.className = 'titlebar-space-dd-item titlebar-space-dd-new';
-    newItem.innerHTML = '<span style="opacity:0.7">+</span><span>New space...</span>';
-    newItem.onclick = (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeSpaceDropdowns();
-      if (typeof switchPanel === 'function') switchPanel('workspaces');
-      setTimeout(() => {
-        if (typeof showCreateSpaceDialog === 'function') showCreateSpaceDialog();
-      }, 100);
-    };
-    dd.appendChild(newItem);
-    dd.hidden = false;
-    if (btn) btn.setAttribute('aria-expanded', 'true');
-    const closer = (e) => {
-      if (!dd.parentElement.contains(e.target)) {
-        dd.hidden = true;
-        if (btn) btn.setAttribute('aria-expanded', 'false');
-        document.removeEventListener('click', closer);
-      }
-    };
-    setTimeout(() => document.addEventListener('click', closer), 0);
+    _renderSpaceDropdownItems(dd, spaces);
+    _positionSpaceDropdown(dd, btn);
+    _installSpaceDropdownCloser(dd, btn);
+  }).catch(e => {
+    _showSpaceDropdownError(dd, e && e.message);
   });
 }
 
@@ -1229,6 +1297,7 @@ updateTitlebarSpace = function() {
 function filterSpaces() {
   renderSpacesPanel();
 }
+_publishSpaceGlobals();
 
 // â”€â”€ Init on load â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 console.log('[spaces] loaded. Active:', _activeSpace);
@@ -1284,6 +1353,7 @@ function toggleSidebarNavLabels() {
 // Initialize the space selector in the sidebar once the DOM is ready
 async function _initSpaceSelector() {
   await loadSpaces();
+  _publishSpaceGlobals();
   _bindTitlebarSpaceButton();
   _bindSidebarSpaceButton();
   const container = document.getElementById('spaceSelectorContainer');
@@ -1292,6 +1362,7 @@ async function _initSpaceSelector() {
   }
   updateWorkspaceNameBar();
   updateTitlebarSpace();
+  _publishSpaceGlobals();
 }
 
 // Defer init — scripts load with 'defer', wait for DOM + dependent functions

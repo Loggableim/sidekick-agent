@@ -39,6 +39,7 @@ from runtime._compat.shim_constants import get_sidekick_home
 logger = logging.getLogger(__name__)
 
 _REPO = "sheeki03/tirith"
+_WARNED_OPERATIONAL_FAILURES: set[str] = set()
 
 # Cosign provenance verification — pinned to the specific release workflow
 _COSIGN_IDENTITY_REGEXP = f"^https://github.com/{_REPO}/\\.github/workflows/release\\.yml@refs/tags/v"
@@ -612,6 +613,21 @@ _MAX_FINDINGS = 50
 _MAX_SUMMARY_LEN = 500
 
 
+def _warn_operational_once(key: str, message: str, *args) -> None:
+    """Log repeated scanner availability failures once per process.
+
+    Missing Tirith is fail-open by default and can happen on fresh Windows
+    installs. Repeating that warning for every tool call floods errors.log and
+    hides real failures, while the returned summary still tells callers that
+    scanning was skipped.
+    """
+    if key in _WARNED_OPERATIONAL_FAILURES:
+        logger.debug(message, *args)
+        return
+    _WARNED_OPERATIONAL_FAILURES.add(key)
+    logger.warning(message, *args)
+
+
 def check_command_security(command: str) -> dict:
     """Run tirith security scan on a command.
 
@@ -632,7 +648,7 @@ def check_command_security(command: str) -> dict:
     fail_open = cfg["tirith_fail_open"]
 
     if tirith_path is None:
-        logger.warning("tirith path resolved to None; scanning disabled")
+        _warn_operational_once("path-none", "tirith path resolved to None; scanning disabled")
         if fail_open:
             return {"action": "allow", "findings": [], "summary": "tirith path unavailable"}
         return {"action": "block", "findings": [], "summary": "tirith path unavailable (fail-closed)"}
@@ -647,12 +663,12 @@ def check_command_security(command: str) -> dict:
         )
     except OSError as exc:
         # Covers FileNotFoundError, PermissionError, exec format error
-        logger.warning("tirith spawn failed: %s", exc)
+        _warn_operational_once(f"spawn:{type(exc).__name__}:{exc}", "tirith spawn failed: %s", exc)
         if fail_open:
             return {"action": "allow", "findings": [], "summary": f"tirith unavailable: {exc}"}
         return {"action": "block", "findings": [], "summary": f"tirith spawn failed (fail-closed): {exc}"}
     except subprocess.TimeoutExpired:
-        logger.warning("tirith timed out after %ds", timeout)
+        _warn_operational_once(f"timeout:{timeout}", "tirith timed out after %ds", timeout)
         if fail_open:
             return {"action": "allow", "findings": [], "summary": f"tirith timed out ({timeout}s)"}
         return {"action": "block", "findings": [], "summary": "tirith timed out (fail-closed)"}

@@ -2687,7 +2687,7 @@ def sanitize_mcp_name_component(value: str) -> str:
 
 
 def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
-"""Convert an MCP tool listing to the Sidekick registry schema format."""
+    """Convert an MCP tool listing to the Sidekick registry schema format.
 
     Args:
         server_name: The logical server name for prefixing.

@@ -486,8 +486,11 @@ function _dashboardBrowserUrl(status){
   return source.protocol+'//'+displayHost+':'+status.port;
 }
 function _applyDashboardStatus(status){
-  const running=!!(status&&status.running);
-  const url=running?_dashboardBrowserUrl(status):'';
+  const probedRunning=!!(status&&status.running);
+  const url=probedRunning?_dashboardBrowserUrl(status):'';
+  let sameOrigin=false;
+  try{sameOrigin=!!url&&new URL(url,window.location.href).origin===window.location.origin;}catch(_){sameOrigin=false;}
+  const running=probedRunning&&!sameOrigin;
   const warning=running&&!_dashboardIsBrowserLoopback()?t('dashboard_loopback_warning'):'';
   document.querySelectorAll('[data-dashboard-link]').forEach(btn=>{
     btn.classList.toggle('dashboard-link-visible',running);
@@ -2079,7 +2082,8 @@ if (typeof window !== 'undefined') window._resetScrollDirectionTracker = _resetS
       // then preserving scrollTop is seamless only if there is runway left for
       // the user's continued upward wheel/touch movement.
       const olderPrefetchPx=Math.max(600,el.clientHeight*1.5);
-      if(_isSessionEndlessScrollEnabled()&&el.scrollTop<olderPrefetchPx && typeof _messagesTruncated!=='undefined' && _messagesTruncated && typeof _loadOlderMessages==='function'){
+      const hasScrollableMessageOverflow=el.scrollHeight>el.clientHeight+8;
+      if(hasScrollableMessageOverflow&&_isSessionEndlessScrollEnabled()&&el.scrollTop<olderPrefetchPx && typeof _messagesTruncated!=='undefined' && _messagesTruncated && typeof _loadOlderMessages==='function'){
         _loadOlderMessages();
       }
     });

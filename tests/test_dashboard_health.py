@@ -1,3 +1,4 @@
+import json
 import pytest
 from pathlib import Path
 from starlette.requests import Request
@@ -80,6 +81,7 @@ def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
+    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
 
     monkeypatch.setattr(
         "web.api.config.get_available_models",
@@ -114,6 +116,7 @@ def test_live_models_endpoint_returns_json_for_matching_provider(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
+    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
 
     monkeypatch.setattr(
         "web.api.config.get_available_models",
@@ -193,6 +196,282 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     assert payload["total"] == 96
 
 
+def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
+
+    space_sessions = tmp_path / "home" / "spaces" / "color" / "sessions"
+    space_sessions.mkdir(parents=True)
+    index = [
+        {
+            "session_id": "color-live",
+            "title": "Color chat",
+            "workspace": r"C:\projekte\color",
+            "workspace_slug": "color",
+            "message_count": 2,
+            "created_at": 20.0,
+            "updated_at": 21.0,
+            "last_message_at": 21.0,
+        },
+        {
+            "session_id": "foreign-only-index",
+            "title": "Foreign chat",
+            "workspace": r"C:\sidekick\home\spaces\nova",
+            "workspace_slug": "nova",
+            "message_count": 2,
+            "created_at": 30.0,
+            "updated_at": 31.0,
+            "last_message_at": 31.0,
+        },
+    ]
+    (space_sessions / "_index.json").write_text(json.dumps(index), encoding="utf-8")
+    (space_sessions / "color-live.json").write_text(
+        json.dumps({"session_id": "color-live", "messages": []}),
+        encoding="utf-8",
+    )
+
+    class _FakeSpace:
+        slug = "color"
+        sessions_dir = space_sessions
+
+    monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace() if slug == "color" else None)
+
+    client = TestClient(web_server.app)
+    response = client.get(
+        "/api/sessions?workspace=color",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert [item["session_id"] for item in payload["sessions"]] == ["color-live"]
+    assert payload["sessions"][0]["workspace_slug"] == "color"
+
+
+def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
+
+    monkeypatch.setattr(
+        web_server,
+        "_load_space_sessions",
+        lambda slug: [
+            {"session_id": "color-live", "title": "Color palette", "workspace_slug": slug, "model": "m"},
+            {"session_id": "color-other", "title": "Unrelated", "workspace_slug": slug, "model": "m"},
+        ],
+    )
+
+    client = TestClient(web_server.app)
+    response = client.get(
+        "/api/sessions/search?workspace=color&q=palette",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 1
+    assert payload["results"] == payload["sessions"]
+    assert payload["results"][0]["session_id"] == "color-live"
+    assert payload["results"][0]["snippet"] == "Color palette"
+    assert payload["results"][0]["title"] == "Color palette"
+    assert payload["results"][0]["match_type"] == "title"
+
+
+def test_session_space_routes_do_not_proxy_for_old_static_ui(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: True)
+    monkeypatch.setattr(
+        web_server,
+        "_load_space_sessions",
+        lambda slug: [
+            {
+                "session_id": "color-live",
+                "title": "Color palette",
+                "workspace_slug": slug,
+                "updated_at": 42.0,
+            }
+        ],
+    )
+
+    async def _fail_proxy(request):
+        raise AssertionError("space-scoped session routes must stay on FastAPI")
+
+    monkeypatch.setattr(web_server, "_proxy_request_to_stdlib", _fail_proxy)
+
+    client = TestClient(web_server.app)
+    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+
+    sessions = client.get("/api/sessions?workspace=color", headers=headers)
+    assert sessions.status_code == 200
+    assert sessions.json()["sessions"][0]["session_id"] == "color-live"
+
+    search = client.get("/api/sessions/search?workspace=color&q=palette", headers=headers)
+    assert search.status_code == 200
+    assert search.json()["results"][0]["session_id"] == "color-live"
+
+
+def test_space_session_detail_repairs_stale_stream_state(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    sessions_dir = tmp_path / "home" / "spaces" / "color" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    session_path = sessions_dir / "color-live.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "session_id": "color-live",
+                "title": "Color deploy",
+                "workspace": r"C:\projekte\color",
+                "workspace_slug": "color",
+                "active_stream_id": "dead-stream",
+                "pending_user_message": "finish this",
+                "pending_attachments": [],
+                "pending_started_at": 1234,
+                "messages": [{"role": "assistant", "content": "ready", "timestamp": 1}],
+                "context_messages": [{"role": "system", "content": "large hidden context"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (sessions_dir / "_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "session_id": "color-live",
+                    "title": "Color deploy",
+                    "workspace_slug": "color",
+                    "active_stream_id": "dead-stream",
+                    "pending_user_message": "finish this",
+                    "has_pending_user_message": True,
+                    "message_count": 1,
+                    "is_streaming": True,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, sessions_dir):
+            self.sessions_dir = sessions_dir
+
+    monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeWorkspace(sessions_dir))
+    monkeypatch.setattr(web_server, "_stream_is_active_for_space", lambda stream_id, slug: False)
+
+    response = TestClient(web_server.app).get(
+        "/api/session?session_id=color-live&workspace=color&messages=0&resolve_model=0",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["session"]
+    assert payload["session_id"] == "color-live"
+    assert payload["messages"] == []
+    assert "context_messages" not in payload
+    assert payload["active_stream_id"] is None
+    assert payload["pending_user_message"] is None
+    assert payload["has_pending_user_message"] is False
+    assert payload["message_count"] == 2
+
+    stored = json.loads(session_path.read_text(encoding="utf-8"))
+    assert stored["messages"][-1]["role"] == "user"
+    assert stored["messages"][-1]["content"] == "finish this"
+    assert stored["messages"][-1]["_recovered"] is True
+    assert stored["active_stream_id"] is None
+    assert stored["pending_user_message"] is None
+
+    index = json.loads((sessions_dir / "_index.json").read_text(encoding="utf-8"))
+    assert index[0]["session_id"] == "color-live"
+    assert index[0]["active_stream_id"] is None
+    assert index[0]["pending_user_message"] is None
+    assert index[0]["has_pending_user_message"] is False
+    assert index[0]["message_count"] == 2
+    assert index[0]["is_streaming"] is False
+
+
+def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    sessions_dir = tmp_path / "home" / "spaces" / "color" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    session_path = sessions_dir / "stale.json"
+    old_ts = 1000.0
+    session_path.write_text(
+        json.dumps(
+            {
+                "session_id": "stale",
+                "title": "Stale stream",
+                "workspace_slug": "color",
+                "active_stream_id": "old-stream",
+                "pending_user_message": "do not lose me",
+                "pending_started_at": old_ts,
+                "messages": [{"role": "assistant", "content": "ready", "timestamp": 1}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (sessions_dir / "_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "session_id": "stale",
+                    "title": "Stale stream",
+                    "workspace_slug": "color",
+                    "active_stream_id": "old-stream",
+                    "pending_user_message": "do not lose me",
+                    "pending_started_at": old_ts,
+                    "is_streaming": False,
+                    "message_count": 1,
+                    "updated_at": old_ts,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _FakeSpace:
+        def __init__(self, sessions_dir):
+            self.slug = "color"
+            self.sessions_dir = sessions_dir
+
+    monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace(sessions_dir) if slug == "color" else None)
+    monkeypatch.setattr(web_server.time, "time", lambda: old_ts + 1000)
+    monkeypatch.setattr(web_server, "_stream_is_active_for_space", lambda stream_id, slug: False)
+
+    response = TestClient(web_server.app).get(
+        "/api/sessions?workspace=color",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    row = response.json()["sessions"][0]
+    assert row["active_stream_id"] is None
+    assert row["pending_user_message"] is None
+    assert row["is_streaming"] is False
+    assert row["message_count"] == 2
+
+    stored = json.loads(session_path.read_text(encoding="utf-8"))
+    assert stored["messages"][-1]["role"] == "user"
+    assert stored["messages"][-1]["content"] == "do not lose me"
+    assert stored["messages"][-1]["_recovered"] is True
+    assert stored["active_stream_id"] is None
+    assert stored["pending_user_message"] is None
+
+
 def test_workspace_api_wrapper_sends_dashboard_session_token():
     api_auth_js = Path("web/static/api-auth.js").read_text(encoding="utf-8")
     workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
@@ -214,6 +493,88 @@ def test_api_auth_script_loads_before_app_fetches():
     assert index_html.index("static/api-auth.js") < index_html.index("static/ui.js")
     assert index_html.index("static/api-auth.js") < index_html.index("static/boot.js")
     assert "'./static/api-auth.js' + VQ" in sw_js
+
+
+def test_mobile_settings_has_main_section_switcher():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+
+    assert 'id="settingsSectionDropdown"' in index_html
+    assert 'onchange="switchSettingsSection(this.value)"' in index_html
+    assert ".settings-section-switcher{display:none" in style_css
+    assert ".settings-section-switcher{display:block" in style_css
+    assert "const dd=$('settingsSectionDropdown')" in panels_js
+
+
+def test_mobile_sidebar_is_forced_out_of_flex_flow():
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert "@media(max-width:640px)" in style_css
+    assert ".sidebar{" in style_css
+    assert "position:fixed!important" in style_css
+    assert "main.main{width:100%!important" in style_css
+
+
+def test_dashboard_self_link_is_hidden_for_current_origin():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+
+    assert "new URL(url,window.location.href).origin===window.location.origin" in ui_js
+    assert "const running=probedRunning&&!sameOrigin" in ui_js
+
+
+def test_cast_status_uses_user_safe_error_summary():
+    routes_py = Path("web/api/routes.py").read_text(encoding="utf-8")
+
+    assert '"error": "Hub nicht erreichbar"' in routes_py
+    assert '"detail": _sanitize_error(exc)' in routes_py
+
+
+def test_background_stream_requests_keep_owner_workspace():
+    messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    assert "workspace_slug:ownerWorkspaceSlug" in messages_js
+    assert "function _ownerScopedApiPath(path)" in messages_js
+    assert "_ownerScopedApiPath(`api/chat/stream?stream_id=" in messages_js
+    assert "_ownerScopedApiPath(`/api/chat/stream/status?stream_id=" in messages_js
+    assert "_ownerScopedApiPath(`/api/session?session_id=" in messages_js
+    assert "workspace_slug:stored.workspace_slug||stored.space_slug||stored.space||''" in sessions_js
+    assert "function _sessionBelongsToActiveWorkspace(s)" in sessions_js
+    assert "if(!_sessionBelongsToActiveWorkspace(s)) return false" in sessions_js
+    assert "ageMs < 10*60*1000" in sessions_js
+
+
+def test_space_deeplink_initializes_active_workspace():
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+    sw_js = Path("web/static/sw.js").read_text(encoding="utf-8")
+
+    assert "function _spaceSlugFromLocation()" in spaces_js
+    assert "new URLSearchParams(window.location.search || '').get('workspace')" in spaces_js
+    assert "let _activeSpace = _urlActiveSpace || localStorage.getItem('sidekick-active-workspace')" in spaces_js
+    assert "localStorage.setItem('sidekick-active-workspace', _urlActiveSpace)" in spaces_js
+    assert "'./static/spaces.js' + VQ" in sw_js
+
+
+def test_launcher_stops_orphan_stdlib_backends():
+    launcher = Path("Sidekick-Launcher.ps1").read_text(encoding="utf-8")
+
+    assert "function Stop-OrphanStdlibBackends" in launcher
+    assert "\\-m\\s+web\\.server" in launcher
+    assert 'Stop-OrphanStdlibBackends "launcher stop"' in launcher
+    assert 'Stop-OrphanStdlibBackends "pre-start cleanup"' in launcher
+
+
+def test_goal_continuation_auto_starts_after_delivery():
+    messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
+    goals_py = Path("cli/goals.py").read_text(encoding="utf-8")
+
+    assert "function _startGoalContinuation(goalNext, attempt=0)" in messages_js
+    assert "api(_ownerScopedApiPath('/api/chat/start')" in messages_js
+    assert "setTimeout(()=>_startGoalContinuation(_goalNext),250)" in messages_js
+    assert "already has an active stream" in messages_js
+    assert "merely reports progress" in goals_py
+    assert "If any required work remains" in goals_py
 
 
 def test_proxy_response_keeps_safe_stdlib_headers(monkeypatch):

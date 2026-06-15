@@ -49,10 +49,26 @@
     return headers;
   }
 
+  function eventSourceUrl(path) {
+    var url = new URL(String(path || '').replace(/^\//, ''), document.baseURI || location.href);
+    try {
+      var token = dashboardSessionToken();
+      if (token) url.searchParams.set('token', token);
+    } catch (_) {}
+    try {
+      if (shouldAttachWorkspaceHeader(url) && !url.searchParams.get('workspace')) {
+        var slug = activeWorkspaceSlug();
+        if (slug) url.searchParams.set('workspace', slug);
+      }
+    } catch (_) {}
+    return url.href;
+  }
+
   window._activeWorkspaceSlug = window._activeWorkspaceSlug || activeWorkspaceSlug;
   window._shouldAttachWorkspaceHeader = window._shouldAttachWorkspaceHeader || shouldAttachWorkspaceHeader;
   window._dashboardSessionToken = window._dashboardSessionToken || dashboardSessionToken;
   window._headersWithWorkspace = window._headersWithWorkspace || headersWithWorkspace;
+  window._eventSourceUrl = window._eventSourceUrl || eventSourceUrl;
 
   if (window.__SIDEKICK_FETCH_AUTH_INSTALLED__) return;
   window.__SIDEKICK_FETCH_AUTH_INSTALLED__ = true;

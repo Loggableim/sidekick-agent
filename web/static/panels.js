@@ -1704,7 +1704,7 @@ function _kanbanStartEventStream(){
   let url = '/api/kanban/events/stream' + _kanbanBoardQuery({since: since});
   let es;
   try {
-    es = new EventSource(url);
+    es = new EventSource(_eventSourceUrl(url));
   } catch(e) {
     _kanbanEventSourceFailures += 1;
     if (_kanbanEventSourceFailures < 3 && !_kanbanPollTimer) {

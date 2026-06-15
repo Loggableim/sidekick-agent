@@ -154,6 +154,7 @@ import yaml
 
 from cli.colors import Colors, color
 from cli.default_soul import DEFAULT_SOUL_MD
+from shared.config import normalize_env_key
 
 
 # =============================================================================
@@ -4341,7 +4342,7 @@ def load_env() -> Dict[str, str]:
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
                 key, _, value = line.partition('=')
-                env_vars[key.strip()] = value.strip().strip('"\'')
+                env_vars[normalize_env_key(key)] = value.strip().strip('"\'')
     
     return env_vars
 

@@ -70,6 +70,7 @@ try:
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
+    from starlette.requests import ClientDisconnect
 except ImportError:
     raise SystemExit(
         "Web UI requires fastapi and uvicorn.\n"
@@ -1126,11 +1127,430 @@ async def get_action_status(name: str, lines: int = 200):
     }
 
 
+def _workspace_slug_from_request(request: Request) -> str:
+    """Return the active Space slug supplied by the WebUI, if any."""
+    value = (
+        request.query_params.get("workspace")
+        or request.headers.get("X-Hermes-Workspace")
+        or request.headers.get("X-Sidekick-Workspace")
+        or ""
+    )
+    return str(value).strip().lower()
+
+
+def _get_space_workspace(slug: str):
+    from web.api.space_engine import DEFAULT_SPACE_SLUG, get_workspace
+
+    ws = get_workspace(slug)
+    if ws:
+        return ws, slug
+    if slug == "default":
+        ws = get_workspace(DEFAULT_SPACE_SLUG)
+        if ws:
+            return ws, DEFAULT_SPACE_SLUG
+    return None, slug
+
+
+def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
+    """Load sessions from the filesystem-owned Space index.
+
+    The canonical Space session source is
+    ``SIDEKICK_HOME/spaces/<slug>/sessions/_index.json``.  ``state.db`` is a
+    global analytics/search store and does not carry enough Space metadata for
+    safe sidebar isolation.
+    """
+    slug = str(slug or "").strip().lower()
+    if not slug:
+        return []
+    from web.api.config import clear_session_dir, set_session_dir
+    from web.api.models import all_sessions
+
+    ws, slug = _get_space_workspace(slug)
+    if not ws:
+        return []
+    _repair_stale_space_index(slug, ws.sessions_dir)
+    set_session_dir(str(ws.sessions_dir))
+    try:
+        sessions = [dict(item) for item in all_sessions()]
+    finally:
+        clear_session_dir()
+    for session in sessions:
+        session.setdefault("workspace_slug", slug)
+        _repair_stale_space_session_from_listing(session, slug)
+    return sessions
+
+
+def _repair_stale_space_index(slug: str, sessions_dir: Path) -> int:
+    index_path = sessions_dir / "_index.json"
+    if not index_path.exists():
+        return 0
+    try:
+        raw = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    if not isinstance(raw, list):
+        return 0
+    changed = 0
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        if not row.get("active_stream_id"):
+            continue
+        if bool(row.get("is_streaming")):
+            continue
+        if _stream_is_active_for_space(str(row.get("active_stream_id") or ""), slug):
+            continue
+        sid = str(row.get("session_id") or "").strip()
+        path = sessions_dir / f"{sid}.json" if sid else None
+        detail = None
+        if path and path.exists():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    detail = loaded
+            except Exception:
+                detail = None
+        if detail is not None:
+            pending_text = str(detail.get("pending_user_message") or row.get("pending_user_message") or "")
+            messages = detail.setdefault("messages", [])
+            if pending_text and isinstance(messages, list):
+                normalized = " ".join(pending_text.split())
+                already_present = any(
+                    isinstance(existing, dict)
+                    and existing.get("role") == "user"
+                    and " ".join(str(existing.get("content") or "").split()) == normalized
+                    for existing in messages[-8:]
+                )
+                if normalized and not already_present:
+                    ts = detail.get("pending_started_at") or row.get("pending_started_at") or time.time()
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": pending_text,
+                            "timestamp": int(ts) if isinstance(ts, (int, float)) and ts > 0 else int(time.time()),
+                            "_recovered": True,
+                        }
+                    )
+            detail["active_stream_id"] = None
+            detail["pending_user_message"] = None
+            detail["pending_attachments"] = []
+            detail["pending_started_at"] = None
+            detail["message_count"] = _session_message_count(detail)
+            detail.setdefault("workspace_slug", slug)
+            _write_json_file(path, detail)
+            row["message_count"] = detail["message_count"]
+        row["active_stream_id"] = None
+        row["pending_user_message"] = None
+        row["pending_attachments"] = []
+        row["pending_started_at"] = None
+        row["has_pending_user_message"] = False
+        row["is_streaming"] = False
+        changed += 1
+    if changed:
+        _write_json_file(index_path, raw)
+    return changed
+
+
+def _is_space_scoped_request(request: Request) -> bool:
+    slug = _workspace_slug_from_request(request)
+    return bool(slug and slug != "default")
+
+
+def _space_session_path(slug: str, session_id: str) -> tuple[Path | None, str]:
+    slug = str(slug or "").strip().lower()
+    session_id = str(session_id or "").strip()
+    if not slug or not session_id:
+        return None, slug
+    ws, slug = _get_space_workspace(slug)
+    if not ws:
+        return None, slug
+    return ws.sessions_dir / f"{session_id}.json", slug
+
+
+def _json_default(value: Any):
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+
+
+def _write_json_file(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
+
+
+def _session_message_count(session: dict[str, Any]) -> int:
+    return len([m for m in session.get("messages") or [] if isinstance(m, dict) and m.get("role")])
+
+
+def _repair_stale_space_session_from_listing(session: dict[str, Any], slug: str) -> bool:
+    """Clear old interrupted stream markers before the sidebar sees them.
+
+    Older builds persisted ``active_stream_id``/``pending_user_message`` in
+    ``_index.json`` even after the worker was gone.  The browser then keeps
+    polling/reconnecting many dead streams across Spaces, which makes the UI
+    sluggish and can amplify backend 500s.  Only clear rows the index already
+    marks as not streaming and that are no longer fresh.
+    """
+    if not isinstance(session, dict) or not session.get("active_stream_id"):
+        return False
+    if bool(session.get("is_streaming")):
+        return False
+    if _stream_is_active_for_space(str(session.get("active_stream_id") or ""), slug):
+        return False
+    sid = str(session.get("session_id") or "").strip()
+    if not sid:
+        return False
+    path, normalized_slug = _space_session_path(slug, sid)
+    if not path or not path.exists():
+        session["active_stream_id"] = None
+        session["pending_user_message"] = None
+        session["pending_attachments"] = []
+        session["pending_started_at"] = None
+        session["has_pending_user_message"] = False
+        session["is_streaming"] = False
+        return True
+    try:
+        detail = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(detail, dict):
+            pending_text = str(detail.get("pending_user_message") or session.get("pending_user_message") or "")
+            messages = detail.setdefault("messages", [])
+            if pending_text and isinstance(messages, list):
+                normalized = " ".join(pending_text.split())
+                already_present = False
+                for existing in reversed(messages[-8:]):
+                    if not isinstance(existing, dict) or existing.get("role") != "user":
+                        continue
+                    if " ".join(str(existing.get("content") or "").split()) == normalized:
+                        already_present = True
+                        break
+                if normalized and not already_present:
+                    now = time.time()
+                    ts = detail.get("pending_started_at") or session.get("pending_started_at") or now
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": pending_text,
+                            "timestamp": int(ts) if isinstance(ts, (int, float)) and ts > 0 else int(now),
+                            "_recovered": True,
+                        }
+                    )
+            detail["active_stream_id"] = None
+            detail["pending_user_message"] = None
+            detail["pending_attachments"] = []
+            detail["pending_started_at"] = None
+            detail["message_count"] = _session_message_count(detail)
+            detail.setdefault("workspace_slug", normalized_slug)
+            _write_json_file(path, detail)
+            _update_space_session_index(normalized_slug, detail)
+            session.update(
+                {
+                    "active_stream_id": None,
+                    "pending_user_message": None,
+                    "pending_attachments": [],
+                    "pending_started_at": None,
+                    "has_pending_user_message": False,
+                    "is_streaming": False,
+                    "message_count": detail.get("message_count", session.get("message_count", 0)),
+                }
+            )
+            return True
+    except Exception:
+        _log.debug("Failed to clear stale stream marker for %s/%s", slug, sid, exc_info=True)
+    return False
+
+
+def _stream_is_active_for_space(stream_id: str, slug: str) -> bool:
+    stream_id = str(stream_id or "").strip()
+    if not stream_id:
+        return False
+    try:
+        path = "/api/chat/stream/status?stream_id=" + urllib.parse.quote(stream_id)
+        if slug:
+            path += "&workspace=" + urllib.parse.quote(slug)
+        status, body, _headers, _ct = _proxy_sync("GET", path, {"X-Hermes-Workspace": slug}, None)
+        if status != 200:
+            return False
+        payload = json.loads(body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body))
+        return bool(payload.get("active"))
+    except Exception:
+        _log.debug("Failed to check space stream status for %s", stream_id, exc_info=True)
+        return False
+
+
+def _repair_stale_space_session_stream(session: dict[str, Any], path: Path, slug: str) -> bool:
+    stream_id = str(session.get("active_stream_id") or "").strip()
+    if not stream_id or _stream_is_active_for_space(stream_id, slug):
+        return False
+
+    pending_text = str(session.get("pending_user_message") or "")
+    messages = session.setdefault("messages", [])
+    if pending_text and isinstance(messages, list):
+        normalized = " ".join(pending_text.split())
+        already_present = False
+        if normalized:
+            for existing in reversed(messages[-8:]):
+                if not isinstance(existing, dict) or existing.get("role") != "user":
+                    continue
+                if " ".join(str(existing.get("content") or "").split()) == normalized:
+                    already_present = True
+                    break
+        if not already_present:
+            ts = session.get("pending_started_at") or time.time()
+            recovered = {
+                "role": "user",
+                "content": pending_text,
+                "timestamp": int(ts) if isinstance(ts, (int, float)) and ts > 0 else int(time.time()),
+                "_recovered": True,
+            }
+            attachments = session.get("pending_attachments")
+            if attachments:
+                recovered["attachments"] = list(attachments)
+            messages.append(recovered)
+
+    session["active_stream_id"] = None
+    session["pending_user_message"] = None
+    session["pending_attachments"] = []
+    session["pending_started_at"] = None
+    session["message_count"] = _session_message_count(session)
+    session["updated_at"] = time.time()
+    session.setdefault("workspace_slug", slug)
+    _write_json_file(path, session)
+    _update_space_session_index(slug, session)
+    return True
+
+
+def _update_space_session_index(slug: str, session: dict[str, Any]) -> None:
+    try:
+        from web.api.space_engine import get_workspace
+
+        ws = get_workspace(slug)
+        if not ws:
+            return
+        index_path = ws.sessions_dir / "_index.json"
+        index = []
+        if index_path.exists():
+            try:
+                raw = json.loads(index_path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    index = raw
+            except Exception:
+                index = []
+        sid = session.get("session_id")
+        row = {
+            "session_id": sid,
+            "title": session.get("title") or "Untitled",
+            "workspace": session.get("workspace") or "",
+            "model": session.get("model") or "",
+            "model_provider": session.get("model_provider"),
+            "message_count": session.get("message_count", _session_message_count(session)),
+            "created_at": session.get("created_at") or session.get("started_at") or session.get("updated_at") or time.time(),
+            "updated_at": session.get("updated_at") or time.time(),
+            "last_message_at": session.get("last_message_at") or session.get("updated_at") or time.time(),
+            "pinned": bool(session.get("pinned", False)),
+            "archived": bool(session.get("archived", False)),
+            "project_id": session.get("project_id"),
+            "profile": session.get("profile") or "default",
+            "active_stream_id": session.get("active_stream_id"),
+            "pending_user_message": session.get("pending_user_message"),
+            "has_pending_user_message": bool(session.get("pending_user_message")),
+            "is_cli_session": False,
+            "workspace_slug": slug,
+            "composer_draft": session.get("composer_draft") or {"text": "", "files": []},
+            "is_streaming": bool(session.get("active_stream_id")),
+        }
+        next_index = [item for item in index if isinstance(item, dict) and item.get("session_id") != sid]
+        next_index.insert(0, row)
+        _write_json_file(index_path, next_index)
+    except Exception:
+        _log.debug("Failed to update space session index for %s", slug, exc_info=True)
+
+
+def _slice_session_messages(session: dict[str, Any], *, load_messages: bool, msg_limit: int | None, msg_before: int | None) -> tuple[list[Any], bool, int]:
+    if not load_messages:
+        return [], False, 0
+    messages = list(session.get("messages") or [])
+    if msg_before is not None:
+        before_idx = max(0, min(msg_before, len(messages)))
+        window = messages[:before_idx]
+        if msg_limit is not None:
+            return window[-msg_limit:], len(window) > msg_limit, max(0, before_idx - min(len(window), msg_limit))
+        return window, False, 0
+    if msg_limit is not None:
+        return messages[-msg_limit:], len(messages) > msg_limit, max(0, len(messages) - min(len(messages), msg_limit))
+    return messages, False, 0
+
+
+@app.get("/api/session")
+async def get_space_session_detail(request: Request):
+    workspace_slug = _workspace_slug_from_request(request)
+    if not workspace_slug or workspace_slug == "default":
+        return await _proxy_request_to_stdlib(request)
+
+    sid = str(request.query_params.get("session_id") or "").strip()
+    if not sid:
+        return JSONResponse({"error": "session_id is required"}, status_code=400)
+    path, slug = _space_session_path(workspace_slug, sid)
+    if not path or not path.exists():
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        session = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        _log.exception("Failed to load space session %s", sid)
+        raise HTTPException(status_code=500, detail=f"Failed to load session: {exc}") from exc
+    if not isinstance(session, dict):
+        raise HTTPException(status_code=500, detail="Invalid session file")
+
+    _repair_stale_space_session_stream(session, path, slug)
+
+    load_messages = request.query_params.get("messages", "1") != "0"
+    try:
+        msg_limit_raw = request.query_params.get("msg_limit")
+        msg_limit = max(1, int(msg_limit_raw)) if msg_limit_raw else None
+    except Exception:
+        msg_limit = None
+    try:
+        msg_before_raw = request.query_params.get("msg_before")
+        msg_before = int(msg_before_raw) if msg_before_raw else None
+    except Exception:
+        msg_before = None
+
+    messages, truncated, offset = _slice_session_messages(
+        session,
+        load_messages=load_messages,
+        msg_limit=msg_limit,
+        msg_before=msg_before,
+    )
+    payload = dict(session)
+    payload.pop("context_messages", None)
+    payload["messages"] = messages
+    if not load_messages:
+        payload["tool_calls"] = []
+        payload["pending_attachments"] = []
+    payload["message_count"] = _session_message_count(session)
+    payload["_messages_truncated"] = truncated
+    payload["_messages_offset"] = offset
+    payload.setdefault("workspace_slug", slug)
+    payload["has_pending_user_message"] = bool(payload.get("pending_user_message"))
+    return {"session": payload}
+
+
 @app.get("/api/sessions")
 async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
-    if _is_old_frontend():
-        return await _proxy_request_to_stdlib(request)
     try:
+        workspace_slug = _workspace_slug_from_request(request)
+        if workspace_slug and workspace_slug != "default":
+            sessions = _load_space_sessions(workspace_slug)
+            total = len(sessions)
+            page = sessions[offset:offset + limit]
+            now = time.time()
+            for s in page:
+                s["is_active"] = (
+                    s.get("ended_at") is None
+                    and (now - s.get("last_active", s.get("started_at", s.get("updated_at", 0)))) < 300
+                )
+            return {"sessions": page, "total": total, "limit": limit, "offset": offset}
+
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
         try:
@@ -1158,11 +1578,34 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
 @app.get("/api/sessions/search")
 async def search_sessions(request: Request, q: str = "", limit: int = 20):
     """Full-text search across session message content using FTS5."""
-    if _is_old_frontend():
-        return await _proxy_request_to_stdlib(request)
     if not q or not q.strip():
-        return {"results": []}
+        return {"results": [], "sessions": []}
     try:
+        if _is_space_scoped_request(request):
+            needle = q.strip().lower()
+            results = []
+            for session in _load_space_sessions(_workspace_slug_from_request(request)):
+                haystack = " ".join(
+                    str(session.get(key) or "")
+                    for key in ("title", "workspace", "model", "model_provider", "profile")
+                ).lower()
+                if needle in haystack:
+                    results.append(
+                        {
+                            "session_id": session.get("session_id"),
+                            "snippet": session.get("title") or "",
+                            "title": session.get("title") or "",
+                            "match_type": "title",
+                            "role": None,
+                            "source": session.get("source") or session.get("source_tag"),
+                            "model": session.get("model"),
+                            "session_started": session.get("created_at") or session.get("started_at"),
+                        }
+                    )
+                if len(results) >= limit:
+                    break
+            return {"results": results, "sessions": results, "query": q.strip(), "count": len(results)}
+
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
         try:
@@ -1186,12 +1629,15 @@ async def search_sessions(request: Request, q: str = "", limit: int = 20):
                     seen[sid] = {
                         "session_id": sid,
                         "snippet": m.get("snippet", ""),
+                        "title": m.get("snippet", ""),
+                        "match_type": "content",
                         "role": m.get("role"),
                         "source": m.get("source"),
                         "model": m.get("model"),
                         "session_started": m.get("session_started"),
                     }
-            return {"results": list(seen.values())}
+            results = list(seen.values())
+            return {"results": results, "sessions": results, "query": q.strip(), "count": len(results)}
         finally:
             db.close()
     except Exception:
@@ -4983,6 +5429,13 @@ _PROXY_DROP_HEADERS = {
     "connection",
     "accept-encoding",
 }
+# The legacy WebUI fires several short API requests per space/session switch.
+# Keep a back-pressure guard, but do not turn normal UI bursts into visible 503s.
+_PROXY_MAX_IN_FLIGHT = 64
+_PROXY_ACQUIRE_TIMEOUT_SECONDS = 8.0
+_PROXY_SYNC_TIMEOUT_SECONDS = 20
+_PROXY_STREAM_TIMEOUT_SECONDS = 300
+_PROXY_SEMAPHORE = threading.BoundedSemaphore(_PROXY_MAX_IN_FLIGHT)
 
 
 def _find_free_port() -> int:
@@ -5006,17 +5459,57 @@ def _is_old_frontend() -> bool:
         return False
 
 
+def _cleanup_stale_stdlib_backends() -> None:
+    """Best-effort cleanup for orphaned legacy ``web.server`` proxy children.
+
+    Windows users often close/restart the dashboard process directly. In that
+    case Python ``atexit`` hooks do not run and the random-port stdlib backend
+    can survive as an orphan. ``_ensure_stdlib_backend`` calls this only before
+    spawning a fresh backend for the current dashboard, so any existing
+    ``python -m web.server`` process is stale and safe to remove.
+    """
+    if os.name != "nt":
+        return
+    try:
+        script = r"""
+$procs = Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -match '(^|\s)-m\s+web\.server(\s|$)' }
+foreach ($p in $procs) {
+  $pidToKill = [int]$p.ProcessId
+  taskkill /PID $pidToKill /T /F 2>$null | Out-Null
+}
+"""
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            check=False,
+        )
+    except Exception:
+        _log.debug("Failed to clean stale stdlib backends", exc_info=True)
+
+
 def _ensure_stdlib_backend() -> int:
     """Start the stdlib API server on a random port if not running. Thread-safe."""
     global _STDLIB_PORT, _STDLIB_PROC
     if _STDLIB_PORT is not None:
-        return _STDLIB_PORT
+        if _STDLIB_PORT != 0 and _STDLIB_PROC is not None and _STDLIB_PROC.poll() is not None:
+            _STDLIB_PORT = None
+            _STDLIB_PROC = None
+        else:
+            return _STDLIB_PORT
     with _STDLIB_LOCK:
         if _STDLIB_PORT is not None:
-            return _STDLIB_PORT
+            if _STDLIB_PORT != 0 and _STDLIB_PROC is not None and _STDLIB_PROC.poll() is not None:
+                _STDLIB_PORT = None
+                _STDLIB_PROC = None
+            else:
+                return _STDLIB_PORT
         if not _is_old_frontend():
             _STDLIB_PORT = 0  # sentinel: never start
             return 0
+        _cleanup_stale_stdlib_backends()
         port = _find_free_port()
         env = os.environ.copy()
         env["SIDEKICK_WEBUI_PORT"] = str(port)
@@ -5025,7 +5518,7 @@ def _ensure_stdlib_backend() -> int:
             [sys.executable, "-m", "web.server"],
             env=env,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
         )
         # Wait for readiness (up to 10 seconds)
         for _ in range(30):
@@ -5056,11 +5549,20 @@ def _stop_stdlib_backend() -> None:
         return
     try:
         if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    check=False,
+                )
+            else:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
     except Exception:
         _log.debug("Failed to stop stdlib backend", exc_info=True)
 
@@ -5113,19 +5615,37 @@ def _proxy_sync(
     req = urllib.request.Request(url, data=body, method=method)
     for k, v in _forward_request_headers(headers).items():
         req.add_header(k, v)
+    req.add_header("Connection", "close")
+    if not _PROXY_SEMAPHORE.acquire(timeout=_PROXY_ACQUIRE_TIMEOUT_SECONDS):
+        return (
+            503,
+            b'{"error":"legacy proxy busy"}',
+            {"content-type": "application/json", "connection": "close"},
+            "application/json",
+        )
     try:
-        resp = urllib.request.urlopen(req, timeout=120)
-        resp_body = resp.read()
-        resp_headers = dict(resp.getheaders())
-        ct = resp_headers.get("Content-Type", resp_headers.get("content-type", "application/json"))
-        return resp.status, resp_body, resp_headers, ct
+        with urllib.request.urlopen(req, timeout=_PROXY_SYNC_TIMEOUT_SECONDS) as resp:
+            resp_body = resp.read()
+            resp_headers = dict(resp.getheaders())
+            ct = resp_headers.get("Content-Type", resp_headers.get("content-type", "application/json"))
+            resp_headers.setdefault("Connection", "close")
+            return resp.status, resp_body, resp_headers, ct
     except urllib.error.HTTPError as e:
-        err_body = e.read()
+        try:
+            err_body = e.read()
+        finally:
+            try:
+                e.close()
+            except Exception:
+                pass
         err_headers = dict(e.headers)
         ct = err_headers.get("Content-Type", err_headers.get("content-type", "application/json"))
+        err_headers.setdefault("Connection", "close")
         return e.code, err_body, err_headers, ct
     except urllib.error.URLError as e:
-        return 502, json.dumps({"error": f"proxy failed: {e.reason}"}).encode(), {"content-type": "application/json"}, "application/json"
+        return 502, json.dumps({"error": f"proxy failed: {e.reason}"}).encode(), {"content-type": "application/json", "connection": "close"}, "application/json"
+    finally:
+        _PROXY_SEMAPHORE.release()
 
 
 def _proxy_stream(
@@ -5140,13 +5660,14 @@ def _proxy_stream(
     req = urllib.request.Request(url, data=body, method=method)
     for k, v in _forward_request_headers(headers).items():
         req.add_header(k, v)
+    req.add_header("Connection", "close")
     try:
-        resp = urllib.request.urlopen(req, timeout=300)
-        while True:
-            chunk = resp.readline()
-            if not chunk:
-                break
-            yield chunk
+        with urllib.request.urlopen(req, timeout=_PROXY_STREAM_TIMEOUT_SECONDS) as resp:
+            while True:
+                chunk = resp.readline()
+                if not chunk:
+                    break
+                yield chunk
     except Exception:
         yield b""
 
@@ -5159,7 +5680,10 @@ async def _proxy_request_to_stdlib(request: Request) -> Response:
     if request.url.query:
         full_path += "?" + request.url.query
 
-    body = await request.body()
+    try:
+        body = await request.body()
+    except ClientDisconnect:
+        return Response(content=b"", status_code=499)
     headers = dict(request.headers)
     loop = asyncio.get_event_loop()
     status, resp_body, resp_headers, content_type = await loop.run_in_executor(
@@ -5185,7 +5709,10 @@ async def api_stdlib_proxy(request: Request, path: str):
     is_stream = any(full_path.startswith(p) for p in _STREAMING_PREFIXES)
 
     if is_stream:
-        body = await request.body()
+        try:
+            body = await request.body()
+        except ClientDisconnect:
+            return Response(content=b"", status_code=499)
         headers = dict(request.headers)
         loop = asyncio.get_event_loop()
         gen = await loop.run_in_executor(

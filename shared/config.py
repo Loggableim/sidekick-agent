@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,16 @@ from typing import Any
 import yaml
 
 from sidekick_constants import get_config_path, get_env_path, get_sidekick_home
+
+
+_CORRUPTED_ENV_KEY_RE = re.compile(r"^\s*(?:\d+\|)+([A-Za-z_][A-Za-z0-9_]*)\s*$")
+
+
+def normalize_env_key(raw_key: str) -> str:
+    """Normalize copied `.env` keys that accidentally include line prefixes."""
+    key = str(raw_key or "").strip()
+    match = _CORRUPTED_ENV_KEY_RE.match(key)
+    return match.group(1) if match else key
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "app": {
@@ -134,7 +145,7 @@ def parse_env_file() -> dict[str, str]:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            key = key.strip()
+            key = normalize_env_key(key)
             value = value.strip()
             if not key:
                 continue

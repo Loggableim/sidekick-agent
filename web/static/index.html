@@ -1474,7 +1474,18 @@
     </div>
     <div id="mainSettings" class="main-view">
       <div class="settings-main">
-          <div class="settings-pane active" id="settingsPaneConversation">
+        <div class="settings-section-switcher">
+          <label for="settingsSectionDropdown">Settings section</label>
+          <select id="settingsSectionDropdown" onchange="switchSettingsSection(this.value)">
+            <option value="conversation">Conversation</option>
+            <option value="appearance">Appearance</option>
+            <option value="preferences">Preferences</option>
+            <option value="providers">Providers</option>
+            <option value="plugins">Plugins</option>
+            <option value="system">System</option>
+          </select>
+        </div>
+        <div class="settings-pane active" id="settingsPaneConversation">
             <div class="settings-section-head">
               <div>
                 <div class="settings-section-title" data-i18n="settings_section_conversation_title">Conversation</div>
@@ -2079,8 +2090,8 @@
 <script src="static/browser.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/spaces.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/gmail.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/power.js?v=__WEBUI_VERSION__" defer></script>

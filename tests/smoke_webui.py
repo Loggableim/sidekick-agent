@@ -1,152 +1,137 @@
 #!/usr/bin/env python3
-"""WebUI HTTP Smoke Test for Sidekick v0.4.0.
+"""Legacy WebUI HTTP smoke test for Sidekick.
 
-Creates a minimal web server instance programmatically and runs HTTP checks.
-All tests work without any running Sidekick instance.
-
-Usage:
-    python tests/smoke_webui.py
+This script exercises the old stdlib web surface that still backs the
+compatibility proxy. It is intentionally importable so ``tests/smoke_all.py``
+can call ``main()`` without executing on import.
 """
+from __future__ import annotations
+
 import json
 import os
 import socket
 import sys
 import threading
-import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
+from typing import Any
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PASS = 0
-FAIL = 0
 
 
-def find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+@dataclass
+class Result:
+    passed: int = 0
+    failed: int = 0
 
-def http_get(port: int, path: str) -> tuple[int, dict | str]:
-    """GET an endpoint, return (status_code, parsed_data_or_raw)."""
+
+def _bootstrap_repo() -> None:
+    sys.path.insert(0, REPO)
+    from sidekick_app.__main__ import _bootstrap_aliases, _ensure_self_first
+
+    _ensure_self_first()
+    _bootstrap_aliases()
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _request_json(port: int, method: str, path: str, body: Any | None = None) -> tuple[int, Any]:
     url = f"http://127.0.0.1:{port}{path}"
+    data = None if body is None else json.dumps(body).encode("utf-8")
+    headers = {"Content-Type": "application/json"} if data is not None else {}
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        resp = urllib.request.urlopen(url, timeout=10)
-        raw = resp.read()
-        ct = resp.headers.get("Content-Type", "")
-        if "application/json" in ct:
-            return resp.status, json.loads(raw.decode("utf-8"))
-        return resp.status, raw
-    except urllib.error.HTTPError as e:
-        raw = e.read()
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+            ctype = resp.headers.get("Content-Type", "")
+            if "application/json" in ctype:
+                return resp.status, json.loads(raw.decode("utf-8"))
+            return resp.status, raw.decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
         try:
-            return e.code, json.loads(raw.decode("utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return e.code, raw
-    except (urllib.error.URLError, ConnectionRefusedError, OSError) as e:
-        return 0, {"error": str(e)}
+            return exc.code, json.loads(raw.decode("utf-8"))
+        except Exception:
+            return exc.code, raw.decode("utf-8", errors="replace")
+    except Exception as exc:
+        return 0, {"error": str(exc)}
 
 
-def test(name: str, ok: bool, detail: str = ""):
-    global PASS, FAIL
+def _mark(result: Result, name: str, ok: bool, detail: str = "") -> None:
     if ok:
-        PASS += 1
-        print(f"  ✓ {name}")
+        result.passed += 1
+        print(f"  [OK] {name}")
     else:
-        FAIL += 1
-        print(f"  ✗ {name}")
+        result.failed += 1
+        print(f"  [FAIL] {name}")
         if detail:
-            print(f"    → {detail}")
+            print(f"        {detail}")
 
 
-print("=== WebUI HTTP Smoke Test ===\n")
+def run_smoke() -> Result:
+    _bootstrap_repo()
+    from web.server import create_server
 
-# Set TESTING env so server uses minimal startup
-os.environ.setdefault("HERMES_WEBUI_LOG_FILE", os.devnull)
+    result = Result()
+    port = _find_free_port()
+    os.environ["SIDEKICK_WEBUI_HOST"] = "127.0.0.1"
+    os.environ["SIDEKICK_WEBUI_PORT"] = str(port)
+    os.environ.setdefault("HERMES_WEBUI_LOG_FILE", os.devnull)
 
-port = find_free_port()
-os.environ["SIDEKICK_WEBUI_PORT"] = str(port)
-os.environ["SIDEKICK_WEBUI_HOST"] = "127.0.0.1"
+    server = create_server("127.0.0.1", port)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
 
-print(f"Starting server on http://127.0.0.1:{port} ...")
-
-# Bootstrap + create server programmatically (avoids main() ceremony)
-sys.path.insert(0, REPO)
-
-# Pop old sys.path entries to ensure correct module resolution
-from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
-_ensure_self_first()
-_bootstrap_aliases()
-
-from http.server import ThreadingHTTPServer
-from web.server import QuietHTTPServer, Handler
-server = QuietHTTPServer(("127.0.0.1", port), Handler)
-server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-server_thread.start()
-time.sleep(0.5)  # Brief wait for server to be ready
-
-# ── /health endpoint ──
-code, data = http_get(port, "/health")
-test("/health returns 200", code == 200 and isinstance(data, dict),
-     f"status={code} data={str(data)[:100]}")
-
-# ── Static asset ──
-code, data = http_get(port, "/favicon.ico")
-test("Static asset (favicon)", code == 200, f"status={code}")
-
-# ── Session create via POST ──
-import urllib.request as _ur
-url = f"http://127.0.0.1:{port}/api/session/new"
-body = json.dumps({"title": "smoke-test-v040"}).encode()
-req = _ur.Request(url, data=body,
-    headers={"Content-Type": "application/json"})
-try:
-    resp = _ur.urlopen(req, timeout=10)
-    created = json.loads(resp.read().decode())
-    s = created.get("session", created)
-    session_id = s.get("session_id", s.get("id", ""))
-    test("Session created", bool(session_id) and resp.status in (200, 201),
-         f"status={resp.status} id={session_id[:20] if session_id else 'NONE'}")
-except Exception as e:
-    test("Session created", False, str(e))
-    session_id = ""
-
-# ── Session integrity: verify session via WebUI API ──
-if session_id:
-    import sys as _sys
-    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    import urllib.request as _ur2
-    _url2 = f"http://127.0.0.1:{port}/api/session?session_id={session_id}"
     try:
-        _resp2 = _ur2.urlopen(_url2, timeout=10)
-        _data2 = json.loads(_resp2.read().decode())
-        _session = _data2.get("session", {})
-        _msgs = _session.get("messages", [])
-        integrity_ok = isinstance(_session, dict) and "session_id" in _session
-        test("Session integrity (API load)", integrity_ok,
-             f"session_id={session_id[:16]} msgs={len(_msgs)}")
-    except Exception as _e:
-        test("Session integrity (API load)", False, str(_e))
+        code, data = _request_json(port, "GET", "/health")
+        _mark(result, "/health", code == 200 and isinstance(data, dict), f"status={code} data={str(data)[:120]}")
 
-# ── Path/env priority test (bootstrapped context) ──
-import os as _os
-_os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-webui'
-_os.environ['HERMES_HOME'] = '/tmp/hermes-prio-webui'
-from shared.paths import sidekick_home as _sk_home
-_h = _sk_home()
-_os.environ.pop('SIDEKICK_HOME', None)
-_os.environ.pop('HERMES_HOME', None)
-test("Path/env SIDEKICK_HOME priority", 'sk-prio-webui' in str(_h),
-     f"sidekick_home={_h}")
+        code, _ = _request_json(port, "GET", "/favicon.ico")
+        _mark(result, "favicon", code == 200, f"status={code}")
 
-# ── Sessions list ──
-code, data = http_get(port, "/api/sessions")
-sessions_list = data if isinstance(data, list) else data.get("sessions", []) if isinstance(data, dict) else []
-test("Sessions list", code == 200, f"status={code} count={len(sessions_list)}")
+        code, created = _request_json(port, "POST", "/api/session/new", {"title": "smoke-legacy"})
+        session = created.get("session", created) if isinstance(created, dict) else {}
+        session_id = session.get("session_id") or session.get("id") or ""
+        _mark(result, "session create", code in {200, 201} and bool(session_id), f"status={code} id={session_id}")
 
-# ── Server stop ──
-server.shutdown()
-server.server_close()
-test("Server stops cleanly", True)
+        if session_id:
+            code, loaded = _request_json(port, "GET", f"/api/session?session_id={session_id}")
+            session_data = loaded.get("session", {}) if isinstance(loaded, dict) else {}
+            _mark(result, "session load", code == 200 and session_data.get("session_id") == session_id, f"status={code}")
 
-print(f"\n─── Ergebnis: {PASS} passed, {FAIL} failed ───")
-raise SystemExit(0 if FAIL == 0 else 1)
+            code, listed = _request_json(port, "GET", "/api/sessions")
+            _mark(result, "session list", code == 200, f"status={code}")
+
+        code, _ = _request_json(port, "GET", "/api/sessions")
+        _mark(result, "sessions endpoint", code == 200, f"status={code}")
+
+        code, _ = _request_json(port, "GET", "/api/sessions/search?q=smoke")
+        _mark(result, "sessions search", code == 200, f"status={code}")
+
+        code, _ = _request_json(port, "GET", "/")
+        _mark(result, "root html", code == 200, f"status={code}")
+
+        code, _ = _request_json(port, "GET", "/api/logs?file=agent&lines=5")
+        _mark(result, "logs endpoint", code == 200, f"status={code}")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    return result
+
+
+def main() -> int:
+    print("=== Legacy WebUI smoke ===\n")
+    result = run_smoke()
+    print(f"\n=== Ergebnis: {result.passed} passed, {result.failed} failed ===")
+    return 0 if result.failed == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1750,11 +1750,21 @@ async function _loadActiveSpaceConfig() {
   }
 }
 
+function _bootTimeout(promise, ms, label) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error((label || 'boot operation') + ' timed out')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 (async()=>{
   // Load send key preference
   let _bootSettings={};
   try{
-    const s=await api('/api/settings');
+    const s=await _bootTimeout(api('/api/settings'),1200,'settings');
     _bootSettings=s;
     window._sendKey=s.send_key||'enter';
     window._showTokenUsage=!!s.show_token_usage;
@@ -1825,8 +1835,15 @@ async function _loadActiveSpaceConfig() {
     const _checkUrl='api/updates/check'+(_testUpdates?'?simulate=1':'');
     api(_checkUrl).then(d=>{if(!_testUpdates)sessionStorage.setItem('sidekick-update-checked','1');if((d.webui&&d.webui.behind>0)||(d.agent&&d.agent.behind>0))_showUpdateBanner(d);}).catch(()=>{});
   }
-  // Fetch active profile
-  try{const p=await api('/api/profile/active');S.activeProfile=p.name||'default';}catch(e){S.activeProfile='default';}
+  // Fetch active profile. This endpoint is useful metadata, but must never
+  // block first paint/session rendering if the backend is busy.
+  try{
+    const p=await _bootTimeout(api('/api/profile/active'),1000,'active profile');
+    S.activeProfile=p.name||'default';
+  }catch(e){
+    S.activeProfile='default';
+    console.warn('[boot] active profile unavailable, using default', e);
+  }
   // Update profile chip label immediately
   const profileLabel=$('profileChipLabel');
   if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
@@ -1856,12 +1873,19 @@ async function _loadActiveSpaceConfig() {
   // Pre-load workspace list so sidebar name is correct from first render.
   // Render the session list before restoring the saved conversation so a stale
   // saved-session/client-side boot error cannot leave the sidebar empty forever.
-  await loadWorkspaceList();
+  await _bootTimeout(loadWorkspaceList(),1500,'workspace list').catch((e)=>{
+    console.warn('[boot] workspace list unavailable, continuing', e);
+  });
   // Load the active space's config (project_dir, default model, etc.) so
   // newSession() sees the correct spaceDefaultPath right from the first
   // new chat, not just after an explicit space switch (#spaces-default-dir).
-  await _loadActiveSpaceConfig();
-  await loadOnboardingWizard();
+  await _bootTimeout(_loadActiveSpaceConfig(),1000,'space config').catch((e)=>{
+    window._activeSpaceConfig=null;
+    console.warn('[boot] active space config unavailable, continuing', e);
+  });
+  await _bootTimeout(loadOnboardingWizard(),1000,'onboarding').catch((e)=>{
+    console.warn('[boot] onboarding unavailable, continuing', e);
+  });
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
   const savedLocal=localStorage.getItem('sidekick-webui-session');
   const saved=urlSession||savedLocal;

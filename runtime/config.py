@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple, List, Dict
 
 import yaml
-from shared.config import get_config_value, load_config as _shared_load_config
+from shared.config import get_config_value, load_config as _shared_load_config, normalize_env_key
 from shared.constants import get_config_path, get_env_path, get_sidekick_home
 
 logger = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ def get_env_value(key: str, default: str | None = None) -> str | None:
             if line.startswith("#") or "=" not in line:
                 continue
             k, _, v = line.partition("=")
-            if k.strip() == key:
+            if normalize_env_key(k) == key:
                 return v.strip().strip("\"'")
         return default
     except OSError:
@@ -120,7 +120,7 @@ def load_env(env_path: str | Path | None = None, *, quiet: bool = False) -> dict
             if line.startswith("#") or "=" not in line:
                 continue
             k, _, v = line.partition("=")
-            result[k.strip()] = v.strip().strip("\"'")
+            result[normalize_env_key(k)] = v.strip().strip("\"'")
     except OSError:
         if not quiet:
             logger.warning("Could not read env file: %s", path)
