@@ -1838,6 +1838,7 @@ def test_initial_space_labels_use_url_workspace_before_spaces_js_loads():
     assert titlebar_default < titlebar_script < titlebar_actions
     assert sidebar_default < sidebar_script < spaces_js
     assert index_html.count("new URLSearchParams(window.location.search || '').get('workspace')") >= 2
+    assert index_html.count("if (!slug) slug = 'nova';") >= 2
     assert "btn.setAttribute('title', 'Switch space (' + slug + ')')" in index_html
 
 
@@ -2104,6 +2105,17 @@ def test_legacy_sse_paths_are_streamed_not_buffered():
     ]
     for path in buffered_paths:
         assert not web_server._is_streaming_api_path(path), path
+
+
+def test_browser_frame_image_uses_authenticated_fetch_blob():
+    browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
+
+    assert "let _browserFrameObjectUrl = '';" in browser_js
+    assert "img.dataset.frameSrc" in browser_js
+    assert "fetch(frameRequestUrl, {credentials:'same-origin'})" in browser_js
+    assert "if (!img.getAttribute('src')) img.style.visibility = 'hidden';" in browser_js
+    assert "URL.createObjectURL(blob)" in browser_js
+    assert "URL.revokeObjectURL(_browserFrameObjectUrl)" in browser_js
 
 
 def test_stdlib_proxy_uses_streaming_proxy_for_legacy_sse(monkeypatch):

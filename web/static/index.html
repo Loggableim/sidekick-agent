@@ -105,6 +105,7 @@
       if (!slug) {
         try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
       }
+      if (!slug) slug = 'nova';
       if (!slug) return;
       var name = document.getElementById('titlebarSpaceName');
       var btn = document.getElementById('titlebarSpaceBtn');
@@ -212,6 +213,7 @@
           if (!slug) {
             try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
           }
+          if (!slug) slug = 'nova';
           if (!slug) return;
           var name = document.getElementById('sidebarSpaceName');
           var btn = document.getElementById('sidebarSpaceBtn');

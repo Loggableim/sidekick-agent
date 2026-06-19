@@ -29,6 +29,7 @@ let _browserPermissionMode = 'none';
 let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
 let _browserDrawerHost = null;
 let _browserDrawerHostNext = null;
+let _browserFrameObjectUrl = '';
 
 function _browserEl(id) {
   return document.getElementById(id);
@@ -75,8 +76,13 @@ function _browserSetEmptyVisible(visible) {
 function _browserClearViewport() {
   const img = _browserEl('browserFrameImage');
   if (img) {
+    if (_browserFrameObjectUrl) {
+      try { URL.revokeObjectURL(_browserFrameObjectUrl); } catch (_) {}
+      _browserFrameObjectUrl = '';
+    }
     img.removeAttribute('src');
     img.dataset.rev = '';
+    img.dataset.frameSrc = '';
     img.style.visibility = 'hidden';
   }
   const target = _browserEl('browserTargetBox');
@@ -756,10 +762,34 @@ function _browserSetImage(state) {
   if (!img || !state) return;
   const rev = String(state.frame_rev || 0);
   const nextSrc = state.frame_url || ('/api/browser/frame?session_id=' + encodeURIComponent(state.session_id || _browserCurrentSessionId()) + '&rev=' + encodeURIComponent(rev));
-  if (img.dataset.rev !== rev) {
+  const frameRequestUrl = nextSrc + (nextSrc.includes('?') ? '&' : '?') + 'cache=' + encodeURIComponent(rev);
+  if (img.dataset.rev !== rev || img.dataset.frameSrc !== frameRequestUrl) {
     img.dataset.rev = rev;
-    img.src = nextSrc + (nextSrc.includes('?') ? '&' : '?') + 'cache=' + encodeURIComponent(rev);
-    img.style.visibility = 'visible';
+    img.dataset.frameSrc = frameRequestUrl;
+    if (!img.getAttribute('src')) img.style.visibility = 'hidden';
+    fetch(frameRequestUrl, {credentials:'same-origin'})
+      .then(res => {
+        if (!res.ok) throw new Error('browser frame request failed: ' + res.status);
+        return res.blob();
+      })
+      .then(blob => {
+        if (img.dataset.rev !== rev || img.dataset.frameSrc !== frameRequestUrl) return;
+        const objectUrl = URL.createObjectURL(blob);
+        if (_browserFrameObjectUrl) {
+          try { URL.revokeObjectURL(_browserFrameObjectUrl); } catch (_) {}
+        }
+        _browserFrameObjectUrl = objectUrl;
+        img.src = objectUrl;
+        img.style.visibility = 'visible';
+      })
+      .catch(err => {
+        if (img.dataset.rev !== rev || img.dataset.frameSrc !== frameRequestUrl) return;
+        if (!_browserFrameObjectUrl) {
+          img.removeAttribute('src');
+          img.style.visibility = 'hidden';
+        }
+        try { console.warn('browser frame image load failed', err); } catch (_) {}
+      });
   }
 }
 
