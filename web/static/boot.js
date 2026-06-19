@@ -269,6 +269,18 @@ function syncWorkspacePanelUI(){
     const el=$(id);
     if(el)el.disabled=!hasSession;
   });
+  if(!hasSession&&!hasPreview){
+    const emptyEl=$('wsEmptyState');
+    const fileTree=$('fileTree');
+    if(emptyEl){
+      emptyEl.textContent=typeof t==='function'?t('workspace_empty_no_path'):'No workspace selected.';
+      emptyEl.style.display='flex';
+    }
+    if(fileTree){
+      fileTree.innerHTML='';
+      fileTree.style.display='none';
+    }
+  }
   const clearBtn=$('btnClearPreview');
   if(clearBtn){
     clearBtn.disabled=!isOpen;

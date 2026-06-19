@@ -240,6 +240,17 @@ async function loadDir(path){
     ) {
       return;
     }
+    const emptyEl = $('wsEmptyState');
+    const box = $('fileTree');
+    if (emptyEl) {
+      const detail = msg ? ` ${msg}` : '';
+      emptyEl.textContent = (typeof t === 'function' ? t('workspace_load_failed') : 'Could not load this workspace.') + detail;
+      emptyEl.style.display = 'flex';
+    }
+    if (box) {
+      box.innerHTML = '';
+      box.style.display = 'none';
+    }
     console.warn('loadDir',e);
   }
 }

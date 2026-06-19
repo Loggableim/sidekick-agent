@@ -1101,8 +1101,29 @@ def test_workspace_files_toggle_uses_current_rightpanel_contract():
     assert "else if(_workspacePanelMode==='browse') _setWorkspacePanelMode('browse');" in boot_js
     assert "const isOpen = fileTreePanel ? !fileTreeMinimized : _workspacePanelMode!=='closed';" in boot_js
     assert "toggleBtn.disabled=!isOpen&&!canBrowse;" in boot_js
+    assert "if(!hasSession&&!hasPreview){" in boot_js
+    assert "emptyEl.textContent=typeof t==='function'?t('workspace_empty_no_path'):'No workspace selected.';" in boot_js
+    assert "fileTree.innerHTML='';" in boot_js
+    assert "fileTree.style.display='none';" in boot_js
     assert "openWorkspacePanel(nextMode,{force:true});" in boot_js
     assert "window.toggleFileTreePanel=function(force){return toggleWorkspacePanel(force);};" in boot_js
+
+
+def test_workspace_load_errors_render_panel_error_state():
+    workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
+    i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
+
+    catch_start = workspace_js.index("  }catch(e){", workspace_js.index("async function loadDir(path)"))
+    load_dir_end = workspace_js.index("async function _refreshGitBadge", catch_start)
+    catch_body = workspace_js[catch_start:load_dir_end]
+
+    assert "$('wsEmptyState')" in catch_body
+    assert "t('workspace_load_failed')" in catch_body
+    assert "emptyEl.style.display = 'flex';" in catch_body
+    assert "box.innerHTML = '';" in catch_body
+    assert "box.style.display = 'none';" in catch_body
+    assert "workspace_load_failed: 'Could not load this workspace.'" in i18n_js
+    assert "workspace_load_failed: 'Dieser Workspace konnte nicht geladen werden.'" in i18n_js
 
 
 def test_open_files_bar_has_current_chat_markup_contract():
