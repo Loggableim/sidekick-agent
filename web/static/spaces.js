@@ -72,10 +72,32 @@ function _withSpaceTimeout(promise, ms, label) {
   });
 }
 
-function _syncActiveSpaceUrl(slug) {
+function _clearSessionRoutePath(pathname) {
+  const path = String(pathname || '/');
+  const marker = '/session/';
+  const idx = path.indexOf(marker);
+  if (idx < 0) return path || '/';
+  const base = path.slice(0, idx) || '/';
+  return base.endsWith('/') ? base : base + '/';
+}
+
+function _locationHasSessionRoute() {
+  try {
+    const url = new URL(window.location.href);
+    return url.pathname.indexOf('/session/') >= 0 || url.searchParams.has('session');
+  } catch (_) {
+    return false;
+  }
+}
+
+function _syncActiveSpaceUrl(slug, options = {}) {
   try {
     const url = new URL(window.location.href);
     url.searchParams.set('workspace', slug);
+    url.searchParams.delete('session');
+    if (options && options.clearSessionRoute) {
+      url.pathname = _clearSessionRoutePath(url.pathname);
+    }
     window.history.replaceState(window.history.state || {}, '', url.pathname + url.search + url.hash);
   } catch (_) {}
 }
@@ -270,10 +292,22 @@ async function selectSpace(slug) {
         _saveComposerDraftNow(S.session.session_id, ta ? ta.value : '', []);
       }
     }
+    const previousSpace = _activeSpace;
     _activeSpace = slug;
     const switchRev = _beginSpaceSwitch();
     localStorage.setItem('sidekick-active-workspace', slug);
-    _syncActiveSpaceUrl(slug);
+    const shouldClearSessionRoute = !!(
+      !activeSessionInTargetSpace
+      && previousSpace !== slug
+      && (
+        (activeSession && activeSession.session_id)
+        || _locationHasSessionRoute()
+      )
+    );
+    if (shouldClearSessionRoute) {
+      try { localStorage.removeItem('sidekick-webui-session'); } catch (_) {}
+    }
+    _syncActiveSpaceUrl(slug, {clearSessionRoute: shouldClearSessionRoute});
     _showSpaceSwitchLoading(slug);
     _syncSpacesPanelActiveState(slug);
     // ── Space Default Config laden ──
@@ -1130,7 +1164,9 @@ function _renderSpaceDropdownItems(dd, spaces) {
       ev.preventDefault();
       ev.stopPropagation();
       closeSpaceDropdowns();
-      selectSpace(ws.slug);
+      const runSelect = () => selectSpace(ws.slug);
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runSelect);
+      else setTimeout(runSelect, 0);
     };
     dd.appendChild(item);
   }
@@ -1167,6 +1203,33 @@ function _showSpaceDropdownError(dd, message) {
   dd.innerHTML = `<div class="titlebar-space-dd-item" style="color:var(--danger,#ff6b6b);cursor:default">${spaceEsc(message || 'Failed to load spaces')}</div>`;
 }
 
+function _openSpaceDropdown(dd, btn, className) {
+  if (className) dd.className = className;
+  const cachedSpaces = Array.isArray(_spacesCache) ? _spacesCache.filter(Boolean) : [];
+  if (cachedSpaces.length) {
+    dd.hidden = false;
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    _renderSpaceDropdownItems(dd, cachedSpaces);
+    _positionSpaceDropdown(dd, btn);
+    _installSpaceDropdownCloser(dd, btn);
+  } else {
+    _showSpaceDropdownLoading(dd, btn);
+  }
+  const refresh = () => {
+    loadSpaces().then(spaces => {
+      if (dd.hidden) return;
+      if (className) dd.className = className;
+      _renderSpaceDropdownItems(dd, spaces);
+      _positionSpaceDropdown(dd, btn);
+      if (!cachedSpaces.length) _installSpaceDropdownCloser(dd, btn);
+    }).catch(e => {
+      if (!cachedSpaces.length) _showSpaceDropdownError(dd, e && e.message);
+    });
+  };
+  if (cachedSpaces.length) setTimeout(refresh, 0);
+  else refresh();
+}
+
 function _installSpaceDropdownCloser(dd, btn) {
   const closer = (e) => {
     if (!dd.parentElement || !dd.parentElement.contains(e.target)) {
@@ -1189,14 +1252,7 @@ function toggleTitlebarSpaceDropdown() {
     if (btn) btn.setAttribute('aria-expanded', 'false');
     return;
   }
-  _showSpaceDropdownLoading(dd, btn);
-  loadSpaces().then(spaces => {
-    _renderSpaceDropdownItems(dd, spaces);
-    _positionSpaceDropdown(dd, btn);
-    _installSpaceDropdownCloser(dd, btn);
-  }).catch(e => {
-    _showSpaceDropdownError(dd, e && e.message);
-  });
+  _openSpaceDropdown(dd, btn);
 }
 
 function _bindTitlebarSpaceButton() {
@@ -1243,15 +1299,7 @@ function toggleSidebarSpaceDropdown() {
     if (btn) btn.setAttribute('aria-expanded', 'false');
     return;
   }
-  _showSpaceDropdownLoading(dd, btn);
-  loadSpaces().then(spaces => {
-    dd.className = 'sidebar-space-dropdown';
-    _renderSpaceDropdownItems(dd, spaces);
-    _positionSpaceDropdown(dd, btn);
-    _installSpaceDropdownCloser(dd, btn);
-  }).catch(e => {
-    _showSpaceDropdownError(dd, e && e.message);
-  });
+  _openSpaceDropdown(dd, btn, 'sidebar-space-dropdown');
 }
 
 function openSidebarSpaceSelector() {

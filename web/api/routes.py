@@ -4223,16 +4223,22 @@ def handle_get(handler, parsed) -> bool:
             diag.stage("load_settings")
             settings = load_settings()
             show_cli_sessions = bool(settings.get("show_cli_sessions"))
-            diag.stage("get_state_sessions")
-            state_sessions = get_cli_sessions()
             from web.api.models import _hide_from_default_sidebar as _cron_hide
 
-            migrated_webui_sessions = [
-                s for s in state_sessions
-                if str(s.get("source_tag") or s.get("raw_source") or "").strip().lower() == "webui"
-                and is_cli_session_row_visible(s)
-                and not _cron_hide(s)
-            ]
+            isolated_workspace = bool(workspace_slug and workspace_slug != "default")
+            state_sessions = []
+            migrated_webui_sessions = []
+            if isolated_workspace:
+                diag.stage("skip_state_sessions")
+            else:
+                diag.stage("get_state_sessions")
+                state_sessions = get_cli_sessions()
+                migrated_webui_sessions = [
+                    s for s in state_sessions
+                    if str(s.get("source_tag") or s.get("raw_source") or "").strip().lower() == "webui"
+                    and is_cli_session_row_visible(s)
+                    and not _cron_hide(s)
+                ]
             if show_cli_sessions:
                 diag.stage("merge_cli_sessions")
                 cli_by_id = {s["session_id"]: s for s in state_sessions}
@@ -4260,7 +4266,7 @@ def handle_get(handler, parsed) -> bool:
                 # low-value imported artifacts do not leak into the sidebar.
                 webui_sessions = [s for s in webui_sessions if is_cli_session_row_visible(s)]
                 webui_ids = {s["session_id"] for s in webui_sessions}
-                deduped_cli = [] if (workspace_slug and workspace_slug != "default") else [
+                deduped_cli = [] if isolated_workspace else [
                     s for s in state_sessions
                     if s["session_id"] not in webui_ids
                     and is_cli_session_row_visible(s)
@@ -4270,7 +4276,7 @@ def handle_get(handler, parsed) -> bool:
                 diag.stage("filter_webui_sessions")
                 webui_sessions = [s for s in webui_sessions if not _is_cli_session_for_settings(s)]
                 webui_ids = {s["session_id"] for s in webui_sessions}
-                deduped_cli = [] if (workspace_slug and workspace_slug != "default") else [
+                deduped_cli = [] if isolated_workspace else [
                     s for s in migrated_webui_sessions
                     if s["session_id"] not in webui_ids
                 ]

@@ -91,7 +91,10 @@ async function _sessionApi(path, timeoutMs, externalSignal) {
   }
   const timer = setTimeout(() => controller.abort(), timeoutMs || _SESSION_LOAD_TIMEOUT_MS);
   try {
-    return await api(path, {signal: controller.signal});
+    const scopedPath = (typeof _spaceScopedApiPath === 'function')
+      ? _spaceScopedApiPath(path)
+      : path;
+    return await api(scopedPath, {signal: controller.signal});
   } finally {
     clearTimeout(timer);
     if (externalSignal) {
@@ -1493,7 +1496,10 @@ async function _loadOlderMessages() {
   // rebuilt transcript (#1937).
   const startGeneration = _messagesGeneration;
   try {
-    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}`);
+    const data = await _sessionApi(
+      `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}`,
+      _SESSION_MESSAGES_TIMEOUT_MS
+    );
     // Guard: api() may have redirected (401) and returned undefined.
     if (!data || !data.session) { _loadingOlder = false; return; }
     //  - response shape sane
@@ -1587,7 +1593,10 @@ async function _ensureAllMessagesLoaded() {
   _loadingOlder = true;
   try {
     const sid = S.session.session_id;
-    const data = await api(`/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0`);
+    const data = await _sessionApi(
+      `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0`,
+      _SESSION_MESSAGES_TIMEOUT_MS
+    );
     // Guard: api() may have redirected (401) and returned undefined.
     if (!data || !data.session) return;
     // Session may have been switched while we awaited. Bail rather than

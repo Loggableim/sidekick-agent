@@ -311,6 +311,10 @@ def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch
         sessions_dir = space_sessions
 
     monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace() if slug == "color" else None)
+    monkeypatch.setattr(
+        "web.api.routes.get_cli_sessions",
+        lambda: (_ for _ in ()).throw(AssertionError("non-default spaces must not scan global state.db")),
+    )
 
     client = TestClient(web_server.app)
     response = client.get(
@@ -1929,6 +1933,10 @@ def test_background_stream_requests_keep_owner_workspace():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
     sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
 
+    assert "const scopedPath = (typeof _spaceScopedApiPath === 'function')" in sessions_js
+    assert "return await api(scopedPath, {signal: controller.signal})" in sessions_js
+    assert "msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}`,\n      _SESSION_MESSAGES_TIMEOUT_MS" in sessions_js
+    assert "messages=1&resolve_model=0`,\n      _SESSION_MESSAGES_TIMEOUT_MS" in sessions_js
     assert "workspace_slug:ownerWorkspaceSlug" in messages_js
     assert "function _ownerScopedApiPath(path)" in messages_js
     assert "_ownerScopedApiPath(`api/chat/stream?stream_id=" in messages_js
@@ -1956,14 +1964,34 @@ def test_space_switch_excludes_explicit_foreign_sessions_from_default_space():
     sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
 
     assert "function _spaceSessionMatchesSlug(session, slug)" in spaces_js
+    assert "function _clearSessionRoutePath(pathname)" in spaces_js
+    assert "function _locationHasSessionRoute()" in spaces_js
     assert "if (explicit) return explicit === target" in spaces_js
     assert "return _shouldTrustUnscopedSessionsForSpace(target)" in spaces_js
+    assert "const previousSpace = _activeSpace" in spaces_js
+    assert "|| _locationHasSessionRoute()" in spaces_js
+    assert "localStorage.removeItem('sidekick-webui-session')" in spaces_js
+    assert "_syncActiveSpaceUrl(slug, {clearSessionRoute: shouldClearSessionRoute})" in spaces_js
     assert "sessionsInSpace = _allSessions.filter(s => _spaceSessionMatchesSlug(s, slug))" in spaces_js
     assert "const hasCurrentInSpace = !!(currentSid && activeSessionInTargetSpace" in spaces_js
     assert "_spaceSessionMatchesSlug," in spaces_js
     assert "typeof window._spaceSessionMatchesSlug==='function'" in sessions_js
     assert "if(sessionSpace) return sessionSpace===active" in sessions_js
     assert "return active==='nova'||active==='default'" in sessions_js
+
+
+def test_space_dropdown_renders_cached_spaces_before_refresh():
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+
+    assert "function _openSpaceDropdown(dd, btn, className)" in spaces_js
+    assert "const cachedSpaces = Array.isArray(_spacesCache) ? _spacesCache.filter(Boolean) : []" in spaces_js
+    assert "if (cachedSpaces.length)" in spaces_js
+    assert "_renderSpaceDropdownItems(dd, cachedSpaces)" in spaces_js
+    assert "if (cachedSpaces.length) setTimeout(refresh, 0)" in spaces_js
+    assert "loadSpaces().then(spaces => {" in spaces_js
+    assert "if (dd.hidden) return" in spaces_js
+    assert "_openSpaceDropdown(dd, btn, 'sidebar-space-dropdown')" in spaces_js
+    assert "requestAnimationFrame(runSelect)" in spaces_js
 
 
 def test_launcher_stops_orphan_stdlib_backends():
