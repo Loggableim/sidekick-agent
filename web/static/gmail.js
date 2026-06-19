@@ -20,6 +20,8 @@ const GMAIL = {
   pollInterval: null,
 };
 let _gmailSearchSeq = 0;
+let _gmailRefreshSeq = 0;
+let _gmailRefreshPending = false;
 
 // Folder display names for nav
 const GMAIL_FOLDER_LABELS = {
@@ -227,12 +229,24 @@ function gmailApplyFilter(emails) {
 }
 
 async function gmailRefresh() {
-  if (GMAIL.loading) return;
+  if (GMAIL.loading) {
+    _gmailRefreshPending = true;
+    return;
+  }
   GMAIL.loading = true;
+  _gmailRefreshPending = false;
+  const refreshSeq = ++_gmailRefreshSeq;
+  const requestedFolder = GMAIL.currentFolder;
+  const requestedFilter = GMAIL.currentFilter || 'all';
 
   try {
-    const url = _gmailAccount(`api/gmail/list?max=25&folder=${encodeURIComponent(GMAIL.currentFolder)}`);
+    const url = _gmailAccount(`api/gmail/list?max=25&folder=${encodeURIComponent(requestedFolder)}`);
     const data = await fetchJson(url);
+    if (
+      refreshSeq !== _gmailRefreshSeq ||
+      requestedFolder !== GMAIL.currentFolder ||
+      requestedFilter !== (GMAIL.currentFilter || 'all')
+    ) return;
     if (data.error) {
       const mainList = document.getElementById('gmailMainList');
       gmailSetEmpty(mainList, '📭', data.error);
@@ -244,12 +258,21 @@ async function gmailRefresh() {
     renderInbox({...data, emails: gmailApplyFilter(GMAIL.emails), total: GMAIL.emails.length});
     gmailRefreshNavCounts();
   } catch (e) {
+    if (
+      refreshSeq !== _gmailRefreshSeq ||
+      requestedFolder !== GMAIL.currentFolder ||
+      requestedFilter !== (GMAIL.currentFilter || 'all')
+    ) return;
     const mainList = document.getElementById('gmailMainList');
     gmailSetEmpty(mainList, '⚠️', 'Verbindungsfehler: ' + _gmailErrorMessage(e));
     const sideContent = document.getElementById('gmailContent');
     gmailSetEmpty(sideContent, '⚠️', 'Verbindungsfehler: ' + _gmailErrorMessage(e));
   } finally {
     GMAIL.loading = false;
+    if (_gmailRefreshPending) {
+      _gmailRefreshPending = false;
+      gmailRefresh();
+    }
   }
 }
 

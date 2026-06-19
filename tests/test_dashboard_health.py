@@ -844,6 +844,28 @@ def test_gmail_empty_search_restores_current_message_list():
     assert "if (searchSeq !== _gmailSearchSeq) return;" in search_body
 
 
+def test_gmail_refresh_reruns_pending_folder_or_filter_change():
+    gmail_js = Path("web/static/gmail.js").read_text(encoding="utf-8")
+
+    refresh_start = gmail_js.index("async function gmailRefresh()")
+    render_start = gmail_js.index("// ── Render inbox list", refresh_start)
+    refresh_body = gmail_js[refresh_start:render_start]
+
+    assert "let _gmailRefreshSeq = 0;" in gmail_js
+    assert "let _gmailRefreshPending = false;" in gmail_js
+    assert "if (GMAIL.loading)" in refresh_body
+    assert "_gmailRefreshPending = true;" in refresh_body
+    assert "const refreshSeq = ++_gmailRefreshSeq;" in refresh_body
+    assert "const requestedFolder = GMAIL.currentFolder;" in refresh_body
+    assert "const requestedFilter = GMAIL.currentFilter || 'all';" in refresh_body
+    assert "encodeURIComponent(requestedFolder)" in refresh_body
+    assert "refreshSeq !== _gmailRefreshSeq" in refresh_body
+    assert "requestedFolder !== GMAIL.currentFolder" in refresh_body
+    assert "requestedFilter !== (GMAIL.currentFilter || 'all')" in refresh_body
+    assert "if (_gmailRefreshPending)" in refresh_body
+    assert "gmailRefresh();" in refresh_body[refresh_body.index("if (_gmailRefreshPending)") :]
+
+
 def test_websearch_history_chips_use_current_suggestion_container():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
