@@ -224,6 +224,33 @@ def create_server(host: str | None = None, port: int | None = None) -> QuietHTTP
     shim so they can bind the legacy web surface without duplicating the
     ``QuietHTTPServer`` construction logic.
     """
+    global HOST, PORT, STATE_DIR, SESSION_DIR
+    from web.api import config as config_mod
+
+    config_mod.refresh_runtime_paths_from_env()
+    HOST = config_mod.HOST
+    PORT = config_mod.PORT
+    STATE_DIR = config_mod.STATE_DIR
+    SESSION_DIR = config_mod.SESSION_DIR
+
+    try:
+        from web.api import profiles as profiles_mod
+        profiles_mod.refresh_profile_base_home_from_env()
+    except Exception:
+        pass
+    try:
+        from web.api import routes as routes_mod
+        routes_mod.STATE_DIR = config_mod.STATE_DIR
+        routes_mod.SESSION_DIR = config_mod.SESSION_DIR
+    except Exception:
+        pass
+    try:
+        from web.api import models as models_mod
+        models_mod._SESSION_LIST_CACHE.clear()
+        models_mod._SESSION_LIST_CACHE_AT.clear()
+    except Exception:
+        pass
+
     resolved_host = HOST if host is None else host
     resolved_port = PORT if port is None else int(port)
     return QuietHTTPServer((resolved_host, resolved_port), Handler)
@@ -432,6 +459,37 @@ def _start_cron_ticker() -> None:
         time.sleep(TICK_INTERVAL)
 
 
+def _release_game_mode_resources_on_startup() -> None:
+    """Unload local GPU workers when Game Mode was already enabled on boot."""
+    try:
+        from web.api import config as config_mod
+
+        if not config_mod.is_game_mode_enabled():
+            return
+    except Exception as exc:
+        print(f"[game-mode] startup check failed: {exc}", flush=True)
+        return
+
+    try:
+        from web.api.game_mode import release_game_mode_resources
+
+        result = release_game_mode_resources()
+        cancelled = len(result.get("cancelled_local_streams") or [])
+        ollama = result.get("ollama") if isinstance(result, dict) else {}
+        unloaded = len((ollama or {}).get("unloaded") or [])
+        servers = len(result.get("local_model_servers") or [])
+        image_queue = result.get("image_generation_queue") if isinstance(result, dict) else {}
+        image_terminated = len((image_queue or {}).get("terminated") or [])
+        print(
+            "  Game Mode startup release: "
+            f"streams={cancelled}, ollama={unloaded}, "
+            f"servers={servers}, image_queue={image_terminated} [ok]",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"[!!] WARNING: Game Mode startup release failed: {exc}", flush=True)
+
+
 def main() -> None:
     from web.api.config import print_startup_config, verify_sidekick_imports, _SIDEKICK_FOUND
 
@@ -517,6 +575,8 @@ def main() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
     DEFAULT_WORKSPACE.mkdir(parents=True, exist_ok=True)
+
+    _release_game_mode_resources_on_startup()
 
     # ── Agents Registry initialisieren ─────────────────────────────────────
     from web.api.agents import init_agents_db

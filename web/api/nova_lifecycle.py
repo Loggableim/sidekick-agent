@@ -23,6 +23,7 @@ from typing import Any
 from web.api.nova_paths import get_nova_space_root
 
 VISIBILITY_ORDER = {"public": 0, "private": 1, "sensitive": 2}
+NOVA_STALE_EVENT_SECONDS = 300
 SECRET_PATTERNS = (
     "auth.json",
     ".env",
@@ -127,6 +128,26 @@ class NovaStatePaths:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_event_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _event_age_seconds(event: dict[str, Any], *, now: datetime | None = None) -> float | None:
+    timestamp = _parse_event_timestamp(event.get("updated_at") or event.get("created_at"))
+    if timestamp is None:
+        return None
+    current = now or datetime.now(timezone.utc)
+    return max(0.0, (current - timestamp).total_seconds())
 
 
 def get_nova_state_paths() -> NovaStatePaths:
@@ -395,21 +416,30 @@ def _update_event(event: dict[str, Any], *, status: str | None = None, step: str
     return event
 
 
-def repair_incomplete_events() -> list[str]:
+def repair_incomplete_events(stale_after_seconds: float = NOVA_STALE_EVENT_SECONDS) -> list[str]:
     events = _load_all_events()
     repaired = []
     changed = False
+    now = datetime.now(timezone.utc)
     for event in events:
         if event.get("status") not in {"started", "running"}:
             continue
+        event_type = event.get("type")
+        event_age = _event_age_seconds(event, now=now)
+        is_post_turn = event_type == "post_turn"
+        is_stale = event_age is None or event_age >= stale_after_seconds
+        if not is_post_turn and not is_stale:
+            continue
         steps = set(event.get("steps") or [])
-        missing_steps = [
-            step
-            for step in ("memory_done", "emotion_done", "continuity_done", "personality_queued")
-            if step not in steps
-        ]
+        missing_steps = []
+        if is_post_turn:
+            missing_steps = [
+                step
+                for step in ("memory_done", "emotion_done", "continuity_done", "personality_queued")
+                if step not in steps
+            ]
         if (
-            event.get("type") == "post_turn"
+            is_post_turn
             and {"memory_done", "emotion_done", "continuity_done"}.issubset(steps)
             and "personality_queued" not in steps
         ):
@@ -426,13 +456,18 @@ def repair_incomplete_events() -> list[str]:
             repaired.append(str(event.get("event_id")))
             changed = True
         else:
+            reason = "incomplete_event_detected" if is_post_turn else "stale_lifecycle_event_detected"
             event["status"] = "failed"
             event["updated_at"] = _now()
             event["repair"] = {
-                "reason": "incomplete_event_detected",
+                "reason": reason,
                 "missing_steps": missing_steps,
                 "repaired_at": _now(),
             }
+            if not is_post_turn:
+                event["repair"]["stale_after_seconds"] = stale_after_seconds
+                if event_age is not None:
+                    event["repair"]["age_seconds"] = round(event_age, 3)
             repaired.append(str(event.get("event_id")))
             changed = True
     if changed:
@@ -464,6 +499,24 @@ def _run_local_script(script: str, *args: str, timeout: int = 20) -> dict[str, A
         }
     except Exception as exc:
         return {"ok": False, "reason": repr(exc), "script": script}
+
+
+def _game_mode_enabled() -> bool:
+    try:
+        from web.api.config import is_game_mode_enabled
+
+        return bool(is_game_mode_enabled())
+    except Exception:
+        return False
+
+
+def _game_mode_model_health() -> dict[str, Any]:
+    parsed = _parse_model_health({"ok": True, "stdout": json.dumps({"models": {}})})
+    parsed["game_mode_enabled"] = True
+    for model_info in parsed["models"].values():
+        model_info["online"] = False
+        model_info["blocked_by_game_mode"] = True
+    return parsed
 
 
 def _queue_reflection(event: dict[str, Any], user_text: str, assistant_text: str) -> None:
@@ -866,6 +919,21 @@ def background_tick() -> dict[str, Any]:
 
 def dream_tick() -> dict[str, Any]:
     event = _append_event(_new_event("dream_tick"))
+    if _game_mode_enabled():
+        _update_event(
+            event,
+            step="game_mode_deferred",
+            status="deferred",
+            deferred_reason="game_mode_enabled",
+            completed_at=None,
+        )
+        return {
+            "ok": True,
+            "event_id": event["event_id"],
+            "deferred": True,
+            "reason": "game_mode_enabled",
+            "game_mode_enabled": True,
+        }
     model_health = _parse_model_health(_run_local_script("local_llm_bridge.py", "--health", timeout=15))
     if not model_health["models"].get("8082", {}).get("online"):
         _update_event(
@@ -962,6 +1030,7 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
     written_scripts = _ensure_cron_scripts()
     try:
         import cron.jobs as cron_jobs
+        import runtime.cron.jobs as runtime_cron_jobs
     except Exception as exc:
         return {
             "ok": False,
@@ -972,59 +1041,88 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
         }
 
     sidekick_home = get_nova_state_paths().space.parents[1].resolve()
-    try:
-        cron_jobs.HERMES_DIR = sidekick_home
-        cron_jobs.CRON_DIR = sidekick_home / "cron"
-        cron_jobs.JOBS_FILE = cron_jobs.CRON_DIR / "jobs.json"
-        cron_jobs.OUTPUT_DIR = cron_jobs.CRON_DIR / "output"
-    except Exception:
-        pass
+    cron_dir = sidekick_home / "cron"
+    jobs_file = cron_dir / "jobs.json"
+    output_dir = cron_dir / "output"
+    for module in (cron_jobs, runtime_cron_jobs):
+        try:
+            module.HERMES_DIR = sidekick_home
+            module.CRON_DIR = cron_dir
+            module.JOBS_FILE = jobs_file
+            module.OUTPUT_DIR = output_dir
+        except Exception:
+            pass
 
-    create_job = cron_jobs.create_job
-    list_jobs = cron_jobs.list_jobs
-    update_job = cron_jobs.update_job
-    jobs = list_jobs(include_disabled=True)
+    create_job = runtime_cron_jobs.create_job
+    list_jobs = runtime_cron_jobs.list_jobs
+    update_job = runtime_cron_jobs.update_job
+    try:
+        jobs = list_jobs(include_disabled=True)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "reason": "cron_jobs_load_failed",
+            "error": repr(exc),
+            "home": str(sidekick_home),
+            "jobs_file": str(jobs_file),
+            "specs": list(NOVA_CRON_SPECS),
+            "written_scripts": written_scripts,
+        }
     active: list[dict[str, Any]] = []
     created: list[str] = []
     updated: list[str] = []
-    for spec in NOVA_CRON_SPECS:
-        existing = next((job for job in jobs if job.get("name") == spec["name"] or job.get("id") == spec["id"]), None)
-        updates = {
-            "name": spec["name"],
-            "prompt": "",
-            "script": spec["script"],
-            "no_agent": True,
-            "deliver": "local",
-            "enabled": True,
-        }
-        if existing:
-            schedule_display = str(existing.get("schedule_display") or "")
-            needs_schedule = schedule_display != spec["schedule"]
-            if needs_schedule:
-                updates["schedule"] = spec["schedule"]
-            job = update_job(str(existing["id"]), updates) or existing
-            updated.append(str(job.get("id")))
-        else:
-            job = create_job(
-                prompt="",
-                schedule=str(spec["schedule"]),
-                name=str(spec["name"]),
-                deliver="local",
-                script=str(spec["script"]),
-                no_agent=True,
-            )
-            created.append(str(job.get("id")))
-        active.append(
-            {
+    try:
+        for spec in NOVA_CRON_SPECS:
+            existing = next((job for job in jobs if job.get("name") == spec["name"] or job.get("id") == spec["id"]), None)
+            updates = {
                 "name": spec["name"],
-                "schedule": spec["schedule"],
+                "prompt": "",
                 "script": spec["script"],
-                "action": spec["action"],
-                "job_id": job.get("id"),
-                "state": job.get("state"),
-                "next_run_at": job.get("next_run_at"),
+                "no_agent": True,
+                "deliver": "local",
+                "enabled": True,
             }
-        )
+            if existing:
+                schedule_display = str(existing.get("schedule_display") or "")
+                needs_schedule = schedule_display != spec["schedule"]
+                if needs_schedule:
+                    updates["schedule"] = spec["schedule"]
+                job = update_job(str(existing["id"]), updates) or existing
+                updated.append(str(job.get("id")))
+            else:
+                job = create_job(
+                    prompt="",
+                    schedule=str(spec["schedule"]),
+                    name=str(spec["name"]),
+                    deliver="local",
+                    script=str(spec["script"]),
+                    no_agent=True,
+                )
+                created.append(str(job.get("id")))
+            active.append(
+                {
+                    "name": spec["name"],
+                    "schedule": spec["schedule"],
+                    "script": spec["script"],
+                    "action": spec["action"],
+                    "job_id": job.get("id"),
+                    "state": job.get("state"),
+                    "next_run_at": job.get("next_run_at"),
+                }
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "reason": "cron_jobs_write_failed",
+            "error": repr(exc),
+            "home": str(sidekick_home),
+            "jobs_file": str(jobs_file),
+            "specs": list(NOVA_CRON_SPECS),
+            "written_scripts": written_scripts,
+            "created": created,
+            "updated": updated,
+            "active": active,
+        }
     return {
         "ok": True,
         "mode": "sidekick_cron_no_agent",
@@ -1038,9 +1136,14 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
 
 def get_nova_status() -> dict[str, Any]:
     migration_tick()
+    repaired = repair_incomplete_events()
     state = load_personality_state()
-    model_status = _run_local_script("local_llm_bridge.py", "--health", timeout=15)
-    parsed_models = _parse_model_health(model_status)
+    game_mode_enabled = _game_mode_enabled()
+    if game_mode_enabled:
+        parsed_models = _game_mode_model_health()
+    else:
+        model_status = _run_local_script("local_llm_bridge.py", "--health", timeout=15)
+        parsed_models = _parse_model_health(model_status)
     cron_status = ensure_background_cron_jobs()
     autonomy = autonomy_definition(int(state.get("autonomy_level", 2)))
     reflection_queue = _read_json(get_nova_state_paths().reflection_queue, [])
@@ -1048,13 +1151,15 @@ def get_nova_status() -> dict[str, Any]:
         reflection_queue = []
     return {
         "ok": True,
+        "game_mode_enabled": game_mode_enabled,
         "autonomy_level": state.get("autonomy_level", 2),
         "autonomy": autonomy,
         "autonomy_levels": AUTONOMY_LEVELS,
         "model_strategy": MODEL_STRATEGY,
         "models": parsed_models,
-        "qwen": "online" if parsed_models["models"].get("8082", {}).get("online") else "queued_or_offline",
-        "minicpm": "online" if parsed_models["models"].get("8081", {}).get("online") else "unknown",
+        "repaired_events": repaired,
+        "qwen": "blocked_by_game_mode" if game_mode_enabled else ("online" if parsed_models["models"].get("8082", {}).get("online") else "queued_or_offline"),
+        "minicpm": "blocked_by_game_mode" if game_mode_enabled else ("online" if parsed_models["models"].get("8081", {}).get("online") else "unknown"),
         "cron": cron_status,
         "reflection_queue": {
             "queued": len([item for item in reflection_queue if item.get("status") == "queued"]),

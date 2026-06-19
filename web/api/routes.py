@@ -924,6 +924,8 @@ from web.api.config import (
     _resolve_cli_toolsets,
     _INDEX_HTML_PATH,
     get_available_models,
+    get_effective_default_model,
+    resolve_model_provider,
     resolve_active_provider_context,
     get_session_dir,
     IMAGE_EXTS,
@@ -937,6 +939,9 @@ from web.api.config import (
     SESSION_AGENT_LOCKS_LOCK,
     load_settings,
     save_settings,
+    is_game_mode_enabled,
+    game_mode_blocks_local_model_request,
+    game_mode_blocked_payload,
     set_hermes_default_model,
     model_with_provider_context,
     get_reasoning_status,
@@ -951,6 +956,7 @@ from web.api.config import (
 from web.api.helpers import (
     require,
     bad,
+    error_response,
     safe_resolve,
     j,
     t,
@@ -1341,12 +1347,47 @@ def _resolve_compatible_session_model_state(
     When a model has an explicit provider context, keep the model string itself
     in its picker/API shape and carry the provider as separate state.
     """
-    catalog = get_available_models()
-    default_model = str(catalog.get("default_model") or DEFAULT_MODEL or "").strip()
     model = str(model_id or "").strip()
     requested_provider = _clean_session_model_provider(model_provider)
     if not model:
+        default_model = str(get_effective_default_model() or DEFAULT_MODEL or "").strip()
         return default_model, requested_provider, bool(default_model)
+
+    try:
+        provider_context = resolve_active_provider_context(include_runtime=False) or {}
+    except Exception:
+        provider_context = {}
+    raw_active_provider_fast = str(provider_context.get("provider") or "").strip().lower()
+    active_provider_fast = _normalize_provider_id(raw_active_provider_fast)
+    _bare_for_context_fast, explicit_provider_fast = _split_provider_qualified_model(model)
+    if requested_provider and not explicit_provider_fast:
+        requested_provider_clean = _clean_session_model_provider(requested_provider)
+        requested_provider_normalized = _normalize_provider_id(requested_provider_clean or "")
+        if requested_provider_clean and (
+            requested_provider_clean == raw_active_provider_fast
+            or (
+                requested_provider_normalized
+                and active_provider_fast
+                and requested_provider_normalized == active_provider_fast
+            )
+            or requested_provider_normalized == raw_active_provider_fast
+        ):
+            return model, requested_provider_clean, False
+    if explicit_provider_fast:
+        explicit_provider_normalized = _normalize_provider_id(explicit_provider_fast)
+        if (
+            explicit_provider_fast == raw_active_provider_fast
+            or explicit_provider_fast == active_provider_fast
+            or (
+                explicit_provider_normalized
+                and active_provider_fast
+                and explicit_provider_normalized == active_provider_fast
+            )
+        ):
+            return model, explicit_provider_fast, False
+
+    catalog = get_available_models()
+    default_model = str(catalog.get("default_model") or DEFAULT_MODEL or "").strip()
 
     active_provider = _normalize_provider_id(catalog.get("active_provider"))
     # Also keep the raw active_provider slug for cross-provider detection with
@@ -1586,6 +1627,9 @@ def _session_model_state_from_request(
         _bare, explicit_provider = _split_provider_qualified_model(model_value)
         if explicit_provider:
             provider = explicit_provider
+            return model_value, provider
+        if requested_provider is not None:
+            return model_value, provider
         elif requested_provider is None:
             provider = _clean_session_model_provider(current_provider)
         model_value, provider, _changed = _resolve_compatible_session_model_state(
@@ -3348,8 +3392,12 @@ def _handle_appstore_updates(handler, parsed) -> bool:
 
 
 def _cockpit_settings_path() -> Path:
-    portable_home = Path(__file__).resolve().parent.parent.parent / "home"
-    return portable_home / "cockpit" / ".cockpit_settings.json"
+    home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
+    if home:
+        sidekick_home = Path(home).expanduser()
+    else:
+        sidekick_home = Path(__file__).resolve().parent.parent.parent.parent / "home"
+    return sidekick_home / "cockpit" / ".cockpit_settings.json"
 
 
 def _handle_cockpit_settings_get(handler, parsed) -> bool:
@@ -4976,17 +5024,27 @@ def _handle_window_control(handler, body):
 def _cast_api_host() -> str:
     return (
         os.getenv("SIDEKICK_CAST_API_HOST", "").strip()
-        or os.getenv("HERMES_CAST_API_HOST", "http://192.168.1.110:8765").strip()
+        or os.getenv("HERMES_CAST_API_HOST", "").strip()
     ).rstrip("/")
 
 
 def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
+    host = _cast_api_host()
+    if not host:
+        return j(handler, {
+            "active": False,
+            "available": False,
+            "configured": False,
+            "error": "Hub nicht erreichbar",
+            "detail": "SIDEKICK_CAST_API_HOST not configured",
+            "host": "",
+        })
     try:
         import json as _json
         import urllib.error
         import urllib.request
 
-        url = f"{_cast_api_host()}{endpoint}"
+        url = f"{host}{endpoint}"
         req = urllib.request.Request(url, method=method)
         with urllib.request.urlopen(req, timeout=2.5) as resp:
             raw = resp.read()
@@ -4994,15 +5052,19 @@ def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
             payload = _json.loads(raw.decode("utf-8") or "{}")
         except Exception:
             payload = {"raw": raw.decode("utf-8", errors="replace")}
+        if isinstance(payload, dict):
+            payload.setdefault("configured", True)
+            payload.setdefault("host", host)
         return j(handler, payload)
     except Exception as exc:
         return j(handler, {
             "active": False,
             "available": False,
+            "configured": True,
             "error": "Hub nicht erreichbar",
             "detail": _sanitize_error(exc),
-            "host": _cast_api_host(),
-        }, status=502)
+            "host": host,
+        }, status=200 if endpoint == "/api/cast/status" else 502)
 
 
 def handle_post(handler, parsed) -> bool:
@@ -6193,6 +6255,19 @@ def handle_post(handler, parsed) -> bool:
 
         saved = save_settings(body)
         saved.pop("password_hash", None)  # never expose hash to client
+        if "game_mode_enabled" in body and saved.get("game_mode_enabled"):
+            try:
+                from web.api.game_mode import release_game_mode_resources
+
+                saved["game_mode_release"] = release_game_mode_resources()
+            except Exception as exc:
+                logger.warning("Game Mode resource release failed", exc_info=True)
+                saved["game_mode_release"] = {
+                    "error": repr(exc)[:240],
+                    "cancelled_local_streams": [],
+                    "ollama": {"checked": [], "unloaded": []},
+                    "local_model_servers": [],
+                }
 
         auth_enabled_after = is_auth_enabled()
         auth_just_enabled = bool(
@@ -9367,6 +9442,37 @@ def _start_chat_stream_for_session(
     return response
 
 
+def _game_mode_guard_payload_for_model(
+    model: str | None,
+    model_provider: str | None,
+    provider_context: dict | None = None,
+) -> dict | None:
+    """Return a Game Mode block payload when a request would hit local GPU work."""
+    context = provider_context if isinstance(provider_context, dict) else {}
+    provider = str(model_provider or context.get("provider") or "").strip()
+    base_url = str(context.get("base_url") or "").strip()
+
+    if game_mode_blocks_local_model_request(provider, base_url):
+        return game_mode_blocked_payload("local_model")
+
+    if not is_game_mode_enabled():
+        return None
+
+    try:
+        resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(
+            model_with_provider_context(model or context.get("model") or "", provider or None)
+        )
+    except Exception:
+        return None
+
+    if game_mode_blocks_local_model_request(
+        resolved_provider or provider,
+        resolved_base_url or base_url,
+    ):
+        return game_mode_blocked_payload("local_model")
+    return None
+
+
 def _handle_goal_command(handler, body):
     """Handle WebUI /goal command controls and optional kickoff stream."""
     try:
@@ -9565,6 +9671,13 @@ def _handle_chat_start(handler, body, diag=None):
                 },
                 status=409,
             )
+        game_mode_payload = _game_mode_guard_payload_for_model(
+            model,
+            model_provider,
+            provider_context,
+        )
+        if game_mode_payload:
+            return j(handler, game_mode_payload, status=409)
         mode = str(body.get("mode", "") or "").strip().lower()
         sandbox_disabled = body.get("sandbox_disabled", False)
         response = _start_chat_stream_for_session(
@@ -9776,6 +9889,13 @@ def _handle_chat_sync(handler, body):
                     _api_key = _cp_key
                 if not _base_url and _cp_base:
                     _base_url = _cp_base
+            game_mode_payload = _game_mode_guard_payload_for_model(
+                _model,
+                _provider,
+                {"provider": _provider, "model": _model, "base_url": _base_url},
+            )
+            if game_mode_payload:
+                return j(handler, game_mode_payload, status=409)
             agent = AIAgent(
                 model=_model,
                 provider=_provider,
@@ -9899,6 +10019,11 @@ def _async_ollama_title(session_id: str) -> None:
         if s.title != "⏳ Titel wird generiert...":
             return
 
+        if is_game_mode_enabled():
+            s.title = title_from(s.messages, "Untitled")
+            s.save()
+            return
+
         title = _generate_title_via_ollama(s.messages)
         if title:
             s.title = title
@@ -9941,6 +10066,10 @@ def _async_extract_facts(sid: str) -> None:
         has_user = any(m.get('role') == 'user' for m in s.messages)
         has_assistant = any(m.get('role') == 'assistant' for m in s.messages)
         if not has_user or not has_assistant:
+            return
+
+        if is_game_mode_enabled():
+            logger.debug("_async_extract_facts: skipped for %s because Game Mode is active", sid)
             return
 
         block = _extract_facts_via_llamacpp(s.messages, sid, s.title or "")

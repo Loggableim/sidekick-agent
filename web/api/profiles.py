@@ -102,6 +102,14 @@ def _resolve_base_sidekick_home() -> Path:
 _DEFAULT_SIDEKICK_HOME = _resolve_base_sidekick_home()
 
 
+def refresh_profile_base_home_from_env() -> None:
+    """Refresh profile base-home globals after env changes in tests/launchers."""
+    global _DEFAULT_SIDEKICK_HOME, _active_profile
+    _DEFAULT_SIDEKICK_HOME = _resolve_base_sidekick_home()
+    _active_profile = "default"
+    _invalidate_root_profile_cache()
+
+
 def _read_active_profile_file() -> str:
     """Read the sticky active profile from ~/.sidekick/active_profile."""
     ap_file = _DEFAULT_SIDEKICK_HOME / 'active_profile'

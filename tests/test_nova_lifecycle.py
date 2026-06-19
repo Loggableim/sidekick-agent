@@ -1,9 +1,18 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 TestClient = pytest.importorskip("fastapi.testclient").TestClient
+
+
+def _stub_nova_status_dependencies(monkeypatch, lifecycle):
+    monkeypatch.setattr(lifecycle, "_game_mode_enabled", lambda: True)
+    monkeypatch.setattr(lifecycle, "migration_tick", lambda: {"ok": True})
+    monkeypatch.setattr(lifecycle, "ensure_background_cron_jobs", lambda: {"ok": True})
+    monkeypatch.setattr(lifecycle, "_vector_memory_count", lambda: 0)
+    monkeypatch.setattr(lifecycle, "_ltm_count", lambda: 0)
 
 
 def test_personality_schema_initializes_expected_fields(monkeypatch, tmp_path):
@@ -178,6 +187,13 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from web.api.nova_lifecycle import ensure_background_cron_jobs
+    import runtime.cron.jobs as runtime_cron_jobs
+
+    wrong_home = tmp_path / "wrong-home"
+    monkeypatch.setattr(runtime_cron_jobs, "HERMES_DIR", wrong_home)
+    monkeypatch.setattr(runtime_cron_jobs, "CRON_DIR", wrong_home / "cron")
+    monkeypatch.setattr(runtime_cron_jobs, "JOBS_FILE", wrong_home / "cron" / "jobs.json")
+    monkeypatch.setattr(runtime_cron_jobs, "OUTPUT_DIR", wrong_home / "cron" / "output")
 
     result = ensure_background_cron_jobs()
     scripts = tmp_path / "home" / "scripts"
@@ -187,6 +203,9 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     assert len(result["active"]) == 3
     assert (scripts / "nova_substrate_heartbeat.py").exists()
     assert (scripts / "nova_dream_reflection_tick.py").exists()
+    assert jobs_file.exists()
+    assert runtime_cron_jobs.JOBS_FILE == jobs_file
+    assert not (wrong_home / "cron" / "jobs.json").exists()
     assert all(item["job_id"] for item in result["active"])
     assert {item["name"] for item in result["active"]} >= {
         "Nova substrate heartbeat",
@@ -196,10 +215,48 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     assert result["mode"] == "sidekick_cron_no_agent"
 
 
+def test_nova_status_degrades_when_cron_storage_write_fails(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import runtime.cron.jobs as runtime_cron_jobs
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_run_local_script", lambda *args, **kwargs: {"ok": False, "stdout": ""})
+    monkeypatch.setattr(
+        runtime_cron_jobs,
+        "list_jobs",
+        lambda include_disabled=False: [
+            {
+                "id": "nova-substrate-heartbeat",
+                "name": "Nova substrate heartbeat",
+                "schedule_display": "every 1m",
+                "state": "scheduled",
+            }
+        ],
+    )
+
+    def fail_update(job_id, updates):
+        raise PermissionError("jobs file locked")
+
+    monkeypatch.setattr(runtime_cron_jobs, "update_job", fail_update)
+
+    cron_result = lifecycle.ensure_background_cron_jobs()
+    status = lifecycle.get_nova_status()
+
+    assert cron_result["ok"] is False
+    assert cron_result["reason"] == "cron_jobs_write_failed"
+    assert "jobs.json" in cron_result["jobs_file"]
+    assert status["ok"] is True
+    assert status["cron"]["ok"] is False
+    assert status["cron"]["reason"] == "cron_jobs_write_failed"
+
+
 def test_dream_tick_defers_when_qwen_offline(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_game_mode_enabled", lambda: False)
 
     def fake_run(script, *args, **kwargs):
         assert script == "local_llm_bridge.py"
@@ -214,6 +271,120 @@ def test_dream_tick_defers_when_qwen_offline(monkeypatch, tmp_path):
     assert result["deferred"] is True
     assert events[0]["status"] == "deferred"
     assert events[0]["steps"][-1] == "qwen_offline_deferred"
+
+
+def test_dream_tick_defers_in_game_mode_before_model_health(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_game_mode_enabled", lambda: True)
+
+    def fail_local_script(*args, **kwargs):
+        raise AssertionError("Game Mode must not touch local LLM scripts")
+
+    monkeypatch.setattr(lifecycle, "_run_local_script", fail_local_script)
+
+    result = lifecycle.dream_tick()
+    events = lifecycle.load_events(limit=1, include_private=True)
+
+    assert result["ok"] is True
+    assert result["deferred"] is True
+    assert result["reason"] == "game_mode_enabled"
+    assert result["game_mode_enabled"] is True
+    assert events[0]["status"] == "deferred"
+    assert events[0]["steps"][-1] == "game_mode_deferred"
+
+
+def test_nova_status_skips_local_model_health_in_game_mode(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    _stub_nova_status_dependencies(monkeypatch, lifecycle)
+
+    def fail_model_health(script, *args, **kwargs):
+        if script == "local_llm_bridge.py":
+            raise AssertionError("Game Mode status must not touch local LLM health")
+        return {"ok": True, "stdout": "{}"}
+
+    monkeypatch.setattr(lifecycle, "_run_local_script", fail_model_health)
+
+    result = lifecycle.get_nova_status()
+
+    assert result["game_mode_enabled"] is True
+    assert result["qwen"] == "blocked_by_game_mode"
+    assert result["minicpm"] == "blocked_by_game_mode"
+    assert result["models"]["game_mode_enabled"] is True
+    assert result["models"]["models"]["8082"]["blocked_by_game_mode"] is True
+
+
+def test_nova_status_repairs_stale_background_event(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    _stub_nova_status_dependencies(monkeypatch, lifecycle)
+    paths = lifecycle.get_nova_state_paths()
+    paths.state_dir.mkdir(parents=True, exist_ok=True)
+    stale_at = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    paths.events.write_text(
+        json.dumps(
+            [
+                {
+                    "event_id": "evt-stale-bg",
+                    "type": "background_tick",
+                    "status": "started",
+                    "steps": ["started"],
+                    "created_at": stale_at,
+                    "updated_at": stale_at,
+                    "visibility": "private",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    status = lifecycle.get_nova_status()
+    events = lifecycle.load_events(limit=1, include_private=True)
+
+    assert status["repaired_events"] == ["evt-stale-bg"]
+    assert events[0]["status"] == "failed"
+    assert events[0]["repair"]["reason"] == "stale_lifecycle_event_detected"
+    assert events[0]["repair"]["stale_after_seconds"] == lifecycle.NOVA_STALE_EVENT_SECONDS
+
+
+def test_nova_status_preserves_fresh_background_event(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    _stub_nova_status_dependencies(monkeypatch, lifecycle)
+    paths = lifecycle.get_nova_state_paths()
+    paths.state_dir.mkdir(parents=True, exist_ok=True)
+    fresh_at = datetime.now(timezone.utc).isoformat()
+    paths.events.write_text(
+        json.dumps(
+            [
+                {
+                    "event_id": "evt-fresh-bg",
+                    "type": "background_tick",
+                    "status": "started",
+                    "steps": ["started"],
+                    "created_at": fresh_at,
+                    "updated_at": fresh_at,
+                    "visibility": "private",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    status = lifecycle.get_nova_status()
+    events = lifecycle.load_events(limit=1, include_private=True)
+
+    assert status["repaired_events"] == []
+    assert events[0]["status"] == "started"
 
 
 def test_agents_md_model_names_are_repaired(monkeypatch, tmp_path):

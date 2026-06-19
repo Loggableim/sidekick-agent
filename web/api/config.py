@@ -39,17 +39,27 @@ TLS_KEY = (os.getenv("SIDEKICK_WEBUI_TLS_KEY") or os.getenv("HERMES_WEBUI_TLS_KE
 TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
-STATE_DIR = (
-    Path(
-        os.getenv("SIDEKICK_WEBUI_STATE_DIR")
-        or os.getenv("HERMES_WEBUI_STATE_DIR")
-        or os.getenv("SIDEKICK_STATE_DIR")
-        or os.getenv("HERMES_STATE_DIR")
-        or (Path.home() / ".sidekick" / "state")
+def _resolve_state_dir_from_env() -> Path:
+    configured_home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
+    default_state = (
+        Path(configured_home).expanduser() / "state" / "webui"
+        if configured_home
+        else Path.home() / ".sidekick" / "state"
     )
-    .expanduser()
-    .resolve()
-)
+    return (
+        Path(
+            os.getenv("SIDEKICK_WEBUI_STATE_DIR")
+            or os.getenv("HERMES_WEBUI_STATE_DIR")
+            or os.getenv("SIDEKICK_STATE_DIR")
+            or os.getenv("HERMES_STATE_DIR")
+            or default_state
+        )
+        .expanduser()
+        .resolve()
+    )
+
+
+STATE_DIR = _resolve_state_dir_from_env()
 
 SESSION_DIR = STATE_DIR / "sessions"
 WORKSPACES_FILE = STATE_DIR / "workspaces.json"
@@ -59,6 +69,25 @@ LAST_WORKSPACE_FILE = STATE_DIR / "last_workspace.txt"
 PROJECTS_FILE = STATE_DIR / "projects.json"
 
 logger = logging.getLogger(__name__)
+
+
+def refresh_runtime_paths_from_env() -> None:
+    """Refresh web runtime paths after launchers or tests mutate env."""
+    global HOST, PORT, STATE_DIR, SESSION_DIR, WORKSPACES_FILE
+    global SESSION_INDEX_FILE, SETTINGS_FILE, LAST_WORKSPACE_FILE, PROJECTS_FILE
+    global _models_cache_path
+
+    HOST = os.getenv("SIDEKICK_WEBUI_HOST") or os.getenv("HERMES_WEBUI_HOST", "127.0.0.1")
+    PORT = int(os.getenv("SIDEKICK_WEBUI_PORT") or os.getenv("HERMES_WEBUI_PORT", "8787"))
+    STATE_DIR = _resolve_state_dir_from_env()
+    SESSION_DIR = STATE_DIR / "sessions"
+    WORKSPACES_FILE = STATE_DIR / "workspaces.json"
+    SESSION_INDEX_FILE = SESSION_DIR / "_index.json"
+    SETTINGS_FILE = STATE_DIR / "settings.json"
+    LAST_WORKSPACE_FILE = STATE_DIR / "last_workspace.txt"
+    PROJECTS_FILE = STATE_DIR / "projects.json"
+    if "_models_cache_path" in globals():
+        _models_cache_path = STATE_DIR / "models_cache.json"
 
 
 # ── Thread-local session directory override (per-request workspace isolation) ─
@@ -4282,6 +4311,7 @@ _SETTINGS_DEFAULTS = {
     "auto_title_refresh_every": "0",  # adaptive title refresh: 0=off, 5/10/20=every N exchanges
     "busy_input_mode": "queue",  # behavior when sending while agent is running: queue | interrupt | steer
     "composer_mode": "action",  # action | plan
+    "game_mode_enabled": False,  # block local GPU-backed model/image work so VRAM stays free
     "password_hash": None,  # PBKDF2-HMAC-SHA256 hash; None = auth disabled
     "show_openrouter_paid": False,  # show paid OpenRouter models in picker (default: free only)
 }
@@ -4402,6 +4432,7 @@ _SETTINGS_BOOL_KEYS = {
     "api_redact_enabled",
     "session_jump_buttons",
     "session_endless_scroll",
+    "game_mode_enabled",
 }
 # Language codes are validated as short alphanumeric BCP-47-like tags (e.g. 'en', 'zh', 'fr')
 _SETTINGS_LANG_RE = __import__("re").compile(r"^[a-zA-Z]{2,10}(-[a-zA-Z0-9]{2,8})?$")
@@ -4474,6 +4505,44 @@ def save_settings(settings: dict) -> dict:
         DEFAULT_WORKSPACE = resolve_default_workspace(current["default_workspace"])
     current["default_model"] = get_effective_default_model()
     return current
+
+
+def is_game_mode_enabled() -> bool:
+    """Return whether Game Mode is currently blocking local GPU work."""
+    try:
+        return bool(load_settings().get("game_mode_enabled", False))
+    except Exception:
+        return False
+
+
+def game_mode_blocks_local_model_request(provider_id: str | None, base_url: str | None = "") -> bool:
+    """Return True when Game Mode should block a local model request."""
+    if not is_game_mode_enabled():
+        return False
+    provider = str(provider_id or "").strip()
+    url = str(base_url or "").strip()
+    return _is_local_server_provider(provider) or _base_url_points_at_local_server(url)
+
+
+def game_mode_blocked_payload(kind: str = "local_model") -> dict:
+    """JSON-safe error payload shared by WebUI routes and tools."""
+    if kind == "image_generation":
+        message = (
+            "Game Mode is active. Image generation is blocked so local GPU/VRAM "
+            "resources stay available for games."
+        )
+    else:
+        message = (
+            "Game Mode is active. Local model requests are blocked so GPU/VRAM "
+            "resources stay available for games."
+        )
+    return {
+        "error": {
+            "code": "game_mode_enabled",
+            "message": message,
+        },
+        "game_mode_enabled": True,
+    }
 
 
 # Apply saved settings on startup (override env-derived defaults)
