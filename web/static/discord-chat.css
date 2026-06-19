@@ -29,16 +29,18 @@
 }
 
 .discord-col-overview .discord-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 4px 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px 6px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 .discord-col-overview .discord-tab {
-  padding: 4px 10px;
+  min-width: 0;
+  padding: 4px 3px;
   border-radius: 6px;
   border: none;
   background: transparent;
@@ -46,6 +48,9 @@
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
   transition: all 0.15s;
 }
 .discord-col-overview .discord-tab:hover {
@@ -533,4 +538,43 @@
 .discord-content::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 2px;
+}
+
+@media (max-width: 640px) {
+  .discord-full-area {
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .discord-col-overview,
+  .discord-col-nav,
+  .discord-col-main {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    flex: 0 0 auto !important;
+    border-right: 0;
+    border-bottom: 1px solid var(--border, #1e1f22);
+  }
+
+  .discord-col-overview {
+    height: 260px;
+  }
+
+  .discord-col-nav {
+    height: 280px;
+  }
+
+  .discord-col-main {
+    min-height: 520px;
+  }
+
+  .discord-col-handle {
+    display: none !important;
+  }
+
+  .discord-col-main-header {
+    flex-wrap: wrap;
+  }
 }

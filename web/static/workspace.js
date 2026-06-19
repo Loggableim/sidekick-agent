@@ -71,13 +71,16 @@ async function api(path,opts={}){
   // Strip leading slash so URL resolves relative to location.href (supports subpath mounts)
   const rel = path.startsWith('/') ? path.slice(1) : path;
   const url=new URL(rel,document.baseURI||location.href);
+  const fetchOpts=Object.assign({},opts||{});
+  const logApiError=fetchOpts.logError!==false;
+  delete fetchOpts.logError;
   // Retry up to 2 times on network errors (e.g. stale keep-alive after long idle).
   // Server errors (4xx/5xx) are NOT retried — only connection failures.
   let lastErr;
   for(let attempt=0;attempt<3;attempt++){
     try{
-      const headers = _headersWithWorkspace(opts.headers, url, {defaultJson:true});
-      const res=await fetch(url.href,{credentials:'include',...opts,headers});
+      const headers = _headersWithWorkspace(fetchOpts.headers, url, {defaultJson:true});
+      const res=await fetch(url.href,{credentials:'include',...fetchOpts,headers});
       if(!res.ok){
         // 401 means the auth session expired. Redirect to login so the user can
         // re-authenticate. This is especially important for iOS PWA (standalone mode)
@@ -115,7 +118,8 @@ async function api(path,opts={}){
         err.data=data;
 
         // Auto-log failed API calls (but skip error-logging endpoints to avoid loops)
-        if(!path.startsWith('api/errors/') && !path.startsWith('/api/errors/')){
+        const isExpectedGameModeBlock=res.status===409&&data&&data.error&&data.error.code==='game_mode_enabled';
+        if(logApiError&&!isExpectedGameModeBlock&&!path.startsWith('api/errors/') && !path.startsWith('/api/errors/')){
           try{
             var _xhr=new XMLHttpRequest();
             _xhr.open('POST','api/errors/log',true);
@@ -128,7 +132,7 @@ async function api(path,opts={}){
               stack:err.stack||'',
               path:window.location.pathname,
               status:res.status,
-              method:(opts.method||'GET').toUpperCase(),
+              method:(fetchOpts.method||'GET').toUpperCase(),
               body:String(text).slice(0,4000),
               url:path,
               meta:{attempt:attempt+1}
@@ -229,7 +233,11 @@ async function loadDir(path){
   }catch(e){
     const currentSessionId = S.session && S.session.session_id;
     const msg = String((e && e.message) || '');
-    if ((currentSessionId && currentSessionId !== sessionId) || (e && e.status === 404 && /session not found/i.test(msg))) {
+    if (
+      (e && e.name === 'AbortError') ||
+      (currentSessionId && currentSessionId !== sessionId) ||
+      (e && e.status === 404 && /session not found/i.test(msg))
+    ) {
       return;
     }
     console.warn('loadDir',e);

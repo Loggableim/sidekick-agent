@@ -105,10 +105,10 @@
         <!-- Column 1: Overview -->
         <div class="discord-col-overview">
           <div class="discord-tabs">
-            <button class="discord-tab discord-active" data-ov-tab="dashboard" onclick="discordOvSwitchTab('dashboard')">📊 Dashboard</button>
-            <button class="discord-tab" data-ov-tab="moderation" onclick="discordOvSwitchTab('moderation')">🛡️ Mod</button>
-            <button class="discord-tab" data-ov-tab="settings" onclick="discordOvSwitchTab('settings')">⚙️ Einst.</button>
-            <button class="discord-tab" data-ov-tab="logs" onclick="discordOvSwitchTab('logs')">📝 Logs</button>
+            <button class="discord-tab discord-active" data-ov-tab="dashboard" onclick="discordOvSwitchTab('dashboard')" title="Dashboard" aria-label="Dashboard">📊 Dash</button>
+            <button class="discord-tab" data-ov-tab="moderation" onclick="discordOvSwitchTab('moderation')" title="Moderation" aria-label="Moderation">🛡️ Mod</button>
+            <button class="discord-tab" data-ov-tab="settings" onclick="discordOvSwitchTab('settings')" title="Einstellungen" aria-label="Einstellungen">⚙️ Einst.</button>
+            <button class="discord-tab" data-ov-tab="logs" onclick="discordOvSwitchTab('logs')" title="Logs" aria-label="Logs">📝 Logs</button>
           </div>
           <div class="discord-content" id="discordOvContent">
             <div class="discord-loading-state"><div class="discord-loading-spinner"></div><span>Lade Serverdaten...</span></div>

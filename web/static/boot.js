@@ -152,6 +152,7 @@ function syncWorkspacePanelState(){
     // The file tree will show the "no workspace" placeholder naturally via renderFileTree().
     // Only force-close if the mode is 'preview' (file preview without a session is invalid).
     if(_workspacePanelMode==='preview') _setWorkspacePanelMode('closed');
+    else if(_workspacePanelMode==='browse') _setWorkspacePanelMode('browse');
     else syncWorkspacePanelUI();
     return;
   }
@@ -208,7 +209,11 @@ function _applyFileTreePanelPref(){
   const pref = localStorage.getItem('sidekick-webui-workspace-panel-pref') !== 'closed'
     || localStorage.getItem('sidekick-webui-workspace-panel') === 'open';
   const panel = $('chatFileTreePanel');
-  if(!panel) return;
+  if(!panel){
+    if(pref&&_workspacePanelMode==='closed') _workspacePanelMode='browse';
+    else if(!pref&&_workspacePanelMode==='browse') _workspacePanelMode='closed';
+    return;
+  }
   if(pref && panel.classList.contains('file-tree-panel--minimized')){
     if(typeof window.toggleFileTreePanel === 'function') window.toggleFileTreePanel();
   }else if(!pref && !panel.classList.contains('file-tree-panel--minimized')){
@@ -245,7 +250,7 @@ function syncWorkspacePanelUI(){
   // Check file tree panel state in chat layout
   const fileTreePanel = $('chatFileTreePanel');
   const fileTreeMinimized = fileTreePanel ? fileTreePanel.classList.contains('file-tree-panel--minimized') : true;
-  const isOpen = !fileTreeMinimized;
+  const isOpen = fileTreePanel ? !fileTreeMinimized : _workspacePanelMode!=='closed';
   const relevant = isWorkspacePanelRelevantForPanel(typeof _currentPanel !== 'undefined' ? _currentPanel : 'chat');
   const canBrowse=relevant&&(!!S.session||_hasWorkspacePreviewVisible()||!!(S._profileDefaultWorkspace));
   const hasPreview=_hasWorkspacePreviewVisible();
@@ -253,7 +258,7 @@ function syncWorkspacePanelUI(){
     toggleBtn.classList.toggle('active',isOpen);
     toggleBtn.setAttribute('aria-pressed',isOpen?'true':'false');
     _setButtonTooltip(toggleBtn, isOpen?'Hide file tree panel':'Show file tree panel');
-    toggleBtn.disabled=!canBrowse;
+    toggleBtn.disabled=!isOpen&&!canBrowse;
   }
   if(collapseBtn){
     _setButtonTooltip(collapseBtn, 'Minimize file tree panel');
@@ -465,7 +470,7 @@ function expandSidebar(){
   _ensureRailButtonLabels();
 })();
 function toggleMobileFiles(){
-  if(typeof toggleFileTreePanel==='function') toggleFileTreePanel();
+  toggleWorkspacePanel();
 }
 function toggleWorkspacePanel(force){
   const {panel}= _workspacePanelEls();
@@ -477,8 +482,9 @@ function toggleWorkspacePanel(force){
     return;
   }
   const nextMode=_hasWorkspacePreviewVisible()?'preview':'browse';
-  openWorkspacePanel(nextMode);
+  openWorkspacePanel(nextMode,{force:true});
 }
+window.toggleFileTreePanel=function(force){return toggleWorkspacePanel(force);};
 function mobileSwitchPanel(name){
   switchPanel(name);
   if(name==='chat'){
@@ -1721,8 +1727,6 @@ function applyBotName(){
   if(sidebarH1) sidebarH1.textContent=name;
   const logo=document.querySelector('.sidebar-header .logo');
   if(logo) logo.textContent=name.charAt(0).toUpperCase();
-  const topbarTitle=$('topbarTitle');
-  if(topbarTitle && (!S.session)) topbarTitle.textContent=name;
   const msg=$('msg');
   if(msg) msg.placeholder='Message '+name+'…';
 }
@@ -1764,7 +1768,7 @@ function _bootTimeout(promise, ms, label) {
   // Load send key preference
   let _bootSettings={};
   try{
-    const s=await _bootTimeout(api('/api/settings'),1200,'settings');
+    const s=await _bootTimeout(api('/api/settings'),5000,'settings');
     _bootSettings=s;
     window._sendKey=s.send_key||'enter';
     window._showTokenUsage=!!s.show_token_usage;
@@ -1777,6 +1781,8 @@ function _bootTimeout(promise, ms, label) {
     window._sidebarDensity=(s.sidebar_density==='detailed'?'detailed':'compact');
     window._busyInputMode=(s.busy_input_mode||'queue');
     window._composerMode=(s.composer_mode||'action');
+    window._gameModeEnabled=!!s.game_mode_enabled;
+    try{localStorage.setItem('sidekick-game-mode-enabled',window._gameModeEnabled?'1':'0');}catch(_){}
     try{localStorage.setItem('sidekick-webui-composer-mode',window._composerMode);}catch(_){}
     window._sessionEndlessScrollEnabled=!!s.session_endless_scroll;
     window._botName=s.bot_name||'Nova';
@@ -1801,9 +1807,11 @@ function _bootTimeout(promise, ms, label) {
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
     applyBotName();
+    if(typeof syncGameModeButton==='function')syncGameModeButton();
     // TTS: apply enabled state on boot so buttons show/hide correctly (#499)
     if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('sidekick-tts-enabled')==='true');
   }catch(e){
+    console.warn('[boot] settings load failed', e);
     window._sendKey='enter';
     window._showTokenUsage=false;
     window._showTps=false;
@@ -1815,6 +1823,12 @@ function _bootTimeout(promise, ms, label) {
     window._sessionJumpButtonsEnabled=false;
     window._sidebarDensity='compact';
     window._busyInputMode='queue';
+    try{
+      const raw=localStorage.getItem('sidekick-game-mode-enabled');
+      window._gameModeEnabled=(raw==='1'||raw==='true');
+    }catch(_){
+      window._gameModeEnabled=false;
+    }
     window._sessionEndlessScrollEnabled=false;
     window._botName='Nova';
     _bootSettings={check_for_updates:false};
@@ -1826,6 +1840,7 @@ function _bootTimeout(promise, ms, label) {
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
     applyBotName();
+    if(typeof syncGameModeButton==='function')syncGameModeButton();
     if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('sidekick-tts-enabled')==='true');
   }
   // Non-blocking update check (fire-and-forget, once per tab session)
@@ -1838,7 +1853,7 @@ function _bootTimeout(promise, ms, label) {
   // Fetch active profile. This endpoint is useful metadata, but must never
   // block first paint/session rendering if the backend is busy.
   try{
-    const p=await _bootTimeout(api('/api/profile/active'),1000,'active profile');
+    const p=await _bootTimeout(api('/api/profile/active'),5000,'active profile');
     S.activeProfile=p.name||'default';
   }catch(e){
     S.activeProfile='default';
@@ -1873,17 +1888,17 @@ function _bootTimeout(promise, ms, label) {
   // Pre-load workspace list so sidebar name is correct from first render.
   // Render the session list before restoring the saved conversation so a stale
   // saved-session/client-side boot error cannot leave the sidebar empty forever.
-  await _bootTimeout(loadWorkspaceList(),1500,'workspace list').catch((e)=>{
+  await _bootTimeout(loadWorkspaceList(),10000,'workspace list').catch((e)=>{
     console.warn('[boot] workspace list unavailable, continuing', e);
   });
   // Load the active space's config (project_dir, default model, etc.) so
   // newSession() sees the correct spaceDefaultPath right from the first
   // new chat, not just after an explicit space switch (#spaces-default-dir).
-  await _bootTimeout(_loadActiveSpaceConfig(),1000,'space config').catch((e)=>{
+  await _bootTimeout(_loadActiveSpaceConfig(),8000,'space config').catch((e)=>{
     window._activeSpaceConfig=null;
     console.warn('[boot] active space config unavailable, continuing', e);
   });
-  await _bootTimeout(loadOnboardingWizard(),1000,'onboarding').catch((e)=>{
+  await _bootTimeout(loadOnboardingWizard(),8000,'onboarding').catch((e)=>{
     console.warn('[boot] onboarding unavailable, continuing', e);
   });
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;

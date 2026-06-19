@@ -509,7 +509,7 @@ function _browserResearchDisplayContent(msg) {
   if (msg && msg.display_content) return String(msg.display_content);
   if (msg && msg.research_topic) return String(msg.research_topic);
   const marker = 'Führe eine Deep-Research zu folgendem Thema durch:';
-  const altMarker = 'FÃ¼hre eine Deep-Research zu folgendem Thema durch:';
+  const altMarker = 'F' + String.fromCharCode(0x00c3, 0x00bc) + 'hre eine Deep-Research zu folgendem Thema durch:';
   const matchedMarker = content.includes(marker) ? marker : (content.includes(altMarker) ? altMarker : '');
   if (matchedMarker) {
     const rest = content.slice(content.indexOf(matchedMarker) + matchedMarker.length).trim();
@@ -1139,7 +1139,7 @@ function _browserResearchSetBusy(busy, statusText) {
     pill.textContent = busy ? 'Running' : 'Idle';
   }
   const status = _browserEl('browserResearchStatusUrl');
-  if (status) status.textContent = statusText || (busy ? 'Running deep researchâ€¦' : 'Enter a topic to begin.');
+  if (status) status.textContent = statusText || (busy ? 'Running deep research…' : 'Enter a topic to begin.');
   _browserResearchSetContinueState();
 }
 
@@ -1290,7 +1290,7 @@ async function browserResearchLoadSession(sessionId) {
   const body = _browserEl('browserResearchBody');
   if (body) {
     body.dataset.initialized = '1';
-    body.innerHTML = '<div class="browser-research-empty">Loading research sessionâ€¦</div>';
+    body.innerHTML = '<div class="browser-research-empty">Loading research session…</div>';
   }
   try {
     const data = await api('/api/agents/research/sessions/' + encodeURIComponent(sid));
@@ -1525,6 +1525,18 @@ window.addEventListener('load', function() {
 let _websearchHistoryOpen = true;
 let _websearchSplitOpen = false;
 
+function websearchIsMobileWidth() {
+  return window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+}
+
+function websearchSetHistoryOpen(open) {
+  _websearchHistoryOpen = !!open;
+  const el = document.getElementById('websearchHistory');
+  if (el) el.classList.toggle('is-collapsed', !_websearchHistoryOpen);
+  const btn = document.getElementById('websearchToggleHistoryBtn');
+  if (btn) btn.setAttribute('aria-expanded', String(_websearchHistoryOpen));
+}
+
 // ── Mode Toggle ────────────────────────────────
 function websearchToggleMode(mode) {
   document.querySelectorAll('.websearch-mode-btn').forEach(b => {
@@ -1545,9 +1557,7 @@ function websearchToggleMode(mode) {
 
 // ── History Sidebar Toggle ─────────────────────
 function websearchToggleHistory() {
-  _websearchHistoryOpen = !_websearchHistoryOpen;
-  const el = document.getElementById('websearchHistory');
-  if (el) el.classList.toggle('is-collapsed', !_websearchHistoryOpen);
+  websearchSetHistoryOpen(!_websearchHistoryOpen);
 }
 
 // ── Split View Toggle ──────────────────────────
@@ -1566,8 +1576,12 @@ function websearchToggleSplit() {
 // ── Quick Search ───────────────────────────────
 
 // ── Websearch Query Chips ──────────────────────────
+function _websearchChipContainer() {
+  return document.getElementById('websearchSuggestionChips');
+}
+
 function _websearchRenderChips() {
-  var chips = document.getElementById('websearchChips');
+  var chips = _websearchChipContainer();
   if (!chips) return;
   var history = _websearchGetHistory();
   var recent = history.slice(0, 3);
@@ -1630,10 +1644,8 @@ async function websearchQuickSearch(event) {
   if (!query) return false;
 
   // Hide chips when searching
-  const chips = document.getElementById('websearchSuggestionChips');
+  const chips = _websearchChipContainer();
   if (chips) chips.style.display = 'none';
-  const chips2 = document.getElementById('websearchChips');
-  if (chips2) chips2.style.display = 'none';
 
   const meta = document.getElementById('websearchQuickMeta');
   const results = document.getElementById('websearchResults');
@@ -1914,6 +1926,7 @@ function _websearchRenderHistory() {
 const _origWebsearchPanelActivated = window.browserResearchPanelActivated;
 window.browserResearchPanelActivated = function() {
   if (typeof _origWebsearchPanelActivated === 'function') _origWebsearchPanelActivated();
+  websearchSetHistoryOpen(!websearchIsMobileWidth());
   _websearchRenderHistory();
   _websearchRenderChips();
 };

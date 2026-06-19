@@ -52,6 +52,22 @@ const _msgEl=document.getElementById('msg');
 if(_msgEl) _msgEl.addEventListener('focus', ()=>{ if('speechSynthesis' in window && speechSynthesis.speaking) speechSynthesis.pause(); });
 if(_msgEl) _msgEl.addEventListener('blur', ()=>{ if('speechSynthesis' in window && speechSynthesis.paused) speechSynthesis.resume(); });
 
+function _gameModeWouldBlockClientModel(model, provider){
+  if(window._gameModeEnabled!==true) return false;
+  const p=String(provider||'').trim().toLowerCase();
+  const m=String(model||'').trim().toLowerCase();
+  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai']);
+  if(localProviders.has(p)) return true;
+  if(p.startsWith('custom:')&&localProviders.has(p.slice(7))) return true;
+  return m.startsWith('@ollama:')||m.startsWith('ollama:')||m.includes('@ollama:');
+}
+
+function _showGameModeClientBlock(){
+  const msg=(typeof t==='function')?t('game_mode_on'):'Game Mode: local GPU blocked';
+  setComposerStatus(msg);
+  if(typeof showToast==='function') showToast(msg,5000,'warning');
+}
+
 async function send(){
   let text=$('msg').value.trim();
   // Plan Mode: `/plan` automatisch voranstellen
@@ -207,6 +223,12 @@ async function send(){
   if(uploaded.length&&!msgText)msgText=`I've uploaded ${uploaded.length} file(s): ${uploadedPaths.join(', ')}`;
   else if(uploaded.length)msgText=`${text}\n\n[Attached files: ${uploadedPaths.join(', ')}]`;
   if(!msgText){setComposerStatus('Nothing to send');return;}
+  const selectedModel=S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'';
+  const selectedProvider=S.session&&S.session.model_provider||null;
+  if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider)){
+    _showGameModeClientBlock();
+    return;
+  }
 
   $('msg').value='';autoResize();_collapseExpandIfOpen();
   // Save to prompt history (non-command user messages only)
@@ -320,6 +342,30 @@ async function send(){
     }
   }catch(e){
     const errMsg=String((e&&e.message)||'');
+    const gameModeBlocked=!!(e&&e.data&&e.data.error&&e.data.error.code==='game_mode_enabled');
+    if(gameModeBlocked){
+      delete INFLIGHT[activeSid];
+      if(typeof clearInflightState==='function') clearInflightState(activeSid);
+      stopApprovalPolling();
+      stopClarifyPolling();
+      if(!_approvalSessionId || _approvalSessionId===activeSid) hideApprovalCard(true);
+      removeThinking();
+      if(!_clarifySessionId || _clarifySessionId===activeSid) hideClarifyCard(true, 'terminal');
+      if(S.messages[S.messages.length-1]===userMsg) S.messages.pop();
+      const msgBox=$('msg');
+      if(msgBox&&text){
+        msgBox.value=text;
+        if(typeof autoResize==='function') autoResize();
+      }
+      setBusy(false);
+      if(typeof updateSendBtn==='function') updateSendBtn();
+      setComposerStatus(errMsg);
+      if(typeof showToast==='function') showToast(errMsg,5000,'warning');
+      if(typeof renderMessages==='function') renderMessages();
+      if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+      if(typeof renderSessionList==='function') void renderSessionList();
+      return;
+    }
     const conflictActiveStream=/session already has an active stream/i.test(errMsg);
     if(conflictActiveStream){
       let conflictStreamId='';

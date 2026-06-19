@@ -32,6 +32,41 @@ async function fetchJson(path,opts={}){
 }
 window.hermesApiUrl=hermesApiUrl;
 window.fetchJson=fetchJson;
+
+let _appShellScrollResetPending=false;
+function resetAppShellScroll(){
+  if(_appShellScrollResetPending)return;
+  _appShellScrollResetPending=true;
+  requestAnimationFrame(()=>{
+    _appShellScrollResetPending=false;
+    const body=document.body;
+    const hasDrift=!!(
+      window.scrollX||window.scrollY||
+      (document.documentElement&&(document.documentElement.scrollTop||document.documentElement.scrollLeft))||
+      (body&&(body.scrollTop||body.scrollLeft))
+    );
+    if(!hasDrift)return;
+    try{if(window.scrollX||window.scrollY)window.scrollTo(0,0);}catch(_){}
+    if(document.documentElement){
+      document.documentElement.scrollTop=0;
+      document.documentElement.scrollLeft=0;
+    }
+    if(body){
+      document.body.scrollTop=0;
+      body.scrollLeft=0;
+    }
+  });
+}
+function _queueAppShellScrollReset(){
+  resetAppShellScroll();
+}
+window.resetAppShellScroll=resetAppShellScroll;
+window.addEventListener('scroll', _queueAppShellScrollReset, {passive:true});
+document.addEventListener('scroll', _queueAppShellScrollReset, true);
+window.addEventListener('resize', _queueAppShellScrollReset, {passive:true});
+document.addEventListener('focusin', _queueAppShellScrollReset, true);
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_queueAppShellScrollReset,{once:true});
+else _queueAppShellScrollReset();
 // ── Prompt History (Arrow-Up/Down) ──────────────────────────────────────────
 const _promptHistoryKey='sidekick-webui-prompt-history';
 const _promptHistoryMax=50;
@@ -567,6 +602,7 @@ let _castAvailable=false;
 let _castPollTimer=null;
 let _castStatusTimer=null;
 let _castLastError='';
+let _castConfigured=true;
 
 function _castFetch(path,opts){
   const ctrl=new AbortController();
@@ -585,9 +621,11 @@ async function _refreshCastStatus(){
   try{
     const r=await _castFetch('/api/cast/status');
     const s=await r.json().catch(()=>({}));
+    _castConfigured=s.configured!==false;
     _castAvailable=r.ok && s.available!==false;
     _castActive=_castAvailable && s.active===true;
     _castLastError=_castAvailable?'':(s.error||'Hub nicht erreichbar');
+    if(!_castConfigured)_cleanupCastTimers();
   }catch(e){
     _castAvailable=false;
     _castActive=false;
@@ -602,6 +640,11 @@ function _applyCastUI(){
   const icon=document.getElementById('castStatusIcon');
   if(!icon)return;
   const btn=icon.closest('.titlebar-action-btn');
+  if(!_castConfigured){
+    if(btn)btn.style.display='none';
+    return;
+  }
+  if(btn)btn.style.display='';
   if(_castLoading){
     icon.textContent='⏳';
     if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-off';
@@ -629,6 +672,7 @@ async function toggleHubCast(){
   try{
     const r=await _castFetch('/api/cast/toggle',{method:'POST'});
     const s=await r.json().catch(()=>({}));
+    _castConfigured=s.configured!==false;
     _castAvailable=r.ok && s.available!==false;
     _castActive=_castAvailable && s.active===true;
     _castLastError=_castAvailable?'':(s.error||'Hub nicht erreichbar');
@@ -652,9 +696,9 @@ async function toggleHubCast(){
 async function _checkCastButtonVisible(){
   // Quick probe: if the dashboard server responds, show the cast button
   try{
-    await fetchJson('api/cast/status');
+    const s=await fetchJson('api/cast/status');
     const btn=document.getElementById('btnCastToggle');
-    if(btn)btn.style.display='';
+    if(btn&&s&&s.configured!==false)btn.style.display='';
   }catch(e){
     // Server not reachable — keep button hidden
   }
@@ -1311,6 +1355,42 @@ function syncModelChip(){
   }
 }
 
+function _positionComposerDropdownWithinViewport(dd,anchor,footer){
+  if(!dd||!anchor||!footer) return;
+  const viewportMargin=8;
+  const viewportWidth=window.innerWidth||document.documentElement.clientWidth||footer.clientWidth||320;
+  const viewportHeight=window.innerHeight||document.documentElement.clientHeight||720;
+  const anchorRect=anchor.getBoundingClientRect();
+  const footerRect=footer.getBoundingClientRect();
+  const ddRect=dd.getBoundingClientRect();
+  const maxDropdownWidth=Math.max(1,viewportWidth-(viewportMargin*2));
+  const dropdownWidth=Math.min(ddRect.width||dd.offsetWidth||280,maxDropdownWidth);
+  let left=anchorRect.left-footerRect.left;
+  const minLeft=viewportMargin-footerRect.left;
+  const maxLeft=viewportWidth-viewportMargin-dropdownWidth-footerRect.left;
+  if(maxLeft>=minLeft){
+    left=Math.max(minLeft,Math.min(left,maxLeft));
+  }else{
+    left=Math.max(0,Math.min(left,Math.max(0,footer.clientWidth-dropdownWidth)));
+  }
+  dd.style.left=`${left}px`;
+  dd.style.right='auto';
+  dd.style.maxWidth=`${maxDropdownWidth}px`;
+
+  const maxDropdownHeight=Math.max(80,viewportHeight-(viewportMargin*2));
+  const dropdownHeight=Math.min(ddRect.height||dd.offsetHeight||320,maxDropdownHeight);
+  dd.style.maxHeight=`${Math.min(320,maxDropdownHeight)}px`;
+  let top=anchorRect.bottom+6;
+  if(top+dropdownHeight>viewportHeight-viewportMargin && anchorRect.top-dropdownHeight-6>=viewportMargin){
+    top=anchorRect.top-dropdownHeight-6;
+  }
+  const maxTop=Math.max(viewportMargin,viewportHeight-dropdownHeight-viewportMargin);
+  top=Math.max(viewportMargin,Math.min(top,maxTop));
+  top=top-footerRect.top;
+  dd.style.bottom='auto';
+  dd.style.top=`${top}px`;
+}
+
 function _positionModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
@@ -1320,12 +1400,7 @@ function _positionModelDropdown(){
   const panel=$('composerMobileConfigPanel');
   const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(chip&&chip.offsetParent?chip:mobileAction);
   if(!anchor) return;
-  const chipRect=anchor.getBoundingClientRect();
-  const footerRect=footer.getBoundingClientRect();
-  let left=chipRect.left-footerRect.left;
-  const maxLeft=Math.max(0, footer.clientWidth-dd.offsetWidth);
-  left=Math.max(0, Math.min(left, maxLeft));
-  dd.style.left=`${left}px`;
+  _positionComposerDropdownWithinViewport(dd,anchor,footer);
 }
 
 function renderModelDropdown(){
@@ -1699,12 +1774,7 @@ function _positionReasoningDropdown(){
   if(!dd||!chip||!footer) return;
   const panel=$('composerMobileConfigPanel');
   const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:chip;
-  const chipRect=anchor.getBoundingClientRect();
-  const footerRect=footer.getBoundingClientRect();
-  let left=chipRect.left-footerRect.left;
-  const maxLeft=Math.max(0,footer.clientWidth-dd.offsetWidth);
-  left=Math.max(0,Math.min(left,maxLeft));
-  dd.style.left=`${left}px`;
+  _positionComposerDropdownWithinViewport(dd,anchor,footer);
 }
 
 function closeReasoningDropdown(){
@@ -4992,12 +5062,6 @@ function syncTopbar(){
     if(typeof syncModelChip==='function') syncModelChip();
     if(typeof syncTerminalButton==='function') syncTerminalButton();
     if(typeof _syncSidekickPanelSessionActions==='function') _syncSidekickPanelSessionActions();
-    else {
-      const sidebarName=$('sidebarWsName');
-      if(sidebarName && sidebarName.textContent==='Workspace'){
-        sidebarName.textContent=t('no_workspace');
-      }
-    }
     if(typeof syncAppTitlebar==='function') syncAppTitlebar();
     // Update profile chip even when no session is active (e.g. right after profile switch)
     const _profileLabel=$('profileChipLabel');
@@ -5005,22 +5069,7 @@ function syncTopbar(){
     return;
   }
   const sessionTitle=S.session.title||t('untitled');
-  const _topbarTitle=$('topbarTitle');if(_topbarTitle)_topbarTitle.textContent=sessionTitle;
   document.title=sessionTitle+' \u2014 '+(window._botName||'Nova');
-  const vis=S.messages.filter(m=>m&&m.role&&m.role!=='tool');
-  const _topbarMeta=$('topbarMeta');
-  if(_topbarMeta){
-    const sourceLabel=(S.session&&S.session.is_cli_session&&(S.session.source_label||S.session.source_tag||S.session.raw_source))||'';
-    const metaText=t('n_messages',vis.length);
-    _topbarMeta.textContent=metaText;
-    if(sourceLabel){
-      const badge=document.createElement('span');
-      badge.className='topbar-source-badge';
-      badge.textContent=sourceLabel+(S.session.read_only?' · read-only':'');
-      _topbarMeta.appendChild(document.createTextNode(' '));
-      _topbarMeta.appendChild(badge);
-    }
-  }
   if(typeof syncAppTitlebar==='function') syncAppTitlebar();
   if(typeof _syncWorkspaceHeadingState==='function') _syncWorkspaceHeadingState();
   // If a profile switch just happened, apply its model rather than the session's stale value.
@@ -5088,9 +5137,6 @@ function syncTopbar(){
   if(typeof syncModelChip==='function') syncModelChip();
   if(typeof syncReasoningChip==='function') syncReasoningChip();
   if(typeof syncToolsetsChip==='function') syncToolsetsChip();
-  // Show Clear button only when session has messages
-  const clearBtn=$('btnClearConv');
-  if(clearBtn) clearBtn.style.display=(S.messages&&S.messages.filter(msg=>msg.role!=='tool').length>0)?'':'none';
   if(typeof _syncSidekickPanelSessionActions==='function') _syncSidekickPanelSessionActions();
   if(typeof syncWorkspaceDisplays==='function') syncWorkspaceDisplays();
   if(typeof syncTerminalButton==='function') syncTerminalButton();

@@ -516,18 +516,34 @@ function _gmailWithWorkspace(obj) {
 // ── Gmail Setup Dialog (for non-default spaces without Gmail config) ──
 let _gmailSetupEl = null;
 
-function showGmailSetupDialog() {
-  // Hide normal gmail content
-  const main = document.getElementById('gmailMain');
-  const sidebar = document.getElementById('gmailSidebar');
-  if (main) main.style.display = 'none';
-  if (sidebar) sidebar.style.display = 'none';
+function _gmailMainView() {
+  return document.getElementById('mainGmail');
+}
 
+function _gmailSidebarView() {
+  return document.querySelector('#panelGmail .gmail-sidebar') || document.querySelector('.gmail-sidebar');
+}
+
+function _gmailSetupHost() {
+  return _gmailMainView() || document.getElementById('panelGmail') || document.querySelector('main.main') || document.body;
+}
+
+function _setGmailSetupVisible(visible) {
+  const container = document.getElementById('gmailSetupContainer');
+  if (container) container.style.display = visible ? 'flex' : 'none';
+  const sidebar = _gmailSidebarView();
+  if (sidebar) {
+    sidebar.style.filter = visible ? 'blur(4px)' : '';
+    sidebar.style.pointerEvents = visible ? 'none' : '';
+  }
+}
+
+function showGmailSetupDialog() {
   let container = document.getElementById('gmailSetupContainer');
   if (!container) {
     container = document.createElement('div');
     container.id = 'gmailSetupContainer';
-    container.style.cssText = 'display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;padding:2rem;gap:1rem;';
+    container.style.cssText = 'position:absolute;inset:0;z-index:120;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100%;padding:2rem;gap:1rem;background:var(--bg);overflow:auto;';
     container.innerHTML = `
       <div style="font-size:2.5rem;">📧</div>
       <h2 style="margin:0;font-size:1.1rem;">Gmail für diesen Space einrichten</h2>
@@ -546,12 +562,13 @@ function showGmailSetupDialog() {
         <button onclick="gmailSetupSkip()" style="padding:0.5rem;border:none;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer;">Später einrichten</button>
       </div>
     `;
-    const gmailPanel = document.getElementById('gmailPanel');
-    if (gmailPanel) gmailPanel.appendChild(container);
+    _gmailSetupHost().appendChild(container);
   } else {
     container.style.display = 'flex';
+    if (!container.parentElement) _gmailSetupHost().appendChild(container);
   }
   _gmailSetupEl = container;
+  _setGmailSetupVisible(true);
 }
 
 async function saveGmailSetup() {
@@ -576,13 +593,7 @@ async function saveGmailSetup() {
       body: JSON.stringify({ slug, gmail: { accounts: { [accountName]: { email, password } } } }),
     });
 
-    // Hide setup, show Gmail content
-    const container = document.getElementById('gmailSetupContainer');
-    if (container) container.style.display = 'none';
-    const main = document.getElementById('gmailMain');
-    const sidebar = document.getElementById('gmailSidebar');
-    if (main) main.style.display = '';
-    if (sidebar) sidebar.style.display = '';
+    _setGmailSetupVisible(false);
 
     gmailToast('✅ Gmail-Konto gespeichert', 'success');
     // Reload Gmail
@@ -595,16 +606,8 @@ async function saveGmailSetup() {
 }
 
 function gmailSetupSkip() {
-  const container = document.getElementById('gmailSetupContainer');
-  if (container) container.style.display = 'none';
-  // Close the Gmail panel (navigate to previous view)
-  const closeBtn = document.querySelector('#rail .gmail-icon, .rail-icon[data-panel="gmail"]');
-  // Just hide setup UI and show empty state
-  const main = document.getElementById('gmailMain');
-  const sidebar = document.getElementById('gmailSidebar');
-  if (main) main.style.display = '';
-  if (sidebar) sidebar.style.display = '';
-  if (main) main.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);padding:2rem;text-align:center;">Klicke auf das Gmail-Icon um einzurichten</div>';
+  _setGmailSetupVisible(false);
+  gmailShowUnavailable('Gmail-Zugriff nicht eingerichtet', 'Klicke erneut auf Gmail, um den App-Code einzugeben.');
 }
 
 // ── Gmail Splash: no credentials prompt ──

@@ -537,6 +537,43 @@ function showCreatorResult(agent) {
 
   // ── Agent Chat ──────────────────────────────────────────────────────────
 
+  const _agentChatHome = { parent: null, next: null };
+
+  function _isAgentsMainVisible() {
+    const main = document.getElementById('mainAgents');
+    return !!(main && main.style.display !== 'none');
+  }
+
+  function _rememberAgentChatHome(view) {
+    if (!view || _agentChatHome.parent) return;
+    _agentChatHome.parent = view.parentElement;
+    _agentChatHome.next = view.nextSibling;
+  }
+
+  function dockAgentChatInMain() {
+    const main = document.getElementById('mainAgents');
+    const view = document.getElementById('agentsChatView');
+    if (!main || !view || !_isAgentsMainVisible()) return false;
+    _rememberAgentChatHome(view);
+    main.classList.add('agents-main-chat-open');
+    if (view.parentElement !== main) main.appendChild(view);
+    if (typeof stopDashboardRefresh === 'function') stopDashboardRefresh();
+    return true;
+  }
+
+  function restoreAgentChatHome() {
+    const view = document.getElementById('agentsChatView');
+    const main = document.getElementById('mainAgents');
+    if (main) main.classList.remove('agents-main-chat-open');
+    if (view && _agentChatHome.parent && view.parentElement !== _agentChatHome.parent) {
+      if (_agentChatHome.next && _agentChatHome.next.parentElement === _agentChatHome.parent) {
+        _agentChatHome.parent.insertBefore(view, _agentChatHome.next);
+      } else {
+        _agentChatHome.parent.appendChild(view);
+      }
+    }
+  }
+
   function openAgentChat(slug) {
     apiGet('/api/agents/' + slug).then(data => {
       _setCurrentAgent(data.agent);
@@ -544,6 +581,8 @@ function showCreatorResult(agent) {
         console.warn('[agents] Agent not found:', slug);
         return;
       }
+
+      const chatDockedInMain = dockAgentChatInMain();
 
       // Show chat view, hide grid
       document.getElementById('agentsGridView').classList.add('hidden');
@@ -576,6 +615,10 @@ function showCreatorResult(agent) {
       // Update panel heading
       const panelHead = document.querySelector('#panelAgents .panel-head-label');
       if (panelHead) panelHead.textContent = currentAgent.name;
+      if (chatDockedInMain) {
+        const main = document.getElementById('mainAgents');
+        if (main) main.setAttribute('aria-label', currentAgent.name + ' agent chat');
+      }
 
       // Initialize workspace for this agent
       initAgentWorkspace(slug);
@@ -791,6 +834,7 @@ function showCreatorResult(agent) {
     workspaceSessionId = null;
 
     document.getElementById('agentsChatView').classList.add('hidden');
+    restoreAgentChatHome();
 
     // Also hide workspace
     var wsView = document.getElementById('agentsWorkspaceView');
@@ -805,6 +849,7 @@ function showCreatorResult(agent) {
     // Reload dashboard if visible
     const agentsMain = document.getElementById('mainAgents');
     if (agentsMain && agentsMain.style.display !== 'none' && agentsMain.style.display !== '') {
+      if (typeof startDashboardRefresh === 'function') startDashboardRefresh();
       setTimeout(loadAgentsDashboard, 300);
     }
   }
@@ -1322,6 +1367,7 @@ function showCreatorResult(agent) {
   window.sendWsCommand = sendWsCommand;
   window.stopAgentWorkspace = stopAgentWorkspace;
   window.loadAgentsDashboard = loadAgentsDashboard;
+  window.restoreAgentChatHome = restoreAgentChatHome;
   window.startDashboardRefresh = startDashboardRefresh;
   window.stopDashboardRefresh = stopDashboardRefresh;
 

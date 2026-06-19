@@ -204,6 +204,10 @@
   padding: 16px;
 }
 
+.agents-grid-view.hidden {
+  display: none !important;
+}
+
 .agents-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -1051,6 +1055,11 @@
   border-bottom: 1px solid var(--border);
 }
 
+.agents-workspace-chat.hidden,
+.agents-workspace-view.hidden {
+  display: none !important;
+}
+
 .agents-workspace-chat .agents-chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -1086,6 +1095,10 @@
   max-width: 720px;
   width: 100%;
   animation: agentsFadeIn 0.35s ease;
+}
+
+.agents-wizard-step.hidden {
+  display: none !important;
 }
 
 .agents-wizard-icon {

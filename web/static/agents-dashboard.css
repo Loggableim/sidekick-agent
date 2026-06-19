@@ -348,3 +348,37 @@
   max-width: 360px;
   line-height: 1.5;
 }
+
+/* Full-width agent chat opened from dashboard cards */
+#mainAgents.agents-main-chat-open {
+  min-height: 0;
+  overflow: hidden;
+}
+
+#mainAgents.agents-main-chat-open > #agentsDashboardStatusBar,
+#mainAgents.agents-main-chat-open > #agentsDashboardGrid,
+#mainAgents.agents-main-chat-open > #agentsDashboardFeed {
+  display: none !important;
+}
+
+#mainAgents.agents-main-chat-open > #agentsChatView {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+#mainAgents.agents-main-chat-open .agents-workspace-layout {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+
+#mainAgents.agents-main-chat-open .agents-workspace-chat {
+  width: min(360px, 38vw);
+  min-width: 280px;
+}
+
+#mainAgents.agents-main-chat-open .agents-workspace-view {
+  min-width: 0 !important;
+}

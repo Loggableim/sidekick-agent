@@ -46,6 +46,8 @@
     // Panel already has the head and tabs from index.html
     // Just wire up tab switching
     panel.querySelectorAll('.discord-tab').forEach((tab) => {
+      if (tab.getAttribute('onclick') || tab.dataset.discordBound === '1') return;
+      tab.dataset.discordBound = '1';
       tab.addEventListener('click', function () {
         discordSwitchTab(this.getAttribute('data-discord-tab'));
       });
