@@ -1675,6 +1675,11 @@ def test_game_mode_resource_release_cancels_local_runs_and_unloads_ollama(monkey
     monkeypatch.setattr(game_mode, "_unload_ollama_model", lambda _base_url, model: {"ok": True, "model": model})
     monkeypatch.setattr(game_mode, "_terminate_known_local_model_servers", lambda: [])
     monkeypatch.setattr(game_mode, "_release_local_image_generation_queues", lambda: {"queues": []})
+    gpu_snapshots = [
+        {"available": True, "top": [{"process": "python.exe", "used_gpu_memory_mb": 2048, "local_gpu_workload": True}]},
+        {"available": True, "top": [{"process": "VRChat.exe", "used_gpu_memory_mb": 4096, "local_gpu_workload": False}], "non_sidekick_top": [{"process": "VRChat.exe", "used_gpu_memory_mb": 4096, "local_gpu_workload": False}]},
+    ]
+    monkeypatch.setattr(game_mode, "_gpu_process_memory_snapshot", lambda: gpu_snapshots.pop(0))
 
     payload = game_mode.release_game_mode_resources()
 
@@ -1682,6 +1687,7 @@ def test_game_mode_resource_release_cancels_local_runs_and_unloads_ollama(monkey
     assert payload["cancelled_local_streams"] == ["local-stream"]
     assert payload["ollama"]["unloaded"][0]["model"] == "qwen3:4b"
     assert "image_generation_queue" in payload
+    assert payload["gpu_processes"]["after"]["non_sidekick_top"][0]["process"] == "VRChat.exe"
 
 
 def test_game_mode_release_targets_all_nova_local_model_ports():
@@ -1691,6 +1697,24 @@ def test_game_mode_release_targets_all_nova_local_model_ports():
 
     assert 8081 in ports
     assert 8082 in ports
+
+
+def test_game_mode_release_targets_configured_local_model_ports(monkeypatch):
+    from web.api import game_mode
+
+    monkeypatch.setattr(
+        game_mode.cfg,
+        "get_config",
+        lambda: {
+            "custom_providers": [
+                {"name": "LM Studio", "base_url": "http://127.0.0.1:1234/v1"},
+                {"name": "Remote", "base_url": "https://api.example.test/v1"},
+            ],
+        },
+    )
+
+    assert 1234 in game_mode._configured_local_model_ports()
+    assert 1234 in game_mode._known_local_model_ports()
 
 
 def test_game_mode_release_flushes_and_stops_local_image_queue(monkeypatch):
@@ -1886,8 +1910,11 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     assert "function syncGameModeButton()" in panels_js
     assert "async function toggleGameMode()" in panels_js
     assert "function _gameModeReleaseSummary(release)" in panels_js
+    assert "function _gameModeGpuUsersSummary(snapshot, key)" in panels_js
     assert "saved&&saved.game_mode_release" in panels_js
     assert "No Sidekick local GPU processes found." in panels_js
+    assert "Top remaining GPU users:" in panels_js
+    assert "Local GPU workload still detected:" in panels_js
     assert "btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off')" in panels_js
     assert "btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off')" in panels_js
     assert "game_mode_enabled" in panels_js

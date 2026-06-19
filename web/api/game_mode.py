@@ -35,6 +35,16 @@ _LOCAL_IMAGE_QUEUE_PROCESS_MARKERS = (
     "horde_worker.py",
 )
 
+_LOCAL_IMAGE_BACKEND_PROCESS_MARKERS = (
+    "comfyui",
+    "stable-diffusion",
+    "automatic1111",
+    "sd-webui",
+    "invokeai",
+)
+
+_GPU_PROCESS_MEMORY_COUNTER = r"\GPU Process Memory(*)\Local Usage"
+
 
 def _normalize_ollama_root(raw_url: str) -> str:
     value = str(raw_url or "").strip()
@@ -221,6 +231,49 @@ def _nova_local_model_ports() -> set[int]:
     return ports
 
 
+def _configured_local_model_ports() -> set[int]:
+    try:
+        conf = cfg.get_config()
+    except Exception:
+        conf = {}
+    candidates: list[Any] = []
+    if isinstance(conf, dict):
+        model_cfg = conf.get("model") or {}
+        if isinstance(model_cfg, dict):
+            candidates.append(model_cfg.get("base_url"))
+        providers = conf.get("providers") or {}
+        if isinstance(providers, dict):
+            for entry in providers.values():
+                if isinstance(entry, dict):
+                    candidates.append(entry.get("base_url"))
+        custom = conf.get("custom_providers") or []
+        if isinstance(custom, list):
+            for entry in custom:
+                if isinstance(entry, dict):
+                    candidates.append(entry.get("base_url"))
+
+    ports: set[int] = set()
+    for raw in candidates:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if "://" not in text:
+            text = "http://" + text
+        try:
+            parsed = urllib.parse.urlparse(text)
+            host = (parsed.hostname or "").strip().lower()
+            port = int(parsed.port or 0)
+        except Exception:
+            continue
+        if port and host in {"127.0.0.1", "localhost", "::1"}:
+            ports.add(port)
+    return ports
+
+
+def _known_local_model_ports() -> set[int]:
+    return _nova_local_model_ports() | _configured_local_model_ports()
+
+
 def _process_looks_like_local_model_server(proc: Any) -> bool:
     try:
         bits = [proc.name() or ""]
@@ -232,7 +285,7 @@ def _process_looks_like_local_model_server(proc: Any) -> bool:
 
 
 def _terminate_known_local_model_servers() -> list[dict]:
-    ports = _nova_local_model_ports()
+    ports = _known_local_model_ports()
     if not ports:
         return []
     try:
@@ -297,6 +350,127 @@ def _process_looks_like_local_image_generation_queue(proc: Any) -> bool:
         return False
     text = " ".join(str(bit) for bit in bits).replace("\\", "/").lower()
     return any(marker in text for marker in _LOCAL_IMAGE_QUEUE_PROCESS_MARKERS)
+
+
+def _process_identity_text(proc: Any) -> str:
+    try:
+        bits = [proc.name() or ""]
+        bits.extend(proc.cmdline() or [])
+    except Exception:
+        return ""
+    return " ".join(str(bit) for bit in bits).replace("\\", "/").lower()
+
+
+def _classify_gpu_process(proc: Any | None) -> tuple[str, bool]:
+    if proc is None:
+        return ("unknown", False)
+    try:
+        if _process_looks_like_local_model_server(proc):
+            return ("local_model_server", True)
+        if _process_looks_like_local_image_generation_queue(proc):
+            return ("image_generation_queue", True)
+    except Exception:
+        pass
+    text = _process_identity_text(proc)
+    if not text:
+        return ("unknown", False)
+    if "ollama" in text:
+        return ("ollama", True)
+    if any(marker in text for marker in _LOCAL_IMAGE_BACKEND_PROCESS_MARKERS):
+        return ("image_generation_backend", True)
+    if "sidekick" in text or "web.server" in text or "run_agent.py" in text:
+        return ("sidekick", True)
+    return ("other", False)
+
+
+def _gpu_process_memory_snapshot(limit: int = 12) -> dict:
+    if os.name != "nt":
+        return {"available": False, "reason": "unsupported_os", "top": []}
+
+    script = rf"""
+$ErrorActionPreference = 'Stop'
+$samples = (Get-Counter '{_GPU_PROCESS_MEMORY_COUNTER}').CounterSamples
+$byProcess = @{{}}
+foreach ($sample in $samples) {{
+  if ($sample.InstanceName -match 'pid_(\d+)') {{
+    $procId = [int]$Matches[1]
+    if (-not $byProcess.ContainsKey($procId)) {{ $byProcess[$procId] = 0 }}
+    $byProcess[$procId] += [double]$sample.CookedValue
+  }}
+}}
+$byProcess.GetEnumerator() |
+  ForEach-Object {{ [pscustomobject]@{{ pid = [int]$_.Key; bytes = [double]$_.Value }} }} |
+  Where-Object {{ $_.bytes -gt 0 }} |
+  Sort-Object bytes -Descending |
+  Select-Object -First 30 |
+  ConvertTo-Json -Compress
+""".strip()
+    try:
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", script],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as exc:
+        return {"available": False, "reason": "counter_failed", "error": repr(exc)[:240], "top": []}
+    if completed.returncode != 0:
+        return {
+            "available": False,
+            "reason": "counter_failed",
+            "error": (completed.stderr or completed.stdout or "")[:240],
+            "top": [],
+        }
+    raw = (completed.stdout or "").strip()
+    if not raw:
+        return {"available": True, "top": [], "local_gpu_workloads": [], "non_sidekick_top": []}
+    try:
+        parsed = json.loads(raw)
+    except Exception as exc:
+        return {"available": False, "reason": "counter_parse_failed", "error": repr(exc)[:240], "top": []}
+    rows = parsed if isinstance(parsed, list) else [parsed]
+    try:
+        import psutil
+    except Exception:
+        psutil = None  # type: ignore[assignment]
+
+    entries: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            pid = int(row.get("pid") or 0)
+            used_bytes = float(row.get("bytes") or 0)
+        except Exception:
+            continue
+        if not pid or used_bytes <= 0:
+            continue
+        proc = None
+        name = "unknown"
+        if psutil is not None:
+            try:
+                proc = psutil.Process(pid)
+                name = proc.name() or name
+            except Exception:
+                proc = None
+        category, local_gpu_workload = _classify_gpu_process(proc)
+        entries.append(
+            {
+                "pid": pid,
+                "process": name,
+                "used_gpu_memory_mb": round(used_bytes / (1024 * 1024), 1),
+                "category": category,
+                "local_gpu_workload": bool(local_gpu_workload),
+            }
+        )
+    entries.sort(key=lambda item: float(item.get("used_gpu_memory_mb") or 0), reverse=True)
+    top = entries[: max(1, int(limit or 12))]
+    return {
+        "available": True,
+        "top": top,
+        "local_gpu_workloads": [item for item in top if item.get("local_gpu_workload")],
+        "non_sidekick_top": [item for item in top if not item.get("local_gpu_workload")],
+    }
 
 
 def _terminate_process_tree(proc: Any) -> dict:
@@ -404,6 +578,7 @@ def release_game_mode_resources() -> dict:
     Sidekick/Nova GPU model port and their process metadata matches a model
     server marker.
     """
+    gpu_before = _gpu_process_memory_snapshot()
     cancelled: list[str] = []
     cancel_errors: list[dict] = []
     for stream_id in _active_local_stream_ids():
@@ -413,10 +588,15 @@ def release_game_mode_resources() -> dict:
         except Exception as exc:
             cancel_errors.append({"stream_id": stream_id, "error": repr(exc)[:240]})
 
-    return {
+    payload = {
         "cancelled_local_streams": cancelled,
         "cancel_errors": cancel_errors,
         "ollama": _unload_ollama_models(),
         "local_model_servers": _terminate_known_local_model_servers(),
         "image_generation_queue": _release_local_image_generation_queues(),
     }
+    payload["gpu_processes"] = {
+        "before": gpu_before,
+        "after": _gpu_process_memory_snapshot(),
+    }
+    return payload

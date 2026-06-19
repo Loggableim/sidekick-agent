@@ -5880,6 +5880,21 @@ function _persistGameModeUiState(enabled){
   try{localStorage.setItem('sidekick-game-mode-enabled',enabled?'1':'0');}catch(_){}
 }
 
+function _gameModeGpuUserLabel(item){
+  if(!item||typeof item!=='object') return '';
+  const name=String(item.process||'unknown').trim()||'unknown';
+  const mb=Number(item.used_gpu_memory_mb||0);
+  const mem=mb>=1024?`${(mb/1024).toFixed(1)} GB`:`${Math.max(1,Math.round(mb))} MB`;
+  return `${name} ${mem}`;
+}
+
+function _gameModeGpuUsersSummary(snapshot, key){
+  if(!snapshot||snapshot.available!==true) return '';
+  const source=Array.isArray(snapshot[key])?snapshot[key]:[];
+  const labels=source.slice(0,3).map(_gameModeGpuUserLabel).filter(Boolean);
+  return labels.join(', ');
+}
+
 function _gameModeReleaseSummary(release){
   if(!release||typeof release!=='object') return '';
   const parts=[];
@@ -5889,12 +5904,17 @@ function _gameModeReleaseSummary(release){
   const image=release.image_generation_queue||{};
   const imageTerminated=Array.isArray(image.terminated)?image.terminated.filter(item=>item&&item.ok!==false&&!item.skipped).length:0;
   const queueSkipped=Array.isArray(image.queues)?image.queues.filter(item=>item&&item.flush&&item.flush.skipped).length:0;
+  const gpuAfter=release.gpu_processes&&release.gpu_processes.after;
+  const remainingGpu=_gameModeGpuUsersSummary(gpuAfter,'non_sidekick_top');
+  const localGpu=_gameModeGpuUsersSummary(gpuAfter,'local_gpu_workloads');
+  const remainingSuffix=remainingGpu?` Top remaining GPU users: ${remainingGpu}.`:'';
   if(cancelled) parts.push(`${cancelled} stream${cancelled===1?'':'s'} cancelled`);
   if(unloaded) parts.push(`${unloaded} Ollama model${unloaded===1?'':'s'} unloaded`);
   if(servers) parts.push(`${servers} local model server${servers===1?'':'s'} stopped`);
   if(imageTerminated) parts.push(`${imageTerminated} image queue process${imageTerminated===1?'':'es'} stopped`);
-  if(parts.length) return ` Released: ${parts.join(', ')}.`;
-  if(queueSkipped) return ' No Sidekick local GPU processes found.';
+  if(parts.length) return ` Released: ${parts.join(', ')}.${remainingSuffix}`;
+  if(localGpu) return ` Local GPU workload still detected: ${localGpu}.${remainingSuffix}`;
+  if(queueSkipped||(gpuAfter&&gpuAfter.available===true)) return ` No Sidekick local GPU processes found.${remainingSuffix}`;
   return '';
 }
 
