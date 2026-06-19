@@ -289,6 +289,10 @@ async function switchPanel(name, opts = {}) {
     if (typeof browserResearchPanelDeactivated === 'function') browserResearchPanelDeactivated();
   }
   _currentPanel = nextPanel;
+  if (opts.fromRailClick && typeof closeMobileSidebar === 'function'
+      && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
+    closeMobileSidebar();
+  }
   // Update nav tabs (rail + mobile sidebar-nav share data-panel)
   document.querySelectorAll('[data-panel]').forEach(t => t.classList.toggle('active', t.dataset.panel === nextPanel));
   // Refresh aria-expanded on the newly-active rail button to mirror sidebar state.
@@ -376,6 +380,7 @@ async function switchPanel(name, opts = {}) {
     startDashboardRefresh();
   } else if (prevPanel === 'agents') {
     // Deactivate dashboard view
+    if (typeof restoreAgentChatHome === 'function') restoreAgentChatHome();
     if (agentsMain) agentsMain.style.display = 'none';
     if (chatMain) chatMain.style.display = '';
     document.body.classList.remove('showing-agents');
@@ -386,7 +391,9 @@ async function switchPanel(name, opts = {}) {
   if (nextPanel === 'appstore') {
     if (chatMain) chatMain.style.display = 'none';
     if (appstoreMain) appstoreMain.style.display = 'flex';
-    await loadAppstorePanel();
+    loadAppstorePanel().catch(function(err) {
+      console.warn('[appstore] panel load failed:', err && err.message ? err.message : err);
+    });
   } else if (prevPanel === 'appstore') {
     if (appstoreMain) appstoreMain.style.display = 'none';
     if (chatMain) chatMain.style.display = '';
@@ -399,6 +406,7 @@ async function switchPanel(name, opts = {}) {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }
+  if (typeof resetAppShellScroll === 'function') resetAppShellScroll();
   if (typeof syncWorkspacePanelForActivePanel === 'function') syncWorkspacePanelForActivePanel(nextPanel);
   // Titlebar mode-toggle + compact-btn only visible on chat panel
   const isChat = nextPanel === 'chat' || !nextPanel;
@@ -419,6 +427,7 @@ async function switchPanel(name, opts = {}) {
   if (nextPanel === 'gmail') loadGmailPanel();
   if (nextPanel === 'discord') setTimeout(function() {
     if (typeof discordChatInit === 'function') discordChatInit();
+    if (typeof loadDiscordPanel === 'function') loadDiscordPanel();
   }, 100);
   if (nextPanel === 'agents') {
     if (typeof loadAgents === 'function') loadAgents();
@@ -4433,11 +4442,6 @@ function syncWorkspaceDisplays(){
   const hasWorkspace=!!(ws);
   const label=hasWorkspace?getWorkspaceFriendlyName(ws):t('no_workspace');
 
-  const sidebarName=$('sidebarWsName');
-  const sidebarPath=$('sidebarWsPath');
-  if(sidebarName) sidebarName.textContent=label;
-  if(sidebarPath) sidebarPath.textContent=ws;
-
   const composerChip=$('composerWorkspaceChip');
   const composerLabel=$('composerWorkspaceLabel');
   const mobileAction=$('composerMobileWorkspaceAction');
@@ -4636,17 +4640,7 @@ function renderWorkspaceDropdownInto(dd, workspaces, currentWs){
 }
 
 function toggleWsDropdown(){
-  const dd=$('wsDropdown');
-  if(!dd)return;
-  const open=dd.classList.contains('open');
-  if(open){closeWsDropdown();}
-  else{
-    closeProfileDropdown(); // close profile dropdown if open
-    loadWorkspaceList().then(data=>{
-      renderWorkspaceDropdownInto(dd, data.workspaces, S.session?S.session.workspace:'');
-      dd.classList.add('open');
-    });
-  }
+  toggleComposerWsDropdown();
 }
 
 function toggleComposerWsDropdown(){
@@ -4673,11 +4667,9 @@ function toggleComposerWsDropdown(){
 }
 
 function closeWsDropdown(){
-  const dd=$('wsDropdown');
   const composerDd=$('composerWsDropdown');
   const composerChip=$('composerWorkspaceChip');
   const mobileAction=$('composerMobileWorkspaceAction');
-  if(dd)dd.classList.remove('open');
   if(composerDd)composerDd.classList.remove('open');
   if(composerChip)composerChip.classList.remove('active');
   if(mobileAction)mobileAction.classList.remove('active');
@@ -5860,12 +5852,86 @@ function _retryAppearanceAutosave(){
 
 // ── Phase 2: Preferences autosave (Issue #1003) ───────────────────────
 
+function syncGameModeButton(){
+  if(typeof window._gameModeEnabled==='undefined'){
+    try{
+      const raw=localStorage.getItem('sidekick-game-mode-enabled');
+      if(raw==='1'||raw==='true') window._gameModeEnabled=true;
+      else if(raw==='0'||raw==='false') window._gameModeEnabled=false;
+    }catch(_){}
+  }
+  const enabled=window._gameModeEnabled===true;
+  const btn=$('btnGameModeToggle');
+  if(btn){
+    btn.classList.toggle('active',enabled);
+    btn.setAttribute('aria-pressed',String(enabled));
+    const label=t(enabled?'game_mode_on':'game_mode_off');
+    btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off');
+    btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off');
+    btn.setAttribute('data-tooltip',label);
+    btn.setAttribute('aria-label',label);
+  }
+  const cb=$('settingsGameModeEnabled');
+  if(cb) cb.checked=enabled;
+  document.documentElement.classList.toggle('game-mode-enabled',enabled);
+}
+
+function _persistGameModeUiState(enabled){
+  try{localStorage.setItem('sidekick-game-mode-enabled',enabled?'1':'0');}catch(_){}
+}
+
+function _gameModeReleaseSummary(release){
+  if(!release||typeof release!=='object') return '';
+  const parts=[];
+  const cancelled=Array.isArray(release.cancelled_local_streams)?release.cancelled_local_streams.length:0;
+  const unloaded=release.ollama&&Array.isArray(release.ollama.unloaded)?release.ollama.unloaded.filter(item=>!item||item.ok!==false).length:0;
+  const servers=Array.isArray(release.local_model_servers)?release.local_model_servers.filter(item=>item&&item.ok!==false&&!item.skipped).length:0;
+  const image=release.image_generation_queue||{};
+  const imageTerminated=Array.isArray(image.terminated)?image.terminated.filter(item=>item&&item.ok!==false&&!item.skipped).length:0;
+  const queueSkipped=Array.isArray(image.queues)?image.queues.filter(item=>item&&item.flush&&item.flush.skipped).length:0;
+  if(cancelled) parts.push(`${cancelled} stream${cancelled===1?'':'s'} cancelled`);
+  if(unloaded) parts.push(`${unloaded} Ollama model${unloaded===1?'':'s'} unloaded`);
+  if(servers) parts.push(`${servers} local model server${servers===1?'':'s'} stopped`);
+  if(imageTerminated) parts.push(`${imageTerminated} image queue process${imageTerminated===1?'':'es'} stopped`);
+  if(parts.length) return ` Released: ${parts.join(', ')}.`;
+  if(queueSkipped) return ' No Sidekick local GPU processes found.';
+  return '';
+}
+
+async function toggleGameMode(){
+  const previous=window._gameModeEnabled===true;
+  const next=!previous;
+  window._gameModeEnabled=next;
+  syncGameModeButton();
+  try{
+    const saved=await api('/api/settings',{method:'POST',body:JSON.stringify({game_mode_enabled:next})});
+    window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
+    _persistGameModeUiState(window._gameModeEnabled);
+    syncGameModeButton();
+    if(typeof showToast==='function'){
+      let message=t(window._gameModeEnabled?'game_mode_enabled_toast':'game_mode_disabled_toast');
+      if(window._gameModeEnabled) message+=_gameModeReleaseSummary(saved&&saved.game_mode_release);
+      showToast(message,window._gameModeEnabled?5000:undefined);
+    }
+  }catch(e){
+    window._gameModeEnabled=previous;
+    syncGameModeButton();
+    if(typeof showToast==='function') showToast(t('settings_save_failed')+(e&&e.message?e.message:e));
+  }
+}
+
+window.syncGameModeButton=syncGameModeButton;
+window.toggleGameMode=toggleGameMode;
+document.addEventListener('DOMContentLoaded',syncGameModeButton);
+
 function _preferencesPayloadFromUi(){
   const payload={};
   const sendKeySel=$('settingsSendKey');
   if(sendKeySel) payload.send_key=sendKeySel.value;
   const langSel=$('settingsLanguage');
   if(langSel) payload.language=langSel.value;
+  const gameModeCb=$('settingsGameModeEnabled');
+  if(gameModeCb) payload.game_mode_enabled=gameModeCb.checked;
   const showUsageCb=$('settingsShowTokenUsage');
   if(showUsageCb) payload.show_token_usage=showUsageCb.checked;
   const showTpsCb=$('settingsShowTps');
@@ -5943,6 +6009,10 @@ async function _autosavePreferencesSettings(payload){
       if(typeof clearMessageRenderCache==='function') clearMessageRenderCache();
       if(typeof renderMessages==='function') renderMessages();
     }
+    if(payload&&payload.game_mode_enabled!==undefined){
+      window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
+      syncGameModeButton();
+    }
     _settingsPreferencesAutosaveRetryPayload=null;
     _setPreferencesAutosaveStatus('saved');
     // Only clear the global dirty flag and hide the unsaved-changes bar when
@@ -5973,7 +6043,26 @@ function _retryPreferencesAutosave(){
   _autosavePreferencesSettings(payload);
 }
 
+function _setPreferencesControlsBusy(busy){
+  const pane=$('settingsPanePreferences');
+  if(!pane) return;
+  pane.classList.toggle('settings-pane-loading',!!busy);
+  pane.setAttribute('aria-busy',String(!!busy));
+  pane.querySelectorAll('input,select,textarea,button').forEach(el=>{
+    if(busy){
+      if(!el.disabled){
+        el.dataset.settingsLoadingDisabled='1';
+        el.disabled=true;
+      }
+    }else if(el.dataset.settingsLoadingDisabled==='1'){
+      el.disabled=false;
+      delete el.dataset.settingsLoadingDisabled;
+    }
+  });
+}
+
 async function loadSettingsPanel(){
+  _setPreferencesControlsBusy(true);
   try{
     const settings=await api('/api/settings');
     // Populate the version badges from the server — keeps them in sync with git
@@ -6108,6 +6197,17 @@ async function loadSettingsPanel(){
       langSel.value=resolvedLanguage;
       langSel.addEventListener('change',_schedulePreferencesAutosave,{once:false});
     }
+    window._gameModeEnabled=!!settings.game_mode_enabled;
+    syncGameModeButton();
+    const gameModeCb=$('settingsGameModeEnabled');
+    if(gameModeCb){
+      gameModeCb.checked=window._gameModeEnabled;
+      gameModeCb.addEventListener('change',function(){
+        window._gameModeEnabled=this.checked;
+        syncGameModeButton();
+        _schedulePreferencesAutosave();
+      },{once:false});
+    }
     const showUsageCb=$('settingsShowTokenUsage');
     if(showUsageCb){showUsageCb.checked=!!settings.show_token_usage;showUsageCb.addEventListener('change',_schedulePreferencesAutosave,{once:false});}
     const showTpsCb=$('settingsShowTps');
@@ -6213,6 +6313,7 @@ async function loadSettingsPanel(){
         botNameTimer=setTimeout(_schedulePreferencesAutosave,500);
       },{once:false});
     }
+    _setPreferencesControlsBusy(false);
     // Password field: always blank (we don't send hash back)
     const pwField=$('settingsPassword');
     if(pwField){pwField.value='';pwField.addEventListener('input',_markSettingsDirty,{once:false});}
@@ -6249,6 +6350,7 @@ async function loadSettingsPanel(){
     loadPluginsPanel(); // load plugin/hook visibility in background
     switchSettingsSection(_settingsSection);
   }catch(e){
+    _setPreferencesControlsBusy(false);
     showToast(t('settings_load_failed')+e.message);
   }
 }
@@ -6660,6 +6762,17 @@ function _renderAppstoreHome(container) {
         '<p class="appstore-hero-sub">Erweitere Sidekick mit Plugins, Gateways und Tools. Ein Klick – los geht\'s.</p>' +
       '</div>' +
     '</div>';
+
+  if (_appstoreAppsCache.length === 0) {
+    html +=
+      '<div class="appstore-empty-state">' +
+        '<div class="appstore-empty-state-icon">📦</div>' +
+        '<div class="appstore-empty-state-title">' + _appstoreText('appstore_empty_catalog_title', 'Keine Apps verfügbar') + '</div>' +
+        '<div class="appstore-empty-state-desc">' +
+          _appstoreText('appstore_empty_catalog_desc', 'Dieser Appstore-Katalog enthält aktuell keine Apps. Prüfe dein aktives Profil oder füge Manifestdateien hinzu.') +
+        '</div>' +
+      '</div>';
+  }
 
   // Featured apps (empfohlene Apps mit featured:true)
   const featuredApps = _appstoreAppsCache.filter(a => a.featured === true);
@@ -8369,6 +8482,8 @@ function _applySavedSettingsUi(saved, body, opts){
   window._notificationsEnabled=body.notifications_enabled;
   window._showThinking=body.show_thinking!==false;
   window._simplifiedToolCalling=body.simplified_tool_calling!==false;
+  window._gameModeEnabled=!!body.game_mode_enabled;
+  syncGameModeButton();
   window._sessionJumpButtonsEnabled=!!body.session_jump_buttons;
   if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
   window._sidebarDensity=sidebarDensity==='detailed'?'detailed':'compact';
@@ -8472,6 +8587,7 @@ async function saveSettings(andClose){
   body.session_jump_buttons=!!($('settingsSessionJumpButtons')||{}).checked;
   body.session_endless_scroll=!!($('settingsSessionEndlessScroll')||{}).checked;
   body.language=language;
+  body.game_mode_enabled=!!($('settingsGameModeEnabled')||{}).checked;
   body.show_token_usage=showTokenUsage;
   body.show_tps=showTps;
   body.simplified_tool_calling=!!($('settingsSimplifiedToolCalling')||{}).checked;

@@ -98,6 +98,20 @@
     </button>
     <div class="titlebar-space-dropdown" id="titlebarSpaceDropdown" hidden></div>
   </div>
+  <script>
+    (function initInitialSpaceLabel(){
+      var slug = '';
+      try { slug = (new URLSearchParams(window.location.search || '').get('workspace') || '').trim().toLowerCase(); } catch (_) {}
+      if (!slug) {
+        try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
+      }
+      if (!slug) return;
+      var name = document.getElementById('titlebarSpaceName');
+      var btn = document.getElementById('titlebarSpaceBtn');
+      if (name) name.textContent = slug;
+      if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
+    })();
+  </script>
   <div class="titlebar-actions" id="titlebarActions">
     <div class="titlebar-lang-selector" id="titlebarLangSelector">
       <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
@@ -115,6 +129,9 @@
         <button class="lang-option" data-lang="zh" role="menuitem" onclick="switchLang('zh')">🇨🇳</button>
       </div>
     </div>
+    <button class="titlebar-action-btn game-mode-toggle-btn has-tooltip has-tooltip--bottom" id="btnGameModeToggle" onclick="toggleGameMode()" type="button" data-tooltip="Game Mode" data-i18n-title="game_mode_toggle" data-i18n-aria-label="game_mode_toggle" aria-label="Game Mode" aria-pressed="false">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 18v2"/><path d="M18 18v2"/></svg>
+    </button>
     <button class="titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn" id="btnCastToggle" type="button" data-tooltip="Hub Cast" aria-label="Hub Cast" onclick="toggleHubCast()" style="display:none">
       <span id="castStatusIcon">📺</span>
     </button>
@@ -176,7 +193,9 @@
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="insights" data-label="Insights" onclick="switchPanel('insights',{fromRailClick:true})" data-tooltip="Insights" data-i18n-title="tab_insights"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></button>
       <button class="nav-tab dashboard-link has-tooltip has-tooltip--bottom" id="dashboardMobileBtn" data-dashboard-link data-label="Dashboard" style="display:none" onclick="openNovaDashboard(event)" data-tooltip="Nova Dashboard" data-i18n-title="tab_dashboard"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg><span class="dashboard-external-badge" aria-hidden="true"></span></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="logs" data-label="Logs" onclick="switchPanel('logs',{fromRailClick:true})" data-tooltip="Logs" data-i18n-title="tab_logs"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M8 9h2"/></svg></button>
+      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="gmail" data-label="Gmail" onclick="switchPanel('gmail',{fromRailClick:true})" data-tooltip="Gmail" data-i18n-title="Gmail" aria-label="Gmail"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/></svg></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="browser" data-label="Websearch" onclick="switchPanel('browser',{fromRailClick:true})" data-tooltip="Websearch"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18"/><circle cx="7" cy="6" r="0.75" fill="currentColor" stroke="none"/><circle cx="10" cy="6" r="0.75" fill="currentColor" stroke="none"/><path d="M12 11l4 4"/><path d="M14 11h2v2"/></svg></button>
+      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="discord" data-label="Discord" onclick="switchPanel('discord',{fromRailClick:true})" data-tooltip="Discord" data-i18n-title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.66V19a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1.66"/></svg></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="appstore" data-label="Appstore" onclick="switchPanel('appstore',{fromRailClick:true})" data-tooltip="Appstore" aria-label="Appstore"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.3 2.1 7L12 16.2 5.4 20.3l2.1-7L2 9h7z"/><circle cx="12" cy="12" r="2" fill="currentColor" opacity=".4"/></svg></button>
       <!-- Settings button mirrored here for mobile (rail is desktop-only via @media >=768px). Keep in sync with rail entry. -->
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
@@ -186,6 +205,20 @@
         <span class="nav-tab-space-name" id="sidebarSpaceName">default</span>
       </button>
       <div class="sidebar-space-dropdown" id="sidebarSpaceDropdown" hidden></div>
+      <script>
+        (function initInitialSidebarSpaceLabel(){
+          var slug = '';
+          try { slug = (new URLSearchParams(window.location.search || '').get('workspace') || '').trim().toLowerCase(); } catch (_) {}
+          if (!slug) {
+            try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
+          }
+          if (!slug) return;
+          var name = document.getElementById('sidebarSpaceName');
+          var btn = document.getElementById('sidebarSpaceBtn');
+          if (name) name.textContent = slug;
+          if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
+        })();
+      </script>
     </div>
     <!-- Chat panel -->
     <div class="panel-view active" id="panelChat">
@@ -273,14 +306,14 @@
         <div class="agents-wizard hidden" id="agentsWizard">
           <!-- Step 1: Welcome -->
           <div class="agents-wizard-step" id="wizardStep1">
-            <div class="agents-wizard-icon">ðŸ¤–</div>
+            <div class="agents-wizard-icon">🤖</div>
             <h1 class="agents-wizard-title">Willkommen bei deinen KI-Agenten</h1>
             <p class="agents-wizard-desc">Deine persönlichen Assistenten für jede Aufgabe. Wähle aus vorgefertigten Spezialisten oder erstelle eigene Agenten – ganz nach deinem Bedarf.</p>
             <div class="agents-wizard-features">
-              <div class="agents-wizard-feature"><span>ðŸ’¬</span> Chatte mit jedem Agenten wie mit einem Freund</div>
-              <div class="agents-wizard-feature"><span>ðŸ§ </span> Jeder Agent hat eigene Persönlichkeit & Erinnerungen</div>
-              <div class="agents-wizard-feature"><span>âš¡</span> Agenten arbeiten autonom im Terminal & Workspace</div>
-              <div class="agents-wizard-feature"><span>ðŸ”§</span> Spezialisiert auf Code, Social Media, Recherche & mehr</div>
+              <div class="agents-wizard-feature"><span>💬</span> Chatte mit jedem Agenten wie mit einem Freund</div>
+              <div class="agents-wizard-feature"><span>🧠</span> Jeder Agent hat eigene Persönlichkeit & Erinnerungen</div>
+              <div class="agents-wizard-feature"><span>⚡</span> Agenten arbeiten autonom im Terminal & Workspace</div>
+              <div class="agents-wizard-feature"><span>🔧</span> Spezialisiert auf Code, Social Media, Recherche & mehr</div>
             </div>
             <button class="agents-wizard-btn primary" onclick="wizardNext()">Los geht's →</button>
           </div>
@@ -295,7 +328,7 @@
               <div style="color:var(--muted);padding:20px;text-align:center">Lade Vorlagen...</div>
             </div>
             <div class="agents-wizard-actions">
-              <button class="agents-wizard-btn" onclick="wizardPrev()">â† Zurück</button>
+              <button class="agents-wizard-btn" onclick="wizardPrev()">← Zurück</button>
               <button class="agents-wizard-btn primary" id="wizardFinishBtn" onclick="completeSplash()" disabled>Fertig einrichten</button>
             </div>
             <div style="margin-top:8px;text-align:center">
@@ -316,7 +349,7 @@
               <button class="agents-chat-back" onclick="closeAgentChat()" title="Back" style="border:none;background:none;color:var(--muted);cursor:pointer;padding:4px;margin-right:4px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
               </button>
-              <span class="agents-chat-avatar" id="agentsChatAvatar" style="font-size:20px;margin-right:6px">ðŸ¤–</span>
+              <span class="agents-chat-avatar" id="agentsChatAvatar" style="font-size:20px;margin-right:6px">🤖</span>
               <div style="flex:1">
                 <div class="agents-chat-name" id="agentsChatName" style="font-size:13px;font-weight:600">Agent</div>
                 <div class="agents-chat-sub" id="agentsChatSub" style="font-size:11px;color:var(--muted)">0 messages</div>
@@ -328,7 +361,7 @@
               <textarea id="agentsChatInput" placeholder="Nachricht an Agenten..." onkeydown="handleChatKeydown(event)" rows="1" style="width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;font-family:inherit;resize:none;outline:none"></textarea>
               <div style="display:flex;justify-content:flex-end;margin-top:4px;gap:4px">
                 <button class="agents-chat-send-btn" onclick="sendAgentMessage()" title="Send to agent" style="padding:4px 12px;border:none;border-radius:4px;background:var(--accent);color:var(--bg);font-size:12px;cursor:pointer">Send</button>
-                <button onclick="sendAgentWorkspaceRequest()" title="Send to workspace" style="padding:4px 12px;border:1px solid var(--accent);border-radius:4px;background:transparent;color:var(--accent);font-size:12px;cursor:pointer">âš¡ Execute</button>
+                <button onclick="sendAgentWorkspaceRequest()" title="Send to workspace" style="padding:4px 12px;border:1px solid var(--accent);border-radius:4px;background:transparent;color:var(--accent);font-size:12px;cursor:pointer">⚡ Execute</button>
               </div>
             </div>
           </div>
@@ -336,13 +369,13 @@
           <div class="agents-workspace-view hidden" id="agentsWorkspaceView" style="flex:1;display:flex;flex-direction:column;min-width:400px;background:var(--bg);border-left:1px solid var(--border)">
             <!-- Workspace Toolbar -->
             <div class="agents-workspace-toolbar">
-              <span class="agents-chat-avatar" id="agentsWsAvatar" style="font-size:18px">ðŸ¤–</span>
+              <span class="agents-chat-avatar" id="agentsWsAvatar" style="font-size:18px">🤖</span>
               <span style="font-size:12px;font-weight:600" id="agentsWsName">Agent</span>
-              <span style="font-size:11px;color:var(--muted);margin:0 4px">Â·</span>
+              <span style="font-size:11px;color:var(--muted);margin:0 4px">·</span>
               <span style="font-size:11px;color:var(--muted)" id="agentsWsWorkdir">~</span>
               <span style="flex:1"></span>
               <span class="ws-status" id="agentsWsStatus">initializing</span>
-              <button onclick="stopAgentWorkspace()" title="Stop workspace" style="border:none;background:none;color:var(--muted);cursor:pointer;padding:2px;margin-left:4px;font-size:16px">â¹</button>
+              <button onclick="stopAgentWorkspace()" title="Stop workspace" style="border:none;background:none;color:var(--muted);cursor:pointer;padding:2px;margin-left:4px;font-size:16px">⏹</button>
             </div>
             <!-- Workspace Terminal -->
             <div class="agents-workspace-terminal" id="agentsWsTerminal">
@@ -358,6 +391,20 @@
             <div class="agents-workspace-timeline" id="agentsWsTimeline">
             </div>
           </div>
+          <aside class="agents-workspace-info" id="agentsChatSidebar" aria-label="Agent info and chat history">
+            <section class="agents-sidebar-section">
+              <div class="agents-sidebar-section-title">Profil</div>
+              <div id="agentsProfileInfo" class="agents-sidebar-field">
+                <span style="font-size:12px;color:var(--muted)">Agent waehlen...</span>
+              </div>
+            </section>
+            <section class="agents-sidebar-section">
+              <div class="agents-sidebar-section-title">Chats</div>
+              <div id="agentsSessionList">
+                <div style="padding:8px;font-size:12px;color:var(--muted);text-align:center">Noch keine Chats</div>
+              </div>
+            </section>
+          </aside>
         </div>
       </div>
     </div>
@@ -536,16 +583,16 @@
       </div>
       <div style="display:flex;flex-direction:column;height:100%;overflow:hidden;">
         <div class="evey-tabs" style="display:flex;gap:2px;padding:4px 8px;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;">
-          <button class="evey-tab evey-active" data-evey-tab="health" onclick="eveySwitchTab('health')">ðŸ¥ Health</button>
-          <button class="evey-tab" data-evey-tab="telemetry" onclick="eveySwitchTab('telemetry')">ðŸ“Š Telemetry</button>
-          <button class="evey-tab" data-evey-tab="learner" onclick="eveySwitchTab('learner')">ðŸ“– Learner</button>
-          <button class="evey-tab" data-evey-tab="validate" onclick="eveySwitchTab('validate')">âœ… Validate</button>
-          <button class="evey-tab" data-evey-tab="delegation" onclick="eveySwitchTab('delegation')">ðŸŽ¯ Delegation</button>
-          <button class="evey-tab" data-evey-tab="memory" onclick="eveySwitchTab('memory')">ðŸ§  Memory</button>
-          <button class="evey-tab" data-evey-tab="habits" onclick="eveySwitchTab('habits')">â° Habits</button>
-          <button class="evey-tab" data-evey-tab="cache" onclick="eveySwitchTab('cache')">ðŸ’¾ Cache</button>
-          <button class="evey-tab" data-evey-tab="schedule" onclick="eveySwitchTab('schedule')">ðŸ“… Schedule</button>
-          <button class="evey-tab" data-evey-tab="watchdog" onclick="eveySwitchTab('watchdog')">ðŸ›¡ï¸ Watchdog</button>
+          <button class="evey-tab evey-active" data-evey-tab="health" onclick="eveySwitchTab('health')">🏥 Health</button>
+          <button class="evey-tab" data-evey-tab="telemetry" onclick="eveySwitchTab('telemetry')">📊 Telemetry</button>
+          <button class="evey-tab" data-evey-tab="learner" onclick="eveySwitchTab('learner')">📖 Learner</button>
+          <button class="evey-tab" data-evey-tab="validate" onclick="eveySwitchTab('validate')">✅ Validate</button>
+          <button class="evey-tab" data-evey-tab="delegation" onclick="eveySwitchTab('delegation')">🎯 Delegation</button>
+          <button class="evey-tab" data-evey-tab="memory" onclick="eveySwitchTab('memory')">🧠 Memory</button>
+          <button class="evey-tab" data-evey-tab="habits" onclick="eveySwitchTab('habits')">⏰ Habits</button>
+          <button class="evey-tab" data-evey-tab="cache" onclick="eveySwitchTab('cache')">💾 Cache</button>
+          <button class="evey-tab" data-evey-tab="schedule" onclick="eveySwitchTab('schedule')">📅 Schedule</button>
+          <button class="evey-tab" data-evey-tab="watchdog" onclick="eveySwitchTab('watchdog')">🛡️ Watchdog</button>
         </div>
         <div id="eveyContent" style="flex:1;overflow-y:auto;padding:12px;"><div style="color:var(--muted);font-size:12px">Loading...</div></div>
       </div>
@@ -636,9 +683,10 @@
         </button>
       </div>
     </div>
+    <div class="open-files-bar" id="openFilesBar" style="display:none" role="tablist" aria-label="Open referenced files"></div>
     <div class="messages" id="messages">
       <button id="jumpToSessionStartBtn" style="display:none"></button>
-      <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label"><span aria-hidden="true">â†“</span><span class="session-jump-btn__text" data-i18n="session_jump_end">End</span></button>
+      <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label"><span aria-hidden="true">↓</span><span class="session-jump-btn__text" data-i18n="session_jump_end">End</span></button>
       <div class="empty-state" id="emptyState">
         <div class="empty-logo"><img src="static/favicon.svg" width="80" height="80" alt="Sidekick logo"></div>
         <h2 data-i18n="empty_title">What can I help with?</h2>
@@ -716,7 +764,7 @@
           <div class="composer-terminal-header">
             <div class="composer-terminal-title">
               <span data-i18n="terminal_title">Terminal</span>
-              <span class="composer-terminal-dot" aria-hidden="true">Â·</span>
+              <span class="composer-terminal-dot" aria-hidden="true">·</span>
               <span id="terminalWorkspaceLabel"></span>
             </div>
             <div class="composer-terminal-actions">
@@ -735,7 +783,7 @@
           <div class="composer-terminal-dock-title">
             <span class="composer-terminal-dock-dot" aria-hidden="true"></span>
             <span data-i18n="terminal_title">Terminal</span>
-            <span class="composer-terminal-dot" aria-hidden="true">Â·</span>
+            <span class="composer-terminal-dot" aria-hidden="true">·</span>
             <span id="terminalDockWorkspaceLabel"></span>
           </div>
           <div class="composer-terminal-actions">
@@ -839,7 +887,7 @@
               </svg>
             </button>
             <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" title="YOLO mode — click to disable" data-i18n-title="yolo_pill_title_active">
-              <span class="yolo-pill-icon" aria-hidden="true">âš¡</span>
+              <span class="yolo-pill-icon" aria-hidden="true">⚡</span>
               <span class="yolo-pill-label" data-i18n="yolo_pill_label">YOLO</span>
             </button>
             <div id="profileChipWrap" class="composer-profile-wrap">
@@ -961,6 +1009,14 @@
             <button class="ctx-info-btn has-tooltip has-tooltip--left" id="btnContextInfo" type="button" onclick="toggleContextInfoPanel()" data-tooltip="What's in context?" aria-label="Show context info" title="Context breakdown">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             </button>
+            <div class="context-panel" id="contextPanel" role="dialog" aria-labelledby="contextPanelTitle" hidden>
+              <div class="context-panel-header">
+                <div class="context-panel-title" id="contextPanelTitle">Context breakdown</div>
+                <button class="context-panel-close" type="button" onclick="toggleContextInfoPanel()" aria-label="Close context info">&times;</button>
+              </div>
+              <div class="context-panel-loading" id="contextPanelLoading" style="display:none">Loading context...</div>
+              <div class="context-panel-body" id="contextPanelBody"></div>
+            </div>
             <button class="send-btn has-tooltip has-tooltip--left" id="btnSend" data-tooltip="Send message" disabled>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             </button>
@@ -1257,7 +1313,7 @@
         </div>
         <div class="main-view-actions">
           <button class="panel-head-btn has-tooltip has-tooltip--bottom" id="btnKanbanCreateBoard" onclick="openKanbanCreateBoard()" data-tooltip="New board" data-i18n-title="kanban_new_board" aria-label="New board"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="17.5" y1="14" x2="17.5" y2="21"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg></button>
-          <button class="panel-head-btn has-tooltip has-tooltip--bottom kanban-nudge-dispatch-btn" id="btnKanbanPreviewDispatcher" onclick="nudgeKanbanDispatcher()" data-tooltip="Preview dispatcher (dry-run)" data-i18n-title="kanban_nudge_dispatcher" aria-label="Preview dispatcher (dry-run)">â–¶</button>
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom kanban-nudge-dispatch-btn" id="btnKanbanPreviewDispatcher" onclick="nudgeKanbanDispatcher()" data-tooltip="Preview dispatcher (dry-run)" data-i18n-title="kanban_nudge_dispatcher" aria-label="Preview dispatcher (dry-run)">▶</button>
           <button class="panel-head-btn has-tooltip has-tooltip--bottom kanban-run-dispatch-btn" id="btnKanbanRunDispatcher" onclick="runKanbanDispatcher()" data-tooltip="Run dispatcher — claim Ready tasks" data-i18n-title="kanban_run_dispatcher" aria-label="Run dispatcher"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></button>
         </div>
       </div>
@@ -1634,6 +1690,13 @@
             </div>
             <div class="settings-field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsGameModeEnabled" style="width:15px;height:15px;accent-color:var(--accent)">
+                <span data-i18n="settings_label_game_mode">Game Mode</span>
+              </label>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_game_mode">Blocks local model and image generation work so GPU/VRAM stays free for games.</div>
+            </div>
+            <div class="settings-field">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="settingsSoundEnabled" style="width:15px;height:15px;accent-color:var(--accent)">
                 <span data-i18n="settings_label_sound">Notification sound</span>
               </label>
@@ -1947,6 +2010,15 @@
     <!-- â”€â”€ Gmail AI Content â”€â”€ -->
     <div class="rightpanel-content rightpanel-content--gmail">
         <div class="gmail-ai-panel" style="display:flex;flex-direction:column;gap:8px;padding:8px;overflow-y:auto;flex:1;height:100%;">
+            <div class="gmail-ai-model-bar">
+                <label class="gmail-ai-model-label" for="gmailAIModelSelect">AI model</label>
+                <select id="gmailAIModelSelect" class="gmail-ai-model-select" onchange="gmailAISetModel(this.value)" title="Gmail AI model">
+                    <option value="llama3.2:latest">llama3.2:latest</option>
+                    <option value="qwen3:4b">qwen3:4b</option>
+                    <option value="qwen2.5-coder:7b">qwen2.5-coder:7b</option>
+                    <option value="mistral:latest">mistral:latest</option>
+                </select>
+            </div>
             <!-- AI Summary Card -->
             <div class="gmail-ai-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
                 <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;">
@@ -2022,10 +2094,10 @@
             <div class="mem-tools-section">
                 <div class="mem-tools-section-title">Actions</div>
                 <div class="mem-tools-actions">
-                    <button class="mem-tools-btn" onclick="copyMemoryContent()">ðŸ“‹ Copy</button>
-                    <button class="mem-tools-btn" onclick="exportMemoryMD()">ðŸ“¤ Export MD</button>
-                    <button class="mem-tools-btn" onclick="openMemorySearch()">ðŸ”Ž Search</button>
-                    <button class="mem-tools-btn" onclick="enrichMemoryWithAI()">ðŸ¤– AI Enrich</button>
+                    <button class="mem-tools-btn" onclick="copyMemoryContent()">📋 Copy</button>
+                    <button class="mem-tools-btn" onclick="exportMemoryMD()">📤 Export MD</button>
+                    <button class="mem-tools-btn" onclick="openMemorySearch()">🔎 Search</button>
+                    <button class="mem-tools-btn" onclick="enrichMemoryWithAI()">🤖 AI Enrich</button>
                 </div>
             </div>
             <!-- Context -->
@@ -2120,7 +2192,7 @@
     <div class="kanban-modal-row-inline">
       <div class="kanban-modal-row">
         <label for="kanbanBoardModalIcon" data-i18n="kanban_board_icon">Icon (emoji, optional)</label>
-        <input type="text" id="kanbanBoardModalIcon" maxlength="4" placeholder="ðŸ“‹" autocomplete="off">
+        <input type="text" id="kanbanBoardModalIcon" maxlength="4" placeholder="📋" autocomplete="off">
       </div>
       <div class="kanban-modal-row">
         <label for="kanbanBoardModalColor" data-i18n="kanban_board_color">Color (optional)</label>
@@ -2184,7 +2256,7 @@
 <!-- Agents Creator Dialog (Custom Agent via LLM) -->
 <div class="agents-edit-modal hidden" id="agentsCreatorModal" onclick="if(event.target===this)closeAgentCreator()">
   <div class="agents-edit-modal-content" style="max-width:600px" role="dialog" aria-modal="true" aria-labelledby="agentsCreatorTitle">
-    <div class="agents-edit-modal-title" id="agentsCreatorTitle">ðŸŽ¨ Eigenen Agenten erstellen</div>
+    <div class="agents-edit-modal-title" id="agentsCreatorTitle">🎨 Eigenen Agenten erstellen</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.5">
       Beantworte einfach die Fragen – eine KI hilft dir, den perfekten Agenten für deine Bedürfnisse zu designen.
     </div>
@@ -2216,7 +2288,7 @@
     </div>
     <div class="agents-edit-field">
       <label for="agentsEditEmoji">Avatar (Emoji)</label>
-      <input type="text" id="agentsEditEmoji" placeholder="ðŸ¤–" maxlength="4">
+      <input type="text" id="agentsEditEmoji" placeholder="🤖" maxlength="4">
     </div>
     <div class="agents-edit-field">
       <label for="agentsEditColor">Farbe</label>

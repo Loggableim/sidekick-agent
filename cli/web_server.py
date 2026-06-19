@@ -98,6 +98,41 @@ app = FastAPI(title="Sidekick Agent", version=__version__)
 _CRON_TICKER_STARTED = False
 
 
+def _is_asyncio_client_disconnect_context(context: dict[str, Any] | None) -> bool:
+    """Return True for event-loop callback errors caused by closed clients."""
+    exc = (context or {}).get("exception")
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)):
+        return True
+    if isinstance(exc, OSError):
+        if getattr(exc, "errno", None) in (32, 54, 104, 110):
+            return True
+        if getattr(exc, "winerror", None) in (10053, 10054, 10058):
+            return True
+    return False
+
+
+def _install_asyncio_disconnect_exception_filter() -> None:
+    """Suppress noisy asyncio transport tracebacks for normal disconnects."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.get_event_loop()
+    if getattr(loop, "_sidekick_disconnect_exception_filter", False):
+        return
+    previous_handler = loop.get_exception_handler()
+
+    def _handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        if _is_asyncio_client_disconnect_context(context):
+            return
+        if previous_handler is not None:
+            previous_handler(loop, context)
+            return
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
+    setattr(loop, "_sidekick_disconnect_exception_filter", True)
+
+
 def _start_dashboard_cron_ticker() -> None:
     """Start the file-backed Sidekick cron scheduler for dashboard-only runs."""
     global _CRON_TICKER_STARTED
@@ -125,6 +160,7 @@ def _start_dashboard_cron_ticker() -> None:
     }
 
 
+app.router.on_startup.append(_install_asyncio_disconnect_exception_filter)
 app.router.on_startup.append(_start_dashboard_cron_ticker)
 
 
@@ -156,17 +192,35 @@ def _webui_version_token() -> str:
 _SESSION_TOKEN = secrets.token_urlsafe(32)
 _SESSION_HEADER_NAME = "X-Hermes-Session-Token"
 
+_STREAMING_EXACT_PATHS: frozenset[str] = frozenset({
+    "/api/chat/stream",
+    "/api/terminal/stream",
+    "/api/sessions/gateway/stream",
+    "/api/approval/stream",
+    "/api/clarify/stream",
+    "/api/browser/events",
+    "/api/nova/events",
+    "/api/gmail/ai/summary/stream",
+    "/api/kanban/events/stream",
+})
+_STREAMING_PREFIXES: tuple[str, ...] = (
+    "/api/agents/workspace/stream/",
+)
+
+
+def _is_streaming_api_path(path: str) -> bool:
+    """True for long-lived SSE endpoints that must not use buffered proxying."""
+    clean_path = str(path or "").split("?", 1)[0].rstrip("/")
+    return clean_path in _STREAMING_EXACT_PATHS or any(
+        clean_path.startswith(prefix) for prefix in _STREAMING_PREFIXES
+    )
+
 
 def _allows_query_session_token(request: Request) -> bool:
     """EventSource cannot send custom headers, so allow token= for SSE only."""
     if request.method.upper() != "GET":
         return False
-    path = request.url.path
-    return (
-        path.endswith("/stream")
-        or "/stream/" in path
-        or path.endswith("/events")
-    )
+    return _is_streaming_api_path(request.url.path)
 
 # In-browser Chat tab (/chat, /api/pty, …).  Off unless ``sidekick dashboard --tui``
 # or HERMES_DASHBOARD_TUI=1.  Set from :func:`start_server`.
@@ -1175,7 +1229,9 @@ def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
     finally:
         clear_session_dir()
     for session in sessions:
-        session.setdefault("workspace_slug", slug)
+        sid = str(session.get("session_id") or "").strip()
+        path, normalized_slug = _space_session_path(slug, sid) if sid else (None, slug)
+        _repair_space_session_slug(session, normalized_slug, path if path and path.exists() else None)
         _repair_stale_space_session_from_listing(session, slug)
     return sessions
 
@@ -1236,7 +1292,7 @@ def _repair_stale_space_index(slug: str, sessions_dir: Path) -> int:
             detail["pending_attachments"] = []
             detail["pending_started_at"] = None
             detail["message_count"] = _session_message_count(detail)
-            detail.setdefault("workspace_slug", slug)
+            _normalize_space_session_slug(detail, slug)
             _write_json_file(path, detail)
             row["message_count"] = detail["message_count"]
         row["active_stream_id"] = None
@@ -1253,7 +1309,7 @@ def _repair_stale_space_index(slug: str, sessions_dir: Path) -> int:
 
 def _is_space_scoped_request(request: Request) -> bool:
     slug = _workspace_slug_from_request(request)
-    return bool(slug and slug != "default")
+    return bool(slug)
 
 
 def _space_session_path(slug: str, session_id: str) -> tuple[Path | None, str]:
@@ -1280,6 +1336,34 @@ def _write_json_file(path: Path, data: Any) -> None:
 
 def _session_message_count(session: dict[str, Any]) -> int:
     return len([m for m in session.get("messages") or [] if isinstance(m, dict) and m.get("role")])
+
+
+def _normalize_space_session_slug(session: dict[str, Any], slug: str) -> bool:
+    """Stamp a Space-owned session with the slug of its session directory."""
+    if not isinstance(session, dict):
+        return False
+    normalized = str(slug or "").strip().lower()
+    if not normalized:
+        return False
+    if session.get("workspace_slug") == normalized:
+        return False
+    session["workspace_slug"] = normalized
+    return True
+
+
+def _repair_space_session_slug(session: dict[str, Any], slug: str, path: Path | None = None) -> bool:
+    changed = _normalize_space_session_slug(session, slug)
+    if changed and path is not None:
+        try:
+            _write_json_file(path, session)
+        except Exception:
+            _log.debug("Failed to repair workspace_slug for %s", path, exc_info=True)
+    if changed and session.get("session_id"):
+        try:
+            _update_space_session_index(slug, session)
+        except Exception:
+            _log.debug("Failed to update repaired workspace_slug index row", exc_info=True)
+    return changed
 
 
 def _repair_stale_space_session_from_listing(session: dict[str, Any], slug: str) -> bool:
@@ -1339,7 +1423,7 @@ def _repair_stale_space_session_from_listing(session: dict[str, Any], slug: str)
             detail["pending_attachments"] = []
             detail["pending_started_at"] = None
             detail["message_count"] = _session_message_count(detail)
-            detail.setdefault("workspace_slug", normalized_slug)
+            _normalize_space_session_slug(detail, normalized_slug)
             _write_json_file(path, detail)
             _update_space_session_index(normalized_slug, detail)
             session.update(
@@ -1483,7 +1567,7 @@ def _slice_session_messages(session: dict[str, Any], *, load_messages: bool, msg
 @app.get("/api/session")
 async def get_space_session_detail(request: Request):
     workspace_slug = _workspace_slug_from_request(request)
-    if not workspace_slug or workspace_slug == "default":
+    if not workspace_slug:
         return await _proxy_request_to_stdlib(request)
 
     sid = str(request.query_params.get("session_id") or "").strip()
@@ -1530,7 +1614,7 @@ async def get_space_session_detail(request: Request):
     payload["message_count"] = _session_message_count(session)
     payload["_messages_truncated"] = truncated
     payload["_messages_offset"] = offset
-    payload.setdefault("workspace_slug", slug)
+    _repair_space_session_slug(payload, slug, path)
     payload["has_pending_user_message"] = bool(payload.get("pending_user_message"))
     return {"session": payload}
 
@@ -1539,7 +1623,7 @@ async def get_space_session_detail(request: Request):
 async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
     try:
         workspace_slug = _workspace_slug_from_request(request)
-        if workspace_slug and workspace_slug != "default":
+        if workspace_slug:
             sessions = _load_space_sessions(workspace_slug)
             total = len(sessions)
             page = sessions[offset:offset + limit]
@@ -5644,6 +5728,8 @@ def _proxy_sync(
         return e.code, err_body, err_headers, ct
     except urllib.error.URLError as e:
         return 502, json.dumps({"error": f"proxy failed: {e.reason}"}).encode(), {"content-type": "application/json", "connection": "close"}, "application/json"
+    except (ConnectionResetError, TimeoutError, OSError) as e:
+        return 502, json.dumps({"error": f"proxy failed: {e}"}).encode(), {"content-type": "application/json", "connection": "close"}, "application/json"
     finally:
         _PROXY_SEMAPHORE.release()
 
@@ -5661,18 +5747,22 @@ def _proxy_stream(
     for k, v in _forward_request_headers(headers).items():
         req.add_header(k, v)
     req.add_header("Connection", "close")
+    resp = None
     try:
-        with urllib.request.urlopen(req, timeout=_PROXY_STREAM_TIMEOUT_SECONDS) as resp:
-            while True:
-                chunk = resp.readline()
-                if not chunk:
-                    break
-                yield chunk
+        resp = urllib.request.urlopen(req, timeout=_PROXY_STREAM_TIMEOUT_SECONDS)
+        while True:
+            chunk = resp.readline()
+            if not chunk:
+                break
+            yield chunk
     except Exception:
         yield b""
-
-
-_STREAMING_PREFIXES = ("/api/chat/stream", "/api/chat/stream/")
+    finally:
+        if resp is not None:
+            try:
+                resp.close()
+            except Exception:
+                pass
 
 
 async def _proxy_request_to_stdlib(request: Request) -> Response:
@@ -5698,7 +5788,11 @@ async def _proxy_request_to_stdlib(request: Request) -> Response:
     )
 
 
-@app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"])
+@app.api_route(
+    "/api/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
+    include_in_schema=False,
+)
 async def api_stdlib_proxy(request: Request, path: str):
     """Proxy /api/* requests that no FastAPI route matched → stdlib backend."""
     # Build the full path + query string
@@ -5706,7 +5800,7 @@ async def api_stdlib_proxy(request: Request, path: str):
     if request.url.query:
         full_path += "?" + request.url.query
 
-    is_stream = any(full_path.startswith(p) for p in _STREAMING_PREFIXES)
+    is_stream = _is_streaming_api_path(full_path)
 
     if is_stream:
         try:

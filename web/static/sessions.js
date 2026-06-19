@@ -135,6 +135,7 @@ function _saveComposerDraft(sid, text, files) {
   _draftSaveTimer = setTimeout(() => {
     api('/api/session/draft', {
       method: 'POST',
+      logError: false,
       body: JSON.stringify({ session_id: sid, text: text || '', files: files || [] }),
     }).catch(() => {});
   }, _DRAFT_SAVE_DELAY_MS);
@@ -146,6 +147,7 @@ function _saveComposerDraftNow(sid, text, files) {
   clearTimeout(_draftSaveTimer);
   api('/api/session/draft', {
     method: 'POST',
+    logError: false,
     body: JSON.stringify({ session_id: sid, text: text || '', files: files || [] }),
   }).catch(() => {});
 }
@@ -187,6 +189,7 @@ function _clearComposerDraft(sid) {
   clearTimeout(_draftSaveTimer);
   api('/api/session/draft', {
     method: 'POST',
+    logError: false,
     body: JSON.stringify({ session_id: sid, text: '' }),
   }).catch(() => {});
 }
@@ -2061,8 +2064,12 @@ function _sessionBelongsToActiveWorkspace(s){
   }catch(_){}
   active=String(active||'').trim().toLowerCase();
   if(!active) return true;
+  if(typeof window!=='undefined' && typeof window._spaceSessionMatchesSlug==='function'){
+    return window._spaceSessionMatchesSlug(s, active);
+  }
   const sessionSpace=String(s.workspace_slug||s.space_slug||s.space||'').trim().toLowerCase();
-  return sessionSpace===active;
+  if(sessionSpace) return sessionSpace===active;
+  return active==='nova'||active==='default';
 }
 
 function _isOptimisticFirstTurnSessionRow(s){
@@ -3627,8 +3634,6 @@ async function deleteSession(sid){
     if(remaining.sessions&&remaining.sessions.length){
       await loadSession(remaining.sessions[0].session_id);
     }else{
-      const _tt=$('topbarTitle');if(_tt)_tt.textContent=window._botName||'Nova';
-      const _tm=$('topbarMeta');if(_tm)_tm.textContent='Start a new conversation';
       $('msgInner').innerHTML='';
       $('emptyState').style.display='';
       $('fileTree').innerHTML='';

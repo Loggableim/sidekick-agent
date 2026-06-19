@@ -19,6 +19,13 @@ function _shouldTrustUnscopedSessionsForSpace(slug) {
   const s = String(slug || '').toLowerCase();
   return s === DEFAULT_SPACE_SLUG || s === LEGACY_DEFAULT_SPACE_SLUG;
 }
+function _spaceSessionMatchesSlug(session, slug) {
+  const target = String(slug || '').trim().toLowerCase();
+  if (!session || !target) return false;
+  const explicit = String(session.workspace_slug || session.space_slug || session.space || '').trim().toLowerCase();
+  if (explicit) return explicit === target;
+  return _shouldTrustUnscopedSessionsForSpace(target);
+}
 function _spaceSlugFromLocation() {
   try {
     const slug = new URLSearchParams(window.location.search || '').get('workspace');
@@ -95,6 +102,7 @@ function _publishSpaceGlobals() {
     getActiveSpaceQuery,
     loadSpaces,
     selectSpace,
+    _spaceSessionMatchesSlug,
     createSpace,
     deleteSpace,
     renderSpacesPanel,
@@ -136,7 +144,7 @@ function isActiveSpaceLoadKey(key) {
 
 async function loadSpaces() {
   try {
-    const data = await _withSpaceTimeout(api('/api/spaces'), 5000, 'load spaces');
+    const data = await _withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces');
     _spacesCache = data.spaces || [];
     if (data.default_space) {
       DEFAULT_SPACE_SLUG = String(data.default_space || 'nova').toLowerCase() || 'nova';
@@ -243,12 +251,12 @@ async function selectSpace(slug) {
   closeSpaceDropdowns();
   const startedInSpacesPanel = (typeof _currentPanel !== 'undefined' && _currentPanel === 'workspaces');
   const activeSession = (typeof S !== 'undefined' && S && S.session) ? S.session : null;
-  const sessionSpace = activeSession ? String(activeSession.workspace_slug || activeSession.space_slug || activeSession.space || '') : '';
+  const activeSessionInTargetSpace = _spaceSessionMatchesSlug(activeSession, slug);
   const hasActiveSessionForSameSpace = !!(
     slug === _activeSpace &&
     activeSession &&
     activeSession.session_id &&
-    sessionSpace === slug
+    activeSessionInTargetSpace
   );
   if (slug === _activeSpace && hasActiveSessionForSameSpace) {
     updateTitlebarSpace();
@@ -292,17 +300,12 @@ async function selectSpace(slug) {
         if (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)) {
           // Client-side safety filter: only keep sessions matching the active space.
           // Backend also filters, but this catches edge cases from stale index data.
-          if (!_shouldTrustUnscopedSessionsForSpace(slug)) {
-            const listHasWorkspaceSlug = _allSessions.some(s => s && Object.prototype.hasOwnProperty.call(s, 'workspace_slug'));
-            sessionsInSpace = listHasWorkspaceSlug ? _allSessions.filter(s => s && s.workspace_slug === slug) : _allSessions.slice();
-          } else {
-            sessionsInSpace = _allSessions.slice();
-          }
+          sessionsInSpace = _allSessions.filter(s => _spaceSessionMatchesSlug(s, slug));
         }
       } catch (_) {}
     }
     const currentSid = (typeof S !== 'undefined' && S && S.session) ? S.session.session_id : null;
-    const hasCurrentInSpace = !!(currentSid && sessionsInSpace.some(s => s && s.session_id === currentSid));
+    const hasCurrentInSpace = !!(currentSid && activeSessionInTargetSpace && sessionsInSpace.some(s => s && s.session_id === currentSid));
     if (!currentSid || !hasCurrentInSpace) {
       if (sessionsInSpace.length && typeof loadSession === 'function') {
         await _withSpaceTimeout(Promise.resolve(loadSession(sessionsInSpace[0].session_id, {expectedSpace: slug})), 12000, 'load session');
@@ -434,7 +437,7 @@ async function saveSpaceConfig(slug, config) {
 // â”€â”€ Render spaces panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function renderSpacesPanel() {
-  const container = document.getElementById('spacesPanel') || document.getElementById('workspacesPanel');
+  const container = document.getElementById('workspacesPanel');
   if (!container) return;
   loadSpaces().then(spaces => {
     const query = (document.getElementById('workspaceSearch') || {}).value || '';
@@ -465,7 +468,7 @@ function renderSpacesPanel() {
       // Emoji statt/in Ergänzung zum farbigen Punkt
       const icon = document.createElement('span');
       icon.className = 'space-item-icon';
-      icon.textContent = ws.emoji || 'ðŸ“';
+      icon.textContent = ws.emoji || '📁';
       icon.style.cssText = 'font-size:16px;flex-shrink:0;width:20px;text-align:center;';
       item.appendChild(icon);
 
@@ -487,7 +490,7 @@ function renderSpacesPanel() {
       const meta = document.createElement('div');
       meta.className = 'space-item-meta';
       const modelStr = (ws.model && ws.model.default) ? ws.model.default : '';
-      meta.textContent = modelStr ? modelStr + (ws.model && ws.model.provider ? ' Â· ' + ws.model.provider : '') : ws.slug;
+      meta.textContent = modelStr ? modelStr + (ws.model && ws.model.provider ? ' · ' + ws.model.provider : '') : ws.slug;
       info.appendChild(meta);
 
       item.appendChild(info);
@@ -960,7 +963,7 @@ function renderSpaceSelector(containerEl) {
     current.className = 'space-selector-current';
     // Show a colored dot + name
     const emojiSpan = document.createElement('span');
-    emojiSpan.textContent = (active && active.emoji) || 'ðŸ“';
+    emojiSpan.textContent = (active && active.emoji) || '📁';
     emojiSpan.style.cssText = 'font-size:16px;flex-shrink:0;width:20px;text-align:center;';
     const label = document.createElement('span');
     label.textContent = (active && active.name) || _activeSpace || 'Space';
@@ -994,7 +997,7 @@ function toggleSpaceDropdown(selectorEl, spaces) {
     item.className = 'space-selector-item' + (ws.slug === _activeSpace ? ' active' : '');
     // Emoji + name
     const wsEmoji = document.createElement('span');
-    wsEmoji.textContent = ws.emoji || 'ðŸ“';
+    wsEmoji.textContent = ws.emoji || '📁';
     wsEmoji.style.cssText = 'font-size:16px;flex-shrink:0;width:20px;text-align:center;';
     const wsLabel = document.createElement('span');
     wsLabel.textContent = ws.name || ws.slug;
@@ -1043,29 +1046,24 @@ function toggleSpaceDropdown(selectorEl, spaces) {
 // â”€â”€ Update workspace name bar in sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function updateWorkspaceNameBar() {
-  const bar = document.getElementById('workspaceNameBar');
-  const textEl = document.getElementById('workspaceNameText');
-  const dotEl = document.getElementById('workspaceNameDot');
-  if (!bar || !textEl) return;
   // Find workspace data in cache
   const ws = _spacesCache.find(s => s.slug === _activeSpace);
   const name = ws ? (ws.name || ws.slug) : _activeSpace;
   const color = ws ? (ws.color || '#4FC3F7') : '#4FC3F7';
-  textEl.textContent = name;
-  if (dotEl) dotEl.style.background = color;
-  // Color the left border accent
-  bar.style.borderLeftColor = color;
-  // Set a data attribute for CSS theming
-  bar.dataset.color = color;
+  const sidebarName = document.getElementById('sidebarSpaceName');
+  const sidebarBtn = document.getElementById('sidebarSpaceBtn');
+  if (sidebarName) sidebarName.textContent = name;
+  if (sidebarBtn) {
+    sidebarBtn.style.setProperty('--space-color', color);
+    sidebarBtn.dataset.color = color;
+    sidebarBtn.setAttribute('title', `Switch space (${name})`);
+  }
 }
 
 // â”€â”€ Refresh the sidebar space selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function _refreshSidebarSelector() {
-  const container = document.getElementById('spaceSelectorContainer');
-  if (container) {
-    renderSpaceSelector(container);
-  }
+  updateSidebarSpaceSelector();
 }
 
 // â”€â”€ Title bar space dropdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1116,13 +1114,17 @@ function _positionSpaceDropdown(dd, anchor) {
 
 function _renderSpaceDropdownItems(dd, spaces) {
   dd.innerHTML = '';
+  dd.setAttribute('role', 'menu');
   for (const ws of spaces) {
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'titlebar-space-dd-item';
     if (ws.slug === _activeSpace) item.classList.add('active');
     const itemColor = safeSpaceColor(ws.color);
     item.style.setProperty('--item-color', itemColor);
     item.dataset.spaceSlug = ws.slug;
+    item.setAttribute('role', 'menuitem');
+    item.setAttribute('aria-current', ws.slug === _activeSpace ? 'true' : 'false');
     item.innerHTML = `<span class="titlebar-space-dd-swatch"></span><span class="tdd-emoji">${spaceEsc(_spaceEmoji(ws))}</span><span class="tdd-name" style="color:${itemColor}">${spaceEsc(ws.name || ws.slug)}</span>`;
     item.onclick = (ev) => {
       ev.preventDefault();
@@ -1134,9 +1136,13 @@ function _renderSpaceDropdownItems(dd, spaces) {
   }
   const sep = document.createElement('div');
   sep.className = 'titlebar-space-dd-sep';
+  sep.setAttribute('role', 'separator');
   dd.appendChild(sep);
-  const newItem = document.createElement('div');
+  const newItem = document.createElement('button');
+  newItem.type = 'button';
   newItem.className = 'titlebar-space-dd-item titlebar-space-dd-new';
+  newItem.dataset.action = 'new-space';
+  newItem.setAttribute('role', 'menuitem');
   newItem.innerHTML = '<span style="opacity:0.7">+</span><span>New space...</span>';
   newItem.onclick = (ev) => {
     ev.preventDefault();
@@ -1352,14 +1358,10 @@ function toggleSidebarNavLabels() {
 
 // Initialize the space selector in the sidebar once the DOM is ready
 async function _initSpaceSelector() {
-  await loadSpaces();
   _publishSpaceGlobals();
   _bindTitlebarSpaceButton();
   _bindSidebarSpaceButton();
-  const container = document.getElementById('spaceSelectorContainer');
-  if (container && typeof renderSpaceSelector === 'function') {
-    renderSpaceSelector(container);
-  }
+  await loadSpaces();
   updateWorkspaceNameBar();
   updateTitlebarSpace();
   _publishSpaceGlobals();
@@ -1369,9 +1371,5 @@ async function _initSpaceSelector() {
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _initSpaceSelector);
 } else {
-  setTimeout(_initSpaceSelector, 500);  // wait for panels.js etc. to load
+  _initSpaceSelector();
 }
-
-
-
-
