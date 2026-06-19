@@ -3562,6 +3562,15 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/cast/status":
         return _handle_cast_proxy(handler, "/api/cast/status", "GET")
 
+    if parsed.path == "/api/game-mode/status":
+        return j(
+            handler,
+            {
+                "ok": True,
+                "game_mode_enabled": bool(is_game_mode_enabled()),
+            },
+        )
+
     if parsed.path == "/api/browser/state":
         return _handle_browser_state(handler, parsed)
 

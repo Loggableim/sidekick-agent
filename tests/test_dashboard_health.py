@@ -1738,6 +1738,45 @@ def test_settings_post_runs_game_mode_release_when_enabling(monkeypatch, tmp_pat
     assert "local_model_servers" in payload["game_mode_release"]
 
 
+def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(handler, urlparse("/api/game-mode/status"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload == {"ok": True, "game_mode_enabled": True}
+
+
 def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch, tmp_path):
     from web.api import config as cfg
     from web.api import game_mode
