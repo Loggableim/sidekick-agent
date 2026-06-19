@@ -1570,7 +1570,9 @@ function websearchSetHistoryOpen(open) {
 // ── Mode Toggle ────────────────────────────────
 function websearchToggleMode(mode) {
   document.querySelectorAll('.websearch-mode-btn').forEach(b => {
-    b.classList.toggle('is-active', b.dataset.mode === mode);
+    const active = b.dataset.mode === mode;
+    b.classList.toggle('is-active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
   const quickPane = document.getElementById('websearchQuickPane');
   const deepPane = document.getElementById('websearchDeepPane');
@@ -1594,7 +1596,10 @@ function websearchToggleHistory() {
 function websearchToggleSplit() {
   _websearchSplitOpen = !_websearchSplitOpen;
   const btn = document.getElementById('websearchSplitBtn');
-  if (btn) btn.classList.toggle('is-active', _websearchSplitOpen);
+  if (btn) {
+    btn.classList.toggle('is-active', _websearchSplitOpen);
+    btn.setAttribute('aria-pressed', _websearchSplitOpen ? 'true' : 'false');
+  }
   // Toggle browser drawer as the preview pane
   if (_websearchSplitOpen) {
     browserSetDrawerOpen(true, {force: true});

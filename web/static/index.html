@@ -1160,12 +1160,12 @@
 <div id="mainBrowser" class="main-view websearch-panel">
   <!-- Mode Toggle -->
   <div class="websearch-mode-bar">
-    <button class="websearch-mode-btn is-active" data-mode="quick" onclick="websearchToggleMode('quick')">⚡ Quick Search</button>
-    <button class="websearch-mode-btn" data-mode="deep" onclick="websearchToggleMode('deep')">🧠 Deep Research</button>
+    <button class="websearch-mode-btn is-active" data-mode="quick" onclick="websearchToggleMode('quick')" aria-pressed="true">⚡ Quick Search</button>
+    <button class="websearch-mode-btn" data-mode="deep" onclick="websearchToggleMode('deep')" aria-pressed="false">🧠 Deep Research</button>
     <div class="websearch-mode-spacer"></div>
     <button class="websearch-toggle-history" id="websearchToggleHistoryBtn" onclick="websearchToggleHistory()" data-tooltip="Toggle search history" title="Toggle search history">☰</button>
     <span class="browser-session-label" id="browserResearchSessionLabel"></span>
-    <button class="websearch-ctrl-btn" id="websearchSplitBtn" onclick="websearchToggleSplit()" data-tooltip="Show browser preview" title="Show browser preview">□ Split</button>
+    <button class="websearch-ctrl-btn" id="websearchSplitBtn" onclick="websearchToggleSplit()" data-tooltip="Show browser preview" title="Show browser preview" aria-pressed="false">□ Split</button>
   </div>
 
   <!-- Main content: flex row with sidebar + content -->

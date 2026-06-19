@@ -904,6 +904,29 @@ def test_websearch_history_chips_use_current_suggestion_container():
     assert "document.getElementById('websearchChips')" not in browser_js
 
 
+def test_websearch_toggles_expose_pressed_state():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
+
+    assert 'class="websearch-mode-btn is-active" data-mode="quick"' in index_html
+    assert 'aria-pressed="true">⚡ Quick Search</button>' in index_html
+    assert 'class="websearch-mode-btn" data-mode="deep"' in index_html
+    assert 'aria-pressed="false">🧠 Deep Research</button>' in index_html
+    assert 'id="websearchSplitBtn"' in index_html
+    assert 'aria-pressed="false">□ Split</button>' in index_html
+
+    mode_start = browser_js.index("function websearchToggleMode(mode)")
+    history_start = browser_js.index("// ── History Sidebar Toggle", mode_start)
+    mode_body = browser_js[mode_start:history_start]
+    split_start = browser_js.index("function websearchToggleSplit()")
+    quick_start = browser_js.index("// ── Quick Search", split_start)
+    split_body = browser_js[split_start:quick_start]
+
+    assert "const active = b.dataset.mode === mode;" in mode_body
+    assert "b.setAttribute('aria-pressed', active ? 'true' : 'false');" in mode_body
+    assert "btn.setAttribute('aria-pressed', _websearchSplitOpen ? 'true' : 'false');" in split_body
+
+
 def test_compact_layout_toggle_exposes_pressed_state():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
