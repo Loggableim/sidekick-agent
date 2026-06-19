@@ -2080,6 +2080,23 @@ def test_background_stream_requests_keep_owner_workspace():
     assert "ageMs < 10*60*1000" in sessions_js
 
 
+def test_session_list_loads_projects_in_parallel_with_sessions():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    render_start = sessions_js.index("async function renderSessionList()")
+    render_end = sessions_js.index("let _gatewaySSE", render_start)
+    body = sessions_js[render_start:render_end]
+
+    sessions_promise = body.index("const sessionsPromise = _apiWithTimeout(")
+    projects_promise = body.index("const projectsPromise = _apiWithTimeout(")
+    await_sessions = body.index("const sessData = await sessionsPromise;")
+    await_projects = body.index("const projData = await projectsPromise;")
+
+    assert sessions_promise < await_sessions
+    assert projects_promise < await_sessions
+    assert await_sessions < await_projects
+
+
 def test_space_deeplink_initializes_active_workspace():
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     sw_js = Path("web/static/sw.js").read_text(encoding="utf-8")

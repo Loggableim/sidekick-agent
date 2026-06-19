@@ -2196,13 +2196,13 @@ async function renderSessionList(){
     }
     const sessionsUrl = '/api/sessions' + (sessionParams.toString() ? '?' + sessionParams.toString() : '');
     const projectsUrl = '/api/projects' + (projectParams.toString() ? '?' + projectParams.toString() : '');
-    const sessData = await _apiWithTimeout(
+    const sessionsPromise = _apiWithTimeout(
       sessionsUrl,
       {signal: listAbortController.signal},
       8000,
       'sessions'
     );
-    const projData = await _apiWithTimeout(
+    const projectsPromise = _apiWithTimeout(
       projectsUrl,
       {signal: listAbortController.signal},
       2500,
@@ -2212,6 +2212,8 @@ async function renderSessionList(){
       console.warn('renderSessionList projects unavailable, continuing without projects', e);
       return {projects: []};
     });
+    const sessData = await sessionsPromise;
+    const projData = await projectsPromise;
     // Discard stale response — a newer renderSessionList() call superseded us.
     if (_gen !== _renderSessionListGen) return;
     if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
