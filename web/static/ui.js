@@ -3691,7 +3691,10 @@ function toggleCompactLayout(){
   if(!chat) return;
   const active=chat.classList.toggle('chat-compact');
   const btn=document.getElementById('compactToggleBtn');
-  if(btn) btn.classList.toggle('active',active);
+  if(btn){
+    btn.classList.toggle('active',active);
+    btn.setAttribute('aria-pressed',active?'true':'false');
+  }
   try{localStorage.setItem('sidekick-webui-compact-chat',active?'1':'');}catch(_){}
 }
 function _initCompactLayout(){
@@ -3700,7 +3703,10 @@ function _initCompactLayout(){
   const active=localStorage.getItem('sidekick-webui-compact-chat')==='1';
   chat.classList.toggle('chat-compact',active);
   const btn=document.getElementById('compactToggleBtn');
-  if(btn) btn.classList.toggle('active',active);
+  if(btn){
+    btn.classList.toggle('active',active);
+    btn.setAttribute('aria-pressed',active?'true':'false');
+  }
 }
 if(document.readyState==='loading'){
   document.addEventListener('DOMContentLoaded',_initCompactLayout,{once:true});

@@ -132,6 +132,7 @@ function _setWorkspacePanelMode(mode){
   localStorage.setItem('sidekick-webui-workspace-panel', open ? 'open' : 'closed');
   layout.classList.toggle('workspace-panel-collapsed',!open);
   if(_isCompactWorkspaceViewport()){
+    if(open&&typeof closeMobileSidebar==='function') closeMobileSidebar();
     panel.classList.toggle('mobile-open',open);
   }else{
     panel.classList.remove('mobile-open');
@@ -285,7 +286,11 @@ function toggleMobileSidebar(){
   if(!sidebar)return;
   const isOpen=sidebar.classList.contains('mobile-open');
   if(isOpen){closeMobileSidebar();}
-  else{sidebar.classList.add('mobile-open');if(overlay)overlay.classList.add('visible');}
+  else{
+    if(_isCompactWorkspaceViewport()&&typeof _setWorkspacePanelMode==='function') _setWorkspacePanelMode('closed');
+    sidebar.classList.add('mobile-open');
+    if(overlay)overlay.classList.add('visible');
+  }
 }
 function closeMobileSidebar(){
   const sidebar=document.querySelector('.sidebar');

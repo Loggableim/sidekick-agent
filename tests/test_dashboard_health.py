@@ -723,6 +723,23 @@ def test_mobile_nav_click_closes_sidebar_and_keeps_hamburger_clickable():
     assert "top:calc(38px + var(--app-titlebar-safe-top,0px))!important;" in style_css
 
 
+def test_mobile_sidebar_and_workspace_panel_are_mutually_exclusive():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+
+    workspace_start = boot_js.index("function _setWorkspacePanelMode(mode)")
+    workspace_end = boot_js.index("function syncWorkspacePanelState()", workspace_start)
+    workspace_body = boot_js[workspace_start:workspace_end]
+
+    toggle_start = boot_js.index("function toggleMobileSidebar()")
+    close_start = boot_js.index("function closeMobileSidebar()", toggle_start)
+    toggle_body = boot_js[toggle_start:close_start]
+
+    assert "if(open&&typeof closeMobileSidebar==='function') closeMobileSidebar();" in workspace_body
+    assert "_isCompactWorkspaceViewport()" in toggle_body
+    assert "typeof _setWorkspacePanelMode==='function'" in toggle_body
+    assert "_setWorkspacePanelMode('closed')" in toggle_body
+
+
 def test_mobile_titlebar_center_stays_in_flex_flow():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
@@ -885,6 +902,25 @@ def test_websearch_history_chips_use_current_suggestion_container():
     assert "var chips = _websearchChipContainer();" in render_body
     assert "const chips = _websearchChipContainer();" in search_intro
     assert "document.getElementById('websearchChips')" not in browser_js
+
+
+def test_compact_layout_toggle_exposes_pressed_state():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+
+    assert 'id="compactToggleBtn"' in index_html
+    assert 'aria-label="Compact layout"' in index_html
+    assert 'aria-pressed="false"' in index_html
+
+    toggle_start = ui_js.index("function toggleCompactLayout()")
+    init_start = ui_js.index("function _initCompactLayout()")
+    context_start = ui_js.index("/*", init_start + 1)
+    toggle_body = ui_js[toggle_start:init_start]
+    init_body = ui_js[init_start:context_start]
+
+    expected = "btn.setAttribute('aria-pressed',active?'true':'false');"
+    assert expected in toggle_body
+    assert expected in init_body
 
 
 def test_mobile_sidebar_nav_mirrors_desktop_panel_rail():
