@@ -591,7 +591,10 @@ def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp
 
     monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace(sessions_dir) if slug == "color" else None)
     monkeypatch.setattr(web_server.time, "time", lambda: old_ts + 1000)
-    monkeypatch.setattr(web_server, "_stream_is_active_for_space", lambda stream_id, slug: False)
+    def _fail_stream_status_check(stream_id, slug):
+        raise AssertionError("space session listing must not synchronously check stream status")
+
+    monkeypatch.setattr(web_server, "_stream_is_active_for_space", _fail_stream_status_check)
 
     response = TestClient(web_server.app).get(
         "/api/sessions?workspace=color",

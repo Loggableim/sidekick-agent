@@ -1254,8 +1254,6 @@ def _repair_stale_space_index(slug: str, sessions_dir: Path) -> int:
             continue
         if bool(row.get("is_streaming")):
             continue
-        if _stream_is_active_for_space(str(row.get("active_stream_id") or ""), slug):
-            continue
         sid = str(row.get("session_id") or "").strip()
         path = sessions_dir / f"{sid}.json" if sid else None
         detail = None
@@ -1378,8 +1376,6 @@ def _repair_stale_space_session_from_listing(session: dict[str, Any], slug: str)
     if not isinstance(session, dict) or not session.get("active_stream_id"):
         return False
     if bool(session.get("is_streaming")):
-        return False
-    if _stream_is_active_for_space(str(session.get("active_stream_id") or ""), slug):
         return False
     sid = str(session.get("session_id") or "").strip()
     if not sid:
