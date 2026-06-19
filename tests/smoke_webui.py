@@ -100,7 +100,14 @@ def run_smoke() -> Result:
         _mark(result, "session create", code in {200, 201} and bool(session_id), f"status={code} id={session_id}")
 
         if session_id:
-            code, loaded = _request_json(port, "GET", f"/api/session?session_id={session_id}")
+            # Match the production session-switch fast path. Full message/model
+            # hydration is covered by targeted tests and can legitimately touch
+            # slow external model metadata caches on a developer machine.
+            code, loaded = _request_json(
+                port,
+                "GET",
+                f"/api/session?session_id={session_id}&messages=0&resolve_model=0",
+            )
             session_data = loaded.get("session", {}) if isinstance(loaded, dict) else {}
             _mark(result, "session load", code == 200 and session_data.get("session_id") == session_id, f"status={code}")
 

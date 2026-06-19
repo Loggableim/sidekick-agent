@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from runtime.gateway.config import PlatformConfig
 from runtime.gateway.platforms.telegram import TelegramAdapter
-from runtime.gateway.platforms.base import MessageType, should_send_media_as_audio
+from runtime.gateway.platforms.base import BasePlatformAdapter, MessageType, should_send_media_as_audio
 
 
 def test_telegram_transcribe_prefers_fish_audio(monkeypatch):
@@ -244,3 +244,20 @@ def test_telegram_dependency_is_available_from_project_extras():
 
     assert any(dep.startswith("python-telegram-bot") for dep in optional["telegram"])
     assert any(dep.startswith("python-telegram-bot") for dep in optional["all"])
+
+
+def test_gateway_adapter_fatal_error_contract_is_boolean_property():
+    base = BasePlatformAdapter()
+    telegram = TelegramAdapter(PlatformConfig(token="telegram-token"))
+
+    assert base.has_fatal_error is False
+    assert telegram.has_fatal_error is False
+
+    telegram._last_connect_error = "InvalidToken"
+    telegram._fatal_error_code = "InvalidToken"
+    telegram._fatal_error_message = "The token `8721757657:***` was rejected by the server."
+
+    assert telegram.has_fatal_error is True
+    assert telegram.fatal_error_retryable is False
+    assert telegram.fatal_error_code == "InvalidToken"
+    assert "rejected" in telegram.fatal_error_message

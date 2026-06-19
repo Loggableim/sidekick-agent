@@ -51,10 +51,16 @@ class TelegramAdapter(BasePlatformAdapter):
         self._allowed: set = set()
         self._notifications_mode = "important"
         self._voice_reply_chats: dict[str, float] = {}
+        self._last_connect_error: str = ""
 
         allowed = os.getenv("TELEGRAM_ALLOWED_USERS", "")
         if allowed:
             self._allowed = set(u.strip() for u in allowed.split(",") if u.strip())
+
+    @property
+    def fatal_error_retryable(self) -> bool:
+        """InvalidToken errors are permanent; don't retry."""
+        return "InvalidToken" not in self._last_connect_error
 
     def set_message_handler(self, h):
         self._msg_handler = h
@@ -83,6 +89,9 @@ class TelegramAdapter(BasePlatformAdapter):
             logger.info("Telegram: connected (polling)")
             return True
         except Exception as e:
+            self._last_connect_error = type(e).__name__
+            self._fatal_error_code = type(e).__name__
+            self._fatal_error_message = str(e)
             logger.error(f"Telegram start failed: {e}", exc_info=True)
             return False
 
@@ -384,8 +393,9 @@ class TelegramAdapter(BasePlatformAdapter):
             return True
         return str(update.effective_user.id) in self._allowed
 
+    @property
     def has_fatal_error(self) -> bool:
-        return False
+        return bool(self._last_connect_error or self.fatal_error_code or self.fatal_error_message)
 
     async def _dispatch(self, update, text: str, message_type=MessageType.TEXT, raw=None):
         if not self._msg_handler or not text:

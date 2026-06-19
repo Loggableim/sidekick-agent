@@ -60,6 +60,27 @@ class BasePlatformAdapter:
     async def start(self):
         pass
 
+    @property
+    def has_fatal_error(self) -> bool:
+        """Whether the adapter currently carries a platform-level fatal error."""
+        return bool(self.fatal_error_code or self.fatal_error_message)
+
+    @property
+    def fatal_error_retryable(self) -> bool:
+        """Whether the current fatal error is retryable (transient) or permanent.
+        Override in subclass when the platform can distinguish error types."""
+        return True
+
+    @property
+    def fatal_error_code(self) -> Optional[str]:
+        """Error code for the current fatal error, if any."""
+        return getattr(self, "_fatal_error_code", None)
+
+    @property
+    def fatal_error_message(self) -> Optional[str]:
+        """Error message for the current fatal error, if any."""
+        return getattr(self, "_fatal_error_message", None)
+
     async def stop(self):
         pass
 

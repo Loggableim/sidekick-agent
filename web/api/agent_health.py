@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,10 @@ _GATEWAY_RUNTIME_STATUS_FILE = "gateway_state.json"
 # minutes. Override is intentionally not exposed: keep the check deterministic
 # and identical across deployments so support diagnostics are reproducible.
 GATEWAY_FRESHNESS_THRESHOLD_S: float = 120.0
+_GATEWAY_SECRET_PATTERNS = (
+    re.compile(r"`\d{6,}:[A-Za-z0-9_-]{8,}`"),
+    re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{8,}\b"),
+)
 
 
 def _checked_at() -> str:
@@ -231,6 +236,15 @@ def _gateway_running_pid(gateway_status: Any, pid_path: Path | None) -> int | No
         return get_running_pid()
 
 
+def _redact_runtime_detail(value: str) -> str:
+    text = str(value or "").strip()
+    for pattern in _GATEWAY_SECRET_PATTERNS:
+        text = pattern.sub("`<redacted>`", text)
+    if len(text) > 300:
+        text = text[:297].rstrip() + "..."
+    return text
+
+
 def _runtime_detail_subset(runtime_status: dict[str, Any] | None) -> dict[str, Any]:
     """Return only non-sensitive runtime fields for the browser.
 
@@ -249,6 +263,10 @@ def _runtime_detail_subset(runtime_status: dict[str, Any] | None) -> dict[str, A
     updated_at = runtime_status.get("updated_at")
     if isinstance(updated_at, str) and updated_at:
         details["updated_at"] = updated_at
+
+    exit_reason = runtime_status.get("exit_reason")
+    if isinstance(exit_reason, str) and exit_reason:
+        details["exit_reason"] = _redact_runtime_detail(exit_reason)
 
     try:
         details["active_agents"] = max(0, int(runtime_status.get("active_agents") or 0))

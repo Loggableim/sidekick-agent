@@ -361,7 +361,11 @@ def read_importable_agent_session_rows(
         return []
 
     log = log or logger
-    with closing(sqlite3.connect(str(db_path))) as conn:
+    with closing(sqlite3.connect(str(db_path), timeout=1.0)) as conn:
+        try:
+            conn.execute("PRAGMA busy_timeout=1000")
+        except Exception:
+            pass
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -393,10 +397,11 @@ def read_importable_agent_session_rows(
         origin_user_id_expr = _optional_col('origin_user_id', session_cols)
         platform_expr = _optional_col('platform', session_cols)
         user_message_count_expr = (
-            "COUNT(CASE WHEN LOWER(m.role) = 'user' THEN 1 END)"
+            "SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END)"
             if 'role' in message_cols
-            else "COUNT(m.id)"
+            else "COUNT(*)"
         )
+        last_activity_expr = "MAX(timestamp)" if 'timestamp' in message_cols else "NULL"
 
         where_clauses = ["s.source IS NOT NULL"]
         params: list[str] = []
@@ -409,6 +414,14 @@ def read_importable_agent_session_rows(
 
         cur.execute(
             f"""
+            WITH message_stats AS (
+                SELECT session_id,
+                       COUNT(*) AS actual_message_count,
+                       {user_message_count_expr} AS actual_user_message_count,
+                       {last_activity_expr} AS last_activity
+                FROM messages
+                GROUP BY session_id
+            )
             SELECT s.id, s.title, s.model, s.message_count,
                    s.started_at, s.source,
                    {session_source_expr},
@@ -423,14 +436,13 @@ def read_importable_agent_session_rows(
                    {parent_expr},
                    {ended_expr},
                    {end_reason_expr},
-                   COUNT(m.id) AS actual_message_count,
-                   {user_message_count_expr} AS actual_user_message_count,
-                   MAX(m.timestamp) AS last_activity
+                   COALESCE(ms.actual_message_count, 0) AS actual_message_count,
+                   COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
+                   ms.last_activity AS last_activity
             FROM sessions s
-            LEFT JOIN messages m ON m.session_id = s.id
+            LEFT JOIN message_stats ms ON ms.session_id = s.id
             WHERE {' AND '.join(where_clauses)}
-            GROUP BY s.id
-            ORDER BY COALESCE(MAX(m.timestamp), s.started_at) DESC
+            ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """,
             params,
         )

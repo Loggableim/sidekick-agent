@@ -4754,6 +4754,12 @@ function _hideAgentHealthAlert(){
   const banner=$('agentHealthBanner');
   if(banner){banner.classList.remove('visible');banner.hidden=true;}
 }
+function _agentHealthDetailSentence(label,value){
+  const clean=String(value||'').trim();
+  if(!clean) return '';
+  const suffix=/[.!?]$/.test(clean)?'':'.';
+  return ` ${label}: ${clean}${suffix}`;
+}
 function _showAgentHealthAlert(payload){
   if(_agentHealthDismissed()) return;
   const banner=$('agentHealthBanner');
@@ -4762,7 +4768,9 @@ function _showAgentHealthAlert(payload){
   if(!banner) return;
   if(title) title.textContent='Nova agent is not responding';
   const state=payload&&payload.details&&payload.details.gateway_state?` State: ${payload.details.gateway_state}.`:'';
-  if(details) details.textContent=`Gateway heartbeat failed.${state} Messages may not be delivered until it comes back.`;
+  const reason=payload&&payload.details&&payload.details.exit_reason;
+  const reasonText=_agentHealthDetailSentence('Reason',reason);
+  if(details) details.textContent=`Gateway heartbeat failed.${state}${reasonText} Messages may not be delivered until it comes back.`;
   banner.hidden=false;
   banner.classList.add('visible');
 }

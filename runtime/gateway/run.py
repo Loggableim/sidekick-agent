@@ -16294,7 +16294,7 @@ async def start_gateway(config: Optional[GatewayConfig] = None, replace: bool = 
     # Centralized logging — agent.log (INFO+), errors.log (WARNING+),
     # and gateway.log (INFO+, gateway-component records only).
     # Idempotent, so repeated calls from AIAgent.__init__ won't duplicate.
-    from sidekick_logging import setup_logging
+    from runtime._compat.shim_logging import setup_logging
     setup_logging()
 
     # Optional stderr handler — level driven by -v/-q flags on the CLI.

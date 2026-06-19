@@ -24,6 +24,39 @@ def test_dashboard_health_endpoint_returns_readiness(monkeypatch, tmp_path):
     assert "web_dist_ready" in payload
 
 
+def test_agent_health_exposes_sanitized_gateway_startup_reason():
+    from web.api.agent_health import _runtime_detail_subset
+
+    details = _runtime_detail_subset(
+        {
+            "gateway_state": "startup_failed",
+            "updated_at": "2026-06-19T18:46:00+00:00",
+            "exit_reason": "telegram: The token `123456789:SECRET_TOKEN_VALUE` was rejected by the server.",
+            "platforms": {
+                "telegram": {
+                    "state": "fatal",
+                    "error_code": "InvalidToken",
+                    "error_message": "The token `123456789:SECRET_TOKEN_VALUE` was rejected.",
+                }
+            },
+        }
+    )
+
+    assert details["gateway_state"] == "startup_failed"
+    assert details["exit_reason"] == "telegram: The token `<redacted>` was rejected by the server."
+    assert "SECRET_TOKEN_VALUE" not in json.dumps(details)
+    assert details["platform_states"] == {"fatal": 1}
+
+
+def test_agent_health_banner_renders_gateway_exit_reason():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+
+    assert "function _agentHealthDetailSentence(label,value)" in ui_js
+    assert "payload&&payload.details&&payload.details.exit_reason" in ui_js
+    assert "_agentHealthDetailSentence('Reason',reason)" in ui_js
+    assert "Gateway heartbeat failed.${state}${reasonText} Messages" in ui_js
+
+
 def test_openapi_schema_excludes_legacy_proxy_without_duplicate_operation_warning(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
