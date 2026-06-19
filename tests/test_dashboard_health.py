@@ -774,6 +774,39 @@ def test_gmail_ai_model_selector_matches_existing_js_contract():
     assert ".gmail-ai-model-select" in gmail_css
 
 
+def test_gmail_compose_overlay_closes_on_escape_without_blocking_panel():
+    gmail_js = Path("web/static/gmail.js").read_text(encoding="utf-8")
+
+    open_start = gmail_js.index("function gmailOpenCompose()")
+    close_start = gmail_js.index("function gmailCloseCompose()")
+    split_start = gmail_js.index("let _gmailSplitDragging", close_start)
+    open_body = gmail_js[open_start:close_start]
+    close_body = gmail_js[close_start:split_start]
+
+    assert "function _gmailComposeKeydown(e)" in gmail_js
+    assert "if (e.key !== 'Escape')" in gmail_js
+    assert "gmailCloseCompose();" in gmail_js
+    assert "document.addEventListener('keydown', _gmailComposeKeydown);" in open_body
+    assert "document.removeEventListener('keydown', _gmailComposeKeydown);" in close_body
+
+
+def test_gmail_empty_search_restores_current_message_list():
+    gmail_js = Path("web/static/gmail.js").read_text(encoding="utf-8")
+
+    search_start = gmail_js.index("async function gmailDoSearch()")
+    compose_start = gmail_js.index("function _gmailComposeKeydown", search_start)
+    search_body = gmail_js[search_start:compose_start]
+
+    empty_query = search_body.index("if (!query)")
+    first_render = search_body.index("const mainList = document.getElementById('gmailMainList')")
+
+    assert empty_query < first_render
+    assert "gmailRefresh();" in search_body[empty_query:first_render]
+    assert "let _gmailSearchSeq = 0;" in gmail_js
+    assert "const searchSeq = ++_gmailSearchSeq;" in search_body
+    assert "if (searchSeq !== _gmailSearchSeq) return;" in search_body
+
+
 def test_websearch_history_chips_use_current_suggestion_container():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")

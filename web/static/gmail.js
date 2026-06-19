@@ -19,6 +19,7 @@ const GMAIL = {
   loading: false,
   pollInterval: null,
 };
+let _gmailSearchSeq = 0;
 
 // Folder display names for nav
 const GMAIL_FOLDER_LABELS = {
@@ -794,7 +795,11 @@ function gmailOpenSearch() {
 async function gmailDoSearch() {
   const input = document.getElementById('gmailSearchInput') || document.getElementById('gmailMainSearch');
   const query = input?.value.trim();
-  if (!query) return;
+  const searchSeq = ++_gmailSearchSeq;
+  if (!query) {
+    await gmailRefresh();
+    return;
+  }
 
   const mainList = document.getElementById('gmailMainList');
   if (!mainList) return;
@@ -805,6 +810,7 @@ async function gmailDoSearch() {
   try {
     const url = _gmailAccount(`api/gmail/search?query=${encodeURIComponent(query)}&max=25`);
     const data = await fetchJson(url);
+    if (searchSeq !== _gmailSearchSeq) return;
     if (data.error) throw new Error(data.error);
 
     const emails = data.emails || [];
@@ -833,6 +839,15 @@ async function gmailDoSearch() {
 }
 
 // ── Open Compose as Overlay in Main area ──
+function _gmailComposeKeydown(e) {
+  if (e.key !== 'Escape') return;
+  const overlay = document.getElementById('gmailComposeOverlay');
+  if (!overlay || overlay.style.display === 'none') return;
+  e.preventDefault();
+  e.stopPropagation();
+  gmailCloseCompose();
+}
+
 function gmailOpenCompose() {
   const overlay = document.getElementById('gmailComposeOverlay');
   if (!overlay) return;
@@ -852,6 +867,8 @@ function gmailOpenCompose() {
   }
 
   overlay.style.display = 'flex';
+  document.removeEventListener('keydown', _gmailComposeKeydown);
+  document.addEventListener('keydown', _gmailComposeKeydown);
   setTimeout(() => {
     const to = document.getElementById('gmailComposeTo');
     if (to && !to.value) to.focus();
@@ -861,6 +878,7 @@ function gmailOpenCompose() {
 function gmailCloseCompose() {
   const overlay = document.getElementById('gmailComposeOverlay');
   if (overlay) overlay.style.display = 'none';
+  document.removeEventListener('keydown', _gmailComposeKeydown);
   // Also clear fields (gently, next open resets)
 }
 
