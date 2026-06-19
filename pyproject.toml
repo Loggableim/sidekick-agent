@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sidekick"
-version = "0.8.1"
+version = "0.8.5"
 description = "Sidekick Agent"
 authors = [{name = "Sidekick"}]
 readme = "README.md"
@@ -30,6 +30,9 @@ nova = [
     "chromadb>=1.0",
     "sentence-transformers>=5.0",
 ]
+telegram = [
+    "python-telegram-bot>=21,<23",
+]
 all = [
     "httpx>=0.27",
     "python-dotenv>=1.0",
@@ -40,6 +43,7 @@ all = [
     "pillow>=10.0",
     "tiktoken>=0.5",
     "croniter>=2.0",
+    "python-telegram-bot>=21,<23",
     "beautifulsoup4>=4.12",
     "numpy>=2.0",
     "chromadb>=1.0",
@@ -62,6 +66,7 @@ py-modules = ["run_agent", "sidekick_constants", "bootstrap"]
 include = [
     "cli", "cli.*",
     "cron", "cron.*",
+    "gateway", "gateway.*",
     "providers", "providers.*",
     "runtime", "runtime.*", "runtime._compat", "runtime.cron", "runtime.cron.*",
     "runtime.gateway", "runtime.gateway.*",

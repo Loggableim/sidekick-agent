@@ -3,9 +3,15 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
+import re
+import subprocess
 import tempfile
+import time
+import uuid
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from runtime.gateway.config import PlatformConfig
@@ -17,8 +23,9 @@ from runtime.gateway.platforms.base import (
 
 logger = logging.getLogger(__name__)
 
-FISH_VOICE_DEFAULT = "83018e49155141d8887f7193b8c1454c"
+FISH_VOICE_DEFAULT = "d130be0856b3419a8d73b0a94db4a1dc"
 FISH_ENDPOINT = "https://api.fish.audio/v1/tts"
+FISH_STT_ENDPOINT = "https://api.fish.audio/v1/asr"
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 
@@ -43,6 +50,7 @@ class TelegramAdapter(BasePlatformAdapter):
         self._app: Any = None
         self._allowed: set = set()
         self._notifications_mode = "important"
+        self._voice_reply_chats: dict[str, float] = {}
 
         allowed = os.getenv("TELEGRAM_ALLOWED_USERS", "")
         if allowed:
@@ -94,21 +102,35 @@ class TelegramAdapter(BasePlatformAdapter):
         if not self._app:
             return {"success": False}
         try:
-            msg = await self._app.bot.send_message(chat_id=chat_id, text=message)
+            send_kwargs = self._telegram_send_kwargs(kwargs)
+            msg = await self._app.bot.send_message(chat_id=chat_id, text=message, **send_kwargs)
+            await self._send_pending_voice_reply(str(chat_id), message)
             return {"success": True, "message_id": str(msg.message_id)}
         except Exception as e:
             logger.warning(f"Telegram send: {e}")
             return {"success": False}
 
-    async def send_voice(self, chat_id: str, audio_path: str) -> dict:
+    async def send_voice(self, chat_id: str, audio_path: str, **kwargs) -> dict:
         if not self._app:
             return {"success": False}
         try:
+            send_kwargs = self._telegram_send_kwargs(kwargs)
             with open(audio_path, "rb") as f:
-                msg = await self._app.bot.send_voice(chat_id=chat_id, voice=f)
+                msg = await self._app.bot.send_voice(chat_id=chat_id, voice=f, **send_kwargs)
             return {"success": True, "message_id": str(msg.message_id)}
         except Exception as e:
             logger.error(f"send_voice: {e}")
+            if Path(audio_path).suffix.lower() != ".ogg" and hasattr(self._app.bot, "send_audio"):
+                try:
+                    with open(audio_path, "rb") as f:
+                        msg = await self._app.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=f,
+                            **self._telegram_send_kwargs(kwargs),
+                        )
+                    return {"success": True, "message_id": str(msg.message_id)}
+                except Exception as audio_exc:
+                    logger.error(f"send_audio fallback: {audio_exc}")
             return {"success": False}
 
     async def _on_text(self, update, ctx):
@@ -121,18 +143,24 @@ class TelegramAdapter(BasePlatformAdapter):
             return
         chat_id = str(update.effective_chat.id)
         try:
-            file = await (update.message.voice or update.message.audio).get_file()
+            is_voice_message = bool(update.message.voice)
+            media = update.message.voice or update.message.audio
+            file = await media.get_file()
             bio = io.BytesIO()
             await file.download_to_memory(bio)
             audio_bytes = bio.getvalue()
 
-            text = await self._transcribe(audio_bytes)
+            mime_type = getattr(media, "mime_type", None) or "audio/ogg"
+            text = await self._transcribe(audio_bytes, mime_type=mime_type)
             if not text:
                 await self._app.bot.send_message(chat_id=chat_id, text="🎤 Konnte nicht transkribieren.")
                 return
 
-            await self._dispatch(update, text, message_type=MessageType.VOICE,
-                                 raw={"voice": True, "transcribed": text})
+            self._voice_reply_chats[chat_id] = time.time() + 300
+            message_type = MessageType.VOICE if is_voice_message else MessageType.AUDIO
+            raw_key = "voice" if is_voice_message else "audio"
+            await self._dispatch(update, text, message_type=message_type,
+                                 raw={raw_key: True, "transcribed": text})
         except Exception as e:
             logger.error(f"voice handling: {e}")
 
@@ -149,11 +177,32 @@ class TelegramAdapter(BasePlatformAdapter):
         await self._on_text(update, ctx)
 
     # ── Transcribe ──────────────────────────────────────
-    async def _transcribe(self, audio_bytes: bytes) -> Optional[str]:
+    async def _transcribe(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
+        if self._fish_audio_key():
+            text = await self._transcribe_fish_audio(audio_bytes, mime_type=mime_type)
+            if text:
+                return text
         key = os.getenv("GROQ_API_KEY", "")
         if key:
             return await self._transcribe_groq(audio_bytes, key)
         return await self._transcribe_local(audio_bytes)
+
+    async def _transcribe_fish_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
+        key = self._fish_audio_key()
+        if not key:
+            return None
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60) as c:
+                files = {"audio": ("telegram-voice.ogg", audio_bytes, mime_type or "audio/ogg")}
+                data = {"language": "de", "ignore_timestamps": "true"}
+                r = await c.post(FISH_STT_ENDPOINT, headers={"Authorization": f"Bearer {key}"}, data=data, files=files)
+                if r.status_code == 200:
+                    return " ".join(str(r.json().get("text") or "").split()) or None
+                logger.error(f"Fish STT {r.status_code}: {r.text[:200]}")
+        except Exception as e:
+            logger.error(f"Fish STT: {e}")
+        return None
 
     async def _transcribe_groq(self, audio_bytes: bytes, key: str) -> Optional[str]:
         try:
@@ -174,7 +223,7 @@ class TelegramAdapter(BasePlatformAdapter):
     async def _transcribe_local(self, audio_bytes: bytes) -> Optional[str]:
         try:
             from faster_whisper import WhisperModel
-            model = WhisperModel("base", device="cpu", compute_type="int8")
+            model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 tmp.write(audio_bytes)
                 p = tmp.name
@@ -189,28 +238,147 @@ class TelegramAdapter(BasePlatformAdapter):
 
     # ── TTS ─────────────────────────────────────────────
     async def _tts(self, text: str) -> Optional[str]:
-        key = os.getenv("FISHAUDIO_API_KEY", "")
+        key = self._fish_audio_key()
         if not key:
             return None
         try:
             import httpx
-            os.makedirs("/c/HermesPortable/home/audio_cache", exist_ok=True)
+            audio_dir = Path(os.getenv("SIDEKICK_HOME", "C:/sidekick/home")) / "audio_cache"
+            audio_dir.mkdir(parents=True, exist_ok=True)
             async with httpx.AsyncClient(timeout=120) as c:
                 r = await c.post(FISH_ENDPOINT,
                     headers={"Authorization": f"Bearer {key}", "model": "s2-pro"},
-                    json={"text": text, "voice_id": FISH_VOICE_DEFAULT})
+                    json=self._fish_tts_payload(text))
                 if r.status_code == 200:
-                    import uuid
-                    p = f"/c/HermesPortable/home/audio_cache/tts_{uuid.uuid4().hex[:12]}.mp3"
+                    p = audio_dir / f"telegram_tts_{uuid.uuid4().hex[:12]}.mp3"
                     with open(p, "wb") as f:
                         f.write(r.content)
-                    return p
+                    return str(self._convert_to_ogg_opus(p) or p)
                 logger.error(f"Fish TTS {r.status_code}: {r.text[:200]}")
         except Exception as e:
             logger.error(f"Fish TTS: {e}")
         return None
 
     # ── Helpers ─────────────────────────────────────────
+    def _fish_tts_payload(self, text: str) -> dict[str, Any]:
+        spoken = re.sub(r"\bCid\b", "Sidd", str(text or ""), flags=re.IGNORECASE)
+        return {
+            "text": spoken,
+            "reference_id": FISH_VOICE_DEFAULT,
+            "temperature": 0.7,
+            "top_p": 0.7,
+            "prosody": {"speed": 1.0, "volume": 0.0, "normalize_loudness": True},
+            "chunk_length": 300,
+            "normalize": True,
+            "format": "mp3",
+            "sample_rate": 44100,
+            "mp3_bitrate": 128,
+            "latency": "normal",
+            "max_new_tokens": 1024,
+            "repetition_penalty": 1.2,
+            "min_chunk_length": 50,
+            "condition_on_previous_chunks": True,
+        }
+
+    def _convert_to_ogg_opus(self, mp3_path: Path) -> Optional[Path]:
+        try:
+            import imageio_ffmpeg
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            out = mp3_path.with_suffix(".ogg")
+            proc = subprocess.run(
+                [ffmpeg, "-y", "-i", str(mp3_path), "-c:a", "libopus", "-b:a", "48k", str(out)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=45,
+                check=False,
+            )
+            if proc.returncode == 0 and out.exists() and out.stat().st_size > 0:
+                return out
+        except Exception as e:
+            logger.debug("Fish TTS opus conversion failed: %s", e)
+        return None
+
+    async def _send_pending_voice_reply(self, chat_id: str, message: str) -> None:
+        deadline = self._voice_reply_chats.get(str(chat_id), 0)
+        if not deadline:
+            return
+        if deadline < time.time():
+            self._voice_reply_chats.pop(str(chat_id), None)
+            return
+        self._voice_reply_chats.pop(str(chat_id), None)
+        audio_path = await self._tts(message)
+        if not audio_path:
+            return
+        await self.send_voice(chat_id, audio_path)
+
+    def _telegram_send_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        reply_to = kwargs.get("reply_to")
+        if reply_to:
+            try:
+                out["reply_to_message_id"] = int(reply_to)
+            except Exception:
+                pass
+        metadata = kwargs.get("metadata") if isinstance(kwargs.get("metadata"), dict) else {}
+        thread_id = metadata.get("thread_id") if metadata else None
+        if thread_id:
+            try:
+                out["message_thread_id"] = int(thread_id)
+            except Exception:
+                pass
+        return out
+
+    def _fish_audio_key(self) -> str:
+        for name in ("FISHAUDIO_API_KEY", "FISH_AUDIO_API_KEY"):
+            value = os.getenv(name, "").strip()
+            if value:
+                return value
+        extra = getattr(self.config, "extra", {}) or {}
+        for key in ("FISHAUDIO_API_KEY", "FISH_AUDIO_API_KEY", "fish_audio_api_key", "fish_api_key"):
+            value = str(extra.get(key) or "").strip()
+            if value:
+                return value
+        for path in (
+            Path(os.getenv("SIDEKICK_HOME", "C:/sidekick/home")) / "auth.json",
+            Path("C:/HermesPortable/home/auth.json"),
+        ):
+            value = self._read_fish_key_from_auth(path)
+            if value:
+                return value
+        return ""
+
+    def _read_fish_key_from_auth(self, path: Path) -> str:
+        try:
+            if not path.exists():
+                return ""
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+
+        wanted = {"fishaudio_api_key", "fish_audio_api_key", "fish_api_key", "api_key", "token"}
+
+        def walk(node: Any, parent: str = "") -> str:
+            if isinstance(node, dict):
+                parent_l = parent.lower()
+                for key, value in node.items():
+                    key_l = str(key).lower()
+                    if isinstance(value, str) and value.strip():
+                        if "fish" in parent_l and key_l in wanted:
+                            return value.strip()
+                        if key_l in {"fishaudio_api_key", "fish_audio_api_key", "fish_api_key"}:
+                            return value.strip()
+                    found = walk(value, key_l)
+                    if found:
+                        return found
+            elif isinstance(node, list):
+                for item in node:
+                    found = walk(item, parent)
+                    if found:
+                        return found
+            return ""
+
+        return walk(data)
+
     def _check(self, update) -> bool:
         if not self._allowed:
             return True

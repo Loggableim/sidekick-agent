@@ -6,6 +6,7 @@ These stubs exist so gateway/run.py can be imported without errors.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -16,6 +17,7 @@ class MessageType(Enum):
     TEXT = "text"
     COMMAND = "command"
     VOICE = "voice"
+    AUDIO = "audio"
     IMAGE = "image"
     DOCUMENT = "document"
     STICKER = "sticker"
@@ -64,6 +66,39 @@ class BasePlatformAdapter:
     async def send(self, chat_id: str, message: str, **kwargs) -> dict:
         return {"success": True, "message_id": None}
 
+    def extract_media(self, text: str) -> tuple[list[tuple[str, bool]], str]:
+        """Extract MEDIA:path tags and optional [[audio_as_voice]] directives."""
+        media: list[tuple[str, bool]] = []
+        cleaned_lines: list[str] = []
+        voice_next = False
+        media_pattern = re.compile(r"MEDIA:(\S+)")
+
+        for raw_line in str(text or "").splitlines():
+            line = raw_line
+            if "[[audio_as_voice]]" in line:
+                voice_next = True
+                line = line.replace("[[audio_as_voice]]", "")
+
+            def repl(match: re.Match[str]) -> str:
+                nonlocal voice_next
+                path = match.group(1).strip().rstrip('",}')
+                if path:
+                    media.append((path, voice_next))
+                voice_next = False
+                return ""
+
+            line = media_pattern.sub(repl, line).strip()
+            if line:
+                cleaned_lines.append(line)
+
+        return media, "\n".join(cleaned_lines).strip()
+
+    def extract_images(self, text: str) -> tuple[list[tuple[str, str]], str]:
+        return [], text
+
+    def extract_local_files(self, text: str) -> tuple[list[str], str]:
+        return [], text
+
 
 def _reply_anchor_for_event(event: MessageEvent) -> Optional[str]:
     """Return the message ID to reply to, if any."""
@@ -78,3 +113,15 @@ def merge_pending_message_event(event: MessageEvent, existing: Optional[MessageE
         user_id="",
         message_id="",
     )
+
+
+def should_send_media_as_audio(platform: Any, ext: str, *, is_voice: bool = False) -> bool:
+    platform_value = getattr(platform, "value", platform)
+    platform_name = str(platform_value or "").lower()
+    ext = str(ext or "").lower()
+    audio_exts = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac"}
+    if ext not in audio_exts:
+        return False
+    if platform_name == "telegram":
+        return True
+    return bool(is_voice)

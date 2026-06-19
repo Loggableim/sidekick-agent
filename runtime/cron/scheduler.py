@@ -76,7 +76,13 @@ def _resolve_cron_enabled_toolsets(job: dict, cfg: dict) -> list[str] | None:
     if per_job:
         return per_job
     try:
-        from runtime._compat.shim_cli.tools_config import _get_platform_tools  # lazy: avoid heavy import at cron module load
+        try:
+            from cli.tools_config import _get_platform_tools  # lazy: avoid heavy import at cron module load
+        except Exception:
+            try:
+                from sidekick_cli.tools_config import _get_platform_tools
+            except Exception:
+                from runtime._compat.shim_cli.tools_config import _get_platform_tools
         return sorted(_get_platform_tools(cfg or {}, "cron"))
     except Exception as exc:
         logger.warning(
@@ -1344,7 +1350,7 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
         # Provider routing
         pr = _cfg.get("provider_routing", {})
 
-        from runtime._compat.shim_cli.runtime_provider import (
+        from cli.runtime_provider import (
             resolve_runtime_provider,
             format_runtime_provider_error,
         )
