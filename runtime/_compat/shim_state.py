@@ -153,6 +153,27 @@ class SessionDB:
             );
             """
         )
+        self._repair_missing_parent_session_refs()
+
+    def _repair_missing_parent_session_refs(self) -> int:
+        """Drop parent links that point at sessions no longer present."""
+        columns = self._table_columns("sessions")
+        if "parent_session_id" not in columns:
+            return 0
+        pk_col = self._session_pk_column()
+        cursor = self._conn.execute(
+            f"""
+            UPDATE sessions
+               SET parent_session_id = NULL
+             WHERE parent_session_id IS NOT NULL
+               AND NOT EXISTS (
+                   SELECT 1
+                     FROM sessions parent
+                    WHERE parent.{pk_col} = sessions.parent_session_id
+               )
+            """
+        )
+        return int(cursor.rowcount or 0)
 
     # ------------------------------------------------------------------
     # Minimal public API — matches what agent modules call
@@ -226,6 +247,7 @@ class SessionDB:
         parent_session_id: str | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
+        import sqlite3
         import time
 
         now = time.time()
@@ -246,11 +268,11 @@ class SessionDB:
             if self.resolve_session_id(effective_parent) is None:
                 effective_parent = None
 
-        def _insert(parent_value: str | None) -> None:
+        def _insert(parent_value: str | None, title_value: str | None) -> None:
             insert_cols = [pk_col]
             values: list[Any] = [session_id]
             for col, value in (
-                ("title", title),
+                ("title", title_value),
                 ("source", source or "unknown"),
                 ("model", model),
                 ("system_prompt", system_prompt),
@@ -270,18 +292,36 @@ class SessionDB:
                 values,
             )
 
-        _insert(effective_parent)
-        if self.get_session(session_id) is None and effective_parent is not None:
-            effective_parent = None
-            _insert(None)
+        parent_candidates = [effective_parent]
+        if effective_parent is not None:
+            parent_candidates.append(None)
+        title_candidates: list[str | None] = [title]
+        if "title" in columns and title is not None:
+            title_candidates.append(None)
+
+        stored_row: dict[str, Any] | None = None
+        stored_parent = effective_parent
+        for parent_value in parent_candidates:
+            for title_value in title_candidates:
+                _insert(parent_value, title_value)
+                stored_row = self.get_session(session_id)
+                if stored_row is not None:
+                    stored_parent = parent_value
+                    break
+            if stored_row is not None:
+                break
+
+        if stored_row is None:
+            raise sqlite3.IntegrityError(f"session row was not created: {session_id}")
+
         return {
             "session_id": session_id,
-            "title": title,
-            "source": source,
-            "model": model,
-            "system_prompt": system_prompt,
-            "user_id": user_id,
-            "parent_session_id": effective_parent,
+            "title": stored_row.get("title", title),
+            "source": stored_row.get("source", source),
+            "model": stored_row.get("model", model),
+            "system_prompt": stored_row.get("system_prompt", system_prompt),
+            "user_id": stored_row.get("user_id", user_id),
+            "parent_session_id": stored_row.get("parent_session_id", stored_parent),
             "metadata": metadata,
             "created_at": now,
             "updated_at": now,

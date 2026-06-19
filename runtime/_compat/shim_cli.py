@@ -21,6 +21,7 @@ _PORTED_ROUTES: dict[str, str] = {
     "runtime_provider": "runtime._compat.shim_runtime_provider",
     "kanban_db": "runtime._compat.shim_kanban_db",
     "debug": "runtime._compat.shim_debug",
+    "tools_config": "runtime._compat.shim_tools_config",
 }
 
 _KNOWN_UNPORTED = [
@@ -64,7 +65,6 @@ _KNOWN_UNPORTED = [
     "slack_cli",
     "stdio",
     "timeouts",
-    "tools_config",
     "uninstall",
     "vercel_auth",
     "webhook",

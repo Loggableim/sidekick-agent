@@ -4,6 +4,7 @@ Clean IMAP/SMTP access with RFC 2047 decoding.
 No ctypes DNS patch needed — server Python has working DNS.
 Multi-Account support: account query parameter on all endpoints.
 """
+import base64
 import json
 import imaplib
 import smtplib
@@ -114,6 +115,69 @@ def _s(val):
     if isinstance(val, bytes):
         return val.decode("utf-8", "replace")
     return str(val)
+
+
+def _decode_imap_utf7(val):
+    """Decode IMAP modified UTF-7 mailbox names."""
+    text = _s(val)
+    if "&" not in text:
+        return text
+    out = []
+    index = 0
+    while index < len(text):
+        start = text.find("&", index)
+        if start < 0:
+            out.append(text[index:])
+            break
+        out.append(text[index:start])
+        end = text.find("-", start)
+        if end < 0:
+            out.append(text[start:])
+            break
+        token = text[start + 1 : end]
+        if not token:
+            out.append("&")
+        else:
+            try:
+                encoded = token.replace(",", "/")
+                encoded += "=" * (-len(encoded) % 4)
+                out.append(base64.b64decode(encoded).decode("utf-16-be"))
+            except Exception:
+                out.append(text[start : end + 1])
+        index = end + 1
+    return "".join(out)
+
+
+def _encode_imap_utf7(val):
+    """Encode display mailbox names to IMAP modified UTF-7."""
+    text = _s(val)
+    out = []
+    buf = []
+
+    def flush_buf():
+        if not buf:
+            return
+        raw = "".join(buf).encode("utf-16-be")
+        enc = base64.b64encode(raw).decode("ascii").rstrip("=").replace("/", ",")
+        out.append("&" + enc + "-")
+        buf.clear()
+
+    for ch in text:
+        code = ord(ch)
+        if ch == "&":
+            flush_buf()
+            out.append("&-")
+        elif 0x20 <= code <= 0x7E:
+            flush_buf()
+            out.append(ch)
+        else:
+            buf.append(ch)
+    flush_buf()
+    return "".join(out)
+
+
+def _imap_mailbox_arg(folder):
+    return _encode_imap_utf7(folder or "INBOX")
 
 
 def _decode_header_safe(msg, header_name):
@@ -405,9 +469,9 @@ def _fetch_headers_by_uid(conn, uids, fields="(FROM TO SUBJECT DATE)"):
 
 def _list_emails(max_r=25, folder="INBOX", account=DEFAULT_ACCOUNT):
     """List recent emails with decoded subjects, fast batch fetch."""
-    conn, user = _connect_imap(account)
     try:
-        status, data = conn.select(folder)
+        conn, user = _connect_imap(account)
+        status, data = conn.select(_imap_mailbox_arg(folder))
         if status != "OK":
             return {"error": f"Cannot select folder '{folder}'", "account": account}
 
@@ -531,8 +595,8 @@ def _search_emails(query, max_r=25, account=DEFAULT_ACCOUNT):
     else:
         imap_q = f'(TEXT "{query}")'
 
-    conn, user = _connect_imap(account)
     try:
+        conn, user = _connect_imap(account)
         conn.select("INBOX")
         status, data = conn.search(None, imap_q)
         if status != "OK" or not data[0]:
@@ -565,11 +629,11 @@ def _search_emails(query, max_r=25, account=DEFAULT_ACCOUNT):
 
 def _list_folders(account=DEFAULT_ACCOUNT):
     """List all Gmail folders/labels."""
-    conn, user = _connect_imap(account)
     try:
+        conn, user = _connect_imap(account)
         status, data = conn.list()
         if status != "OK":
-            return {"error": "Failed to list folders", "account": account}
+            return {"error": "Failed to list folders", "folders": [], "account": account}
 
         known_system = {"INBOX", "[Gmail]/Gesendet", "[Gmail]/Papierkorb",
                         "[Gmail]/Entwürfe", "[Gmail]/Spam", "[Gmail]/Wichtig",
@@ -580,7 +644,7 @@ def _list_folders(account=DEFAULT_ACCOUNT):
                 decoded = f.decode("utf-8", "replace") if isinstance(f, bytes) else f
                 parts = decoded.split('"')
                 if len(parts) >= 3:
-                    name = parts[-2]
+                    name = _decode_imap_utf7(parts[-2])
                     if name:
                         folders.append({
                             "name": name,
@@ -593,7 +657,7 @@ def _list_folders(account=DEFAULT_ACCOUNT):
         return {"folders": folders, "account": account}
     except Exception:
         logger.exception("_list_folders failed")
-        return {"error": "IMAP list folders failed", "account": account}
+        return {"error": "Failed to list folders", "folders": [], "account": account}
 
 
 def _send_email(to, subject, body, account=DEFAULT_ACCOUNT, attachments=None):
@@ -651,9 +715,9 @@ def _delete_email(email_id, folder="INBOX", account=DEFAULT_ACCOUNT):
     """Move email to trash (reversible)."""
     conn, user = _connect_imap(account)
     try:
-        conn.select(folder)
+        conn.select(_imap_mailbox_arg(folder))
         for trash in ["[Gmail]/Papierkorb", "[Gmail]/Trash", "Trash"]:
-            status, _ = conn.uid("copy", str(email_id), trash)
+            status, _ = conn.uid("copy", str(email_id), _imap_mailbox_arg(trash))
             if status == "OK":
                 break
         else:
@@ -670,8 +734,8 @@ def _move_email(email_id, to_folder, from_folder="INBOX", account=DEFAULT_ACCOUN
     """Move email to another folder."""
     conn, user = _connect_imap(account)
     try:
-        conn.select(from_folder)
-        status, _ = conn.uid("copy", str(email_id), to_folder)
+        conn.select(_imap_mailbox_arg(from_folder))
+        status, _ = conn.uid("copy", str(email_id), _imap_mailbox_arg(to_folder))
         if status != "OK":
             return {"error": f"Folder '{to_folder}' not found", "account": account}
 
@@ -795,6 +859,18 @@ def _ai_call(prompt, system_prompt="You are a helpful assistant.", max_tokens=30
 
 def _ai_call_stream(prompt, system_prompt="You are a helpful assistant.", model="llama3.2:latest"):
     """Stream tokens from an AI model. Yields (token, done)."""
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            yield (
+                "Game Mode is active. Gmail AI is blocked so local GPU/VRAM stays free.",
+                True,
+            )
+            return
+    except Exception:
+        logger.debug("Gmail AI Game Mode check failed", exc_info=True)
+
     full_prompt = f"{system_prompt}\n\n{prompt}"
     # Try Ollama streaming
     try:

@@ -2448,6 +2448,9 @@ class AIAgent:
                 user_id=None,
                 parent_session_id=self._parent_session_id,
             )
+            get_session = getattr(self._session_db, "get_session", None)
+            if callable(get_session) and get_session(self.session_id) is None:
+                raise RuntimeError(f"session row was not created: {self.session_id}")
             self._session_db_created = True
         except Exception as e:
             # Transient failure (e.g. SQLite lock). Keep _session_db alive —
@@ -4486,10 +4489,16 @@ class AIAgent:
         if not self._session_db:
             return
         self._apply_persist_user_message_override(messages)
+
+        def _is_session_fk_error(exc: Exception) -> bool:
+            return "foreign key constraint failed" in str(exc).lower()
+
         try:
             # Retry row creation if the earlier attempt failed transiently.
             if not self._session_db_created:
                 self._ensure_db_session()
+            if not self._session_db_created:
+                return
             start_idx = len(conversation_history) if conversation_history else 0
             flush_from = max(start_idx, self._last_flushed_db_idx)
             for msg in messages[flush_from:]:
@@ -4517,7 +4526,7 @@ class AIAgent:
                     ]
                 elif isinstance(msg.get("tool_calls"), list):
                     tool_calls_data = msg["tool_calls"]
-                self._session_db.append_message(
+                append_kwargs = dict(
                     session_id=self.session_id,
                     role=role,
                     content=content,
@@ -4531,6 +4540,16 @@ class AIAgent:
                     codex_reasoning_items=msg.get("codex_reasoning_items") if role == "assistant" else None,
                     codex_message_items=msg.get("codex_message_items") if role == "assistant" else None,
                 )
+                try:
+                    self._session_db.append_message(**append_kwargs)
+                except Exception as append_exc:
+                    if not _is_session_fk_error(append_exc):
+                        raise
+                    self._session_db_created = False
+                    self._ensure_db_session()
+                    if not self._session_db_created:
+                        raise
+                    self._session_db.append_message(**append_kwargs)
             self._last_flushed_db_idx = len(messages)
         except Exception as e:
             logger.warning("Session DB append_message failed: %s", e)

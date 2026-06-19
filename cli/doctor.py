@@ -93,6 +93,22 @@ def _safe_which(cmd: str) -> str | None:
         return None
 
 
+def _checkpoint_wal_truncate(state_db_path: Path, wal_path: Path) -> tuple[int, int, tuple[int, int, int] | None]:
+    """Checkpoint and truncate a SQLite WAL file.
+
+    Returns ``(old_size, new_size, sqlite_result)``. SQLite reports
+    ``(busy, log_frames, checkpointed_frames)`` for wal_checkpoint.
+    """
+    import sqlite3
+
+    old_size = wal_path.stat().st_size if wal_path.exists() else 0
+    with sqlite3.connect(str(state_db_path), timeout=10) as conn:
+        row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    new_size = wal_path.stat().st_size if wal_path.exists() else 0
+    result = tuple(int(v) for v in row) if row is not None else None
+    return old_size, new_size, result
+
+
 def _termux_browser_setup_steps(node_installed: bool) -> list[str]:
     steps: list[str] = []
     step = 1
@@ -954,13 +970,23 @@ def run_doctor(args):
                     "(may indicate missed checkpoints)"
                 )
                 if should_fix:
-                    import sqlite3
-                    conn = sqlite3.connect(str(state_db_path))
-                    conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                    conn.close()
-                    new_size = wal_path.stat().st_size if wal_path.exists() else 0
-                    check_ok(f"WAL checkpoint performed ({wal_size // 1024}K → {new_size // 1024}K)")
-                    fixed_count += 1
+                    old_size, new_size, checkpoint_result = _checkpoint_wal_truncate(
+                        state_db_path,
+                        wal_path,
+                    )
+                    detail = f"({old_size // 1024}K -> {new_size // 1024}K)"
+                    if checkpoint_result is not None:
+                        busy, log_frames, checkpointed_frames = checkpoint_result
+                        detail += f" sqlite busy={busy} frames={checkpointed_frames}/{log_frames}"
+                    if new_size < old_size:
+                        check_ok(f"WAL checkpoint performed {detail}")
+                        fixed_count += 1
+                    else:
+                        check_warn(
+                            f"WAL checkpoint did not shrink file {detail}",
+                            "(close active Sidekick processes and retry)"
+                        )
+                        issues.append("Large WAL file remains after checkpoint attempt")
                 else:
                     issues.append("Large WAL file — run 'sidekick doctor --fix' to checkpoint")
             elif wal_size > 10 * 1024 * 1024:  # 10 MB

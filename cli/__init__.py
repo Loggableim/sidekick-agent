@@ -15,7 +15,7 @@ import os
 import sys
 
 from sidekick_cli import __version__  # single source of truth
-__release_date__ = "2026.6.10"
+__release_date__ = "2026.6.11"
 
 
 def _ensure_utf8():

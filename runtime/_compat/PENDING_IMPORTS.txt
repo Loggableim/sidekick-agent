@@ -61,6 +61,11 @@ These were identified as heavily dependent on sidekick_cli and skipped:
   - agent/context_compressor.py  (imports agent.auxiliary_client -> needs credential_pool)
   - agent/curator.py             (imports 'agent' as a package)
 
+RESOLVED DURING PORT:
+---------------------
+- tools_config.py now has a runtime compat adapter at
+  runtime/_compat/shim_tools_config.py for _get_platform_tools.
+
 
 ADDITIONAL NOTES:
 ------------------

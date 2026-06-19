@@ -646,6 +646,27 @@ def _upscale_image(image_url: str, original_prompt: str) -> Optional[Dict[str, A
 # ---------------------------------------------------------------------------
 # Tool entry point
 # ---------------------------------------------------------------------------
+def _game_mode_image_generation_error() -> Optional[str]:
+    try:
+        from web.api.config import game_mode_blocked_payload, is_game_mode_enabled
+        if not is_game_mode_enabled():
+            return None
+        payload = game_mode_blocked_payload("image_generation")
+        message = payload.get("error", {}).get("message") or "Game Mode is active"
+    except Exception:
+        return None
+    return json.dumps(
+        {
+            "success": False,
+            "image": None,
+            "error": message,
+            "error_type": "game_mode_enabled",
+            "game_mode_enabled": True,
+        },
+        ensure_ascii=False,
+    )
+
+
 def image_generate_tool(
     prompt: str,
     aspect_ratio: str = DEFAULT_ASPECT_RATIO,
@@ -665,6 +686,21 @@ def image_generate_tool(
     Returns a JSON string with ``{"success": bool, "image": url | None,
     "error": str, "error_type": str}``.
     """
+    if not prompt or not isinstance(prompt, str) or len(prompt.strip()) == 0:
+        return json.dumps(
+            {
+                "success": False,
+                "image": None,
+                "error": "Prompt is required and must be a non-empty string",
+                "error_type": "validation_error",
+            },
+            ensure_ascii=False,
+        )
+
+    game_mode_error = _game_mode_image_generation_error()
+    if game_mode_error:
+        return game_mode_error
+
     model_id, meta = _resolve_fal_model()
 
     debug_call_data = {
@@ -687,9 +723,6 @@ def image_generate_tool(
     start_time = datetime.datetime.now()
 
     try:
-        if not prompt or not isinstance(prompt, str) or len(prompt.strip()) == 0:
-            raise ValueError("Prompt is required and must be a non-empty string")
-
         if not (fal_key_is_configured() or _resolve_managed_fal_gateway()):
             message = "FAL_KEY environment variable not set"
             if managed_nous_tools_enabled():
@@ -1033,6 +1066,9 @@ def _handle_image_generate(args, **kw):
     if not prompt:
         return tool_error("prompt is required for image generation")
     aspect_ratio = args.get("aspect_ratio", DEFAULT_ASPECT_RATIO)
+    game_mode_error = _game_mode_image_generation_error()
+    if game_mode_error:
+        return game_mode_error
 
     # Route to a plugin-registered provider if one is active (and it's
     # not the in-tree FAL path).
