@@ -162,6 +162,23 @@ function isActiveSpaceLoadKey(key) {
   return key === _activeSpaceLoadKey();
 }
 
+function _startSpaceSwitchTiming(slug, rev) {
+  const record = { slug, rev, started_at: Date.now(), marks: [] };
+  try { window._lastSpaceSwitchTiming = record; } catch (_) {}
+  _markSpaceSwitchTiming(slug, rev, 'start');
+  return record;
+}
+
+function _markSpaceSwitchTiming(slug, rev, name) {
+  try {
+    const record = window._lastSpaceSwitchTiming;
+    if (!record || record.slug !== slug || record.rev !== rev) return;
+    record.marks.push({ name, elapsed_ms: Date.now() - record.started_at });
+    const root = document.documentElement;
+    if (root) root.setAttribute('data-sidekick-space-switch-timing', JSON.stringify(record));
+  } catch (_) {}
+}
+
 // â”€â”€ Load spaces from API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function loadSpaces() {
@@ -205,11 +222,23 @@ function _resetViewsForSpaceSwitch() {
   if (todoMain && typeof _renderTodosMainBoard === 'function') _renderTodosMainBoard([]);
 }
 
+function _showSessionListSpaceLoading() {
+  const list = document.getElementById('sessionList');
+  if (!list) return;
+  list.innerHTML = '<div style="padding:14px 12px;color:var(--muted);font-size:12px;text-align:center;">Loading conversations...</div>';
+  list.dataset.sessionVirtualTotal = '0';
+  list.dataset.sessionVirtualFilter = '';
+  list.dataset.sessionVirtualStart = '0';
+  list.dataset.sessionVirtualEnd = '0';
+  delete list.dataset.sessionVirtualActiveAnchor;
+}
+
 function _showSpaceSwitchLoading(slug) {
   _resetViewsForSpaceSwitch();
   updateWorkspaceNameBar();
   updateTitlebarSpace();
   _refreshSidebarSelector();
+  _showSessionListSpaceLoading();
   try {
     if (typeof _activeSessionLoadAbortController !== 'undefined' && _activeSessionLoadAbortController) {
       _activeSessionLoadAbortController.abort();
@@ -230,6 +259,89 @@ function _showSpaceSwitchLoading(slug) {
     } catch (_) {}
     try { if (typeof syncTopbar === 'function') syncTopbar(); } catch (_) {}
     try { if (typeof updateSendBtn === 'function') updateSendBtn(); } catch (_) {}
+  }
+}
+
+async function _syncSpaceProjectDirForActiveSession(slug) {
+  const spaceCfg = _spacesCache.find(s => s.slug === slug);
+  if (!spaceCfg || !spaceCfg.project_dir || typeof loadDir !== 'function') return;
+  const pdir = spaceCfg.project_dir.trim();
+  if (!pdir || typeof S === 'undefined' || !S.session || !S.session.session_id) return;
+  try {
+    if (!S.session.workspace || S.session.workspace !== pdir) {
+      const upd = await api('/api/session/update', {
+        method: 'POST',
+        body: JSON.stringify({
+          session_id: S.session.session_id,
+          workspace: pdir
+        })
+      });
+      if (upd && upd.session) {
+        S.session.workspace = upd.session.workspace;
+      }
+    }
+  } catch (e) {
+    console.warn('selectSpace: failed to sync workspace to project_dir:', e);
+  }
+  loadDir('.');
+}
+
+async function _loadSpaceConfigForSwitch(slug, switchRev, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch (_) {}
+  }, timeoutMs || 1200);
+  try {
+    _markSpaceSwitchTiming(slug, switchRev, 'config-load-started');
+    const configResp = await api(`/api/space/config?slug=${encodeURIComponent(slug)}`, {
+      signal: controller.signal,
+      logError: false,
+    });
+    if (!_isCurrentSpaceSwitch(switchRev, slug)) return null;
+    const config = configResp ? (configResp.config || null) : null;
+    window._activeSpaceConfig = config;
+    _markSpaceSwitchTiming(slug, switchRev, 'config-loaded');
+    return config;
+  } catch (_) {
+    if (_isCurrentSpaceSwitch(switchRev, slug)) {
+      window._activeSpaceConfig = null;
+      _markSpaceSwitchTiming(slug, switchRev, 'config-unavailable');
+    }
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, configPromise) {
+  try {
+    if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+    _markSpaceSwitchTiming(slug, switchRev, 'session-selection-start');
+    const currentSession = (typeof S !== 'undefined' && S && S.session) ? S.session : null;
+    const currentSid = currentSession ? currentSession.session_id : null;
+    const activeSessionInTargetSpace = _spaceSessionMatchesSlug(currentSession, slug);
+    const hasCurrentInSpace = !!(currentSid && activeSessionInTargetSpace && (sessionsInSpace || []).some(s => s && s.session_id === currentSid));
+    if (!currentSid || !hasCurrentInSpace) {
+      if ((sessionsInSpace || []).length && typeof loadSession === 'function') {
+        await _withSpaceTimeout(Promise.resolve(loadSession(sessionsInSpace[0].session_id, {expectedSpace: slug})), 12000, 'load session');
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        _markSpaceSwitchTiming(slug, switchRev, 'session-loaded');
+      } else if (typeof newSession === 'function') {
+        if (configPromise) await Promise.resolve(configPromise).catch(() => null);
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        await _withSpaceTimeout(Promise.resolve(newSession()), 12000, 'create session');
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        _markSpaceSwitchTiming(slug, switchRev, 'session-created');
+        if (typeof renderSessionList === 'function') await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        _markSpaceSwitchTiming(slug, switchRev, 'sessions-rerendered-after-create');
+      }
+    }
+    if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+    void _syncSpaceProjectDirForActiveSession(slug);
+    _markSpaceSwitchTiming(slug, switchRev, 'background-finished');
+  } catch (e) {
+    if (_isCurrentSpaceSwitch(switchRev, slug)) console.warn('continue space session selection:', e);
   }
 }
 
@@ -295,6 +407,7 @@ async function selectSpace(slug) {
     const previousSpace = _activeSpace;
     _activeSpace = slug;
     const switchRev = _beginSpaceSwitch();
+    _startSpaceSwitchTiming(slug, switchRev);
     localStorage.setItem('sidekick-active-workspace', slug);
     const shouldClearSessionRoute = !!(
       !activeSessionInTargetSpace
@@ -310,16 +423,9 @@ async function selectSpace(slug) {
     _syncActiveSpaceUrl(slug, {clearSessionRoute: shouldClearSessionRoute});
     _showSpaceSwitchLoading(slug);
     _syncSpacesPanelActiveState(slug);
-    // ── Space Default Config laden ──
-    let nextSpaceConfig = null;
-    try {
-      const configResp = await _withSpaceTimeout(api(`/api/space/config?slug=${encodeURIComponent(slug)}`), 5000, 'load space config');
-      nextSpaceConfig = configResp.config || null;
-    } catch(e) {
-      nextSpaceConfig = null;
-    }
-    if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-    window._activeSpaceConfig = nextSpaceConfig;
+    _markSpaceSwitchTiming(slug, switchRev, 'space-visible');
+    window._activeSpaceConfig = null;
+    const spaceConfigPromise = _loadSpaceConfigForSwitch(slug, switchRev, 1200);
     // Clear stale session cache before reloading — prevents race conditions
     // with polling timers (startStreamingPoll, _gatewayPollTimer) that may
     // fire between the API call and the response, showing old-space sessions.
@@ -330,6 +436,7 @@ async function selectSpace(slug) {
     if (typeof renderSessionList === 'function') {
       await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
       if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+      _markSpaceSwitchTiming(slug, switchRev, 'session-list-rendered');
       try {
         if (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)) {
           // Client-side safety filter: only keep sessions matching the active space.
@@ -338,44 +445,8 @@ async function selectSpace(slug) {
         }
       } catch (_) {}
     }
-    const currentSid = (typeof S !== 'undefined' && S && S.session) ? S.session.session_id : null;
-    const hasCurrentInSpace = !!(currentSid && activeSessionInTargetSpace && sessionsInSpace.some(s => s && s.session_id === currentSid));
-    if (!currentSid || !hasCurrentInSpace) {
-      if (sessionsInSpace.length && typeof loadSession === 'function') {
-        await _withSpaceTimeout(Promise.resolve(loadSession(sessionsInSpace[0].session_id, {expectedSpace: slug})), 12000, 'load session');
-        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-      } else if (typeof newSession === 'function') {
-        await _withSpaceTimeout(Promise.resolve(newSession()), 12000, 'create session');
-        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-        if (typeof renderSessionList === 'function') await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
-        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-      }
-    }
-    // ── Ensure file tree points to the space's project_dir ──
-    const spaceCfg = _spacesCache.find(s => s.slug === slug);
-    if (spaceCfg && spaceCfg.project_dir && typeof loadDir === 'function') {
-      const pdir = spaceCfg.project_dir.trim();
-      if (pdir && typeof S !== 'undefined' && S.session && S.session.session_id) {
-        try {
-          if (!S.session.workspace || S.session.workspace !== pdir) {
-            const upd = await api('/api/session/update', {
-              method: 'POST',
-              body: JSON.stringify({
-                session_id: S.session.session_id,
-                workspace: pdir
-              })
-            });
-            if (upd && upd.session) {
-              S.session.workspace = upd.session.workspace;
-            }
-          }
-        } catch (e) {
-          console.warn('selectSpace: failed to sync workspace to project_dir:', e);
-        }
-        // Reload file tree from root — session workspace now points to project_dir
-        loadDir('.');
-      }
-    }
+    void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise);
+    _markSpaceSwitchTiming(slug, switchRev, 'background-session-load-started');
     _refreshActiveSpaceScopedPanel();
     // Refresh spaces panel UI if currently visible
     const spacesPanel = document.getElementById('panelWorkspaces');

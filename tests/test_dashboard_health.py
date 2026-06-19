@@ -1994,6 +1994,22 @@ def test_space_dropdown_renders_cached_spaces_before_refresh():
     assert "requestAnimationFrame(runSelect)" in spaces_js
 
 
+def test_space_switch_does_not_block_on_space_config_load():
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+
+    assert "async function _loadSpaceConfigForSwitch(slug, switchRev, timeoutMs)" in spaces_js
+    assert "const spaceConfigPromise = _loadSpaceConfigForSwitch(slug, switchRev, 1200)" in spaces_js
+    assert "void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise)" in spaces_js
+    assert "_markSpaceSwitchTiming(slug, switchRev, 'session-list-rendered')" in spaces_js
+
+
+def test_session_html_cache_ignores_loading_placeholder():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+
+    assert "!/Loading conversation/i.test(String(cached.html||''))" in ui_js
+    assert "!/Loading conversation/i.test(String(_html))" in ui_js
+
+
 def test_launcher_stops_orphan_stdlib_backends():
     launcher = Path("Sidekick-Launcher.ps1").read_text(encoding="utf-8")
 

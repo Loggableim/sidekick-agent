@@ -5981,7 +5981,7 @@ function renderMessages(options){
   // before those cards can be inserted.
   if(sid&&sid!==_sessionHtmlCacheSid&&!INFLIGHT[sid]&&!hasTransientTranscriptUi){
     const cached=_sessionHtmlCache.get(sid);
-    if(cached&&cached.msgCount===msgCount&&cached.renderWindowSize===renderWindowSize){
+    if(cached&&cached.msgCount===msgCount&&cached.renderWindowSize===renderWindowSize&&!/Loading conversation/i.test(String(cached.html||''))){
       _saveExpandedCodeBlocks();
       _saveExpandedMessageCollapses();
       inner.innerHTML=cached.html;
@@ -6615,7 +6615,7 @@ function renderMessages(options){
   if(sid&&!hasTransientTranscriptUi){
     const _html=inner.innerHTML;
     // Only cache sessions with <300KB rendered HTML; evict oldest beyond 8 sessions.
-    if(_html.length<300_000){
+    if(_html.length<300_000&&!/Loading conversation/i.test(String(_html))){
       _sessionHtmlCache.set(sid,{html:_html,msgCount,renderWindowSize});
       if(_sessionHtmlCache.size>8){_sessionHtmlCache.delete(_sessionHtmlCache.keys().next().value);}
     }
