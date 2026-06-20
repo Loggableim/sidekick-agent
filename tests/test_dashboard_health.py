@@ -1013,6 +1013,18 @@ def test_desktop_rail_owns_vertical_overflow():
     assert ".rail::-webkit-scrollbar{display:none;}" in style_css
 
 
+def test_short_desktop_rail_compacts_navigation_buttons():
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert "@media(min-width:641px) and (max-height:760px)" in style_css
+    assert ".rail{gap:2px;padding:6px 0;}" in style_css
+    assert ".rail-btn{width:34px;height:34px;min-height:34px;}" in style_css
+    assert ".rail-spacer{min-height:4px;}" in style_css
+    assert ".rail-separator{margin:2px auto;}" in style_css
+    assert 'html[data-rail-expanded="1"] .rail{padding:6px 8px;}' in style_css
+    assert 'html[data-rail-expanded="1"] .rail-btn{height:34px;min-height:34px;}' in style_css
+
+
 def test_mobile_open_sidebar_layers_above_rightpanel():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 

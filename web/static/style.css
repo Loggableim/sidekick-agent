@@ -2391,6 +2391,16 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .layout.rail-expanded #railSidebarToggle svg,
     html[data-rail-expanded="1"] #railSidebarToggle svg{transform:rotate(0deg);}
   }
+  @media(min-width:641px) and (max-height:760px){
+    .rail{gap:2px;padding:6px 0;}
+    .rail-btn{width:34px;height:34px;min-height:34px;}
+    .rail-spacer{min-height:4px;}
+    .rail-separator{margin:2px auto;}
+    .layout.rail-expanded .rail,
+    html[data-rail-expanded="1"] .rail{padding:6px 8px;}
+    .layout.rail-expanded .rail-btn,
+    html[data-rail-expanded="1"] .rail-btn{height:34px;min-height:34px;}
+  }
 
   @media(max-width:900px){
     .rightpanel{display:none}
