@@ -1859,6 +1859,16 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "btn.style.display='none'" not in cast_js
 
 
+def test_show_toast_accepts_legacy_type_second_argument():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    show_toast = ui_js[ui_js.index("function showToast(msg,ms,type)") : ui_js.index("const APP_DIALOG")]
+
+    assert "if(typeof ms==='string'&&!type)" in show_toast
+    assert "type=ms;" in show_toast
+    assert "ms=null;" in show_toast
+    assert "const duration=(ms==null)?(t==='error'?TOAST_ERROR_DEFAULT_MS:TOAST_DEFAULT_MS):ms;" in show_toast
+
+
 def test_main_view_headers_do_not_overflow_from_actions_or_hidden_tooltips():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
