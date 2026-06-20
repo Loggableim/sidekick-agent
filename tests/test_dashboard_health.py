@@ -1718,6 +1718,17 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "btn.style.display='none'" not in cast_js
 
 
+def test_main_view_headers_do_not_overflow_from_actions_or_hidden_tooltips():
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert ".main-view-header > :first-child{min-width:0;max-width:100%;}" in style_css
+    assert ".main-view-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;}" in style_css
+    assert ".main-view-actions .has-tooltip:not(:hover):not(:focus-visible)::after{content:none;}" in style_css
+    assert ".todos-main-header > :first-child{min-width:0;}" in style_css
+    assert ".todos-main-header{align-items:flex-start;flex-wrap:wrap;}" in style_css
+    assert ".todos-main-header .main-view-actions{width:100%;justify-content:flex-start;}" in style_css
+
+
 def test_empty_session_model_resolution_skips_catalog(monkeypatch):
     from web.api import routes
 
