@@ -1134,6 +1134,35 @@ def test_mobile_composer_config_layers_above_rightpanel():
     )
 
 
+def test_browser_drawer_open_renders_as_fixed_bottom_sheet():
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert "body.browser-drawer-open:not(.browser-maximized) .browser-drawer {" in style_css
+    bottom_sheet = style_css[
+        style_css.index("body.browser-drawer-open:not(.browser-maximized) .browser-drawer {") :
+        style_css.index(".browser-drawer-shell {", style_css.index("body.browser-drawer-open:not(.browser-maximized) .browser-drawer {"))
+    ]
+    assert "position: fixed;" in bottom_sheet
+    assert "bottom: calc(12px + env(safe-area-inset-bottom,0px));" in bottom_sheet
+    assert "width: min(760px, calc(100vw - 32px));" in bottom_sheet
+    assert "height: min(52vh, 560px);" in bottom_sheet
+    assert "max-height: 560px !important;" in bottom_sheet
+    assert "opacity: 1 !important;" in bottom_sheet
+    assert "transition: none;" in bottom_sheet
+    assert "z-index: 260;" in bottom_sheet
+
+    mobile_drawer = style_css[
+        style_css.index("@media (max-width: 760px)") :
+        style_css.index("/* \u00e2\u201d\u20ac\u00e2\u201d\u20ac Rightpanel: Agents Dashboard", style_css.index("@media (max-width: 760px)"))
+    ]
+    assert "body.browser-drawer-open:not(.browser-maximized) .browser-drawer {" in mobile_drawer
+    assert "width: 100vw;" in mobile_drawer
+    assert "height: min(46vh, 380px);" in mobile_drawer
+    assert "max-height: 380px !important;" in mobile_drawer
+    assert "body.browser-drawer-open:not(.browser-maximized) .browser-drawer-shell {" in mobile_drawer
+    assert "height: min(46vh, 380px);" in mobile_drawer
+
+
 def test_workspace_files_toggle_uses_current_rightpanel_contract():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
