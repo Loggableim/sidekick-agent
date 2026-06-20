@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import sys
 import warnings
 import pytest
 from pathlib import Path
@@ -1491,8 +1492,53 @@ def test_cast_status_without_config_does_not_probe_network(monkeypatch):
     assert captured["payload"]["available"] is False
     assert captured["payload"]["active"] is False
     assert captured["payload"]["configured"] is False
-    assert captured["payload"]["host"] == ""
+    assert captured["payload"]["host"] == "http://127.0.0.1:8765"
+    assert captured["payload"]["dashboard_url"] == "http://127.0.0.1:8765"
+    assert "launch_available" in captured["payload"]
     assert "not configured" in captured["payload"]["detail"]
+
+
+def test_cast_toggle_without_config_starts_local_cockpit(monkeypatch, tmp_path):
+    from web.api import routes
+
+    captured = {}
+    launcher = tmp_path / "launch_cockpit.py"
+    launcher.write_text("print('ok')", encoding="utf-8")
+
+    class Proc:
+        pid = 4242
+
+    def fake_j(handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+
+    def fake_urlopen(*args, **kwargs):
+        raise TimeoutError("not running")
+
+    popen_calls = []
+
+    def fake_popen(args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return Proc()
+
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.setenv("SIDEKICK_COCKPIT_LAUNCHER", str(launcher))
+    monkeypatch.setattr(routes, "j", fake_j)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(routes.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(routes, "_wait_for_cockpit_ready", lambda host: True)
+
+    routes._handle_cast_proxy(object(), "/api/cast/toggle", "POST")
+
+    assert captured["status"] == 200
+    assert captured["payload"]["configured"] is True
+    assert captured["payload"]["available"] is True
+    assert captured["payload"]["started"] is True
+    assert captured["payload"]["host"] == "http://127.0.0.1:8765"
+    assert captured["payload"]["dashboard_url"] == "http://127.0.0.1:8765"
+    assert popen_calls
+    assert popen_calls[0][0] == [sys.executable, str(launcher)]
 
 
 def test_cast_status_configured_host_keeps_safe_unavailable_error(monkeypatch):

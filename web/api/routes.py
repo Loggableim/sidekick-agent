@@ -5043,33 +5043,46 @@ def _cast_api_host() -> str:
     ).rstrip("/")
 
 
-def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
-    host = _cast_api_host()
-    if not host:
-        return j(handler, {
-            "active": False,
-            "available": False,
-            "configured": False,
-            "error": "Hub nicht erreichbar",
-            "detail": "SIDEKICK_CAST_API_HOST not configured",
-            "host": "",
-        })
-    try:
-        import json as _json
-        import urllib.error
-        import urllib.request
+def _default_cockpit_cast_host() -> str:
+    return (os.getenv("SIDEKICK_COCKPIT_CAST_API_HOST", "").strip() or "http://127.0.0.1:8765").rstrip("/")
 
-        url = f"{host}{endpoint}"
-        req = urllib.request.Request(url, method=method)
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            raw = resp.read()
-        try:
-            payload = _json.loads(raw.decode("utf-8") or "{}")
-        except Exception:
-            payload = {"raw": raw.decode("utf-8", errors="replace")}
-        if isinstance(payload, dict):
-            payload.setdefault("configured", True)
-            payload.setdefault("host", host)
+
+def _cockpit_launcher_path() -> Path:
+    raw = os.getenv("SIDEKICK_COCKPIT_LAUNCHER", "").strip()
+    return Path(raw) if raw else Path("C:/HermesPortable/home/cockpit/launch_cockpit.py")
+
+
+def _cockpit_autostart_enabled() -> bool:
+    return os.getenv("SIDEKICK_COCKPIT_AUTOSTART", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _cockpit_launch_available() -> bool:
+    return _cockpit_autostart_enabled() and _cockpit_launcher_path().is_file()
+
+
+_COCKPIT_LAUNCH_PROCESS = None
+_COCKPIT_LAUNCH_LOCK = threading.Lock()
+
+
+def _cast_read_json(url: str, method: str = "GET", timeout: float = 2.5) -> dict:
+    import json as _json
+    import urllib.request
+
+    req = urllib.request.Request(url, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    try:
+        payload = _json.loads(raw.decode("utf-8") or "{}")
+    except Exception:
+        payload = {"raw": raw.decode("utf-8", errors="replace")}
+    return payload if isinstance(payload, dict) else {"value": payload}
+
+
+def _forward_cast_request(handler, host: str, endpoint: str, method: str):
+    try:
+        payload = _cast_read_json(f"{host}{endpoint}", method=method, timeout=2.5)
+        payload.setdefault("configured", True)
+        payload.setdefault("host", host)
         return j(handler, payload)
     except Exception as exc:
         return j(handler, {
@@ -5080,6 +5093,111 @@ def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
             "detail": _sanitize_error(exc),
             "host": host,
         }, status=200 if endpoint == "/api/cast/status" else 502)
+
+
+def _start_cockpit_launcher():
+    global _COCKPIT_LAUNCH_PROCESS
+    launcher = _cockpit_launcher_path()
+    if not _cockpit_autostart_enabled():
+        raise RuntimeError("cockpit autostart disabled")
+    if not launcher.is_file():
+        raise FileNotFoundError(str(launcher))
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    with _COCKPIT_LAUNCH_LOCK:
+        poll = getattr(_COCKPIT_LAUNCH_PROCESS, "poll", None)
+        if _COCKPIT_LAUNCH_PROCESS is not None and callable(poll) and poll() is None:
+            return _COCKPIT_LAUNCH_PROCESS
+        _COCKPIT_LAUNCH_PROCESS = subprocess.Popen(
+            [sys.executable, str(launcher)],
+            cwd=str(launcher.parent),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=creationflags,
+        )
+        return _COCKPIT_LAUNCH_PROCESS
+
+
+def _wait_for_cockpit_ready(host: str, timeout: float = 8.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            _cast_read_json(f"{host}/api/status", timeout=0.75)
+            return True
+        except Exception:
+            time.sleep(0.25)
+    return False
+
+
+def _handle_cast_autostart(handler):
+    host = _default_cockpit_cast_host()
+    if _cockpit_launch_available():
+        try:
+            proc = _start_cockpit_launcher()
+            ready = _wait_for_cockpit_ready(host)
+            return j(handler, {
+                "active": bool(ready),
+                "available": bool(ready),
+                "configured": True,
+                "started": True,
+                "pid": getattr(proc, "pid", None),
+                "host": host,
+                "dashboard_url": host,
+                "detail": "Cockpit launcher started" if ready else "Cockpit launcher started; waiting for dashboard",
+            }, status=200 if ready else 202)
+        except Exception as exc:
+            return j(handler, {
+                "active": False,
+                "available": False,
+                "configured": False,
+                "error": "Hub nicht erreichbar",
+                "detail": _sanitize_error(exc),
+                "host": host,
+                "dashboard_url": host,
+                "launch_available": _cockpit_launch_available(),
+            }, status=502)
+
+    try:
+        status = _cast_read_json(f"{host}/api/cast/status", timeout=0.75)
+        status.setdefault("configured", True)
+        status.setdefault("host", host)
+        if status.get("active") is True:
+            status.setdefault("available", True)
+            return j(handler, status)
+        return _forward_cast_request(handler, host, "/api/cast/toggle", "POST")
+    except Exception:
+        pass
+
+    return j(handler, {
+        "active": False,
+        "available": False,
+        "configured": False,
+        "error": "Hub nicht erreichbar",
+        "detail": "SIDEKICK_CAST_API_HOST not configured and cockpit launcher unavailable",
+        "host": host,
+        "dashboard_url": host,
+        "launch_available": False,
+    }, status=502)
+
+
+def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
+    host = _cast_api_host()
+    if not host:
+        if method == "POST" and endpoint == "/api/cast/toggle":
+            return _handle_cast_autostart(handler)
+        default_host = _default_cockpit_cast_host()
+        return j(handler, {
+            "active": False,
+            "available": False,
+            "configured": False,
+            "error": "Hub nicht erreichbar",
+            "detail": "SIDEKICK_CAST_API_HOST not configured",
+            "host": default_host,
+            "dashboard_url": default_host,
+            "launch_available": _cockpit_launch_available(),
+        })
+    return _forward_cast_request(handler, host, endpoint, method)
 
 
 def handle_post(handler, parsed) -> bool:

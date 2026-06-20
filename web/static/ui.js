@@ -604,6 +604,7 @@ let _castStatusTimer=null;
 let _castLastError='';
 let _castConfigured=true;
 let _castHost='';
+let _castDashboardUrl='';
 
 function _castFetch(path,opts){
   const ctrl=new AbortController();
@@ -624,6 +625,7 @@ async function _refreshCastStatus(){
     const s=await r.json().catch(()=>({}));
     _castConfigured=s.configured!==false;
     if(s&&typeof s.host==='string')_castHost=s.host.trim();
+    if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
     _castAvailable=r.ok && s.available!==false;
     _castActive=_castAvailable && s.active===true;
     _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
@@ -663,9 +665,11 @@ function _applyCastUI(){
 }
 
 function _hubCastDashboardUrl(){
+  const dashboard=(_castDashboardUrl||'').trim().replace(/\/+$/,'');
+  if(/^https?:\/\//i.test(dashboard))return dashboard;
   const host=(_castHost||'').trim().replace(/\/+$/,'');
   if(/^https?:\/\//i.test(host))return host;
-  return _dashboardBrowserUrl(_dashboardStatusCache)||window.location.origin;
+  return _dashboardBrowserUrl(_dashboardStatusCache)||'http://127.0.0.1:8765';
 }
 
 function openHubCastDashboard(){
@@ -682,12 +686,6 @@ async function toggleHubCast(){
     _refreshCastStatus();
     return;
   }
-  if(!_castConfigured){
-    _castLastError='Hub Cast nicht konfiguriert';
-    _applyCastUI();
-    if(typeof showToast==='function')showToast('Hub Cast nicht konfiguriert. Pruefe SIDEKICK_CAST_API_HOST.', 'error');
-    return;
-  }
   _castLoading=true;
   _applyCastUI();
   try{
@@ -695,6 +693,7 @@ async function toggleHubCast(){
     const s=await r.json().catch(()=>({}));
     _castConfigured=s.configured!==false;
     if(s&&typeof s.host==='string')_castHost=s.host.trim();
+    if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
     _castAvailable=r.ok && s.available!==false;
     _castActive=_castAvailable && s.active===true;
     _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
@@ -722,6 +721,7 @@ async function _checkCastButtonVisible(){
   try{
     const s=await fetchJson('api/cast/status');
     if(s&&typeof s.host==='string')_castHost=s.host.trim();
+    if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
   }catch(e){
     // Keep the Hub button visible even when the cast backend is not reachable.
   }
