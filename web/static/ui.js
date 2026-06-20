@@ -4234,9 +4234,11 @@ function copyToastText(btn){
 }
 function showToast(msg,ms,type){
   const el=$('toast');if(!el)return;
-  if(typeof ms==='string'&&!type){
-    type=ms;
-    ms=null;
+  if(typeof ms==='string'){
+    const legacyType=ms;
+    const legacyDuration=typeof type==='number'?type:null;
+    type=legacyType;
+    ms=legacyDuration;
   }
   const s=String(msg==null?'':msg);let t=type;
   if(!t){const low=s.toLowerCase();if(/fail|error|denied|invalid|unavailable|no active|no workspace match|no model match|no personalities/.test(low))t='error';else if(/warn|queued|takes effect|skipped|fallback/.test(low))t='warning';else if(/saved|created|imported|restored|switched|set to|updated|duplicated|moved to|renamed|deleted|complete|pinned|archived|cleared|stopped/.test(low))t='success';else t='info';}

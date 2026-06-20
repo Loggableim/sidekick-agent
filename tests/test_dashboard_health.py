@@ -1866,9 +1866,11 @@ def test_show_toast_accepts_legacy_type_second_argument():
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     show_toast = ui_js[ui_js.index("function showToast(msg,ms,type)") : ui_js.index("const APP_DIALOG")]
 
-    assert "if(typeof ms==='string'&&!type)" in show_toast
-    assert "type=ms;" in show_toast
-    assert "ms=null;" in show_toast
+    assert "if(typeof ms==='string')" in show_toast
+    assert "const legacyType=ms;" in show_toast
+    assert "const legacyDuration=typeof type==='number'?type:null;" in show_toast
+    assert "type=legacyType;" in show_toast
+    assert "ms=legacyDuration;" in show_toast
     assert "const duration=(ms==null)?(t==='error'?TOAST_ERROR_DEFAULT_MS:TOAST_DEFAULT_MS):ms;" in show_toast
 
 
