@@ -603,6 +603,7 @@ let _castPollTimer=null;
 let _castStatusTimer=null;
 let _castLastError='';
 let _castConfigured=true;
+let _castHost='';
 
 function _castFetch(path,opts){
   const ctrl=new AbortController();
@@ -622,9 +623,10 @@ async function _refreshCastStatus(){
     const r=await _castFetch('/api/cast/status');
     const s=await r.json().catch(()=>({}));
     _castConfigured=s.configured!==false;
+    if(s&&typeof s.host==='string')_castHost=s.host.trim();
     _castAvailable=r.ok && s.available!==false;
     _castActive=_castAvailable && s.active===true;
-    _castLastError=_castAvailable?'':(s.error||'Hub nicht erreichbar');
+    _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
     if(!_castConfigured)_cleanupCastTimers();
   }catch(e){
     _castAvailable=false;
@@ -640,10 +642,6 @@ function _applyCastUI(){
   const icon=document.getElementById('castStatusIcon');
   if(!icon)return;
   const btn=icon.closest('.titlebar-action-btn');
-  if(!_castConfigured){
-    if(btn)btn.style.display='none';
-    return;
-  }
   if(btn)btn.style.display='';
   if(_castLoading){
     icon.textContent='⏳';
@@ -652,7 +650,7 @@ function _applyCastUI(){
   }else if(_castActive){
     icon.textContent='📺';
     if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-on';
-    icon.parentElement?.setAttribute('data-tooltip','Cast aktiv – klicken zum stoppen');
+    icon.parentElement?.setAttribute('data-tooltip','Hub Dashboard oeffnen');
   }else if(!_castAvailable){
     icon.textContent='📺';
     if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable';
@@ -664,18 +662,42 @@ function _applyCastUI(){
   }
 }
 
+function _hubCastDashboardUrl(){
+  const host=(_castHost||'').trim().replace(/\/+$/,'');
+  if(/^https?:\/\//i.test(host))return host;
+  return _dashboardBrowserUrl(_dashboardStatusCache)||window.location.origin;
+}
+
+function openHubCastDashboard(){
+  const url=_hubCastDashboardUrl();
+  if(!url)return false;
+  window.open(url,'_blank','noopener,noreferrer');
+  return true;
+}
+
 async function toggleHubCast(){
-  const icon=document.getElementById('castStatusIcon');
+  openHubCastDashboard();
   if(_castLoading)return;
+  if(_castActive){
+    _refreshCastStatus();
+    return;
+  }
+  if(!_castConfigured){
+    _castLastError='Hub Cast nicht konfiguriert';
+    _applyCastUI();
+    if(typeof showToast==='function')showToast('Hub Cast nicht konfiguriert. Pruefe SIDEKICK_CAST_API_HOST.', 'error');
+    return;
+  }
   _castLoading=true;
   _applyCastUI();
   try{
     const r=await _castFetch('/api/cast/toggle',{method:'POST'});
     const s=await r.json().catch(()=>({}));
     _castConfigured=s.configured!==false;
+    if(s&&typeof s.host==='string')_castHost=s.host.trim();
     _castAvailable=r.ok && s.available!==false;
     _castActive=_castAvailable && s.active===true;
-    _castLastError=_castAvailable?'':(s.error||'Hub nicht erreichbar');
+    _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
     if(!_castAvailable&&typeof showToast==='function')showToast('Hub Cast nicht erreichbar. Prüfe SIDEKICK_CAST_API_HOST.', 'error');
   }catch(e){
     _castAvailable=false;
@@ -694,13 +716,14 @@ async function toggleHubCast(){
 
 // Init cast status polling
 async function _checkCastButtonVisible(){
+  const btn=document.getElementById('btnCastToggle');
+  if(btn)btn.style.display='';
   // Quick probe: if the dashboard server responds, show the cast button
   try{
     const s=await fetchJson('api/cast/status');
-    const btn=document.getElementById('btnCastToggle');
-    if(btn&&s&&s.configured!==false)btn.style.display='';
+    if(s&&typeof s.host==='string')_castHost=s.host.trim();
   }catch(e){
-    // Server not reachable — keep button hidden
+    // Keep the Hub button visible even when the cast backend is not reachable.
   }
 }
 setTimeout(_checkCastButtonVisible,2000);

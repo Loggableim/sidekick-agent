@@ -1649,14 +1649,27 @@ def test_workspace_load_dir_ignores_abort_noise():
     assert "console.warn('loadDir',e)" in workspace_js
 
 
-def test_unconfigured_cast_status_keeps_button_hidden():
+def test_unconfigured_cast_status_keeps_hub_button_visible():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    cast_js = ui_js[ui_js.index("let _castActive=false;") : ui_js.index("function _initDashboardLinkProbe()")]
 
+    cast_button_id = index_html.index('id="btnCastToggle"')
+    cast_button_start = index_html.rfind("<button", 0, cast_button_id)
+    cast_button_end = index_html.index("</button>", cast_button_start)
+    cast_button = index_html[cast_button_start:cast_button_end]
+
+    assert 'style="display:none"' not in cast_button
+    assert "cast-unavailable" in cast_button
     assert "let _castConfigured=true;" in ui_js
+    assert "let _castHost='';" in ui_js
     assert "s.configured!==false" in ui_js
-    assert "if(!_castConfigured)" in ui_js
     assert "if(!_castConfigured)_cleanupCastTimers()" in ui_js
-    assert "btn.style.display='none'" in ui_js
+    assert "Hub Cast nicht konfiguriert" in ui_js
+    assert "function openHubCastDashboard()" in ui_js
+    assert "window.open(url,'_blank','noopener,noreferrer')" in ui_js
+    assert "if(_castActive){" in ui_js
+    assert "btn.style.display='none'" not in cast_js
 
 
 def test_empty_session_model_resolution_skips_catalog(monkeypatch):
