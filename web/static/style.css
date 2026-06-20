@@ -8279,6 +8279,10 @@ body.focus-mode aside.rightpanel {
   @media(max-width:360px){
     .app-titlebar-inner{max-width:24px;}
     .app-titlebar-title{display:none;}
+    .app-titlebar-center{flex:0 0 42px;min-width:42px;}
+    .app-titlebar-center .mode-toggle{flex:0 0 42px;min-width:42px;}
+    .app-titlebar-center .mode-btn{flex-basis:18px;width:18px;min-width:18px;}
+    .app-titlebar-center .mode-btn::before{font-size:11px;}
     .titlebar-space{max-width:96px;}
   }
   .sidebar{
