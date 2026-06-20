@@ -301,14 +301,29 @@ function toggleMobileSidebar(){
   else{
     if(_isCompactWorkspaceViewport()&&typeof _setWorkspacePanelMode==='function') _setWorkspacePanelMode('closed');
     sidebar.classList.add('mobile-open');
+    _syncMobileSidebarInlineOffset(sidebar,true);
     if(overlay)overlay.classList.add('visible');
   }
 }
 function closeMobileSidebar(){
   const sidebar=document.querySelector('.sidebar');
   const overlay=$('mobileOverlay');
-  if(sidebar)sidebar.classList.remove('mobile-open');
+  if(sidebar){
+    sidebar.classList.remove('mobile-open');
+    _syncMobileSidebarInlineOffset(sidebar,false);
+  }
   if(overlay)overlay.classList.remove('visible');
+}
+
+function _syncMobileSidebarInlineOffset(sidebar,open){
+  if(!sidebar)return;
+  if(_isDesktopWidth()){
+    sidebar.style.removeProperty('left');
+    sidebar.style.removeProperty('transform');
+    return;
+  }
+  sidebar.style.setProperty('left','-300px','important');
+  sidebar.style.setProperty('transform',open?'translate3d(300px,0,0)':'none','important');
 }
 
 const windowControls={
@@ -1358,6 +1373,7 @@ document.querySelectorAll('.suggestion').forEach(btn=>{
 });
 
 window.addEventListener('resize',()=>{
+  _syncMobileSidebarInlineOffset(document.querySelector('.sidebar'),document.querySelector('.sidebar')?.classList.contains('mobile-open'));
   _syncWorkspacePanelInlineWidth();
   syncWorkspacePanelState();
 });

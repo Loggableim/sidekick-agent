@@ -695,12 +695,13 @@ def test_mobile_sidebar_is_forced_out_of_flex_flow():
     assert "@media(max-width:640px)" in style_css
     assert ".sidebar{" in style_css
     assert "position:fixed!important" in style_css
+    assert "left:-300px!important;" in style_css
     assert "overflow:hidden!important" in style_css
     assert "pointer-events:none!important" in style_css
-    assert "transform:translate3d(calc(-100% - 20px),0,0)!important;" in style_css
-    assert "transition:transform .25s ease!important;" in style_css
+    assert "transform:none!important" in style_css
+    assert "transition:left .25s ease!important;" in style_css
     assert ".sidebar.mobile-open{" in style_css
-    assert "transform:translate3d(0,0,0)!important;" in style_css
+    assert "transform:translate3d(300px,0,0)!important;" in style_css
     assert "pointer-events:auto!important" in style_css
     assert ".rightpanel{" in style_css
     assert "right:calc(-1 * var(--mobile-rightpanel-width))!important" in style_css
@@ -726,6 +727,10 @@ def test_mobile_nav_click_closes_sidebar_and_keeps_hamburger_clickable():
     assert "opts.fromRailClick && typeof closeMobileSidebar === 'function'" in panels_js
     assert "typeof _isDesktopWidth === 'function' && !_isDesktopWidth()" in panels_js
     assert "closeMobileSidebar();" in panels_js
+    assert "function _syncMobileSidebarInlineOffset(sidebar,open)" in Path("web/static/boot.js").read_text(encoding="utf-8")
+    assert "sidebar.style.setProperty('left','-300px','important')" in Path("web/static/boot.js").read_text(encoding="utf-8")
+    assert "sidebar.style.setProperty('transform',open?'translate3d(300px,0,0)':'none','important')" in Path("web/static/boot.js").read_text(encoding="utf-8")
+    assert "sidebar.style.removeProperty('left')" in Path("web/static/boot.js").read_text(encoding="utf-8")
     assert ".app-titlebar{position:relative;z-index:220!important;}" in style_css
     assert ".app-titlebar-hamburger{position:relative;z-index:221!important;}" in style_css
     assert "top:calc(38px + var(--app-titlebar-safe-top,0px))!important;" in style_css
@@ -1766,7 +1771,7 @@ def test_main_view_headers_do_not_overflow_from_actions_or_hidden_tooltips():
 
     assert ".main-view-header > :first-child{min-width:0;max-width:100%;}" in style_css
     assert ".main-view-actions{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;}" in style_css
-    assert ".main-view-actions .has-tooltip:not(:hover):not(:focus-visible)::after{content:none;}" in style_css
+    assert ".has-tooltip:not(:hover):not(:focus-visible)::after{content:none;}" in style_css
     assert ".todos-main-header > :first-child{min-width:0;}" in style_css
     assert ".todos-main-header{align-items:flex-start;flex-wrap:wrap;}" in style_css
     assert ".todos-main-header .main-view-actions{width:100%;justify-content:flex-start;}" in style_css
