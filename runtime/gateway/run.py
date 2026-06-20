@@ -759,6 +759,31 @@ def _try_resolve_fallback_provider() -> dict | None:
     return None
 
 
+def _game_mode_blocks_gateway_runtime(provider: str | None, base_url: str | None) -> bool:
+    """Return True when Gateway must not start a local GPU-backed model run."""
+    try:
+        from web.api.config import game_mode_blocks_local_model_request
+
+        return bool(game_mode_blocks_local_model_request(provider, base_url))
+    except Exception:
+        return False
+
+
+def _game_mode_gateway_block_result() -> dict:
+    message = (
+        "Game Mode is active. Local model requests are blocked so GPU/VRAM "
+        "resources stay available for games."
+    )
+    return {
+        "final_response": message,
+        "messages": [],
+        "api_calls": 0,
+        "tools": [],
+        "game_mode_enabled": True,
+        "error_type": "game_mode_enabled",
+    }
+
+
 def _build_media_placeholder(event) -> str:
     """Build a text placeholder for media-only events so they aren't dropped.
 
@@ -14707,6 +14732,17 @@ class GatewayRunner:
                     "api_calls": 0,
                     "tools": [],
                 }
+
+            if _game_mode_blocks_gateway_runtime(
+                runtime_kwargs.get("provider"),
+                runtime_kwargs.get("base_url"),
+            ):
+                logger.info(
+                    "Game Mode blocked gateway local model run: provider=%s session=%s",
+                    runtime_kwargs.get("provider") or "",
+                    session_key or "",
+                )
+                return _game_mode_gateway_block_result()
 
             pr = self._provider_routing
             reasoning_config = self._resolve_session_reasoning_config(
