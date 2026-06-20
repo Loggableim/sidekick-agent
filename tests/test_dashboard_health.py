@@ -986,6 +986,9 @@ def test_mobile_sidebar_nav_mirrors_desktop_panel_rail():
     for panel in ("gmail", "discord"):
         assert f"data-panel=\"{panel}\"" in sidebar_nav_html
         assert f"switchPanel('{panel}',{{fromRailClick:true}})" in sidebar_nav_html
+    for match in re.finditer(r"<button[^>]+class=\"nav-tab[^\"]*\"[^>]*>", sidebar_nav_html):
+        button = match.group(0)
+        assert 'aria-label="' in button or 'data-label="' in button
 
 
 def test_space_dropdown_selection_uses_delegated_container_click():
