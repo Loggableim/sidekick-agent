@@ -2381,10 +2381,13 @@ def test_session_list_loads_projects_in_parallel_with_sessions():
     projects_promise = body.index("const projectsPromise = _apiWithTimeout(")
     await_sessions = body.index("const sessData = await sessionsPromise;")
     await_projects = body.index("const projData = await projectsPromise;")
+    first_render = body.index("renderSessionListFromCache();  // no-ops if rename is in progress")
+    second_render = body.index("renderSessionListFromCache();", await_projects)
 
     assert sessions_promise < await_sessions
     assert projects_promise < await_sessions
-    assert await_sessions < await_projects
+    assert await_sessions < first_render < await_projects
+    assert await_projects < second_render
 
 
 def test_space_deeplink_initializes_active_workspace():

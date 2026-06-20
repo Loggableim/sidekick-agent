@@ -2213,7 +2213,6 @@ async function renderSessionList(){
       return {projects: []};
     });
     const sessData = await sessionsPromise;
-    const projData = await projectsPromise;
     // Discard stale response — a newer renderSessionList() call superseded us.
     if (_gen !== _renderSessionListGen) return;
     if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
@@ -2222,7 +2221,7 @@ async function renderSessionList(){
     // without a second round-trip. Stashed on the module for renderSessionListFromCache.
     _otherProfileCount = sessData.other_profile_count || 0;
     _allSessions = _mergeOptimisticFirstTurnSessions(sessData.sessions||[]);
-    _allProjects = projData.projects||[];
+    _allProjects = [];
     // Capture server clock for clock-skew compensation (issue #1144).
     // server_time is epoch seconds from the server's time.time().
     // _serverTimeDelta = client - server, so (Date.now() - _serverTimeDelta)
@@ -2242,6 +2241,11 @@ async function renderSessionList(){
     }
     ensureSessionTimeRefreshPoll();
     renderSessionListFromCache();  // no-ops if rename is in progress
+    const projData = await projectsPromise;
+    if (_gen !== _renderSessionListGen) return;
+    if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
+    _allProjects = projData.projects||[];
+    renderSessionListFromCache();
   }catch(e){
     if (listAbortController.signal.aborted || (e && e.name === 'AbortError')) return;
     if (_gen !== _renderSessionListGen) return;
