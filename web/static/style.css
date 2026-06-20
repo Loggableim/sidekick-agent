@@ -8263,7 +8263,10 @@ body.focus-mode aside.rightpanel {
   .app-titlebar-title{max-width:48px;}
   .app-titlebar-center{position:static;left:auto;top:auto;transform:none;flex:0 1 auto;max-width:none;gap:6px;z-index:auto;}
   .app-titlebar-center .mode-toggle{flex:0 1 auto;min-width:0;}
-  .app-titlebar-center .mode-btn{min-width:0;padding:3px 7px;}
+  .app-titlebar-center .mode-btn{position:relative;flex:0 0 28px;width:28px;min-width:28px;padding:3px 0;overflow:hidden;font-size:0;}
+  .app-titlebar-center .mode-btn::before{display:inline-flex;align-items:center;justify-content:center;font-size:12px;line-height:1;color:currentColor;}
+  .app-titlebar-center .mode-btn[data-mode="action"]::before{content:"\2394";}
+  .app-titlebar-center .mode-btn[data-mode="plan"]::before{content:"\1F9E0";}
   .compact-toggle-btn{display:none!important;}
   .app-titlebar-spacer{display:flex;flex:1 1 auto;min-width:4px;width:auto;height:auto;}
   .titlebar-space-spacer{display:none;}
@@ -8276,7 +8279,6 @@ body.focus-mode aside.rightpanel {
   @media(max-width:360px){
     .app-titlebar-inner{max-width:24px;}
     .app-titlebar-title{display:none;}
-    .app-titlebar-center .mode-btn{padding:3px 6px;}
     .titlebar-space{max-width:96px;}
   }
   .sidebar{

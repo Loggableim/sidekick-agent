@@ -759,6 +759,9 @@ def test_mobile_titlebar_center_stays_in_flex_flow():
     assert "@media(max-width:640px)" in style_css
     assert ".app-titlebar-center{position:static;" in style_css
     assert "transform:none;" in style_css
+    assert '.app-titlebar-center .mode-btn{position:relative;flex:0 0 28px;width:28px;min-width:28px;padding:3px 0;overflow:hidden;font-size:0;}' in style_css
+    assert '.app-titlebar-center .mode-btn[data-mode="action"]::before{content:"\\2394";}' in style_css
+    assert '.app-titlebar-center .mode-btn[data-mode="plan"]::before{content:"\\1F9E0";}' in style_css
     assert ".compact-toggle-btn{display:none!important;}" in style_css
     assert ".titlebar-space-spacer{display:none;}" in style_css
     assert ".titlebar-space{flex:0 1 auto;min-width:0;max-width:112px;margin-right:0;}" in style_css
