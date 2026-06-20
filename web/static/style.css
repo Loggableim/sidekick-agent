@@ -8271,7 +8271,6 @@ body.focus-mode aside.rightpanel {
   .titlebar-space-btn{min-width:0;max-width:100%;margin:0;padding:3px 8px 3px 6px;}
   .titlebar-space-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
   .titlebar-actions{display:inline-flex!important;flex:0 0 auto;align-items:center;gap:2px;margin-right:0;}
-  .titlebar-actions #btnCastToggle,
   .titlebar-actions #btnRebootSidekick,
   .titlebar-actions #btnShutdownSidekick{display:none!important;}
   @media(max-width:360px){

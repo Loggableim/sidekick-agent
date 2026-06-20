@@ -765,12 +765,12 @@ def test_mobile_titlebar_center_stays_in_flex_flow():
     assert ".titlebar-space-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}" in style_css
 
 
-def test_mobile_titlebar_keeps_language_and_game_mode_visible():
+def test_mobile_titlebar_keeps_language_game_mode_and_hub_visible():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
     mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
 
     assert ".titlebar-actions{display:inline-flex!important;flex:0 0 auto;align-items:center;gap:2px;margin-right:0;}" in mobile_guard
-    assert ".titlebar-actions #btnCastToggle," in mobile_guard
+    assert ".titlebar-actions #btnCastToggle" not in mobile_guard
     assert ".titlebar-actions #btnRebootSidekick," in mobile_guard
     assert ".titlebar-actions #btnShutdownSidekick{display:none!important;}" in mobile_guard
 
