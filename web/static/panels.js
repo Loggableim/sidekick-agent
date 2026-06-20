@@ -285,9 +285,6 @@ async function switchPanel(name, opts = {}) {
       GMAIL.pollInterval = null;
     }
   }
-  if (prevPanel === 'browser' && nextPanel !== 'browser') {
-    if (typeof browserResearchPanelDeactivated === 'function') browserResearchPanelDeactivated();
-  }
   _currentPanel = nextPanel;
   if (opts.fromRailClick && typeof closeMobileSidebar === 'function'
       && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
@@ -303,6 +300,7 @@ async function switchPanel(name, opts = {}) {
   if (panelEl) panelEl.classList.add('active');
   // ── Discord full view lifecycle: swap #mainChat ↔ #mainDiscord ──
   const discordMain = document.getElementById('mainDiscord');
+  const browserMain = document.getElementById('mainBrowser');
   const chatMain = document.getElementById('mainChat');
   if (nextPanel === 'discord') {
     // Activate full view
@@ -344,11 +342,15 @@ async function switchPanel(name, opts = {}) {
     document.body.classList.remove('showing-memory');
   }
   if (nextPanel === 'browser') {
+    if (chatMain) chatMain.style.display = 'none';
+    if (browserMain) browserMain.style.display = '';
     document.body.classList.add('showing-browser');
     if (typeof browserResearchPanelActivated === 'function') {
       setTimeout(browserResearchPanelActivated, 0);
     }
   } else if (prevPanel === 'browser') {
+    if (browserMain) browserMain.style.display = 'none';
+    if (chatMain && !['discord', 'gmail', 'agents', 'appstore'].includes(nextPanel)) chatMain.style.display = '';
     document.body.classList.remove('showing-browser');
     if (typeof browserResearchPanelDeactivated === 'function') {
       browserResearchPanelDeactivated();

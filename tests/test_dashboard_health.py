@@ -1262,6 +1262,20 @@ def test_main_view_css_keeps_full_view_panels_exclusive():
     assert "main.main.showing-appstore > #mainAppstore{display:flex;}" in style_css
 
 
+def test_browser_panel_activation_swaps_full_view():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+
+    assert 'id="mainBrowser"' in index_html
+    assert 'data-panel="browser"' in index_html
+    assert "const browserMain = document.getElementById('mainBrowser');" in panels_js
+    assert "if (nextPanel === 'browser') {" in panels_js
+    assert "if (chatMain) chatMain.style.display = 'none';" in panels_js
+    assert "if (browserMain) browserMain.style.display = '';" in panels_js
+    assert "if (browserMain) browserMain.style.display = 'none';" in panels_js
+    assert "browserResearchPanelDeactivated();" in panels_js
+
+
 def test_discord_panel_activation_loads_sidebar_and_full_view():
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
