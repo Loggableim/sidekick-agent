@@ -1469,7 +1469,7 @@ def test_cast_status_uses_user_safe_error_summary():
     assert 'os.getenv("HERMES_CAST_API_HOST", "").strip()' in routes_py
 
 
-def test_cast_status_without_config_does_not_probe_network(monkeypatch):
+def test_cast_status_without_config_reports_default_host_when_cockpit_unavailable(monkeypatch):
     from web.api import routes
 
     captured = {}
@@ -1479,7 +1479,7 @@ def test_cast_status_without_config_does_not_probe_network(monkeypatch):
         captured["status"] = status
 
     def fail_urlopen(*args, **kwargs):
-        raise AssertionError("cast status should not probe network without configured host")
+        raise TimeoutError("not running")
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
@@ -1496,6 +1496,49 @@ def test_cast_status_without_config_does_not_probe_network(monkeypatch):
     assert captured["payload"]["dashboard_url"] == "http://127.0.0.1:8765"
     assert "launch_available" in captured["payload"]
     assert "not configured" in captured["payload"]["detail"]
+
+
+def test_cast_status_without_config_uses_local_cockpit_when_available(monkeypatch):
+    from web.api import routes
+
+    captured = {}
+
+    class Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"active": true}'
+
+    def fake_j(handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+
+    seen = []
+
+    def fake_urlopen(req, timeout=None):
+        seen.append((req.full_url, timeout))
+        return Resp()
+
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.setattr(routes, "j", fake_j)
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    routes._handle_cast_proxy(object(), "/api/cast/status", "GET")
+
+    assert captured["status"] == 200
+    assert captured["payload"]["active"] is True
+    assert captured["payload"]["available"] is True
+    assert captured["payload"]["configured"] is True
+    assert captured["payload"]["host"] == "http://127.0.0.1:8765"
+    assert captured["payload"]["dashboard_url"] == "http://127.0.0.1:8765"
+    assert seen == [("http://127.0.0.1:8765/api/cast/status", 0.75)]
 
 
 def test_cast_toggle_without_config_starts_local_cockpit(monkeypatch, tmp_path):

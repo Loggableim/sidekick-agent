@@ -5187,6 +5187,16 @@ def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
         if method == "POST" and endpoint == "/api/cast/toggle":
             return _handle_cast_autostart(handler)
         default_host = _default_cockpit_cast_host()
+        if method == "GET" and endpoint == "/api/cast/status":
+            try:
+                payload = _cast_read_json(f"{default_host}{endpoint}", timeout=0.75)
+                payload.setdefault("configured", True)
+                payload.setdefault("host", default_host)
+                payload.setdefault("dashboard_url", default_host)
+                payload.setdefault("available", True)
+                return j(handler, payload)
+            except Exception:
+                pass
         return j(handler, {
             "active": False,
             "available": False,
