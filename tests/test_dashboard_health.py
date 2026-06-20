@@ -312,6 +312,10 @@ def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch
 
     monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace() if slug == "color" else None)
     monkeypatch.setattr(
+        "web.api.models.all_sessions",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("space listings must use _index.json directly")),
+    )
+    monkeypatch.setattr(
         "web.api.routes.get_cli_sessions",
         lambda: (_ for _ in ()).throw(AssertionError("non-default spaces must not scan global state.db")),
     )

@@ -1216,22 +1216,43 @@ def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
     slug = str(slug or "").strip().lower()
     if not slug:
         return []
-    from web.api.config import clear_session_dir, set_session_dir
-    from web.api.models import all_sessions
 
     ws, slug = _get_space_workspace(slug)
     if not ws:
         return []
     _repair_stale_space_index(slug, ws.sessions_dir)
-    set_session_dir(str(ws.sessions_dir))
+    index_path = ws.sessions_dir / "_index.json"
     try:
-        sessions = [dict(item) for item in all_sessions()]
-    finally:
-        clear_session_dir()
+        raw = json.loads(index_path.read_text(encoding="utf-8")) if index_path.exists() else []
+    except Exception:
+        raw = []
+    if not isinstance(raw, list):
+        raw = []
+    sessions: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        sid = str(item.get("session_id") or "").strip()
+        if not sid:
+            continue
+        path = ws.sessions_dir / f"{sid}.json"
+        if not path.exists():
+            continue
+        row = dict(item)
+        row.setdefault("profile", "default")
+        row["workspace_slug"] = slug
+        sessions.append(row)
+    sessions.sort(key=lambda s: (bool(s.get("pinned", False)), s.get("last_message_at") or s.get("updated_at") or 0), reverse=True)
+    sessions = [s for s in sessions if not (
+        s.get("title", "Untitled") == "Untitled"
+        and s.get("message_count", 0) == 0
+        and not s.get("active_stream_id")
+        and not s.get("has_pending_user_message")
+        and not s.get("worktree_path")
+    )]
     for session in sessions:
         sid = str(session.get("session_id") or "").strip()
         path, normalized_slug = _space_session_path(slug, sid) if sid else (None, slug)
-        _repair_space_session_slug(session, normalized_slug, path if path and path.exists() else None)
         _repair_stale_space_session_from_listing(session, slug)
     return sessions
 
