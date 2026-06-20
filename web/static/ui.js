@@ -708,6 +708,8 @@ async function toggleHubCast(){
   setTimeout(()=>{if(_castPollTimer)clearInterval(_castPollTimer);_castPollTimer=null;},30000);
   _refreshCastStatus();
 }
+window.openHubCastDashboard=openHubCastDashboard;
+window.toggleHubCast=toggleHubCast;
 
 // Init cast status polling
 async function _checkCastButtonVisible(){
@@ -2037,6 +2039,8 @@ function toggleMobileComposerConfig(){
   panel.classList.add('open');
   _syncMobileComposerConfigButton(true);
 }
+window.closeMobileComposerConfig=closeMobileComposerConfig;
+window.toggleMobileComposerConfig=toggleMobileComposerConfig;
 
 document.addEventListener('click',function(e){
   if(

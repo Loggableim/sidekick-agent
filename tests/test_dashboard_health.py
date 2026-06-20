@@ -1885,10 +1885,27 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "if(!_castConfigured)_cleanupCastTimers()" in ui_js
     assert "Hub Cast nicht konfiguriert" in ui_js
     assert "function openHubCastDashboard()" in ui_js
+    assert "window.openHubCastDashboard=openHubCastDashboard;" in ui_js
+    assert "window.toggleHubCast=toggleHubCast;" in ui_js
     assert "window.open(url,'_blank','noopener,noreferrer')" in ui_js
     assert "_castFetch('/api/cast/start',{method:'POST'})" in ui_js
     assert "_castFetch('/api/cast/toggle',{method:'POST'})" not in ui_js
     assert "btn.style.display='none'" not in cast_js
+
+
+def test_inline_titlebar_and_mobile_handlers_are_exported():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+
+    assert 'id="btnCastToggle"' in index_html
+    assert 'onclick="toggleHubCast()"' in index_html
+    assert "window.toggleHubCast=toggleHubCast;" in ui_js
+    assert "window.openHubCastDashboard=openHubCastDashboard;" in ui_js
+
+    assert 'id="composerMobileConfigBtn"' in index_html
+    assert 'onclick="toggleMobileComposerConfig()"' in index_html
+    assert "window.toggleMobileComposerConfig=toggleMobileComposerConfig;" in ui_js
+    assert "window.closeMobileComposerConfig=closeMobileComposerConfig;" in ui_js
 
 
 def test_show_toast_accepts_legacy_type_second_argument():
