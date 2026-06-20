@@ -5181,6 +5181,25 @@ def _handle_cast_autostart(handler):
     }, status=502)
 
 
+def _handle_cast_start_proxy(handler):
+    host = _cast_api_host()
+    if not host:
+        return _handle_cast_autostart(handler)
+
+    try:
+        status = _cast_read_json(f"{host}/api/cast/status", timeout=0.75)
+        status.setdefault("configured", True)
+        status.setdefault("host", host)
+        status.setdefault("dashboard_url", host)
+        if status.get("active") is True:
+            status.setdefault("available", True)
+            return j(handler, status)
+    except Exception:
+        pass
+
+    return _forward_cast_request(handler, host, "/api/cast/toggle", "POST")
+
+
 def _handle_cast_proxy(handler, endpoint: str, method: str = "GET"):
     host = _cast_api_host()
     if not host:
@@ -5281,6 +5300,9 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/cast/toggle":
         return _handle_cast_proxy(handler, "/api/cast/toggle", "POST")
+
+    if parsed.path == "/api/cast/start":
+        return _handle_cast_start_proxy(handler)
 
     if parsed.path == "/api/browser/control":
         try:

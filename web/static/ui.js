@@ -682,14 +682,10 @@ function openHubCastDashboard(){
 async function toggleHubCast(){
   openHubCastDashboard();
   if(_castLoading)return;
-  if(_castActive){
-    _refreshCastStatus();
-    return;
-  }
   _castLoading=true;
   _applyCastUI();
   try{
-    const r=await _castFetch('/api/cast/toggle',{method:'POST'});
+    const r=await _castFetch('/api/cast/start',{method:'POST'});
     const s=await r.json().catch(()=>({}));
     _castConfigured=s.configured!==false;
     if(s&&typeof s.host==='string')_castHost=s.host.trim();

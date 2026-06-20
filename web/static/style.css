@@ -1017,7 +1017,7 @@
   html.has-custom-window-controls .titlebar-actions{margin-right:2px;}
   .cast-on{color:#0f6!important;filter:drop-shadow(0 0 6px #0f6);}
   .cast-off{color:#555!important;filter:none;}
-  .cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.62;}
+  .cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.88;}
   .cast-unavailable:hover{opacity:1;color:#f59e0b!important;}
   /* ── Language Selector (titlebar) ── */
   .titlebar-lang-selector{position:relative;display:inline-flex;align-items:center;}

@@ -778,6 +778,7 @@ def test_mobile_titlebar_keeps_language_game_mode_and_hub_visible():
 
     assert ".titlebar-actions{display:inline-flex!important;flex:0 0 auto;align-items:center;gap:2px;margin-right:0;}" in mobile_guard
     assert ".titlebar-actions #btnCastToggle" not in mobile_guard
+    assert ".cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.88;}" in style_css
     assert ".titlebar-actions #btnRebootSidekick," in mobile_guard
     assert ".titlebar-actions #btnShutdownSidekick{display:none!important;}" in mobile_guard
 
@@ -985,6 +986,18 @@ def test_mobile_sidebar_nav_mirrors_desktop_panel_rail():
     for panel in ("gmail", "discord"):
         assert f"data-panel=\"{panel}\"" in sidebar_nav_html
         assert f"switchPanel('{panel}',{{fromRailClick:true}})" in sidebar_nav_html
+
+
+def test_space_dropdown_selection_uses_delegated_container_click():
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+
+    assert "function _bindSpaceDropdownSelection(dd)" in spaces_js
+    assert "dd.dataset.boundSpaceSelection === '1'" in spaces_js
+    assert "ev.target.closest('[data-space-slug]')" in spaces_js
+    assert "const slug = String(item.dataset.spaceSlug || '').trim();" in spaces_js
+    assert "closeSpaceDropdowns();" in spaces_js
+    assert "const runSelect = () => selectSpace(slug);" in spaces_js
+    assert "_bindSpaceDropdownSelection(dd);" in spaces_js[spaces_js.index("function _openSpaceDropdown") :]
 
 
 def test_mobile_sidebar_nav_uses_scrollable_touch_targets():
@@ -1657,6 +1670,66 @@ def test_cast_toggle_configured_host_keeps_error_status(monkeypatch):
     assert captured["payload"]["configured"] is True
 
 
+def test_cast_start_configured_host_does_not_toggle_active_cast(monkeypatch):
+    from web.api import routes
+
+    captured = {}
+
+    def fake_j(handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+
+    monkeypatch.setenv("SIDEKICK_CAST_API_HOST", "http://127.0.0.1:8765/")
+    monkeypatch.setattr(routes, "j", fake_j)
+    monkeypatch.setattr(
+        routes,
+        "_cast_read_json",
+        lambda url, method="GET", timeout=2.5: {"active": True, "available": True},
+    )
+    monkeypatch.setattr(
+        routes,
+        "_forward_cast_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("active cast must not be toggled off")),
+    )
+
+    routes._handle_cast_start_proxy(object())
+
+    assert captured["status"] == 200
+    assert captured["payload"]["active"] is True
+    assert captured["payload"]["available"] is True
+    assert captured["payload"]["configured"] is True
+    assert captured["payload"]["host"] == "http://127.0.0.1:8765"
+    assert captured["payload"]["dashboard_url"] == "http://127.0.0.1:8765"
+
+
+def test_cast_start_configured_host_toggles_only_when_inactive(monkeypatch):
+    from web.api import routes
+
+    forwarded = {}
+
+    monkeypatch.setenv("SIDEKICK_CAST_API_HOST", "http://127.0.0.1:8765/")
+    monkeypatch.setattr(
+        routes,
+        "_cast_read_json",
+        lambda url, method="GET", timeout=2.5: {"active": False, "available": True},
+    )
+
+    def fake_forward(handler, host, endpoint, method):
+        forwarded["host"] = host
+        forwarded["endpoint"] = endpoint
+        forwarded["method"] = method
+        return True
+
+    monkeypatch.setattr(routes, "_forward_cast_request", fake_forward)
+
+    assert routes._handle_cast_start_proxy(object()) is True
+    assert forwarded == {
+        "host": "http://127.0.0.1:8765",
+        "endpoint": "/api/cast/toggle",
+        "method": "POST",
+    }
+
+
 def test_boot_uses_realistic_metadata_timeouts():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
@@ -1781,7 +1854,8 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "Hub Cast nicht konfiguriert" in ui_js
     assert "function openHubCastDashboard()" in ui_js
     assert "window.open(url,'_blank','noopener,noreferrer')" in ui_js
-    assert "if(_castActive){" in ui_js
+    assert "_castFetch('/api/cast/start',{method:'POST'})" in ui_js
+    assert "_castFetch('/api/cast/toggle',{method:'POST'})" not in ui_js
     assert "btn.style.display='none'" not in cast_js
 
 

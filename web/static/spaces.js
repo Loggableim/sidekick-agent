@@ -1276,6 +1276,7 @@ function _showSpaceDropdownError(dd, message) {
 
 function _openSpaceDropdown(dd, btn, className) {
   if (className) dd.className = className;
+  _bindSpaceDropdownSelection(dd);
   const cachedSpaces = Array.isArray(_spacesCache) ? _spacesCache.filter(Boolean) : [];
   if (cachedSpaces.length) {
     dd.hidden = false;
@@ -1299,6 +1300,23 @@ function _openSpaceDropdown(dd, btn, className) {
   };
   if (cachedSpaces.length) setTimeout(refresh, 0);
   else refresh();
+}
+
+function _bindSpaceDropdownSelection(dd) {
+  if (!dd || dd.dataset.boundSpaceSelection === '1') return;
+  dd.dataset.boundSpaceSelection = '1';
+  dd.addEventListener('click', (ev) => {
+    const item = ev.target && ev.target.closest ? ev.target.closest('[data-space-slug]') : null;
+    if (!item || !dd.contains(item)) return;
+    const slug = String(item.dataset.spaceSlug || '').trim();
+    if (!slug) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeSpaceDropdowns();
+    const runSelect = () => selectSpace(slug);
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runSelect);
+    else setTimeout(runSelect, 0);
+  });
 }
 
 function _installSpaceDropdownCloser(dd, btn) {
