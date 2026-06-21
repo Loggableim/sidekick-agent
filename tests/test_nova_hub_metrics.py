@@ -84,3 +84,5 @@ def test_gpu_summary_card_uses_one_value_and_rotates_every_six_seconds():
     assert "setInterval(toggleGpuSummary,GPU_SUMMARY_ROTATION_MS);" in app_js
     assert "function renderGpuSummary()" in app_js
     assert "function toggleGpuSummary()" in app_js
+    assert 'script src="app.js?v=20260621-gpu-rotation"' in index_html
+    assert "20260618-kitt-toponly" not in index_html
