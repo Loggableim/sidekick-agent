@@ -357,21 +357,18 @@ async function switchPanel(name, opts = {}) {
     }
   }
   // ── Gmail full view lifecycle: swap #mainChat ↔ #mainGmail ──
-  const gmailMain = document.getElementById('mainGmail');
-  if (nextPanel === 'gmail') {
-    // Activate full view
-    if (chatMain) chatMain.style.display = 'none';
-    if (gmailMain) gmailMain.style.display = '';
-    // Show rightpanel tabs (including AI-Gmail tab)
-    document.body.classList.add('gmail-mode');
-  } else if (prevPanel === 'gmail') {
-    // Deactivate full view
-    if (typeof gmailCloseSplash === 'function') gmailCloseSplash();
-    if (gmailMain) gmailMain.style.display = 'none';
-    if (chatMain) chatMain.style.display = '';
-    // Restore rightpanel
-    document.body.classList.remove('gmail-mode');
-  }
+  const mailMain = document.getElementById('mainMail');
+   if (nextPanel === 'mail') {
+     if (chatMain) chatMain.style.display = 'none';
+     if (mailMain) mailMain.style.display = '';
+     loadMailPanel().catch(function(err) {
+       console.warn('[mail] panel load failed:', err && err.message ? err.message : err);
+     });
+   } else if (prevPanel === 'mail') {
+     if (mailMain) mailMain.style.display = 'none';
+     if (chatMain) chatMain.style.display = '';
+   }
+
   // ── Agents Dashboard lifecycle: swap #mainChat ↔ #mainAgents ──
   const agentsMain = document.getElementById('mainAgents');
   if (nextPanel === 'agents') {
@@ -404,7 +401,7 @@ async function switchPanel(name, opts = {}) {
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
   if (mainEl) {
-    ['settings','skills','memory','tasks','kanban','workspaces','profiles','insights','logs','gmail','browser','discord','agents','todos','appstore'].forEach(p => {
+    ['settings','skills','memory','tasks','kanban','workspaces','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }
@@ -9719,6 +9716,153 @@ function exportMemoryMD() {
 
 function enrichMemoryWithAI() {
   showToast('AI enrichment - coming soon', 'info');
+}
+
+// ── Mail Panel Logic ──
+
+function _mailApi(path, params={}) {
+  const url = new URL(path, window.location.origin);
+  Object.entries(params).forEach(([k,v])=>url.searchParams.append(k,v));
+  return fetch(url).then(r=>{ if(!r.ok) throw new Error(r.statusText); return r.json(); });
+}
+
+async function loadMailPanel() {
+  const inboxSelector = document.getElementById('mailInboxSelector');
+  const mailList = document.getElementById('mailList');
+  if (!inboxSelector || !mailList) return;
+  inboxSelector.innerHTML = '<option value="" disabled selected>Lade...</option>';
+  mailList.innerHTML = '<div class="mail-loading">Lade Mails...</div>';
+  try {
+    const data = await _mailApi('/api/mail/folders');
+    const inboxes = data.inboxes || [];
+    inboxSelector.innerHTML = inboxes.map(i=>`<option value="${i.id}">${i.label}</option>`).join('');
+    if (inboxes.length>0) {
+      _mailSwitchInbox(inboxes[0].id);
+    }
+  } catch(e) {
+    console.warn('Mail load error', e);
+    inboxSelector.innerHTML = '<option value="" disabled selected>Fehler beim Laden</option>';
+    mailList.innerHTML = `<div class="mail-error">Fehler: ${e.message}</div>`;
+  }
+}
+
+async function _mailSwitchInbox(inboxId) {
+  const mailList = document.getElementById('mailList');
+  if (!mailList) return;
+  _currentMailInboxId = inboxId;
+  mailList.innerHTML = '<div class="mail-loading">Lade Mails...</div>';
+  try {
+    const data = await _mailApi('/api/mail/inbox', {inbox_id: inboxId, limit: 20});
+    const mails = data.mails || [];
+    _mailRenderMails(mails);
+  } catch(e) {
+    console.warn('Mail inbox error', e);
+    mailList.innerHTML = '<div class="mail-error">Fehler: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+function _mailRenderMails(mails) {
+  const mailList = document.getElementById('mailList');
+  if (!mailList) return;
+  if (mails.length===0) {
+    mailList.innerHTML = '<div class="mail-empty">Keine Mails.</div>';
+    return;
+  }
+  mailList.innerHTML = mails.map((m,i)=>{
+    const unread = !(m.flags || []).includes('\\Seen');
+    const cls = unread ? 'mail-card mail-card-unread' : 'mail-card';
+    return '<div class="' + cls + '" onclick="_mailViewThread(mails[' + i + '])">' +
+      '<div class="mail-card-subject">' + escHtml(m.subject || '(kein Betreff)') + '</div>' +
+      '<div class="mail-card-meta"><span>' + escHtml(m.from || '') + '</span><span>' + escHtml(m.date || '') + '</span></div>' +
+      '<div class="mail-card-snippet">' + escHtml(m.snippet || '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function _mailOpenConfig() {
+  const modal = document.createElement('div');
+  modal.className = 'mail-config-modal';
+  modal.innerHTML = '<div class="mail-config-modal-content"><h3>Mail-Konfiguration</h3><textarea style="width:100%;height:300px;font-family:monospace;font-size:12px;" class="mail-config-textarea"></textarea><div class="mail-config-actions"><button class="btn btn-primary mail-config-save">Speichern</button><button class="btn btn-secondary mail-config-cancel">Abbrechen</button></div></div>';
+  document.body.appendChild(modal);
+  const textarea = modal.querySelector('.mail-config-textarea');
+  const saveBtn = modal.querySelector('.mail-config-save');
+  const cancelBtn = modal.querySelector('.mail-config-cancel');
+  const close = () => { document.body.removeChild(modal); };
+  const fetchConfig = async () => {
+    try {
+      const res = await _mailApi('/api/mail/config');
+      if (res.success) textarea.value = JSON.stringify(res.config, null, 2);
+    } catch(err){
+      showToast('Konfiguration laden fehlgeschlagen: '+err.message,'error');
+    }
+  };
+  fetchConfig();
+  const sendSave = async () => {
+    try {
+      const cfg = JSON.parse(textarea.value);
+      const res = await fetch('/api/mail/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({config: cfg})}).then(r=>r.json());
+      if (res.success){
+        close();
+        loadMailPanel();
+      } else throw new Error(res.error||'unknown');
+    } catch(err){
+      showToast('Speichern fehlgeschlagen: '+err.message,'error');
+    }
+  };
+  saveBtn.onclick = sendSave;
+  cancelBtn.onclick = close;
+  modal.addEventListener('keydown', e=>{ if(e.key==='Escape') close(); });
+  modal.addEventListener('click', e=>{ if(e.target===modal) close(); });
+}
+
+let _currentMailInboxId = null;
+
+function _mailCompose() {
+  if(!_currentMailInboxId){ showToast('Kein Postfach ausgewählt','error'); return; }
+  const modal=document.createElement('div'); modal.className='mail-compose-modal';
+  modal.innerHTML='<div class="mail-compose-modal-content"><h3>Neue Mail</h3><label>An: <input type="email" class="mail-compose-to" /></label><label>Betreff: <input type="text" class="mail-compose-subject" /></label><label>Nachricht:<textarea class="mail-compose-body" style="width:100%;height:200px;"></textarea></label><div class="mail-compose-actions"><button class="btn btn-primary mail-compose-send">Senden</button><button class="btn btn-secondary mail-compose-cancel">Abbrechen</button></div></div>';
+  document.body.appendChild(modal);
+  const to=modal.querySelector('.mail-compose-to');
+  const subj=modal.querySelector('.mail-compose-subject');
+  const body=modal.querySelector('.mail-compose-body');
+  const sendBtn=modal.querySelector('.mail-compose-send');
+  const cancelBtn=modal.querySelector('.mail-compose-cancel');
+  const close=()=>{document.body.removeChild(modal);};
+  sendBtn.onclick=async()=>{ try{ const res=await fetch('/api/mail/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inbox_id:_currentMailInboxId,to:to.value,subject:subj.value,body:body.value})}).then(r=>r.json()); if(res.success){showToast('Mail gesendet','success');close();loadMailPanel();} else throw new Error(res.error||'unknown'); }catch(err){showToast('Senden fehlgeschlagen: '+err.message,'error');} };
+  cancelBtn.onclick=close;
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+  modal.addEventListener('click',e=>{if(e.target===modal)close();});
+}
+
+function _mailReply(mail){
+  if(!mail){showToast('Keine Mail zum Antworten','error');return;}
+  const modal=document.createElement('div'); modal.className='mail-compose-modal';
+  modal.innerHTML='<div class="mail-compose-modal-content"><h3>Antworten</h3><label>An: <input type="email" class="mail-compose-to" value="'+escHtml(mail.from)+'" /></label><label>Betreff: <input type="text" class="mail-compose-subject" value="Re: '+escHtml(mail.subject)+'" /></label><label>Nachricht:<textarea class="mail-compose-body" style="width:100%;height:200px;"></textarea></label><div class="mail-compose-actions"><button class="btn btn-primary mail-compose-send">Senden</button><button class="btn btn-secondary mail-compose-cancel">Abbrechen</button></div></div>';
+  document.body.appendChild(modal);
+  const to=modal.querySelector('.mail-compose-to');
+  const subj=modal.querySelector('.mail-compose-subject');
+  const body=modal.querySelector('.mail-compose-body');
+  const sendBtn=modal.querySelector('.mail-compose-send');
+  const cancelBtn=modal.querySelector('.mail-compose-cancel');
+  const close=()=>{document.body.removeChild(modal);};
+  sendBtn.onclick=async()=>{ try{ const res=await fetch('/api/mail/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inbox_id:_currentMailInboxId,to:to.value,subject:subj.value,body:body.value})}).then(r=>r.json()); if(res.success){showToast('Mail gesendet','success');close();loadMailPanel();} else throw new Error(res.error||'unknown'); }catch(err){showToast('Senden fehlgeschlagen: '+err.message,'error');} };
+  cancelBtn.onclick=close;
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+  modal.addEventListener('click',e=>{if(e.target===modal)close();});
+}
+
+function _mailViewThread(mail){
+  if(!mail){showToast('Keine Mail','error');return;}
+  const modal=document.createElement('div'); modal.className='mail-thread-modal';
+  modal.innerHTML='<div class="mail-thread-modal-content"><h3>'+escHtml(mail.subject||'(kein Betreff)')+'</h3><div class="mail-thread-body" style="white-space:pre-wrap;font-size:13px;padding:12px 0;">'+escHtml(mail.body||'')+'</div><div class="mail-thread-actions"><button class="btn btn-primary mail-thread-reply">Antworten</button><button class="btn btn-secondary mail-thread-close">Schließen</button></div></div>';
+  document.body.appendChild(modal);
+  const replyBtn=modal.querySelector('.mail-thread-reply');
+  const closeBtn=modal.querySelector('.mail-thread-close');
+  const close=()=>{document.body.removeChild(modal);};
+  replyBtn.onclick=()=>{ close(); _mailReply(mail); };
+  closeBtn.onclick=close;
+  modal.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
+  modal.addEventListener('click',e=>{if(e.target===modal)close();});
 }
 
 function openMemorySearch() {

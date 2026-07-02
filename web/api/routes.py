@@ -973,6 +973,19 @@ from web.api.appstore import (
     submit_plugin,
 )
 
+from tools.mail_imap import (
+    get_space_config,
+    get_inbox_config,
+    get_imap,
+    release_imap,
+    parse_mail_summary,
+    send_mail,
+)
+from tools.mail_folders import _handler as _folders_handler
+from tools.mail_read import _handler as _read_handler
+from tools.mail_search import _handler as _search_handler
+from tools.mail_send import _handler as _send_handler
+
 
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
     """Return a Kanban-specific 404 for stale clients/obsolete endpoint shapes."""
@@ -3360,6 +3373,121 @@ def _handle_appstore_updates(handler, parsed) -> bool:
         return j(handler, {"updates": [], "error": str(exc)})
 
 
+# ── Mail handlers ───────────────────────────────────────────────────────────
+
+
+def _handle_mail_folders(handler, parsed) -> bool:
+    """GET /api/mail/folders — list inboxes and folders for the active space."""
+    try:
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        args = {}
+        kw = {"user_task": space_slug}
+        result = json.loads(_folders_handler(args, **kw))
+        return j(handler, result)
+    except Exception as exc:
+        logger.exception("mail_folders failed")
+        return j(handler, {"error": str(exc), "inboxes": []})
+
+
+def _handle_mail_inbox(handler, parsed) -> bool:
+    """GET /api/mail/inbox — list mails for a given inbox."""
+    try:
+        query = parse_qs(parsed.query)
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        inbox_id = (query.get("inbox_id") or [""])[0]
+        limit = int((query.get("limit") or ["20"])[0])
+        args = {"inbox_id": inbox_id, "limit": limit}
+        kw = {"user_task": space_slug}
+        result = json.loads(_read_handler(args, **kw))
+        return j(handler, result)
+    except Exception as exc:
+        logger.exception("mail_inbox failed")
+        return j(handler, {"error": str(exc), "mails": [], "total": 0})
+
+
+def _handle_mail_send(handler, parsed, body) -> bool:
+    """POST /api/mail/send — send an email."""
+    try:
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        args = {
+            "inbox_id": body.get("inbox_id", ""),
+            "to": body.get("to", ""),
+            "subject": body.get("subject", ""),
+            "body": body.get("body", ""),
+            "cc": body.get("cc", ""),
+        }
+        kw = {"user_task": space_slug}
+        result = json.loads(_send_handler(args, **kw))
+        return j(handler, result)
+    except Exception as exc:
+        logger.exception("mail_send failed")
+        return j(handler, {"success": False, "error": str(exc)})
+
+
+def _handle_mail_search(handler, parsed, body) -> bool:
+    """POST /api/mail/search — search emails."""
+    try:
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        args = {
+            "inbox_id": body.get("inbox_id", ""),
+            "query": body.get("query", ""),
+            "folder": body.get("folder", "INBOX"),
+            "limit": int(body.get("limit", 20)),
+        }
+        kw = {"user_task": space_slug}
+        result = json.loads(_search_handler(args, **kw))
+        return j(handler, result)
+    except Exception as exc:
+        logger.exception("mail_search failed")
+        return j(handler, {"error": str(exc), "mails": [], "total": 0})
+
+
+def _handle_mail_config_get(handler, parsed) -> bool:
+    """GET /api/mail/config — load mail.json for the active space."""
+    try:
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        sidekick_home = Path(
+            os.environ.get("SIDEKICK_HOME")
+            or os.environ.get("HERMES_HOME")
+            or Path.home() / ".sidekick"
+        )
+        mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
+        if mail_path.exists():
+            config = json.loads(mail_path.read_text(encoding="utf-8"))
+        else:
+            config = {"inboxes": []}
+        return j(handler, {"success": True, "config": config})
+    except Exception as exc:
+        logger.exception("mail_config_get failed")
+        return j(handler, {"success": False, "error": str(exc), "config": {"inboxes": []}})
+
+
+def _handle_mail_config_post(handler, parsed, body) -> bool:
+    """POST /api/mail/config — save mail.json for the active space."""
+    try:
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        config = body.get("config", {})
+        if not isinstance(config, dict) or "inboxes" not in config:
+            return bad(handler, "Invalid config: must have 'inboxes' list")
+        if not isinstance(config["inboxes"], list):
+            return bad(handler, "Invalid config: 'inboxes' must be a list")
+        sidekick_home = Path(
+            os.environ.get("SIDEKICK_HOME")
+            or os.environ.get("HERMES_HOME")
+            or Path.home() / ".sidekick"
+        )
+        mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
+        mail_path.parent.mkdir(parents=True, exist_ok=True)
+        mail_path.write_text(
+            json.dumps(config, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return j(handler, {"success": True})
+    except Exception as exc:
+        logger.exception("mail_config_post failed")
+        return j(handler, {"success": False, "error": str(exc)})
+
+
 def _cockpit_settings_path() -> Path:
     home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
     if home:
@@ -3773,6 +3901,14 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, get_sdk_docs())
     if parsed.path == "/api/cockpit/settings":
         return _handle_cockpit_settings_get(handler, parsed)
+
+    # ── Mail (GET) ──
+    if parsed.path == "/api/mail/folders":
+        return _handle_mail_folders(handler, parsed)
+    if parsed.path == "/api/mail/inbox":
+        return _handle_mail_inbox(handler, parsed)
+    if parsed.path == "/api/mail/config":
+        return _handle_mail_config_get(handler, parsed)
 
     if parsed.path == "/api/provider/quota":
         query = parse_qs(parsed.query)
@@ -6931,6 +7067,14 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/cockpit/settings":
         return _handle_cockpit_settings_post(handler, body)
+
+    # ── Mail (POST) ──
+    if parsed.path == "/api/mail/send":
+        return _handle_mail_send(handler, parsed, body)
+    if parsed.path == "/api/mail/search":
+        return _handle_mail_search(handler, parsed, body)
+    if parsed.path == "/api/mail/config":
+        return _handle_mail_config_post(handler, parsed, body)
 
     # T8 – Bulk-Update
     if parsed.path == "/api/appstore/update-all":
