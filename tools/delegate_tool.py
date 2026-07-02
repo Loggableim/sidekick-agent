@@ -725,6 +725,12 @@ def _build_child_progress_callback(
         }
         if subagent_id is not None:
             kw["subagent_id"] = subagent_id
+            # Dynamically read session_id from the active registry so the
+            # WebUI can link the subagent progress card to its live session.
+            with _active_subagents_lock:
+                _rec = _active_subagents.get(subagent_id)
+                if _rec and _rec.get("session_id"):
+                    kw["session_id"] = _rec["session_id"]
         if parent_id is not None:
             kw["parent_id"] = parent_id
         if depth is not None:
@@ -1432,6 +1438,7 @@ def _run_single_child(
         _raw_depth = getattr(child, "_delegate_depth", 1)
         _tui_depth = max(0, _raw_depth - 1) if isinstance(_raw_depth, int) else 0
         _parent_sid = getattr(child, "_parent_subagent_id", None)
+        _child_session_id = getattr(child, "session_id", None)
         _register_subagent(
             {
                 "subagent_id": _subagent_id,
@@ -1446,6 +1453,7 @@ def _run_single_child(
                 "started_at": time.time(),
                 "status": "running",
                 "tool_count": 0,
+                "session_id": _child_session_id if isinstance(_child_session_id, str) else None,
                 "agent": child,
             }
         )

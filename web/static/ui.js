@@ -6716,8 +6716,11 @@ function buildToolCard(tc, rawIdx){
   let displayName=_toolDisplayName(tc);
   let previewText=tc.preview||displaySnippet||'';
   if(isSubagent) previewText=previewText.replace(/^(?:\u{1F500}|↳)\s*/u,'');
+  // Subagent with a known child session → make the card clickable
+  const childSid=isSubagent&&tc._child_session_id?String(tc._child_session_id).trim():'';
+  const cardClick=childSid?`onclick="event.stopPropagation();if(typeof loadSession==='function')loadSession('${esc(childSid)}')"`:'';
   row.innerHTML=`
-    <div class="${cardClass}">
+    <div class="${cardClass}"${cardClick}>
       <div class="tool-card-header" onclick="this.closest('.tool-card').classList.toggle('open')">
         ${runIndicator}
         <span class="tool-card-icon">${icon}</span>
@@ -6733,6 +6736,7 @@ function buildToolCard(tc, rawIdx){
           <pre>${esc(displaySnippet)}</pre>
           ${hasMore?`<button class="tool-card-more" data-full="${esc(tc.snippet||'').replace(/"/g,'&quot;')}" data-short="${esc(displaySnippet||'').replace(/"/g,'&quot;')}" data-more-label="${esc(moreLabel)}" data-less-label="${esc(lessLabel)}" onclick="event.stopPropagation();const p=this.previousElementSibling;const full=this.dataset.full;const short=this.dataset.short;p.textContent=p.textContent===short?full:short;this.textContent=p.textContent===short?this.dataset.moreLabel:this.dataset.lessLabel">${esc(moreLabel)}</button>`:''}
         </div>`:''}
+        ${childSid?`<div class="tool-card-child-link"><button class="tool-card-fix-btn" onclick="event.stopPropagation();if(typeof loadSession==='function')loadSession('${esc(childSid)}')">${li('external-link',14)} Open subagent session</button></div>`:''}
       </div>`:''}
       ${_isTermErr?`<div class="tool-card-fix-wrap">
         <button class="tool-card-fix-btn" onclick="_fixThisTool(this)" data-fix-ctx="${_fixCtxEsc}">${li('sparkles',14)} Fix this?</button>

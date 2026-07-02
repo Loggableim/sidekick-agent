@@ -2787,6 +2787,22 @@ def _run_agent_streaming(
                         _emit_metering()
                     return
 
+                # Subagent lifecycle events — relay session_id so the UI can
+                # link the subagent progress card to its live session.
+                if event_type in ('subagent.start', 'subagent.complete', 'subagent.progress', 'subagent.thinking', 'subagent.tool'):
+                    put('subagent_event', {
+                        'event_type': event_type,
+                        'name': name,
+                        'preview': preview,
+                        'session_id': cb_kwargs.get('session_id'),
+                        'subagent_id': cb_kwargs.get('subagent_id'),
+                        'goal': cb_kwargs.get('goal'),
+                        'status': cb_kwargs.get('status'),
+                        'depth': cb_kwargs.get('depth'),
+                        'model': cb_kwargs.get('model'),
+                    })
+                    return
+
                 args_snap = {}
                 if isinstance(args, dict):
                     for k, v in list(args.items())[:4]:

@@ -1456,6 +1456,42 @@ let _latestGoalStatus=null;
       sendBrowserNotification('Approval required',d.description||'Tool approval needed');
     });
 
+    // Subagent lifecycle events — stash session_id on the current tool call
+    // so the subagent progress card can link to the child's live session.
+    source.addEventListener('subagent_event',e=>{
+      const d=JSON.parse(e.data);
+      if(!d.session_id) return;
+      const inflight=INFLIGHT[activeSid];
+      if(!inflight||!Array.isArray(inflight.toolCalls)) return;
+      // Attach session_id to the most recent subagent tool call
+      for(let i=inflight.toolCalls.length-1;i>=0;i--){
+        const cur=inflight.toolCalls[i];
+        if(cur&&cur.name==='subagent_progress'&&!cur._child_session_id){
+          cur._child_session_id=d.session_id;
+          cur._child_subagent_id=d.subagent_id;
+          cur._child_goal=d.goal;
+          break;
+        }
+      }
+      // Optimistically add the child session to the sidebar if not already present
+      if(typeof _allSessions!=='undefined'&&Array.isArray(_allSessions)){
+        if(!_allSessions.some(s=>s&&s.session_id===d.session_id)){
+          _allSessions.unshift({
+            session_id:d.session_id,
+            title:d.goal||'Subagent',
+            message_count:0,
+            last_message_at:Math.floor(Date.now()/1000),
+            updated_at:Math.floor(Date.now()/1000),
+            is_streaming:true,
+            relationship_type:'child_session',
+            parent_session_id:activeSid,
+            source:'webui',
+          });
+          if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
+        }
+      }
+    });
+
     source.addEventListener('clarify',e=>{
       const d=JSON.parse(e.data);
       showClarifyForSession(activeSid, d);
