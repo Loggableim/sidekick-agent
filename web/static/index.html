@@ -1093,6 +1093,7 @@
           <div class="model-dropdown" id="composerModelDropdown"></div>
         </div>
         <div class="upload-bar-wrap" id="uploadBarWrap"><div class="upload-bar" id="uploadBar"></div></div>
+        <div class="browser-chat-context-bar" id="browserChatContextBar" onclick="browserToggleDrawer()" role="button" tabindex="0" aria-label="Open browser drawer"></div>
       </div>  <!-- /composer-box -->
       <div class="browser-drawer" id="browserDrawer" aria-label="Live websearch drawer">
         <div class="browser-drawer-shell">
@@ -1102,12 +1103,14 @@
             <span class="browser-permission-status" id="browserPermissionStatus">Agent locked</span>
             <div class="panel-actions">
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserPermissionBtn" data-tooltip="Allow Nova agent browser control" aria-label="Allow Nova agent browser control" aria-pressed="false" onclick="browserTogglePermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.5-2.2"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserExploreBtn" data-tooltip="Switch to Explore mode" aria-label="Switch to Explore mode" aria-pressed="false" onclick="browserToggleExploreMode()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserAgentStopBtn" data-tooltip="Stop Nova agent browser handoff" aria-label="Stop Nova agent browser handoff" onclick="browserStopPermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnBack" data-tooltip="Back" aria-label="Back" onclick="browserGoBack()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnForward" data-tooltip="Forward" aria-label="Forward" onclick="browserGoForward()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnReload" data-tooltip="Reload" aria-label="Reload" onclick="browserReload()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnStop" data-tooltip="Stop" aria-label="Stop" onclick="browserStop()"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="none"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnOpenTab" data-tooltip="Maximize browser" aria-label="Maximize browser" aria-pressed="false" onclick="browserToggleFullscreen()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendToChatBtn" data-tooltip="Send screenshot to chat" aria-label="Send screenshot to chat" onclick="browserSendScreenshotToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom browser-drawer-close-btn" id="browserBtnCloseDrawer" data-tooltip="Close browser drawer" aria-label="Close browser drawer" onclick="browserPanelDeactivated()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
           </div>
@@ -1132,6 +1135,7 @@
                 <div class="browser-cursor" id="browserCursor" aria-hidden="true"></div>
                 <div class="browser-click-flash" id="browserClickFlash" aria-hidden="true"></div>
                 <div class="browser-hit-layer" id="browserHitLayer" aria-hidden="true"></div>
+                <div class="browser-diff-overlay" id="browserDiffOverlay" aria-hidden="true">Change detected</div>
               </div>
             </div>
             <div class="browser-empty-state" id="browserEmptyState">

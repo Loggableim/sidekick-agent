@@ -30,6 +30,12 @@ let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') ===
 let _browserDrawerHost = null;
 let _browserDrawerHostNext = null;
 let _browserFrameObjectUrl = '';
+let _browserExploreMode = false;
+let _browserDiffActive = false;
+let _browserDiffTimer = null;
+let _browserTraceThumbnails = [];
+let _browserChatContextActive = false;
+let _browserPrevFrameRev = '';
 
 function _browserEl(id) {
   return document.getElementById(id);
@@ -387,8 +393,72 @@ function _browserSetFullscreen(open) {
   }
 }
 
-function browserToggleFullscreen() {
-  _browserSetFullscreen(!_browserFullscreen);
+function browserToggleExploreMode() {
+  _browserExploreMode = !_browserExploreMode;
+  const btn = _browserEl('browserExploreBtn');
+  if (btn) {
+    btn.classList.toggle('is-active', _browserExploreMode);
+    btn.setAttribute('aria-pressed', _browserExploreMode ? 'true' : 'false');
+    btn.setAttribute('data-tooltip', _browserExploreMode ? 'Switch to Follow mode' : 'Switch to Explore mode');
+    btn.setAttribute('aria-label', _browserExploreMode ? 'Switch to Follow mode' : 'Switch to Explore mode');
+  }
+  const stage = _browserEl('browserStage');
+  if (stage) {
+    stage.style.cursor = _browserExploreMode ? 'default' : 'none';
+  }
+  const hitLayer = _browserEl('browserHitLayer');
+  if (hitLayer) {
+    hitLayer.style.cursor = _browserExploreMode ? 'pointer' : 'default';
+  }
+  if (typeof showToast === 'function') {
+    showToast(_browserExploreMode ? 'Explore mode: you can click the viewport' : 'Follow mode: agent controls the browser', 2000, 'info');
+  }
+}
+
+function _browserTriggerDiffOverlay() {
+  const overlay = _browserEl('browserDiffOverlay');
+  if (!overlay || _browserDiffActive) return;
+  _browserDiffActive = true;
+  overlay.classList.add('visible');
+  clearTimeout(_browserDiffTimer);
+  _browserDiffTimer = setTimeout(function() {
+    overlay.classList.remove('visible');
+    _browserDiffActive = false;
+  }, 600);
+}
+
+function _browserUpdateChatContext(state) {
+  const bar = _browserEl('browserChatContextBar');
+  if (!bar) return;
+  const hasSession = !!(state && state.session_id);
+  _browserChatContextActive = hasSession;
+  bar.classList.toggle('visible', hasSession);
+  if (!hasSession) return;
+  const url = String(state.url || '').trim();
+  var domain = url;
+  try { domain = new URL(url).hostname; } catch (_) { if (!url) domain = 'about:blank'; }
+  const actionCount = _browserActionTrace.length;
+  bar.innerHTML = '🔍 <span class="browser-ctx-domain">' + _browserResearchEscape(domain) + '</span>' +
+    (actionCount > 0 ? ' — <span class="browser-ctx-actions">' + actionCount + ' action' + (actionCount !== 1 ? 's' : '') + '</span>' : '');
+}
+
+function browserSendScreenshotToChat() {
+  const state = _browserState;
+  if (!state || !state.url) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  const url = state.url;
+  const frameUrl = _browserFrameObjectUrl || '';
+  const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
+  const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
+  if (textarea && typeof insertAtCursor === 'function') {
+    insertAtCursor(textarea, text);
+  } else if (textarea) {
+    textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
+    textarea.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+  if (typeof showToast === 'function') showToast('Screenshot added to chat', 2000, 'success');
 }
 
 function _browserResearchRenderQuickAnswer(text, meta = {}) {
@@ -665,6 +735,7 @@ function _browserRecordActionTrace(state) {
     status: String((state && state.status) || 'idle'),
     text: actionText,
     meta: String((state && state.target_label) || (state && state.target_selector) || (state && state.active_element_label) || '').trim(),
+    frameUrl: _browserFrameObjectUrl || '',
   };
   _browserActionTrace.unshift(item);
   _browserActionTrace = _browserActionTrace.slice(0, 5);
@@ -672,6 +743,15 @@ function _browserRecordActionTrace(state) {
   _browserActionTrace.forEach(entry => {
     const row = document.createElement('div');
     row.className = 'browser-trace-item' + (entry.status ? ' is-' + entry.status : '');
+    if (entry.frameUrl) {
+      const thumb = document.createElement('img');
+      thumb.className = 'browser-trace-thumb';
+      thumb.src = entry.frameUrl;
+      thumb.alt = '';
+      thumb.width = 40;
+      thumb.height = 30;
+      row.appendChild(thumb);
+    }
     const step = document.createElement('div');
     step.className = 'browser-trace-step';
     step.textContent = entry.step ? ('#' + entry.step) : '·';
@@ -781,6 +861,11 @@ function _browserSetImage(state) {
         _browserFrameObjectUrl = objectUrl;
         img.src = objectUrl;
         img.style.visibility = 'visible';
+        // Trigger diff overlay if frame changed
+        if (_browserPrevFrameRev && _browserPrevFrameRev !== rev) {
+          _browserTriggerDiffOverlay();
+        }
+        _browserPrevFrameRev = rev;
       })
       .catch(err => {
         if (img.dataset.rev !== rev || img.dataset.frameSrc !== frameRequestUrl) return;
@@ -822,6 +907,7 @@ function _browserRender(state, opts = {}) {
   if (state.active_element_label) actionSummaryParts.push('focus: ' + state.active_element_label);
   if (state.scroll_x != null || state.scroll_y != null) actionSummaryParts.push('scroll: ' + Math.round(Number(state.scroll_x || 0)) + 'x' + Math.round(Number(state.scroll_y || 0)));
   _browserSetActionSummary(actionSummaryParts.join(' · '));
+  _browserUpdateChatContext(state);
   _browserSetTarget(state);
   _browserSetButtonsDisabled(!state.session_id, state);
   const input = _browserEl('browserUrlInput');
@@ -1121,6 +1207,7 @@ function _browserAttachPointerHandlers() {
     _browserSendMove(coords);
   });
   layer.addEventListener('pointerdown', function(event) {
+    if (!_browserExploreMode) return;
     const coords = _browserCoordsFromEvent(event);
     if (!coords) return;
     event.preventDefault();
@@ -1528,6 +1615,8 @@ window.browserReload = browserReload;
 window.browserStop = browserStop;
 window.browserToggleFullscreen = browserToggleFullscreen;
 window.browserSubmitUrl = browserSubmitUrl;
+window.browserToggleExploreMode = browserToggleExploreMode;
+window.browserSendScreenshotToChat = browserSendScreenshotToChat;
 
 window.addEventListener('load', function() {
   _browserSyncFullscreenButton(_browserFullscreen);

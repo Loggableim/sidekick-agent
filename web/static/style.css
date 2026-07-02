@@ -5932,6 +5932,26 @@ body.browser-maximized .browser-drawer .browser-stage {
   min-height: 0;
 }
 
+.browser-diff-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.3);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .05em;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.browser-diff-overlay.visible {
+  opacity: 1;
+}
+
 .browser-session-label {
   margin-left: auto;
   font-size: 10px;
@@ -6100,12 +6120,54 @@ body.browser-maximized .browser-drawer .browser-stage {
   flex: 0 0 auto;
   color: var(--muted);
 }
+.browser-trace-thumb {
+  width: 40px;
+  height: 30px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border2);
+  background: var(--surface-alt);
+  margin-right: 6px;
+}
 .browser-stage-wrap {
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
   padding: 10px;
+}
+
+.browser-chat-context-bar {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin: 0 12px 6px;
+  border-radius: 8px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border2);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s ease;
+  user-select: none;
+}
+.browser-chat-context-bar.visible {
+  display: flex;
+}
+.browser-chat-context-bar:hover {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.browser-ctx-domain {
+  font-weight: 600;
+  color: var(--text);
+}
+.browser-ctx-actions {
+  color: var(--muted);
+}
 }
 .browser-stage {
   position: relative;
