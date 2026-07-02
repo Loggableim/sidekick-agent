@@ -1083,6 +1083,7 @@ _PROVIDER_MODELS = {
         {"id": "kimi-k2.5", "label": "Kimi K2.5"},
     ],
     "minimax": [
+        {"id": "MiniMax-M3", "label": "MiniMax M3"},
         {"id": "MiniMax-M2.7", "label": "MiniMax M2.7"},
         {"id": "MiniMax-M2.7-highspeed", "label": "MiniMax M2.7 Highspeed"},
         {"id": "MiniMax-M2.5", "label": "MiniMax M2.5"},

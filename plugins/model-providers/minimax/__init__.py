@@ -14,7 +14,9 @@ minimax = ProviderProfile(
     env_vars=("MINIMAX_API_KEY",),
     base_url="https://api.minimax.io/anthropic",
     auth_type="api_key",
-    default_aux_model="MiniMax-M2.7",
+    # Auxiliary tasks (compression/vision/web-extract) on highspeed —
+    # same model family as M3, lower cost per token than the flagship.
+    default_aux_model="MiniMax-M2.7-highspeed",
 )
 
 minimax_cn = ProviderProfile(
@@ -24,7 +26,7 @@ minimax_cn = ProviderProfile(
     env_vars=("MINIMAX_CN_API_KEY",),
     base_url="https://api.minimaxi.com/anthropic",
     auth_type="api_key",
-    default_aux_model="MiniMax-M2.7",
+    default_aux_model="MiniMax-M2.7-highspeed",
 )
 
 minimax_oauth = ProviderProfile(

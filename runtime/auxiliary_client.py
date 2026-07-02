@@ -263,9 +263,12 @@ _API_KEY_PROVIDER_AUX_MODELS_FALLBACK: Dict[str, str] = {
     "stepfun": "step-3.5-flash",
     "kimi-coding-cn": "kimi-k2-turbo-preview",
     "gmi": "google/gemini-3.1-flash-lite-preview",
-    "minimax": "MiniMax-M2.7",
+    # Canonical defaults live in plugins/model-providers/minimax/__init__.py
+    # (ProviderProfile.default_aux_model). The fallback below only fires when
+    # the plugin entry is unavailable — keep it aligned with the plugin.
+    "minimax": "MiniMax-M2.7-highspeed",
     "minimax-oauth": "MiniMax-M2.7-highspeed",
-    "minimax-cn": "MiniMax-M2.7",
+    "minimax-cn": "MiniMax-M2.7-highspeed",
     "anthropic": "claude-haiku-4-5-20251001",
     "ai-gateway": "google/gemini-3-flash",
     "opencode-zen": "gemini-3-flash",
