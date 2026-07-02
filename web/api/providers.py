@@ -400,6 +400,7 @@ _PROVIDER_ENV_VAR: dict[str, str] = {
     # flip to "no key" after upgrading.
     "lmstudio": "LM_API_KEY",
     "nvidia": "NVIDIA_API_KEY",
+    "morph": "MORPH_API_KEY",
 }
 
 # Read-only legacy env-var aliases.  When `_provider_has_key(pid)` looks up its
