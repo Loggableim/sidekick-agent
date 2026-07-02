@@ -95,9 +95,20 @@ TOOLSETS = {
         "includes": []
     },
 
-    "video": {
+"video": {
         "description": "Video analysis and understanding tools (opt-in, not in default toolset)",
         "tools": ["video_analyze"],
+        "includes": []
+    },
+
+    "mcp-minimax": {
+        # Tool names populated dynamically by the `minimax-token-plan` MCP server
+        # (web_search, understand_image). The MCP client in tools/mcp_tool.py
+        # registers tools under toolset "mcp-<server_name>" and also creates
+        # an alias from the user-facing server name (here: "minimax") to this
+        # canonical name. See docs/mcp-servers/minimax-token-plan.md.
+        "description": "MiniMax Token Plan MCP tools — web_search and understand_image (requires uvx and MINIMAX_API_KEY)",
+        "tools": [],
         "includes": []
     },
     

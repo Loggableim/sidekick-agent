@@ -36,6 +36,36 @@ _MCP_PRESETS: Dict[str, Dict[str, Any]] = {
         "command": "codex",
         "args": ["mcp-server"],
     },
+
+    # MiniMax Token Plan MCP (https://platform.minimax.io/docs/guides/token-plan-mcp-guide)
+    # Provides `web_search` and `understand_image` tools. Requires:
+    #   - uvx on PATH (https://docs.astral.sh/uv/)
+    #   - MINIMAX_API_KEY env var (Subscription Key from Billing > Token Plan)
+    # The MCP server is published as the `minimax-coding-plan-mcp` Python package
+    # and runs in stdio mode by default — perfect match for Sidekick's stdio MCP client.
+    # NOTE: -y is forwarded to `uvx` so non-interactive installs work on first use.
+    "minimax-token-plan": {
+        "command": "uvx",
+        "args": ["-y", "minimax-coding-plan-mcp"],
+        "env_help": {
+            "MINIMAX_API_KEY": (
+                "MiniMax Subscription Key from "
+                "https://platform.minimax.io/user-center/billing/token-plan"
+            ),
+            "MINIMAX_API_HOST": (
+                "MiniMax API host (default: https://api.minimax.io). "
+                "Only change for self-hosted/private deployments."
+            ),
+            "MINIMAX_API_RESOURCE_MODE": (
+                "Image delivery mode for understand_image: 'url' (default) "
+                "or 'local'. 'local' writes outputs to MINIMAX_MCP_BASE_PATH."
+            ),
+            "MINIMAX_MCP_BASE_PATH": (
+                "Local output directory for 'local' resource mode. "
+                "Must exist and be writable."
+            ),
+        },
+    },
 }
 
 
