@@ -427,6 +427,19 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     # Azure Foundry: user-provided endpoint and model.
     # Empty list because models depend on the endpoint configuration.
     "azure-foundry": [],
+    # Morph — specialized models and subagents for AI coding agents
+    "morph": [
+        "morph-qwen35-397b",
+        "morph-glm52-744b",
+        "morph-minimax3-428b",
+        "morph-minimax27-230b",
+        "morph-dsv4flash",
+        "morph-qwen36-27b",
+        "morph-v3-fast",
+        "morph-v3-large",
+        "morph-compactor",
+        "morph-warp-grep-v2.1",
+    ],
 }
 
 # Vercel AI Gateway: derive the bare-model-id catalog from the curated
@@ -588,6 +601,8 @@ _PROVIDER_ALIASES = {
     "lm_studio": "lmstudio",
     "ollama": "custom",  # bare "ollama" = local; use "ollama-cloud" for cloud
     "ollama_cloud": "ollama-cloud",
+    "morphllm": "morph",
+    "morph-llm": "morph",
 }
 
 

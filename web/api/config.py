@@ -772,6 +772,7 @@ _PROVIDER_DISPLAY = {
     "x-ai": "xAI",
     "nvidia": "NVIDIA NIM",
     "xiaomi": "Xiaomi",
+    "morph": "Morph",
 }
 
 # Provider alias → canonical slug.  Users configure providers using the
@@ -830,6 +831,8 @@ _PROVIDER_ALIASES = {
     # lets the agent's auxiliary client take the ``no-key-required``
     # OpenAI-compat path. See #1384.
     "local": "custom",
+    "morphllm": "morph",
+    "morph-llm": "morph",
 }
 
 
@@ -1202,6 +1205,19 @@ _PROVIDER_MODELS = {
     # xAI — prefix used in OpenRouter model IDs (x-ai/grok-4-20)
     "x-ai": [
         {"id": "grok-4.20", "label": "Grok 4.20"},
+    ],
+    # Morph — specialized models and subagents for AI coding agents
+    "morph": [
+        {"id": "morph-qwen35-397b",     "label": "Qwen 3.5 397B"},
+        {"id": "morph-glm52-744b",      "label": "GLM-5.2 744B"},
+        {"id": "morph-minimax3-428b",   "label": "MiniMax M3 428B"},
+        {"id": "morph-minimax27-230b",  "label": "MiniMax M2.7 230B"},
+        {"id": "morph-dsv4flash",       "label": "DeepSeek V4 Flash"},
+        {"id": "morph-qwen36-27b",      "label": "Qwen 3.6 27B"},
+        {"id": "morph-v3-fast",         "label": "Fast Apply (v3-fast)"},
+        {"id": "morph-v3-large",        "label": "Fast Apply (v3-large)"},
+        {"id": "morph-compactor",       "label": "Compact"},
+        {"id": "morph-warp-grep-v2.1",  "label": "WarpGrep"},
     ],
 }
 

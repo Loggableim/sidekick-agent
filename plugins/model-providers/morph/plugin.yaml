@@ -1,0 +1,5 @@
+name: morph-provider
+kind: model-provider
+version: 1.0.0
+description: Morph — specialized models and subagents for AI coding agents
+author: Morph
