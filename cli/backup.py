@@ -235,7 +235,7 @@ def run_backup(args) -> None:
     print(f"  Time:        {elapsed:.1f}s")
 
     if skipped_dirs:
-        print(f"\n  Excluded directories:")
+        print("\n  Excluded directories:")
         for d in sorted(skipped_dirs):
             print(f"    {d}/")
 
@@ -445,8 +445,8 @@ def run_import(args) -> None:
             except ImportError:
                 # sidekick_cli.profiles might not be available (fresh install)
                 if any(profiles_dir.iterdir()):
-                    print(f"\n  Profiles detected but aliases could not be created.")
-                    print(f"  Run: sidekick profile list  (after installing sidekick)")
+                    print("\n  Profiles detected but aliases could not be created.")
+                    print("  Run: sidekick profile list  (after installing sidekick)")
 
         # Guidance
         print()

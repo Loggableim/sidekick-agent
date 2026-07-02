@@ -1238,7 +1238,7 @@ class PluginManager:
     def list_plugins(self) -> List[Dict[str, Any]]:
         """Return a list of info dicts for all discovered plugins."""
         result: List[Dict[str, Any]] = []
-        for key, loaded in sorted(self._plugins.items()):
+        for _key, loaded in sorted(self._plugins.items()):
             result.append(
                 {
                     "name": loaded.manifest.name,

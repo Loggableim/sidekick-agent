@@ -354,7 +354,7 @@ def _check_providers_connectivity() -> None:
 
     if not provider:
         # Check env for common provider keys as fallback
-        for key, url in _PROVIDER_CHECK_URLS.items():
+        for key, _url in _PROVIDER_CHECK_URLS.items():
             if key == "openai":
                 if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_BASE_URL"):
                     provider = key

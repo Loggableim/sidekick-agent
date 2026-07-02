@@ -85,3 +85,33 @@ def test_gmail_ai_stream_is_blocked_in_game_mode(monkeypatch, tmp_path):
             True,
         )
     ]
+
+
+def test_gmail_related_only_strips_reply_or_forward_prefixes(monkeypatch):
+    from web.api import gmail_tools
+
+    monkeypatch.setattr(gmail_tools, "_ai_cache_get", lambda key: None)
+    monkeypatch.setattr(gmail_tools, "_ai_cache_set", lambda key, value: None)
+    monkeypatch.setattr(
+        gmail_tools,
+        "_read_email",
+        lambda email_id, account: {
+            "id": email_id,
+            "subject": "Review",
+            "from": "alice@example.com",
+        },
+    )
+    monkeypatch.setattr(
+        gmail_tools,
+        "_list_emails",
+        lambda max_r, folder, account: {
+            "emails": [
+                {"id": "2", "subject": "Product view", "from": "bob@example.net"},
+                {"id": "3", "subject": "Re: Review", "from": "bob@example.net"},
+            ]
+        },
+    )
+
+    related = gmail_tools._ai_find_related("1", "dominik")
+
+    assert [item["id"] for item in related] == ["3"]

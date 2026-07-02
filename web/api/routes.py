@@ -19,8 +19,7 @@ import sys
 import threading
 import time
 import uuid
-import re
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 from contextlib import closing
 from urllib.parse import parse_qs
 from web.api.agent_sessions import (
@@ -828,8 +827,9 @@ def _run_cron_tracked(job, profile_home=None, execution_profile_home=None):
         _with_cron_home(profile_home, _persist_success)
     except Exception as e:
         logger.exception("Manual cron run failed for job %s", job_id)
+        error_text = str(e)
         try:
-            _with_cron_home(profile_home, lambda: mark_job_run(job_id, False, str(e)))
+            _with_cron_home(profile_home, lambda: mark_job_run(job_id, False, error_text))
         except Exception:
             logger.debug("Failed to mark manual cron run failure for %s", job_id)
     finally:
@@ -910,8 +910,6 @@ def _clear_live_models_cache() -> None:
         _LIVE_MODELS_CACHE.clear()
 
 from web.api.config import (
-    STATE_DIR,
-    SESSION_DIR,
     DEFAULT_WORKSPACE,
     DEFAULT_MODEL,
     SESSIONS,
@@ -919,7 +917,6 @@ from web.api.config import (
     LOCK,
     STREAMS,
     STREAMS_LOCK,
-    CANCEL_FLAGS,
     SERVER_START_TIME,
     _resolve_cli_toolsets,
     _INDEX_HTML_PATH,
@@ -928,11 +925,7 @@ from web.api.config import (
     resolve_model_provider,
     resolve_active_provider_context,
     get_session_dir,
-    IMAGE_EXTS,
-    MD_EXTS,
     MIME_MAP,
-    MAX_FILE_BYTES,
-    MAX_UPLOAD_BYTES,
     CHAT_LOCK,
     _get_session_agent_lock,
     SESSION_AGENT_LOCKS,
@@ -957,6 +950,7 @@ from web.api.helpers import (
     require,
     bad,
     error_response,
+    reject_windows_device_path,
     safe_resolve,
     j,
     t,
@@ -973,7 +967,6 @@ from web.api.appstore import (
     install_app,
     uninstall_app,
     get_all_status,
-    discover_manifests,
     get_updates,
     get_sdk_docs,
     update_all,
@@ -1960,7 +1953,6 @@ from web.api.models import (
     title_from,
     _generate_title_via_ollama,
     _extract_facts_via_llamacpp,
-    _write_session_index,
     _active_state_db_path,
     load_projects,
     save_projects,
@@ -1978,12 +1970,10 @@ from web.api.workspace import (
     list_dir,
     list_workspace_suggestions,
     read_file_content,
-    safe_resolve_ws,
     resolve_trusted_workspace,
     validate_workspace_to_add,
     _is_blocked_system_path,
     _strip_surrounding_quotes,
-    _workspace_blocked_roots,
 )
 from web.api.upload import handle_upload, handle_upload_extract, handle_transcribe
 from web.api.streaming import (
@@ -2740,50 +2730,27 @@ def _build_insights_from_state_db(days: int) -> dict | None:
     except Exception:
         existing_cols = set()
 
-    _COLUMN_DEFAULTS: dict[str, str] = {
-        "input_tokens": "0",
-        "output_tokens": "0",
-        "cache_read_tokens": "0",
-        "reasoning_tokens": "0",
-        "estimated_cost_usd": "0",
-        "actual_cost_usd": "0",
-        "message_count": "0",
-    }
-
-    def _col_sql(name: str, alias: str | None = None) -> str:
-        """Return a COALESCE expression for *name*, defaulting to 0 when the
-        column does not exist in the current schema."""
-        target = alias or name
-        if name in existing_cols:
-            default = _COLUMN_DEFAULTS.get(name, "0")
-            return f"COALESCE({name}, {default}) AS {target}"
-        return f"{_COLUMN_DEFAULTS.get(name, '0')} AS {target}"
-
     # Determine the best timestamp column for the WHERE clause — the real
     # state.db schema (agent-side) uses `started_at` but may lack `updated_at`
     # or `created_at` that the SessionDB shim schema declares.
-    _TS_COLS = ["started_at", "updated_at", "created_at"]
-    _existing_ts_cols = [c for c in _TS_COLS if c in existing_cols]
-    _ts_col = _existing_ts_cols[0] if _existing_ts_cols else "started_at"
-
     try:
-        rows_raw = db._conn.execute(
-            f"""SELECT
-                {_ts_col} AS started_at,
-                COALESCE(model, '') AS model,
-                {_col_sql('input_tokens')},
-                {_col_sql('output_tokens')},
-                {_col_sql('cache_read_tokens')},
-                {_col_sql('reasoning_tokens')},
-                {_col_sql('estimated_cost_usd', 'estimated_cost')},
-                {_col_sql('actual_cost_usd', 'actual_cost')},
-                {_col_sql('message_count')}
-            FROM sessions
-            WHERE {_ts_col} >= ?
-            ORDER BY started_at ASC
-            """,
-            (cutoff_ts,),
-        )
+        if "started_at" in existing_cols:
+            rows_raw = db._conn.execute(
+                "SELECT * FROM sessions WHERE started_at >= ? ORDER BY started_at ASC",
+                (cutoff_ts,),
+            )
+        elif "updated_at" in existing_cols:
+            rows_raw = db._conn.execute(
+                "SELECT * FROM sessions WHERE updated_at >= ? ORDER BY updated_at ASC",
+                (cutoff_ts,),
+            )
+        elif "created_at" in existing_cols:
+            rows_raw = db._conn.execute(
+                "SELECT * FROM sessions WHERE created_at >= ? ORDER BY created_at ASC",
+                (cutoff_ts,),
+            )
+        else:
+            rows_raw = db._conn.execute("SELECT * FROM sessions")
         rows = rows_raw.fetchall()
     except Exception as exc:
         db.close()
@@ -2812,12 +2779,14 @@ def _build_insights_from_state_db(days: int) -> dict | None:
 
     for row in rows:
         r = dict(row)
+        if "started_at" not in r:
+            r["started_at"] = r.get("updated_at") or r.get("created_at") or 0
         input_tokens = int(r.get("input_tokens", 0))
         output_tokens = int(r.get("output_tokens", 0))
         cache_read_tokens = int(r.get("cache_read_tokens", 0))
         reasoning_tokens = int(r.get("reasoning_tokens", 0))
-        estimated_cost = float(r.get("estimated_cost", 0.0))
-        actual_cost = float(r.get("actual_cost", 0.0))
+        estimated_cost = float(r.get("estimated_cost") or r.get("estimated_cost_usd") or 0.0)
+        actual_cost = float(r.get("actual_cost") or r.get("actual_cost_usd") or 0.0)
         message_count = int(r.get("message_count", 0))
 
         total_input_tokens += input_tokens
@@ -3087,18 +3056,18 @@ def _handle_insights(handler, parsed) -> bool:
         result = _build_insights_from_state_db(days)
         if result is not None:
             return j(handler, result)
-    except Exception as exc:
+    except Exception:
         logger.exception("_build_insights_from_state_db raised; falling back to _index.json")
 
     # 2. Fallback to _index.json
     try:
         result = _build_insights_from_index(days)
         return j(handler, result)
-    except Exception as exc:
+    except Exception:
         logger.exception("_build_insights_from_index also failed")
         # Safe fallback — empty payload with error source flag.
         payload = _empty_insights_payload(days, "error_fallback")
-        payload["warnings"] = [f"Both analytics data sources failed. See logs for details."]
+        payload["warnings"] = ["Both analytics data sources failed. See logs for details."]
         return j(handler, payload)
 
 
@@ -5132,6 +5101,18 @@ def _wait_for_cockpit_ready(host: str, timeout: float = 8.0) -> bool:
 
 def _handle_cast_autostart(handler):
     host = _default_cockpit_cast_host()
+    try:
+        status = _cast_read_json(f"{host}/api/cast/status", timeout=0.75)
+        status.setdefault("configured", True)
+        status.setdefault("host", host)
+        status.setdefault("dashboard_url", host)
+        status.setdefault("available", True)
+        if status.get("active") is True:
+            return j(handler, status)
+        return _forward_cast_request(handler, host, "/api/cast/toggle", "POST")
+    except Exception:
+        pass
+
     if _cockpit_launch_available():
         try:
             proc = _start_cockpit_launcher()
@@ -5157,17 +5138,6 @@ def _handle_cast_autostart(handler):
                 "dashboard_url": host,
                 "launch_available": _cockpit_launch_available(),
             }, status=502)
-
-    try:
-        status = _cast_read_json(f"{host}/api/cast/status", timeout=0.75)
-        status.setdefault("configured", True)
-        status.setdefault("host", host)
-        if status.get("active") is True:
-            status.setdefault("available", True)
-            return j(handler, status)
-        return _forward_cast_request(handler, host, "/api/cast/toggle", "POST")
-    except Exception:
-        pass
 
     return j(handler, {
         "active": False,
@@ -5544,12 +5514,6 @@ def handle_post(handler, parsed) -> bool:
             workspace = str(resolve_trusted_workspace(body.get("workspace"))) if body.get("workspace") else None
         except (TypeError, ValueError) as e:
             return bad(handler, str(e))
-        # Extract workspace slug from query param
-        try:
-            _ws_qs = parse_qs(parsed.query).get("workspace", [None])[0]
-            workspace_slug = _ws_qs.strip().lower() if _ws_qs else None
-        except Exception:
-            workspace_slug = None
         worktree_info = None
         worktree_requested = (
             body.get("worktree") is True
@@ -6325,7 +6289,10 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, extra_headers={
                 'Set-Cookie': build_profile_cookie(name),
             })
-        except (ValueError, FileNotFoundError) as e:
+        except ValueError as e:
+            status = 404 if "does not exist" in str(e) else 400
+            return bad(handler, _sanitize_error(e), status)
+        except FileNotFoundError as e:
             return bad(handler, _sanitize_error(e), 404)
         except RuntimeError as e:
             return bad(handler, str(e), 409)
@@ -6369,9 +6336,8 @@ def handle_post(handler, parsed) -> bool:
         if not name:
             return bad(handler, "name is required")
         try:
-            from web.api.profiles import delete_profile_api, _validate_profile_name
+            from web.api.profiles import delete_profile_api
 
-            _validate_profile_name(name)
             result = delete_profile_api(name)
             return j(handler, result)
         except (ValueError, FileNotFoundError) as e:
@@ -7217,8 +7183,8 @@ def _handle_agents_post(handler, parsed, body):
     """Handle POST /api/agents/... routes."""
     from web.api.agents import (
         create_agent, activate_from_template, mark_splash_completed,
-        create_agent_session, append_agent_message, set_agent_memory,
-        get_agent,
+        set_agent_memory,
+        get_agent, update_agent,
     )
     from web.api.helpers import require, j, bad
 
@@ -7267,13 +7233,6 @@ def _handle_agents_post(handler, parsed, body):
                 ["hermes", "profile", "create", profile_name, "--clone-from", "default", "--no-alias"],
                 capture_output=True, text=True, timeout=30,
             )
-            # Persönlichkeit in config.yaml setzen
-            agent_type = agent.get("agent_type", "custom")
-            personality_key = {
-                "friend": "helpful", "project-manager": "helpful",
-                "social-media": "creative", "developer": "technical",
-                "knowledge-base": "helpful",
-            }.get(agent_type, "helpful")
             # Update der agents table
             update_agent(slug, {"profile": profile_name})
             return j(handler, {
@@ -7585,8 +7544,10 @@ def _handle_list_dir(handler, parsed):
                 "path": qs.get("path", ["."])[0],
             },
         )
-    except (FileNotFoundError, ValueError) as e:
+    except FileNotFoundError as e:
         return bad(handler, _sanitize_error(e), 404)
+    except ValueError as e:
+        return bad(handler, _sanitize_error(e))
 
 
 def _handle_sse_stream(handler, parsed):
@@ -7652,8 +7613,8 @@ def _terminal_session_and_workspace(body_or_query):
         raise ValueError("session_id required")
     try:
         s = get_session(sid)
-    except KeyError:
-        raise KeyError("Session not found")
+    except KeyError as exc:
+        raise KeyError("Session not found") from exc
     workspace = resolve_trusted_workspace(getattr(s, "workspace", "") or "")
     return sid, workspace
 
@@ -7777,7 +7738,7 @@ def _gateway_sse_probe_payload(settings, watcher):
     # don't implement the full public API.
     if watcher is None:
         watcher_alive = False
-    elif hasattr(watcher, 'is_alive') and callable(getattr(watcher, 'is_alive')):
+    elif hasattr(watcher, 'is_alive') and callable(watcher.is_alive):
         watcher_alive = bool(watcher.is_alive())
     else:
         _t = getattr(watcher, '_thread', None)
@@ -8047,6 +8008,7 @@ def _handle_media(handler, parsed):
         resolved = Path(raw_path).expanduser().resolve()
     except Exception:
         return bad(handler, "Invalid path", 400)
+    target = resolved
 
     # Allowed roots: hermes home, /tmp, user home, and active workspace.
     allowed_roots = [
@@ -8158,7 +8120,11 @@ def _handle_file_raw(handler, parsed):
         return bad(handler, "Session not found", 404)
     rel = qs.get("path", [""])[0]
     force_download = qs.get("download", [""])[0] == "1"
-    target = safe_resolve(Path(s.workspace), rel)
+    try:
+        reject_windows_device_path(rel)
+        target = safe_resolve(Path(s.workspace), rel)
+    except (ValueError, PermissionError, OSError) as e:
+        return bad(handler, _sanitize_error(e))
     if not target.exists() or not target.is_file():
         return j(handler, {"error": "not found"}, status=404)
     ext = target.suffix.lower()
@@ -8197,8 +8163,10 @@ def _handle_file_read(handler, parsed):
         return bad(handler, "path is required")
     try:
         return j(handler, read_file_content(Path(s.workspace), rel))
-    except (FileNotFoundError, ValueError) as e:
+    except FileNotFoundError as e:
         return bad(handler, _sanitize_error(e), 404)
+    except ValueError as e:
+        return bad(handler, _sanitize_error(e))
 
 
 def _handle_approval_pending(handler, parsed):
@@ -8476,7 +8444,9 @@ def _handle_browser_permission_status(handler, parsed):
 
 def _handle_browser_action(handler, parsed):
     try:
-        body = read_json(handler)
+        from web.api.helpers import read_body
+
+        body = read_body(handler)
     except Exception:
         body = {}
     try:
@@ -9124,7 +9094,7 @@ def _handle_supermemory_forget(handler, body):
     if not memory_id:
         return bad(handler, "id is required")
     try:
-        result = client.memories.forget(container_tag=container_tag, id=memory_id)
+        client.memories.forget(container_tag=container_tag, id=memory_id)
         return j(handler, {"ok": True, "result": "forgotten"})
     except Exception as e:
         logger.exception("Supermemory forget failed")
@@ -10394,6 +10364,31 @@ def _handle_cron_resume(handler, body):
     return bad(handler, "Job not found", 404)
 
 
+def _raw_workspace_path(workspace_path: Path, requested: str) -> Path:
+    return Path(os.path.abspath(os.path.normpath(str(workspace_path / requested))))
+
+
+def _ensure_raw_target_within_workspace(workspace_path: Path, workspace_root: Path, raw_target: Path) -> None:
+    raw_workspace_root = Path(os.path.abspath(os.path.normpath(str(workspace_path))))
+    for allowed_root in (workspace_root, raw_workspace_root):
+        try:
+            raw_target.relative_to(allowed_root)
+            return
+        except ValueError:
+            pass
+    raise ValueError("Path traversal blocked")
+
+
+def _workspace_relative_path(workspace_path: Path, workspace_root: Path, target: Path) -> str:
+    raw_workspace_root = Path(os.path.abspath(os.path.normpath(str(workspace_path))))
+    for allowed_root in (workspace_root, raw_workspace_root):
+        try:
+            return str(target.relative_to(allowed_root))
+        except ValueError:
+            pass
+    raise ValueError("Path traversal blocked")
+
+
 def _handle_file_delete(handler, body):
     try:
         require(body, "session_id", "path")
@@ -10404,7 +10399,23 @@ def _handle_file_delete(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
-        target = safe_resolve(Path(s.workspace), body["path"])
+        workspace_path = Path(s.workspace)
+        workspace_root = workspace_path.resolve()
+        try:
+            reject_windows_device_path(body["path"])
+        except ValueError as e:
+            return bad(handler, str(e))
+        raw_target = _raw_workspace_path(workspace_path, body["path"])
+        try:
+            _ensure_raw_target_within_workspace(workspace_path, workspace_root, raw_target)
+        except ValueError as e:
+            return bad(handler, str(e))
+        if raw_target.is_symlink():
+            raw_target.unlink()
+            return j(handler, {"ok": True, "path": body["path"]})
+        target = safe_resolve(workspace_path, body["path"])
+        if target == workspace_root:
+            return bad(handler, "Cannot delete workspace root")
         if not target.exists():
             return bad(handler, "File not found", 404)
         if target.is_dir():
@@ -10414,7 +10425,7 @@ def _handle_file_delete(handler, body):
         else:
             target.unlink()
         return j(handler, {"ok": True, "path": body["path"]})
-    except (ValueError, PermissionError) as e:
+    except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
 
 
@@ -10428,6 +10439,10 @@ def _handle_file_save(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
+        try:
+            reject_windows_device_path(body["path"])
+        except ValueError as e:
+            return bad(handler, str(e))
         target = safe_resolve(Path(s.workspace), body["path"])
         if not target.exists():
             return bad(handler, "File not found", 404)
@@ -10437,7 +10452,7 @@ def _handle_file_save(handler, body):
         return j(
             handler, {"ok": True, "path": body["path"], "size": target.stat().st_size}
         )
-    except (ValueError, PermissionError) as e:
+    except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
 
 
@@ -10457,16 +10472,29 @@ def _handle_workspace_write(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
-        target = safe_resolve(Path(s.workspace), body["path"])
+        workspace_path = Path(s.workspace)
+        workspace_root = workspace_path.resolve()
+        target = safe_resolve(workspace_path, body["path"])
+        raw_target = _raw_workspace_path(workspace_path, body["path"])
+        try:
+            _ensure_raw_target_within_workspace(workspace_path, workspace_root, raw_target)
+        except ValueError as e:
+            return bad(handler, str(e))
+        try:
+            reject_windows_device_path(body["path"])
+        except ValueError as e:
+            return bad(handler, str(e))
+        if raw_target.is_symlink():
+            return bad(handler, "Cannot write: path is a symlink")
         if target.exists() and target.is_dir():
             return bad(handler, "Cannot write: path is a directory")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body.get("content", ""), encoding="utf-8")
         return j(
             handler,
-            {"ok": True, "path": str(target.relative_to(Path(s.workspace))), "size": target.stat().st_size},
+            {"ok": True, "path": str(target.relative_to(workspace_root)), "size": target.stat().st_size},
         )
-    except (ValueError, PermissionError) as e:
+    except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
 
 
@@ -10480,15 +10508,26 @@ def _handle_file_create(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if target.exists():
+        workspace_path = Path(s.workspace)
+        workspace_root = workspace_path.resolve()
+        target = safe_resolve(workspace_path, body["path"])
+        raw_target = _raw_workspace_path(workspace_path, body["path"])
+        try:
+            _ensure_raw_target_within_workspace(workspace_path, workspace_root, raw_target)
+        except ValueError as e:
+            return bad(handler, str(e))
+        try:
+            reject_windows_device_path(body["path"])
+        except ValueError as e:
+            return bad(handler, str(e))
+        if target.exists() or raw_target.is_symlink():
             return bad(handler, "File already exists")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body.get("content", ""), encoding="utf-8")
         return j(
-            handler, {"ok": True, "path": str(target.relative_to(Path(s.workspace)))}
+            handler, {"ok": True, "path": str(target.relative_to(workspace_root))}
         )
-    except (ValueError, PermissionError) as e:
+    except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
 
 
@@ -10502,17 +10541,40 @@ def _handle_file_rename(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
-        source = safe_resolve(Path(s.workspace), body["path"])
-        if not source.exists():
+        workspace_path = Path(s.workspace)
+        workspace_root = workspace_path.resolve()
+        source = safe_resolve(workspace_path, body["path"])
+        raw_source = _raw_workspace_path(workspace_path, body["path"])
+        try:
+            _ensure_raw_target_within_workspace(workspace_path, workspace_root, raw_source)
+        except ValueError as e:
+            return bad(handler, str(e))
+        if raw_source.is_symlink():
+            source = raw_source
+        if not source.exists() and not source.is_symlink():
             return bad(handler, "File not found", 404)
         new_name = body["new_name"].strip()
-        if not new_name or "/" in new_name or ".." in new_name:
+        native_name = PurePath(new_name)
+        windows_name = PureWindowsPath(new_name)
+        if (
+            not new_name
+            or ".." in new_name
+            or native_name.is_absolute()
+            or windows_name.is_absolute()
+            or windows_name.drive
+            or len(native_name.parts) != 1
+            or len(windows_name.parts) != 1
+        ):
             return bad(handler, "Invalid file name")
+        try:
+            reject_windows_device_path(new_name)
+        except ValueError as e:
+            return bad(handler, str(e))
         dest = source.parent / new_name
-        if dest.exists():
+        if dest.exists() or dest.is_symlink():
             return bad(handler, f'A file named "{new_name}" already exists')
         source.rename(dest)
-        new_rel = str(dest.relative_to(Path(s.workspace)))
+        new_rel = _workspace_relative_path(workspace_path, workspace_root, dest)
         return j(handler, {"ok": True, "old_path": body["path"], "new_path": new_rel})
     except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
@@ -10528,12 +10590,23 @@ def _handle_create_dir(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
-        target = safe_resolve(Path(s.workspace), body["path"])
-        if target.exists():
+        workspace_path = Path(s.workspace)
+        workspace_root = workspace_path.resolve()
+        target = safe_resolve(workspace_path, body["path"])
+        raw_target = _raw_workspace_path(workspace_path, body["path"])
+        try:
+            _ensure_raw_target_within_workspace(workspace_path, workspace_root, raw_target)
+        except ValueError as e:
+            return bad(handler, str(e))
+        try:
+            reject_windows_device_path(body["path"])
+        except ValueError as e:
+            return bad(handler, str(e))
+        if target.exists() or raw_target.is_symlink():
             return bad(handler, "Path already exists")
         target.mkdir(parents=True)
         return j(
-            handler, {"ok": True, "path": str(target.relative_to(Path(s.workspace)))}
+            handler, {"ok": True, "path": str(target.relative_to(workspace_root))}
         )
     except (ValueError, PermissionError, OSError) as e:
         return bad(handler, _sanitize_error(e))
@@ -10549,6 +10622,7 @@ def _handle_file_reveal(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
+        reject_windows_device_path(body["path"])
         target = safe_resolve(Path(s.workspace), body["path"])
         if not target.exists():
             # Include the resolved server-side path in the error message so
@@ -10596,6 +10670,7 @@ def _handle_file_path(handler, body):
     except KeyError:
         return bad(handler, "Session not found", 404)
     try:
+        reject_windows_device_path(body["path"])
         target = safe_resolve(Path(s.workspace), body["path"])
         return j(handler, {"ok": True, "path": str(target)})
     except (ValueError, PermissionError, OSError) as e:
@@ -10795,7 +10870,6 @@ def _handle_session_compress(handler, body):
         return {"role": role, "ts": ts, "text": norm, "attachments": attach_count}
 
     def _compression_summary_from_messages(messages):
-        text = None
         for m in reversed(messages or []):
             if not isinstance(m, dict):
                 continue
@@ -10932,7 +11006,7 @@ def _handle_session_compress(handler, body):
 
         import web.api.config as _cfg
         from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
-        import hermes_cli.runtime_provider as _runtime_provider
+        import sidekick_cli.runtime_provider as _runtime_provider
         import run_agent as _run_agent
 
         resolved_model, resolved_provider, resolved_base_url = _cfg.resolve_model_provider(
@@ -11550,7 +11624,7 @@ def _handle_handoff_summary(handler, body):
     try:
         import web.api.config as _cfg
         from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
-        import hermes_cli.runtime_provider as _runtime_provider
+        import sidekick_cli.runtime_provider as _runtime_provider
         import run_agent as _run_agent
 
         # Try to resolve model from an existing session, fall back to default.
@@ -12616,7 +12690,7 @@ def _handle_supermemory_add(handler, body):
     if not content:
         return bad(handler, "content is required")
     try:
-        result = client.documents.add(content=content, tags=tags, container_tag=container_tag)
+        client.documents.add(content=content, tags=tags, container_tag=container_tag)
         return j(handler, {"ok": True, "result": "added"})
     except Exception as e:
         logger.exception("Supermemory add failed")
@@ -12633,7 +12707,7 @@ def _handle_supermemory_forget(handler, body):
     if not memory_id:
         return bad(handler, "id is required")
     try:
-        result = client.memories.forget(container_tag=container_tag, id=memory_id)
+        client.memories.forget(container_tag=container_tag, id=memory_id)
         return j(handler, {"ok": True, "result": "forgotten"})
     except Exception as e:
         logger.exception("Supermemory forget failed")

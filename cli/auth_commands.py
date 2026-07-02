@@ -469,7 +469,7 @@ def _interactive_auth() -> None:
         if has_aws_credentials():
             auth_source = resolve_aws_auth_env_var() or "unknown"
             region = resolve_bedrock_region()
-            print(f"bedrock (AWS SDK credential chain):")
+            print("bedrock (AWS SDK credential chain):")
             print(f"  Auth: {auth_source}")
             print(f"  Region: {region}")
             try:
@@ -479,7 +479,7 @@ def _interactive_auth() -> None:
                 arn = identity.get("Arn", "unknown")
                 print(f"  Identity: {arn}")
             except Exception:
-                print(f"  Identity: (could not resolve — boto3 STS call failed)")
+                print("  Identity: (could not resolve — boto3 STS call failed)")
             print()
     except ImportError:
         pass  # boto3 or bedrock_adapter not available
@@ -528,7 +528,7 @@ def _pick_provider(prompt: str = "Provider") -> str:
     try:
         raw = input(f"{prompt}: ").strip()
     except (EOFError, KeyboardInterrupt):
-        raise SystemExit()
+        raise SystemExit() from None
     return _normalize_provider(raw)
 
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from typing import Optional
 
 # ── Re-export from shared.logging_setup ─────────────────────────────────────
 from shared.logging_setup import get_logs_dir

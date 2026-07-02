@@ -50,12 +50,12 @@ def _require_boto3():
     try:
         import boto3
         return boto3
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "The 'boto3' package is required for the AWS Bedrock provider. "
             "Install it with: pip install boto3\n"
             "Or install Sidekick with Bedrock support: pip install -e '.[bedrock]'"
-        )
+        ) from exc
 
 
 def _get_bedrock_runtime_client(region: str):

@@ -39,7 +39,6 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
-import yaml
 
 from cli.config import get_sidekick_home, get_config_path, read_raw_config
 from runtime._compat.shim_constants import OPENROUTER_BASE_URL
@@ -91,7 +90,7 @@ QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
 DEFAULT_SPOTIFY_ACCOUNTS_BASE_URL = "https://accounts.spotify.com"
 DEFAULT_SPOTIFY_API_BASE_URL = "https://api.spotify.com/v1"
 DEFAULT_SPOTIFY_REDIRECT_URI = "http://127.0.0.1:43827/spotify/callback"
-SPOTIFY_DOCS_URL = "https://sidekick-agent.sh/docs/user-guide/features/spotify"  # noqa: real upstream URL
+SPOTIFY_DOCS_URL = "https://sidekick-agent.sh/docs/user-guide/features/spotify"
 SPOTIFY_DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 SPOTIFY_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = 120
 DEFAULT_SPOTIFY_SCOPE = " ".join((
@@ -890,9 +889,9 @@ def _file_lock(
                     lock_file.seek(0)
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                 break
-            except (BlockingIOError, OSError, PermissionError):
+            except (BlockingIOError, OSError, PermissionError) as exc:
                 if time.monotonic() >= deadline:
-                    raise TimeoutError(timeout_message)
+                    raise TimeoutError(timeout_message) from exc
                 time.sleep(0.05)
 
         holder.depth = 1
@@ -2286,7 +2285,7 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
         raw = input("Spotify Client ID: ").strip()
     except (EOFError, KeyboardInterrupt):
         print()
-        raise SystemExit("Spotify setup cancelled.")
+        raise SystemExit("Spotify setup cancelled.") from None
 
     if not raw:
         print()
@@ -2802,9 +2801,9 @@ def _poll_for_token(
 
         try:
             error_payload = response.json()
-        except Exception:
+        except Exception as exc:
             response.raise_for_status()
-            raise RuntimeError("Token endpoint returned a non-JSON error response")
+            raise RuntimeError("Token endpoint returned a non-JSON error response") from exc
 
         error_code = error_payload.get("error", "")
         if error_code == "authorization_pending":
@@ -3478,7 +3477,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
         raise AuthError(
             f"Failed to request device code: {exc}",
             provider="openai-codex", code="device_code_request_failed",
-        )
+        ) from exc
 
     if resp.status_code != 200:
         raise AuthError(
@@ -3532,7 +3531,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
                     )
     except KeyboardInterrupt:
         print("\nLogin cancelled.")
-        raise SystemExit(130)
+        raise SystemExit(130) from None
 
     if code_resp is None:
         raise AuthError(
@@ -3568,7 +3567,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
         raise AuthError(
             f"Token exchange failed: {exc}",
             provider="openai-codex", code="token_exchange_failed",
-        )
+        ) from exc
 
     if token_resp.status_code != 200:
         raise AuthError(
@@ -3643,10 +3642,10 @@ def _minimax_request_user_code(
             provider="minimax-oauth", code="authorization_failed",
         )
     payload = response.json()
-    for field in ("user_code", "verification_uri", "expired_in"):
-        if field not in payload:
+    for required_field in ("user_code", "verification_uri", "expired_in"):
+        if required_field not in payload:
             raise AuthError(
-                f"MiniMax OAuth response missing field: {field}",
+                f"MiniMax OAuth response missing field: {required_field}",
                 provider="minimax-oauth", code="authorization_incomplete",
             )
     if payload.get("state") != state:
@@ -3940,7 +3939,7 @@ def _login_minimax_oauth(args, pconfig: ProviderConfig) -> None:
         )
     except AuthError as exc:
         print(format_auth_error(exc))
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 def logout_command(args) -> None:

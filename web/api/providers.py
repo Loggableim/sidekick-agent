@@ -26,7 +26,6 @@ from web.api.config import (
     _PROVIDER_DISPLAY,
     _PROVIDER_MODELS,
     _custom_provider_slug_from_name,
-    _get_label_for_model,
     _models_from_live_provider_ids,
     _read_live_provider_model_ids,
     _read_visible_codex_cache_model_ids,

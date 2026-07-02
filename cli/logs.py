@@ -172,7 +172,7 @@ def tail_log(
     log_path = get_sidekick_home() / "logs" / filename
     if not log_path.exists():
         print(f"Log file not found: {log_path}")
-        print(f"(Logs are created when Sidekick runs — try 'sidekick chat' first)")
+        print("(Logs are created when Sidekick runs — try 'sidekick chat' first)")
         sys.exit(1)
 
     # Parse --since into a datetime cutoff

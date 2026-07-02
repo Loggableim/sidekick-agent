@@ -898,7 +898,7 @@ if __name__ == "__main__":
         print("✅ fal_client library available")
     except ImportError:
         print("❌ fal_client library not found — pip install fal-client")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
     model_id, meta = _resolve_fal_model()
     print(f"🤖 Active model: {meta.get('display', model_id)} ({model_id})")

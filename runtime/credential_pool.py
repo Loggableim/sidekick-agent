@@ -14,11 +14,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from runtime._compat.shim_constants import OPENROUTER_BASE_URL
-from cli.config import get_env_value, load_env
+from cli.config import load_env
 import cli.auth as auth_mod
 from cli.auth import (
     CODEX_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-    DEFAULT_AGENT_KEY_MIN_TTL_SECONDS,
     PROVIDER_REGISTRY,
     _auth_store_lock,
     _codex_access_token_is_expiring,
@@ -323,7 +322,7 @@ def get_custom_provider_pool_key(base_url: str, provider_name: Optional[str] = N
     # base_url always resolve to the first one's credentials.
     if provider_name:
         normalized_name = _normalize_custom_pool_name(provider_name)
-        for norm_name, entry in _iter_custom_providers():
+        for norm_name, _entry in _iter_custom_providers():
             if norm_name == normalized_name:
                 return f"{CUSTOM_POOL_PREFIX}{norm_name}"
 

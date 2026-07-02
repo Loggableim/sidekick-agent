@@ -290,7 +290,7 @@ def _make_run_env(env: dict) -> dict:
     # Inject ContextVar-based session vars into subprocess env.
     # ContextVars don't propagate to child processes, so we bridge them here.
     try:
-        from gateway.session_context import get_session_env, _UNSET, _VAR_MAP
+        from gateway.session_context import _UNSET, _VAR_MAP
         for var_name, var in _VAR_MAP.items():
             value = var.get()
             if value is not _UNSET and value:
@@ -505,6 +505,20 @@ class LocalEnvironment(BaseEnvironment):
             _pipe_stdin(proc, stdin_data)
 
         return proc
+
+    def _resolve_effective_cwd(self, cwd: str) -> str:
+        resolved = _windows_posix_path_to_native(cwd)
+        safe_cwd = _resolve_safe_cwd(resolved)
+        if safe_cwd != resolved:
+            logger.warning(
+                "LocalEnvironment cwd %r is missing on disk; "
+                "falling back to %r so terminal commands keep working.",
+                resolved,
+                safe_cwd,
+            )
+            self.cwd = safe_cwd
+            return safe_cwd
+        return resolved
 
     def _kill_process(self, proc):
         """Kill the entire process group (all children)."""

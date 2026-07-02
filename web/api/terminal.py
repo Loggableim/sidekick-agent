@@ -41,7 +41,7 @@ _windows_select = None
 if not _IS_WINDOWS:
     import select as _posix_select
 else:
-    import select as _windows_select  # noqa: F811 — imported for clarity, used via _IS_WINDOWS check
+    pass  # noqa: F811 — imported for clarity, used via _IS_WINDOWS check
 
 
 def _set_nonblocking(fd: int) -> None:

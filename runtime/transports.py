@@ -11,10 +11,10 @@ import copy
 import json
 import logging
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from runtime.lmstudio_reasoning import resolve_lmstudio_effort
-from runtime.moonshot_schema import is_moonshot_model, sanitize_moonshot_tools
+from runtime.moonshot_schema import sanitize_moonshot_tools
 from runtime.prompt_builder import DEVELOPER_ROLE_MODELS
 from providers.base import OMIT_TEMPERATURE
 
@@ -73,7 +73,7 @@ class ChatCompletionsTransport:
             message = {}
         finish_reason = getattr(choice, "finish_reason", None) or "stop"
         try:
-            setattr(message, "finish_reason", finish_reason)
+            message.finish_reason = finish_reason
             return message
         except Exception:
             normalized = dict(message) if isinstance(message, dict) else {"content": str(message)}
@@ -458,7 +458,7 @@ class CodexResponsesTransport:
 
         message, finish_reason = _normalize_codex_response(response)
         try:
-            setattr(message, "finish_reason", finish_reason)
+            message.finish_reason = finish_reason
         except Exception:
             pass
         return message

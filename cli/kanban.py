@@ -1381,17 +1381,17 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
             if not ids:
                 diags_by_task = {}
             else:
-                placeholders = ",".join(["?"] * len(ids))
+                ids_json = json.dumps(ids)
                 ev_by = {i: [] for i in ids}
                 for row in conn.execute(
-                    f"SELECT * FROM task_events WHERE task_id IN ({placeholders}) ORDER BY id",
-                    tuple(ids),
+                    "SELECT * FROM task_events WHERE task_id IN (SELECT value FROM json_each(?)) ORDER BY id",
+                    (ids_json,),
                 ):
                     ev_by.setdefault(row["task_id"], []).append(row)
                 run_by = {i: [] for i in ids}
                 for row in conn.execute(
-                    f"SELECT * FROM task_runs WHERE task_id IN ({placeholders}) ORDER BY id",
-                    tuple(ids),
+                    "SELECT * FROM task_runs WHERE task_id IN (SELECT value FROM json_each(?)) ORDER BY id",
+                    (ids_json,),
                 ):
                     run_by.setdefault(row["task_id"], []).append(row)
                 diags_by_task = {}
@@ -1414,10 +1414,9 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
         # Map task_id → title/status/assignee for the table output.
         meta: dict[str, dict] = {}
         if diags_by_task:
-            placeholders = ",".join(["?"] * len(diags_by_task))
             for r in conn.execute(
-                f"SELECT id, title, status, assignee FROM tasks WHERE id IN ({placeholders})",
-                tuple(diags_by_task.keys()),
+                "SELECT id, title, status, assignee FROM tasks WHERE id IN (SELECT value FROM json_each(?))",
+                (json.dumps(list(diags_by_task)),),
             ):
                 meta[r["id"]] = {
                     "title": r["title"], "status": r["status"],

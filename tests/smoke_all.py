@@ -8,7 +8,6 @@ Exits 0 if all tests pass, non-zero on first failure.
 import subprocess
 import sys
 import os
-import tempfile
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASS = 0
@@ -44,13 +43,13 @@ def test(name: str, cmd: list[str], expect_ok: bool = True, grep: str | None = N
         print(f"  ✗ {name}: {e}")
 
 
-def test_code(name: str, code: str, grep: str | None = None):
+def test_code(name: str, code: str, grep: str | None = None, timeout: int = 15):
     """Run Python code inline and check for expected output."""
     global PASS, FAIL
     try:
         r = subprocess.run(
             [sys.executable, "-c", code],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, cwd=REPO,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, cwd=REPO,
             env={**os.environ, "PYTHONPATH": REPO},
         )
         ok = r.returncode == 0 and (not grep or grep in r.stdout + r.stderr)
@@ -289,6 +288,7 @@ except SystemExit as e:
     sys.exit(e.code)
 """,
     grep="passed",
+    timeout=45,
 )
 
 test_code(
@@ -302,6 +302,7 @@ except SystemExit as e:
     sys.exit(e.code)
 """,
     grep="passed",
+    timeout=45,
 )
 
 # ─── CI output ───

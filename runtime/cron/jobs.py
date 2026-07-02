@@ -225,7 +225,7 @@ def parse_schedule(schedule: str) -> Dict[str, Any]:
         try:
             croniter(schedule)
         except Exception as e:
-            raise ValueError(f"Invalid cron expression '{schedule}': {e}")
+            raise ValueError(f"Invalid cron expression '{schedule}': {e}") from e
         return {
             "kind": "cron",
             "expr": schedule,
@@ -247,7 +247,7 @@ def parse_schedule(schedule: str) -> Dict[str, Any]:
                 "display": f"once at {dt.strftime('%Y-%m-%d %H:%M')}"
             }
         except ValueError as e:
-            raise ValueError(f"Invalid timestamp '{schedule}': {e}")
+            raise ValueError(f"Invalid timestamp '{schedule}': {e}") from e
     
     # Duration like "30m", "2h", "1d" → one-shot from now
     try:
@@ -978,23 +978,32 @@ def save_job_output(job_id: str, output: str):
     
     timestamp = _hermes_now().strftime("%Y-%m-%d_%H-%M-%S")
     output_file = job_output_dir / f"{timestamp}.md"
-    
-    fd, tmp_path = tempfile.mkstemp(dir=str(job_output_dir), suffix='.tmp', prefix='.output_')
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            f.write(output)
-            f.flush()
-            os.fsync(f.fileno())
-        atomic_replace(tmp_path, output_file)
-        _secure_file(output_file)
-    except BaseException:
+
+    return _write_unique_job_output(output_file, output)
+
+
+def _write_unique_job_output(path: Path, output: str) -> Path:
+    """Write cron output without replacing an existing same-second result."""
+    for index in range(1000):
+        candidate = path if index == 0 else path.with_name(
+            f"{path.stem}_{index:03d}{path.suffix}"
+        )
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
-    
-    return output_file
+            with candidate.open("x", encoding="utf-8") as f:
+                f.write(output)
+                f.flush()
+                os.fsync(f.fileno())
+            _secure_file(candidate)
+            return candidate
+        except FileExistsError:
+            continue
+        except BaseException:
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+    raise FileExistsError(f"Could not allocate unique cron output path for {path}")
 
 
 # =============================================================================

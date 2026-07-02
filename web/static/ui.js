@@ -599,45 +599,34 @@ function openNovaDashboard(event){
 let _castActive=false;
 let _castLoading=false;
 let _castAvailable=false;
-let _castPollTimer=null;
 let _castStatusTimer=null;
+let _castConnectPromise=null;
+let _castInteractiveRequested=false;
 let _castLastError='';
 let _castConfigured=true;
 let _castHost='';
 let _castDashboardUrl='';
+const CAST_RECONNECT_INTERVAL_MS=15000;
 
-function _castFetch(path,opts){
+function _castFetch(path,opts,timeoutMs=3500){
   const ctrl=new AbortController();
-  const timer=setTimeout(()=>ctrl.abort(),3500);
+  const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
   return fetch(hermesApiUrl(path).href,{credentials:'same-origin',signal:ctrl.signal,...(opts||{})}).finally(()=>clearTimeout(timer));
 }
 
 function _cleanupCastTimers(){
-  if(_castPollTimer){clearInterval(_castPollTimer);_castPollTimer=null;}
   if(_castStatusTimer){clearInterval(_castStatusTimer);_castStatusTimer=null;}
 }
 window.addEventListener('pagehide', _cleanupCastTimers, {once:true});
 window.addEventListener('beforeunload', _cleanupCastTimers, {once:true});
 
-async function _refreshCastStatus(){
-  try{
-    const r=await _castFetch('/api/cast/status');
-    const s=await r.json().catch(()=>({}));
-    _castConfigured=s.configured!==false;
-    if(s&&typeof s.host==='string')_castHost=s.host.trim();
-    if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
-    _castAvailable=r.ok && s.available!==false;
-    _castActive=_castAvailable && s.active===true;
-    _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
-    if(!_castConfigured)_cleanupCastTimers();
-  }catch(e){
-    _castAvailable=false;
-    _castActive=false;
-    _castLastError=e&&e.name==='AbortError'?'Hub Timeout':'Hub nicht erreichbar';
-  }finally{
-    _castLoading=false;
-    _applyCastUI();
-  }
+function _applyCastResponse(r,s){
+  _castConfigured=s.configured!==false;
+  if(s&&typeof s.host==='string')_castHost=s.host.trim();
+  if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
+  _castAvailable=r.ok && s.available!==false;
+  _castActive=_castAvailable && s.active===true;
+  _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
 }
 
 function _applyCastUI(){
@@ -680,53 +669,52 @@ function openHubCastDashboard(){
 }
 
 async function toggleHubCast(){
-  openHubCastDashboard();
-  if(_castLoading)return;
-  _castLoading=true;
-  _applyCastUI();
-  try{
-    const r=await _castFetch('/api/cast/start',{method:'POST'});
-    const s=await r.json().catch(()=>({}));
-    _castConfigured=s.configured!==false;
-    if(s&&typeof s.host==='string')_castHost=s.host.trim();
-    if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
-    _castAvailable=r.ok && s.available!==false;
-    _castActive=_castAvailable && s.active===true;
-    _castLastError=_castAvailable?'':(!_castConfigured?'Hub Cast nicht konfiguriert':(s.error||'Hub nicht erreichbar'));
-    if(!_castAvailable&&typeof showToast==='function')showToast('Hub Cast nicht erreichbar. Prüfe SIDEKICK_CAST_API_HOST.', 'error');
-  }catch(e){
-    _castAvailable=false;
-    _castActive=false;
-    _castLastError=e&&e.name==='AbortError'?'Hub Timeout':'Hub nicht erreichbar';
-    if(typeof showToast==='function')showToast(_castLastError, 'error');
-  }
-  _castLoading=false;
-  _applyCastUI();
-  // Poll more frequently for 30s after toggle to catch state changes
-  if(_castPollTimer)clearInterval(_castPollTimer);
-  _castPollTimer=setInterval(_refreshCastStatus,2000);
-  setTimeout(()=>{if(_castPollTimer)clearInterval(_castPollTimer);_castPollTimer=null;},30000);
-  _refreshCastStatus();
+  const connected=await _ensureHubCastConnected({interactive:true});
+  if(connected)openHubCastDashboard();
+  return connected;
 }
 window.openHubCastDashboard=openHubCastDashboard;
 window.toggleHubCast=toggleHubCast;
 
-// Init cast status polling
-async function _checkCastButtonVisible(){
+function _ensureHubCastConnected({interactive=false}={}){
+  if(interactive)_castInteractiveRequested=true;
+  if(_castConnectPromise)return _castConnectPromise;
+  _castLoading=true;
+  _applyCastUI();
+  _castConnectPromise=(async()=>{
+    try{
+      const r=await _castFetch('/api/cast/start',{method:'POST'},10000);
+      const s=await r.json().catch(()=>({}));
+      _applyCastResponse(r,s);
+      if(!_castActive&&_castInteractiveRequested&&typeof showToast==='function'){
+        showToast(_castLastError||'Hub Cast nicht erreichbar. Prüfe SIDEKICK_CAST_API_HOST.','error');
+      }
+      return _castActive;
+    }catch(e){
+      _castAvailable=false;
+      _castActive=false;
+      _castLastError=e&&e.name==='AbortError'?'Hub Timeout':'Hub nicht erreichbar';
+      if(_castInteractiveRequested&&typeof showToast==='function')showToast(_castLastError,'error');
+      return false;
+    }finally{
+      _castLoading=false;
+      _castConnectPromise=null;
+      _castInteractiveRequested=false;
+      _applyCastUI();
+    }
+  })();
+  return _castConnectPromise;
+}
+
+function _startHubCastMonitor(){
   const btn=document.getElementById('btnCastToggle');
   if(btn)btn.style.display='';
-  // Quick probe: if the dashboard server responds, show the cast button
-  try{
-    const s=await fetchJson('api/cast/status');
-    if(s&&typeof s.host==='string')_castHost=s.host.trim();
-    if(s&&typeof s.dashboard_url==='string')_castDashboardUrl=s.dashboard_url.trim();
-  }catch(e){
-    // Keep the Hub button visible even when the cast backend is not reachable.
-  }
+  _ensureHubCastConnected({interactive:false});
+  if(_castStatusTimer)clearInterval(_castStatusTimer);
+  _castStatusTimer=setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS);
 }
-setTimeout(_checkCastButtonVisible,2000);
-setTimeout(_refreshCastStatus,2000);
-_castStatusTimer=setInterval(_refreshCastStatus,15000);
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_startHubCastMonitor,{once:true});
+else _startHubCastMonitor();
 
 function _initDashboardLinkProbe(){
   loadDashboardSettings();

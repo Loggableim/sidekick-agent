@@ -6,9 +6,7 @@ runtime modules import from sidekick_cli.models.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from runtime.config import get_custom_provider_context_length
 
 logger = logging.getLogger(__name__)
 

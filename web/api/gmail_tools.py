@@ -1036,6 +1036,13 @@ def _ai_draft_reply(email_id, account="dominik"):
 
 
 # ── AI: Find related emails ──
+_THREAD_PREFIX_RE = re.compile(r"^\s*(?:(?:re|fw|fwd)\s*:\s*)+", re.IGNORECASE)
+
+
+def _strip_thread_subject_prefixes(subject):
+    return _THREAD_PREFIX_RE.sub("", subject or "").strip().lower()
+
+
 def _ai_find_related(email_id, account="dominik", max_related=5):
     cache_key = _ai_cache_key("related", account, email_id)
     cached = _ai_cache_get(cache_key)
@@ -1079,7 +1086,9 @@ def _ai_find_related(email_id, account="dominik", max_related=5):
         score += overlap * 2
 
         # Re: or Fwd: continuation
-        if e_subj.lower().lstrip("re:fwd:") in subject.lower() or subject.lower().lstrip("re:fwd:") in e_subj.lower():
+        base_subject = _strip_thread_subject_prefixes(subject)
+        base_e_subj = _strip_thread_subject_prefixes(e_subj)
+        if base_e_subj and base_subject and (base_e_subj in base_subject or base_subject in base_e_subj):
             score += 8
 
         # Has shared keywords with body

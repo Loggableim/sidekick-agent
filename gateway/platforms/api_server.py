@@ -31,4 +31,4 @@ class APIServerAdapter(BasePlatformAdapter):
         pass
     
     async def send(self, chat_id: str, message: str, **kwargs) -> dict:
-        return {"ok": True}
+        return {"success": False, "error": "API server platform is inbound-only"}

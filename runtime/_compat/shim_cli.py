@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import types
 
-from sidekick_cli import __version__  # single source of truth
+from sidekick_cli import __version__ as __version__  # single source of truth
 # Map of already-ported submodule names to their canonical runtime module path
 _PORTED_ROUTES: dict[str, str] = {
     "config": "runtime.config",
@@ -116,7 +116,7 @@ def _make_stub(sub_name: str) -> types.ModuleType:
 for _sub, _route in _PORTED_ROUTES.items():
     try:
         _install_route(_sub, _route)
-    except Exception as exc:
+    except Exception:
         # If the route module can't be loaded, fall back to stub
         stub = _make_stub(_sub)
         sys.modules[f"runtime._compat.shim_cli.{_sub}"] = stub
@@ -140,4 +140,4 @@ def __getattr__(name: str) -> types.ModuleType:
     )
 
 
-__all__: list[str] = []
+__all__: list[str] = ["__version__"]

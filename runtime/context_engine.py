@@ -128,6 +128,7 @@ class ContextEngine(ABC):
         Use this to load persisted state (DAG, store) for the session.
         kwargs may include hermes_home, platform, model, etc.
         """
+        return None
 
     def on_session_end(self, session_id: str, messages: List[Dict[str, Any]]) -> None:
         """Called at real session boundaries (CLI exit, /reset, gateway expiry).
@@ -135,6 +136,7 @@ class ContextEngine(ABC):
         Use this to flush state, close DB connections, etc.
         NOT called per-turn — only when the session truly ends.
         """
+        return None
 
     def on_session_reset(self) -> None:
         """Called on /new or /reset. Reset per-session state.

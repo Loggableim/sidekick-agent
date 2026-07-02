@@ -19,10 +19,12 @@ import re
 import sys
 import threading
 import time
-import traceback
-import uuid
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from typing import TYPE_CHECKING
+from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from runtime.credential_pool import CredentialPool
 
 # ── Basic layout ──────────────────────────────────────────────────────────────
 HOME = Path.home()
@@ -509,7 +511,6 @@ DEFAULT_MODEL = os.getenv("SIDEKICK_WEBUI_DEFAULT_MODEL") or os.getenv("HERMES_W
 def print_startup_config() -> None:
     """Print detected configuration at startup so the user can verify what was found."""
     ok = "\033[32m[ok]\033[0m"
-    warn = "\033[33m[!!]\033[0m"
     err = "\033[31m[XX]\033[0m"
 
     lines = [
@@ -1146,6 +1147,7 @@ _PROVIDER_MODELS = {
     ],
     # OpenCode Go — flat-rate models via opencode.ai/go ($10/month)
     "opencode-go": [
+        {"id": "glm-5.2",          "label": "GLM-5.2"},
         {"id": "glm-5.1",          "label": "GLM-5.1"},
         {"id": "glm-5",            "label": "GLM-5"},
         {"id": "kimi-k2.5",        "label": "Kimi K2.5"},
@@ -2234,7 +2236,7 @@ def _runtime_provider_status(requested: str | None = None) -> dict:
     """Best-effort provider context from the Hermes runtime resolver."""
     try:
         from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
-        import hermes_cli.runtime_provider as _runtime_provider
+        import sidekick_cli.runtime_provider as _runtime_provider
 
         result = resolve_runtime_provider_with_anthropic_env_lock(
             _runtime_provider.resolve_runtime_provider,
@@ -4148,7 +4150,6 @@ def _cleanup_stale_streams() -> int:
     Returns the number of entries removed. Prevents unbounded STREAMS growth
     when cancel/stream_end leaves entries behind (problem #15).
     """
-    import sys as _sys
     removed = 0
     with STREAMS_LOCK:
         stale = []
@@ -4228,7 +4229,6 @@ def unregister_active_run(stream_id: str) -> None:
 # LRU cache with size limit to prevent memory bloat.
 # All cache operations (get, set, move_to_end, popitem) are protected by
 # SESSION_AGENT_CACHE_LOCK for thread safety in multi-threaded ASGI servers.
-import collections
 SESSION_AGENT_CACHE: collections.OrderedDict = collections.OrderedDict()  # LRU cache
 SESSION_AGENT_CACHE_MAX = 50  # Maximum cached agents (each holds full conversation history)
 SESSION_AGENT_CACHE_LOCK = threading.Lock()
@@ -4508,7 +4508,21 @@ def save_settings(settings: dict) -> dict:
 
 
 def is_game_mode_enabled() -> bool:
-    """Return whether Game Mode is currently blocking local GPU work."""
+    """Return whether Game Mode is currently blocking local GPU work.
+
+    Checks in priority order:
+    1. game_mode.lock file (ULTIMATIVE barrier — survives settings resets)
+    2. settings.json game_mode_enabled flag
+    """
+    try:
+        # PRIMARY: Lock-Datei — ultimative Barriere
+        from pathlib import Path
+        lock_file = Path("C:/sidekick/home/state/game_mode.lock")
+        if lock_file.exists():
+            return True
+    except Exception:
+        pass
+
     try:
         return bool(load_settings().get("game_mode_enabled", False))
     except Exception:

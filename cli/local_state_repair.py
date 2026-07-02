@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sqlite3
 import subprocess
-import sys
 import time
 import zipfile
 from dataclasses import dataclass, field
@@ -44,10 +42,16 @@ class RepairResult:
 def _count_sqlite_rows(db_path: Path, table: str) -> int:
     if not db_path.exists() or db_path.stat().st_size == 0:
         return 0
+    if table not in {"sessions", "messages"}:
+        return 0
     try:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2)
         try:
-            return int(con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            if table == "sessions":
+                row = con.execute("SELECT COUNT(*) FROM sessions").fetchone()
+            else:
+                row = con.execute("SELECT COUNT(*) FROM messages").fetchone()
+            return int(row[0])
         finally:
             con.close()
     except Exception:

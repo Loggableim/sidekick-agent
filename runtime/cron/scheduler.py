@@ -30,10 +30,13 @@ except ImportError:
 from pathlib import Path
 from typing import List, Optional
 
-# Add parent directory to path for imports BEFORE repo-level imports.
-# Without this, standalone invocations (e.g. after `sidekick update` reloads
-# the module) fail with ModuleNotFoundError for hermes_time et al.
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add the repository root for imports BEFORE repo-level imports.
+# Using the runtime/ directory itself here shadows the legacy gateway/
+# forwarder package with runtime/gateway and breaks gateway.platforms imports.
+_PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+if _PROJECT_ROOT in sys.path:
+    sys.path.remove(_PROJECT_ROOT)
+sys.path.insert(0, _PROJECT_ROOT)
 
 from runtime._compat.shim_constants import get_sidekick_home
 from runtime._compat.shim_cli.config import load_config, _expand_env_vars
@@ -127,7 +130,15 @@ _LEGACY_HOME_TARGET_ENV_VARS = {
     "QQBOT_HOME_CHANNEL": "QQ_HOME_CHANNEL",
 }
 
-from .jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_run
+try:
+    from .jobs import get_due_jobs, mark_job_run, save_job_output, advance_next_run
+except ImportError:
+    from runtime.cron.jobs import (
+        advance_next_run,
+        get_due_jobs,
+        mark_job_run,
+        save_job_output,
+    )
 
 # Sentinel: when a cron agent has nothing new to report, it can start its
 # response with this marker to suppress delivery.  Output is still saved
@@ -730,7 +741,6 @@ def _run_job_script(script_path: str, timeout_override: int | None = None) -> tu
         (success, output) — on failure *output* contains the error message so the
         LLM can report the problem to the user.
     """
-    from runtime._compat.shim_constants import get_sidekick_home
 
     scripts_dir = _get_sidekick_home() / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -1199,7 +1209,6 @@ def run_job(job: dict) -> tuple[bool, str, str, Optional[str]]:
     if prompt is None:
         logger.info("Job '%s': script produced no output, skipping AI call.", job_name)
         return True, "", SILENT_MARKER, None
-    origin = _resolve_origin(job)
     _cron_session_id = f"cron_{job_id}_{_hermes_now().strftime('%Y%m%d_%H%M%S')}"
 
     logger.info("Running job '%s' (ID: %s)", job_name, job_id)

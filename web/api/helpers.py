@@ -5,7 +5,29 @@ import json as _json
 import os
 import re as _re
 from pathlib import Path
-from web.api.config import IMAGE_EXTS, MD_EXTS
+
+
+_WINDOWS_DEVICE_NAMES = {
+    'CON',
+    'PRN',
+    'AUX',
+    'NUL',
+    *(f'COM{i}' for i in range(1, 10)),
+    *(f'LPT{i}' for i in range(1, 10)),
+}
+
+
+def is_windows_device_name(name: str) -> bool:
+    stem = name.rstrip(' .').split('.', 1)[0].upper()
+    return stem in _WINDOWS_DEVICE_NAMES
+
+
+def reject_windows_device_path(path: str) -> None:
+    for part in Path(path).parts:
+        if ':' in part:
+            raise ValueError('Invalid filename')
+        if is_windows_device_name(part):
+            raise ValueError('Invalid filename')
 
 
 def require(body: dict, *fields) -> None:

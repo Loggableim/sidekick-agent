@@ -769,7 +769,11 @@ class BaseEnvironment(ABC):
         and Local don't need file sync — the host filesystem is directly
         visible inside the container/process.
         """
-        pass
+        return None
+
+    def _resolve_effective_cwd(self, cwd: str) -> str:
+        """Return the cwd to embed in the shell wrapper for this command."""
+        return cwd
 
     # ------------------------------------------------------------------
     # Unified execute()
@@ -796,6 +800,7 @@ class BaseEnvironment(ABC):
         exec_command = _rewrite_compound_background(exec_command)
         effective_timeout = timeout or self.timeout
         effective_cwd = cwd or self.cwd
+        effective_cwd = self._resolve_effective_cwd(effective_cwd)
 
         # Merge sudo stdin with caller stdin
         if sudo_stdin is not None and stdin_data is not None:

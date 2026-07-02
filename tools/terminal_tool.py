@@ -997,11 +997,11 @@ def _parse_env_var(name: str, default: str, converter=int, type_label: str = "in
     raw = os.getenv(name, default)
     try:
         return converter(raw)
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as exc:
         raise ValueError(
             f"Invalid value for {name}: {raw!r} (expected {type_label}). "
             f"Check ~/.sidekick/.env or environment variables."
-        )
+        ) from exc
 
 
 def _get_env_config() -> Dict[str, Any]:
@@ -1920,6 +1920,16 @@ def terminal_tool(
                         session_key=session_key,
                     )
 
+                if proc_session.exited and proc_session.pid is None and proc_session.exit_code:
+                    return json.dumps({
+                        "output": getattr(proc_session, "output_buffer", ""),
+                        "session_id": proc_session.id,
+                        "pid": proc_session.pid,
+                        "exit_code": proc_session.exit_code,
+                        "error": getattr(proc_session, "output_buffer", "") or "Failed to start background process",
+                        "status": "error",
+                    }, ensure_ascii=False)
+
                 result_data = {
                     "output": "Background process started",
                     "session_id": proc_session.id,
@@ -1967,7 +1977,7 @@ def terminal_tool(
 
                 # Mark for agent notification on completion
                 if notify_on_complete and background:
-                    proc_session.notify_on_complete = True
+                    process_registry.enable_notify_on_complete(proc_session)
                     result_data["notify_on_complete"] = True
 
                     # In gateway mode, auto-register a fast watcher so the

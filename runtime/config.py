@@ -5,15 +5,13 @@ that runtime modules need, delegating to shared.config where possible.
 """
 from __future__ import annotations
 
-import copy
 import logging
 import re
 import os
 from pathlib import Path
-from typing import Any, Optional, Tuple, List, Dict
+from typing import Any
 
-import yaml
-from shared.config import get_config_value, load_config as _shared_load_config, normalize_env_key
+from shared.config import load_config as _shared_load_config, normalize_env_key
 from shared.constants import get_config_path, get_env_path, get_sidekick_home
 
 logger = logging.getLogger(__name__)

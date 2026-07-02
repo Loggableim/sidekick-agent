@@ -8,7 +8,6 @@ import json
 import logging
 import mimetypes
 import os
-import queue
 import re
 import threading
 import time
@@ -25,7 +24,7 @@ from web.api.config import (
     STREAMS, STREAMS_LOCK, CANCEL_FLAGS, AGENT_INSTANCES, STREAM_PARTIAL_TEXT,
     STREAM_REASONING_TEXT, STREAM_LIVE_TOOL_CALLS,
     STREAM_GOAL_RELATED, PENDING_GOAL_CONTINUATION,
-    LOCK, SESSIONS, SESSION_DIR, get_session_dir,
+    LOCK, SESSIONS, get_session_dir,
     _get_session_agent_lock, _set_thread_env, _clear_thread_env,
     register_active_run, update_active_run, unregister_active_run,
     SESSION_AGENT_LOCKS, SESSION_AGENT_LOCKS_LOCK,
@@ -387,7 +386,6 @@ def _aiagent_import_error_detail() -> str:
     lines.append('  Full troubleshooting: docs/troubleshooting.md ("AIAgent not available")')
     return "\n".join(lines)
 from web.api.models import get_session, title_from
-from web.api.workspace import set_last_workspace
 
 # Fields that are safe to send to LLM provider APIs.
 # Everything else (attachments, timestamp, _ts, etc.) is display-only
@@ -552,7 +550,7 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     """
     env = dict(profile_runtime_env or {})
     try:
-        from web.api.config import HOST as _WEBUI_HOST, PORT as _WEBUI_PORT
+        from web.api.config import PORT as _WEBUI_PORT
         _browser_base_url = os.environ.get("SIDEKICK_WEBUI_BROWSER_BASE_URL") or os.environ.get("HERMES_WEBUI_BROWSER_BASE_URL") or f"http://127.0.0.1:{_WEBUI_PORT}"
     except Exception:
         _browser_base_url = os.environ.get("SIDEKICK_WEBUI_BROWSER_BASE_URL") or os.environ.get("HERMES_WEBUI_BROWSER_BASE_URL") or "http://127.0.0.1:8787"
@@ -3276,7 +3274,7 @@ def _run_agent_streaming(
             _agent_soul = None
             _agent_skills = None
             try:
-                from web.api.space_engine import Space as _Space, get_space as _gws
+                from web.api.space_engine import get_space as _gws
                 _ws_obj_2 = _gws(_ws_slug) if _ws_slug else None
                 if not _ws_obj_2 and _ws_slug:
                     # Fallback: old workspace_isolation module

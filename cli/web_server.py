@@ -75,7 +75,7 @@ except ImportError:
     raise SystemExit(
         "Web UI requires fastapi and uvicorn.\n"
         f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'"
-    )
+    ) from None
 
 # WEB_DIST: where the built frontend lives. Falls back through several
 # reasonable locations because the monorepo has the SPA assets in different
@@ -130,7 +130,7 @@ def _install_asyncio_disconnect_exception_filter() -> None:
         loop.default_exception_handler(context)
 
     loop.set_exception_handler(_handler)
-    setattr(loop, "_sidekick_disconnect_exception_filter", True)
+    loop._sidekick_disconnect_exception_filter = True
 
 
 def _start_dashboard_cron_ticker() -> None:
@@ -1129,7 +1129,7 @@ async def restart_gateway():
         proc = _spawn_hermes_action(["gateway", "restart"], "gateway-restart")
     except Exception as exc:
         _log.exception("Failed to spawn gateway restart")
-        raise HTTPException(status_code=500, detail=f"Failed to restart gateway: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to restart gateway: {exc}") from exc
     return {
         "ok": True,
         "pid": proc.pid,
@@ -1144,7 +1144,7 @@ async def update_hermes():
         proc = _spawn_hermes_action(["update"], "hermes-update")
     except Exception as exc:
         _log.exception("Failed to spawn hermes update")
-        raise HTTPException(status_code=500, detail=f"Failed to start update: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to start update: {exc}") from exc
     return {
         "ok": True,
         "pid": proc.pid,
@@ -1671,9 +1671,9 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
             return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
         finally:
             db.close()
-    except Exception:
+    except Exception as exc:
         _log.exception("GET /api/sessions failed")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @app.get("/api/sessions/search")
@@ -1741,9 +1741,9 @@ async def search_sessions(request: Request, q: str = "", limit: int = 20):
             return {"results": results, "sessions": results, "query": q.strip(), "count": len(results)}
         finally:
             db.close()
-    except Exception:
+    except Exception as exc:
         _log.exception("GET /api/sessions/search failed")
-        raise HTTPException(status_code=500, detail="Search failed")
+        raise HTTPException(status_code=500, detail="Search failed") from exc
 
 
 def _normalize_config_for_web(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -1812,9 +1812,9 @@ def get_models_catalog():
         from web.api.config import get_available_models
 
         return get_available_models()
-    except Exception:
+    except Exception as exc:
         _log.exception("GET /api/models failed")
-        raise HTTPException(status_code=500, detail="Failed to load model catalog")
+        raise HTTPException(status_code=500, detail="Failed to load model catalog") from exc
 
 
 @app.get("/api/models/live")
@@ -1838,9 +1838,9 @@ def get_live_models(provider: str = ""):
             models.extend(group.get("models", []) or [])
             models.extend(group.get("extra_models", []) or [])
         return {"provider": provider_id, "models": models, "count": len(models)}
-    except Exception:
+    except Exception as exc:
         _log.exception("GET /api/models/live failed")
-        raise HTTPException(status_code=500, detail="Failed to load live models")
+        raise HTTPException(status_code=500, detail="Failed to load live models") from exc
 
 
 @app.post("/api/models/refresh")
@@ -2011,9 +2011,9 @@ def get_model_options():
             "model": current_model,
             "provider": current_provider,
         }
-    except Exception:
+    except Exception as exc:
         _log.exception("GET /api/model/options failed")
-        raise HTTPException(status_code=500, detail="Failed to list model options")
+        raise HTTPException(status_code=500, detail="Failed to list model options") from exc
 
 
 @app.get("/api/model/auxiliary")
@@ -2055,9 +2055,9 @@ def get_auxiliary_models():
             main = {"provider": "", "model": str(model_cfg) if model_cfg else ""}
 
         return {"tasks": tasks, "main": main}
-    except Exception:
+    except Exception as exc:
         _log.exception("GET /api/model/auxiliary failed")
-        raise HTTPException(status_code=500, detail="Failed to read auxiliary config")
+        raise HTTPException(status_code=500, detail="Failed to read auxiliary config") from exc
 
 
 @app.post("/api/model/set")
@@ -2141,9 +2141,9 @@ async def set_model_assignment(body: ModelAssignment):
         }
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
         _log.exception("POST /api/model/set failed")
-        raise HTTPException(status_code=500, detail="Failed to save model assignment")
+        raise HTTPException(status_code=500, detail="Failed to save model assignment") from exc
 
 
 
@@ -2205,9 +2205,9 @@ async def update_config(body: ConfigUpdate):
     try:
         save_config(_denormalize_config_from_web(body.config))
         return {"ok": True}
-    except Exception:
+    except Exception as exc:
         _log.exception("PUT /api/config failed")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @app.get("/api/env")
@@ -2234,9 +2234,9 @@ async def set_env_var(body: EnvVarUpdate):
     try:
         save_env_value(body.key, body.value)
         return {"ok": True, "key": body.key}
-    except Exception:
+    except Exception as exc:
         _log.exception("PUT /api/env failed")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @app.delete("/api/env")
@@ -2248,9 +2248,9 @@ async def remove_env_var(body: EnvVarDelete):
         return {"ok": True, "key": body.key}
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
         _log.exception("DELETE /api/env failed")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 @app.post("/api/env/reveal")
@@ -2576,7 +2576,7 @@ async def disconnect_oauth_provider(provider_id: str, request: Request):
         return {"ok": bool(cleared), "provider": provider_id}
     except Exception as e:
         _log.exception("disconnect %s failed", provider_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -3173,7 +3173,7 @@ async def start_oauth_login(provider_id: str, request: Request):
         raise
     except Exception as e:
         _log.exception("oauth/start %s failed", provider_id)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     raise HTTPException(status_code=400, detail="Unsupported flow")
 
 
@@ -3482,7 +3482,7 @@ async def create_cron_job(body: CronJobCreate):
         return job
     except Exception as e:
         _log.exception("POST /api/cron/jobs failed")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.put("/api/cron/jobs/{job_id}")
@@ -3613,7 +3613,7 @@ def _resolve_profile_dir(name: str) -> Path:
     try:
         profiles_mod.validate_profile_name(name)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     if not profiles_mod.profile_exists(name):
         raise HTTPException(status_code=404, detail=f"Profile '{name}' does not exist.")
     return profiles_mod.get_profile_dir(name)
@@ -3659,10 +3659,10 @@ async def create_profile_endpoint(body: ProfileCreate):
         if not collision:
             profiles_mod.create_wrapper_script(body.name)
     except (ValueError, FileExistsError, FileNotFoundError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         _log.exception("POST /api/profiles failed")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return {"ok": True, "name": body.name, "path": str(path)}
 
 
@@ -3714,14 +3714,14 @@ async def open_profile_terminal_endpoint(name: str):
                     detail="No supported terminal emulator found",
                 )
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
         _log.exception("POST /api/profiles/%s/open-terminal failed", name)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return {"ok": True, "command": command}
 
 
@@ -3731,12 +3731,12 @@ async def rename_profile_endpoint(name: str, body: ProfileRename):
     try:
         path = profiles_mod.rename_profile(name, body.new_name)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except (ValueError, FileExistsError) as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         _log.exception("PATCH /api/profiles/%s failed", name)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return {"ok": True, "name": body.new_name, "path": str(path)}
 
 
@@ -3749,12 +3749,12 @@ async def delete_profile_endpoint(name: str):
     try:
         path = profiles_mod.delete_profile(name, yes=True)
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         _log.exception("DELETE /api/profiles/%s failed", name)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
     return {"ok": True, "path": str(path)}
 
 
@@ -3765,7 +3765,7 @@ async def get_profile_soul(name: str):
         try:
             return {"content": soul_path.read_text(encoding="utf-8"), "exists": True}
         except OSError as e:
-            raise HTTPException(status_code=500, detail=f"Could not read SOUL.md: {e}")
+            raise HTTPException(status_code=500, detail=f"Could not read SOUL.md: {e}") from e
     return {"content": "", "exists": False}
 
 
@@ -3776,7 +3776,7 @@ async def update_profile_soul(name: str, body: ProfileSoulUpdate):
         soul_path.write_text(body.content, encoding="utf-8")
     except OSError as e:
         _log.exception("PUT /api/profiles/%s/soul failed", name)
-        raise HTTPException(status_code=500, detail=f"Could not write SOUL.md: {e}")
+        raise HTTPException(status_code=500, detail=f"Could not write SOUL.md: {e}") from e
     return {"ok": True}
 
 
@@ -3873,7 +3873,7 @@ async def update_config_raw(body: RawConfigUpdate):
         save_config(parsed)
         return {"ok": True}
     except yaml.YAMLError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {e}") from e
 
 
 # ---------------------------------------------------------------------------
@@ -4058,7 +4058,6 @@ async def get_models_analytics(days: int = 30):
 # ---------------------------------------------------------------------------
 
 import re
-import asyncio
 
 # PTY bridge is POSIX-only (depends on fcntl/termios/ptyprocess).  On native
 # Windows the import raises; catch and leave PtyBridge=None so the rest of
@@ -5323,6 +5322,18 @@ def _mount_plugin_api_routes():
 
 _DISCORD_GATEWAY_AVAILABLE = False  # set True once gateway IPC is wired up
 
+
+def _discord_api(method: str, path: str, data: Any | None = None):
+    from web.api.discord_bot import _api
+
+    return _api(method, path, data)
+
+
+def _raise_for_discord_api_error(result: Any) -> None:
+    if isinstance(result, dict) and result.get("error"):
+        detail = result.get("message") or result.get("detail") or "Discord API request failed"
+        raise HTTPException(status_code=502, detail=str(detail))
+
 MOCK_ROLES: List[Dict[str, Any]] = [
     {
         "id": "123456789012345678",
@@ -5403,8 +5414,11 @@ async def get_guild_roles(guild_id: str):
     if not _DISCORD_GATEWAY_AVAILABLE:
         # For development: return mock data
         return {"roles": MOCK_ROLES}
-    # TODO: call actual Discord gateway
-    raise HTTPException(status_code=503, detail="Discord gateway integration pending")
+    data = _discord_api("GET", f"/guilds/{guild_id}/roles")
+    _raise_for_discord_api_error(data)
+    if isinstance(data, list):
+        return {"roles": data}
+    return data
 
 
 @app.get("/api/discord/guilds/{guild_id}/members")
@@ -5412,8 +5426,12 @@ async def get_guild_members(guild_id: str, limit: int = 200):
     if not _DISCORD_GATEWAY_AVAILABLE:
         members = MOCK_MEMBERS[:limit]
         return {"members": members}
-    # TODO: call actual Discord gateway
-    raise HTTPException(status_code=503, detail="Discord gateway integration pending")
+    safe_limit = max(1, min(int(limit), 1000))
+    data = _discord_api("GET", f"/guilds/{guild_id}/members?limit={safe_limit}")
+    _raise_for_discord_api_error(data)
+    if isinstance(data, list):
+        return {"members": data}
+    return data
 
 
 @app.put("/api/discord/members/{member_id}/roles")
@@ -5429,8 +5447,17 @@ async def put_member_roles(member_id: str, body: _DiscordMemberRolesBody, reques
             body.remove_role_ids,
         )
         return {"ok": True}
-    # TODO: call actual Discord gateway
-    raise HTTPException(status_code=503, detail="Discord gateway integration pending")
+    added = []
+    removed = []
+    for role_id in body.add_role_ids or []:
+        result = _discord_api("PUT", f"/guilds/{body.guild_id}/members/{member_id}/roles/{role_id}")
+        _raise_for_discord_api_error(result)
+        added.append(role_id)
+    for role_id in body.remove_role_ids or []:
+        result = _discord_api("DELETE", f"/guilds/{body.guild_id}/members/{member_id}/roles/{role_id}")
+        _raise_for_discord_api_error(result)
+        removed.append(role_id)
+    return {"ok": True, "updated": {"added": added, "removed": removed}}
 
 
 # Mount plugin API routes before the SPA catch-all.
@@ -5450,40 +5477,43 @@ async def onboarding_oauth_poll(flow_id: str = ""):
     try:
         return poll_onboarding_oauth_flow(flow_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @app.post("/api/onboarding/oauth/start")
-async def onboarding_oauth_start(body: dict = {}):
+async def onboarding_oauth_start(body: dict | None = None):
     """Start an onboarding OAuth flow (OpenAI Codex or Anthropic/Claude)."""
+    body = body or {}
     try:
         return start_onboarding_oauth_flow(body)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/onboarding/oauth/cancel")
-async def onboarding_oauth_cancel(body: dict = {}):
+async def onboarding_oauth_cancel(body: dict | None = None):
     """Cancel an ongoing onboarding OAuth flow."""
+    body = body or {}
     try:
         return cancel_onboarding_oauth_flow(body)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.post("/api/onboarding/setup")
-async def onboarding_setup(body: dict = {}):
+async def onboarding_setup(body: dict | None = None):
     """Apply onboarding setup (provider, model, API keys)."""
+    body = body or {}
     try:
         return apply_onboarding_setup(body)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/onboarding/complete")
@@ -5493,15 +5523,16 @@ async def onboarding_complete():
 
 
 @app.post("/api/onboarding/probe")
-async def onboarding_probe(body: dict = {}):
+async def onboarding_probe(body: dict | None = None):
     """Probe a provider endpoint for reachability and model catalog."""
+    body = body or {}
     provider = str(body.get("provider") or "").strip().lower()
     base_url = str(body.get("base_url") or "")
     api_key = str(body.get("api_key") or "").strip() or None
     try:
         return probe_provider_endpoint(provider, base_url, api_key)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"probe failed: {e}")
+        raise HTTPException(status_code=500, detail=f"probe failed: {e}") from e
 
 
 # ── API proxy / fallback ─────────────────────────────────────────────────────────

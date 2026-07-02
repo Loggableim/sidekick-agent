@@ -1,7 +1,7 @@
 """
 Discord Bot API — Backend handlers for the Discord WebUI plugin
 """
-import json, os, datetime, math, random
+import json, os, datetime
 
 def _j(handler, payload, status=200):
     """Send JSON response (inline helper, avoids Python 3.14 asyncio crash via api.helpers)"""
@@ -13,7 +13,6 @@ def _j(handler, payload, status=200):
     handler.end_headers()
     handler.wfile.write(body)
 
-BOT_TOKEN_FILE = r'C:\Users\logga\discord_token.txt'
 GUILD_ID = '1367623607055810620'
 BOT_ID = '1503402978843955293'
 
@@ -41,18 +40,30 @@ def _active_bot_id():
     return str(_active_bot_config().get("client_id") or BOT_ID)
 
 def _get_headers():
-    cfg = _active_bot_config()
-    token = (cfg.get("token") or "").strip()
+    token = _active_bot_token()
     if not token:
-        with open(BOT_TOKEN_FILE) as f:
-            token = f.read().strip()
+        raise RuntimeError("Discord bot token is not configured")
     return {
         'Authorization': f'Bot {token}',
         'Content-Type': 'application/json',
         'User-Agent': 'SidekickWebUI/1.0 (https://github.com/Loggableim/sidekick)',
     }
 
-import urllib.request, urllib.error
+
+def _active_bot_token():
+    cfg = _active_bot_config()
+    token = (cfg.get("token") or "").strip()
+    if not token:
+        token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+    if token:
+        return token
+
+    token_file = os.getenv("DISCORD_BOT_TOKEN_FILE", "").strip()
+    if token_file:
+        with open(token_file, encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
 
 def _api(method, path, data=None):
     """Make Discord API call via urllib (stdlib, no requests dep)"""
@@ -182,13 +193,15 @@ def handle_get(handler, parsed):
                 results[label] = {'type': 'list', 'count': len(r), 'first': r[0] if r else None}
             else:
                 results[label] = r
-        return _j(handler, {'debug': results, 'token_file_exists': os.path.exists(BOT_TOKEN_FILE), 'guild_id': guild_id})
+        token_file = os.getenv("DISCORD_BOT_TOKEN_FILE", "").strip()
+        return _j(handler, {'debug': results, 'token_file_exists': bool(token_file and os.path.exists(token_file)), 'guild_id': guild_id})
     
     # ── Raw test: full HTTP response details ──
     if path == '/api/discord/rawtest':
         import urllib.request, urllib.error
-        cfg = _active_bot_config()
-        token = (cfg.get("token") or "").strip() or open(BOT_TOKEN_FILE).read().strip()
+        token = _active_bot_token()
+        if not token:
+            return _j(handler, {'status': 0, 'error': 'Discord bot token is not configured'})
         url = 'https://discord.com/api/v10/users/@me'
         req = urllib.request.Request(url, headers={
             'Authorization': f'Bot {token}',

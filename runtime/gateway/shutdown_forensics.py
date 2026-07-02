@@ -17,14 +17,12 @@ the async helper, never in the synchronous probe.
 
 from __future__ import annotations
 
-import json
 import os
 import signal
 import subprocess
 import sys
 import time
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 
 _SIGNAL_NAME_BY_NUM: Dict[int, str] = {}

@@ -242,7 +242,7 @@ _BUILTIN_SKINS: Dict[str, Dict[str, Any]] = {
             "agent_name": "Ares Agent",
             "welcome": "Welcome to Ares Agent! Type your message or /help for commands.",
             "goodbye": "Farewell, warrior! ⚔",
-"response_label": " ⚕ Sidekick "
+            "response_label": " ⚕ Sidekick ",
             "prompt_symbol": "⚔",
             "help_header": "(⚔) Available Commands",
         },
@@ -414,7 +414,7 @@ _BUILTIN_SKINS: Dict[str, Dict[str, Any]] = {
             "agent_name": "Sidekick Agent",
             "welcome": "Welcome to Sidekick Agent! Type your message or /help for commands.",
             "goodbye": "Goodbye! \u2695",
-"response_label": " ⚕ Sidekick "
+            "response_label": " ⚕ Sidekick ",
             "prompt_symbol": "\u276f",
             "help_header": "(^_^)? Available Commands",
         },

@@ -162,7 +162,7 @@ def test_build_status_event_reports_missing_engine_cleanly():
 
 
 def test_vosk_stream_exposes_reset_for_tts_echo_flush():
-    stt = load_stt_module()
+    load_stt_module()
 
     assert "def reset(self)" in MODULE_PATH.read_text(encoding="utf-8")
 

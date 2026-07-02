@@ -1,5 +1,4 @@
 """Sidekick -- Session model and in-memory session store."""
-import collections
 import datetime
 import hashlib
 import json
@@ -19,7 +18,11 @@ from web.api.config import (
     get_session_dir, set_session_dir,
 )
 from web.api.workspace import get_last_workspace
-from web.api.agent_sessions import read_importable_agent_session_rows, read_session_lineage_metadata
+from web.api.agent_sessions import (
+    _is_continuation_session,
+    read_importable_agent_session_rows,
+    read_session_lineage_metadata,
+)
 
 logger = logging.getLogger(__name__)
 CLI_VISIBLE_SESSION_LIMIT = 20
@@ -2110,8 +2113,6 @@ def get_cli_session_messages(sid) -> list:
                 'reasoning_content',
                 'codex_message_items',
             ]
-            selected = ['role', 'content', 'timestamp'] + [c for c in optional if c in available]
-
             cur.execute("PRAGMA table_info(sessions)")
             session_cols = {str(row['name']) for row in cur.fetchall()}
             session_chain = [str(sid)]
@@ -2154,13 +2155,12 @@ def get_cli_session_messages(sid) -> list:
                         current_id = str(parent_row['id'])
                         seen.add(current_id)
 
-            placeholders = ', '.join('?' for _ in session_chain)
-            cur.execute(f"""
-                SELECT {', '.join(selected)}, session_id
+            cur.execute("""
+                SELECT *
                 FROM messages
-                WHERE session_id IN ({placeholders})
+                WHERE session_id IN (SELECT value FROM json_each(?))
                 ORDER BY timestamp ASC, id ASC
-            """, session_chain)
+            """, (json.dumps(session_chain),))
             msgs = []
             for row in cur.fetchall():
                 msg = {

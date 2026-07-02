@@ -3,18 +3,19 @@ Sidekick -- File upload: multipart parser and upload handler.
 """
 import mimetypes
 import re as _re
-import email.parser
 import tempfile
 from pathlib import Path
 
 from web.api.config import MAX_UPLOAD_BYTES
-from web.api.helpers import j, bad
+from web.api.helpers import is_windows_device_name, j, reject_windows_device_path
 from web.api.models import get_session
 from web.api.workspace import safe_resolve_ws
 
 
 def parse_multipart(rfile, content_type, content_length) -> tuple:
     import re as _re, email.parser as _ep
+    if content_length < 0:
+        raise ValueError('Invalid Content-Length')
     m = _re.search(r'boundary=([^;\s]+)', content_type)
     if not m:
         raise ValueError('No boundary in Content-Type')
@@ -23,7 +24,6 @@ def parse_multipart(rfile, content_type, content_length) -> tuple:
     fields = {}
     files = {}
     delimiter = b'--' + boundary
-    end_marker = b'--' + boundary + b'--'
     parts = raw.split(delimiter)
     for part in parts[1:]:
         stripped = part.lstrip(b'\r\n')
@@ -56,6 +56,8 @@ def _sanitize_upload_name(filename: str) -> str:
     safe_name = _re.sub(r'[^\w.\-]', '_', Path(filename).name)[:200]
     if not safe_name or safe_name.strip('.') == '':
         raise ValueError('Invalid filename')
+    if is_windows_device_name(safe_name):
+        raise ValueError('Invalid filename')
     return safe_name
 
 
@@ -79,6 +81,9 @@ def handle_upload(handler):
             return j(handler, {'error': 'Session not found'}, status=404)
         workspace = Path(s.workspace)
         safe_name = _sanitize_upload_name(filename)
+        upload_path = workspace / safe_name
+        if upload_path.is_symlink():
+            raise ValueError('Upload target cannot be a symlink')
         dest = safe_resolve_ws(workspace, safe_name)
         dest.write_bytes(file_bytes)
         mime = mimetypes.guess_type(safe_name)[0] or 'application/octet-stream'
@@ -107,10 +112,12 @@ def extract_archive(file_bytes: bytes, filename: str, workspace: Path):
     Returns a dict with ``extracted`` (int), ``files`` (list[str]).
     Raises ValueError on zip-slip or unsupported format.
     """
-    import zipfile, tarfile, io, os, shutil
+    import zipfile, tarfile, io, shutil
 
     name = Path(filename).name
     stem = Path(filename).stem  # strip .zip / .tar.gz etc.
+    if is_windows_device_name(stem):
+        raise ValueError('Invalid filename')
 
     if name.lower().endswith(('.zip',)):
         _mode = 'zip'
@@ -120,6 +127,9 @@ def extract_archive(file_bytes: bytes, filename: str, workspace: Path):
         raise ValueError(f'Unsupported archive format: {filename}')
 
     # Determine destination directory — use archive stem as folder name
+    archive_path = workspace / stem
+    if archive_path.is_symlink():
+        raise ValueError('Archive destination cannot be a symlink')
     dest_dir = safe_resolve_ws(workspace, stem)
     # Avoid overwriting existing files by appending a suffix
     if dest_dir.exists():
@@ -139,6 +149,7 @@ def extract_archive(file_bytes: bytes, filename: str, workspace: Path):
                     # Skip directories
                     if member.is_dir():
                         continue
+                    reject_windows_device_path(member.filename)
                     # Zip-slip protection
                     member_path = (dest_dir / member.filename).resolve()
                     if not member_path.is_relative_to(dest_dir.resolve()):
@@ -172,6 +183,7 @@ def extract_archive(file_bytes: bytes, filename: str, workspace: Path):
                 for member in tf.getmembers():
                     if not member.isfile():
                         continue
+                    reject_windows_device_path(member.name)
                     # Tar-slip protection
                     member_path = (dest_dir / member.name).resolve()
                     if not member_path.is_relative_to(dest_dir.resolve()):

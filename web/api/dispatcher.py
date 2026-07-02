@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +223,7 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
     hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
     if not hermes_bin:
         hermes_bin = sys.executable
-        hermes_args = ["-m", "hermes_cli.main"]
+        hermes_args = ["-m", "sidekick_cli.main"]
     else:
         hermes_args = []
 

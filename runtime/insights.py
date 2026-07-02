@@ -176,22 +176,22 @@ class InsightsEngine:
     # Data gathering (SQL queries)
     # =========================================================================
 
-    # Columns we actually need (skip system_prompt, model_config blobs)
-    _SESSION_COLS = ("id, source, model, started_at, ended_at, "
-                     "message_count, tool_call_count, input_tokens, output_tokens, "
-                     "cache_read_tokens, cache_write_tokens, billing_provider, "
-                     "billing_base_url, billing_mode, estimated_cost_usd, "
-                     "actual_cost_usd, cost_status, cost_source")
-
-    # Pre-computed query strings — f-string evaluated once at class definition,
-    # not at runtime, so no user-controlled value can alter the query structure.
+    # Columns we actually need (skip system_prompt, model_config blobs).
     _GET_SESSIONS_WITH_SOURCE = (
-        f"SELECT {_SESSION_COLS} FROM sessions"
+        "SELECT id, source, model, started_at, ended_at, "
+        "message_count, tool_call_count, input_tokens, output_tokens, "
+        "cache_read_tokens, cache_write_tokens, billing_provider, "
+        "billing_base_url, billing_mode, estimated_cost_usd, "
+        "actual_cost_usd, cost_status, cost_source FROM sessions"
         " WHERE started_at >= ? AND source = ?"
         " ORDER BY started_at DESC"
     )
     _GET_SESSIONS_ALL = (
-        f"SELECT {_SESSION_COLS} FROM sessions"
+        "SELECT id, source, model, started_at, ended_at, "
+        "message_count, tool_call_count, input_tokens, output_tokens, "
+        "cache_read_tokens, cache_write_tokens, billing_provider, "
+        "billing_base_url, billing_mode, estimated_cost_usd, "
+        "actual_cost_usd, cost_status, cost_source FROM sessions"
         " WHERE started_at >= ?"
         " ORDER BY started_at DESC"
     )

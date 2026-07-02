@@ -71,6 +71,46 @@ def test_query_gpu_metrics_reads_json_counter_samples_without_percent_rescaling(
     assert calls[0][1]["timeout"] >= 8
 
 
+def test_query_gpu_metrics_includes_igcl_gpu_temperature(monkeypatch):
+    dashboard = load_dashboard_module()
+
+    def fake_run(*args, **kwargs):
+        return SimpleNamespace(returncode=0, stdout="[]")
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fake_run)
+    monkeypatch.setattr(dashboard, "_query_gpu_temperature_igcl", lambda: 43.2, raising=False)
+
+    metrics = dashboard._query_gpu_metrics()
+
+    assert metrics["temp_c"] == 43.2
+
+
+def test_system_metrics_exposes_gpu_temperature_key(monkeypatch):
+    dashboard = load_dashboard_module()
+
+    monkeypatch.setattr(
+        dashboard,
+        "get_gpu_metrics",
+        lambda: {"util_pct": 12.0, "memory_gb": 2.1, "memory_total_gb": 8.0, "temp_c": 43.0},
+    )
+
+    metrics = dashboard.get_system_metrics()
+
+    assert metrics["gpu_temp_c"] == 43.0
+
+
+def test_igcl_temperature_selection_prefers_gpu_sensor_over_global_and_memory():
+    dashboard = load_dashboard_module()
+
+    readings = [
+        {"type": 0, "value": 58.0},
+        {"type": 1, "value": 43.0},
+        {"type": 2, "value": 58.0},
+    ]
+
+    assert dashboard._select_igcl_gpu_temperature(readings) == 43.0
+
+
 def test_gpu_summary_card_uses_one_value_and_rotates_every_six_seconds():
     index_html = (DASHBOARD_DIR / "index.html").read_text(encoding="utf-8")
     app_js = (DASHBOARD_DIR / "app.js").read_text(encoding="utf-8")

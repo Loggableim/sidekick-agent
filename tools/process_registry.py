@@ -168,6 +168,7 @@ class ProcessRegistry:
         # Track sessions whose completion was already consumed by the agent
         # via wait/poll/log.  Drain loops skip notifications for these.
         self._completion_consumed: set = set()
+        self._completion_enqueued: set = set()
 
         # Global watch-match circuit breaker — across all sessions.
         # Prevents sibling processes from collectively flooding the user even
@@ -523,18 +524,21 @@ class ProcessRegistry:
                     name=f"proc-pty-reader-{session.id}",
                 )
                 session._reader_thread = reader
-                reader.start()
 
                 with self._lock:
                     self._prune_if_needed()
                     self._running[session.id] = session
 
+                reader.start()
                 self._write_checkpoint()
                 return session
 
             except ImportError:
                 logger.warning("ptyprocess not installed, falling back to pipe mode")
             except Exception as e:
+                with self._lock:
+                    self._running.pop(session.id, None)
+                    self._finished.pop(session.id, None)
                 logger.warning("PTY spawn failed (%s), falling back to pipe mode", e)
 
         # Standard Popen path (non-PTY or PTY fallback)
@@ -571,17 +575,20 @@ class ProcessRegistry:
                 name=f"proc-reader-{session.id}",
             )
             session._reader_thread = reader
-            reader.start()
 
             with self._lock:
                 self._prune_if_needed()
                 self._running[session.id] = session
 
+            reader.start()
             self._write_checkpoint()
         except Exception:
             # Post-Popen setup failed — kill the orphaned subprocess (and any
             # descendants spawned via setsid) before re-raising so they do not
             # leak as untracked background processes.
+            with self._lock:
+                self._running.pop(session.id, None)
+                self._finished.pop(session.id, None)
             try:
                 if not _IS_WINDOWS:
                     try:
@@ -671,11 +678,22 @@ class ProcessRegistry:
                 name=f"proc-poller-{session.id}",
             )
             session._reader_thread = reader
-            reader.start()
 
         with self._lock:
             self._prune_if_needed()
-            self._running[session.id] = session
+            if session.exited:
+                self._finished[session.id] = session
+            else:
+                self._running[session.id] = session
+
+        if not session.exited:
+            try:
+                reader.start()
+            except Exception:
+                with self._lock:
+                    self._running.pop(session.id, None)
+                    self._finished.pop(session.id, None)
+                raise
 
         self._write_checkpoint()
         return session
@@ -806,19 +824,35 @@ class ProcessRegistry:
             self._finished[session.id] = session
         self._write_checkpoint()
 
-        # Only enqueue completion notification on the FIRST move.  Without
-        # this guard, kill_process() and the reader thread can both call
-        # _move_to_finished(), producing duplicate [IMPORTANT: ...] messages.
-        if was_running and session.notify_on_complete:
-            from tools.ansi_strip import strip_ansi
-            output_tail = strip_ansi(session.output_buffer[-2000:]) if session.output_buffer else ""
-            self.completion_queue.put({
-                "type": "completion",
-                "session_id": session.id,
-                "command": session.command,
-                "exit_code": session.exit_code,
-                "output": output_tail,
-            })
+        # Only enqueue completion notification on the FIRST move. Without this
+        # guard, kill_process() and the reader thread can both call
+        # _move_to_finished(), producing duplicate completion messages.
+        if was_running:
+            self._enqueue_completion_notification(session)
+
+    def _enqueue_completion_notification(self, session: ProcessSession) -> None:
+        if not session.notify_on_complete:
+            return
+
+        with self._lock:
+            if session.id in self._completion_enqueued:
+                return
+            self._completion_enqueued.add(session.id)
+
+        from tools.ansi_strip import strip_ansi
+        output_tail = strip_ansi(session.output_buffer[-2000:]) if session.output_buffer else ""
+        self.completion_queue.put({
+            "type": "completion",
+            "session_id": session.id,
+            "command": session.command,
+            "exit_code": session.exit_code,
+            "output": output_tail,
+        })
+
+    def enable_notify_on_complete(self, session: ProcessSession) -> None:
+        session.notify_on_complete = True
+        if session.exited:
+            self._enqueue_completion_notification(session)
 
     # ----- Query Methods -----
 
@@ -1254,6 +1288,7 @@ class ProcessRegistry:
         for sid in expired:
             del self._finished[sid]
             self._completion_consumed.discard(sid)
+            self._completion_enqueued.discard(sid)
 
         # If still over limit, remove oldest finished
         total = len(self._running) + len(self._finished)
@@ -1261,6 +1296,7 @@ class ProcessRegistry:
             oldest_id = min(self._finished, key=lambda sid: self._finished[sid].started_at)
             del self._finished[oldest_id]
             self._completion_consumed.discard(oldest_id)
+            self._completion_enqueued.discard(oldest_id)
 
         # Drop any _completion_consumed entries whose sessions are no longer
         # tracked at all — belt-and-suspenders against module-lifetime growth
@@ -1269,6 +1305,10 @@ class ProcessRegistry:
         stale = self._completion_consumed - tracked
         if stale:
             self._completion_consumed -= stale
+
+        stale_enqueued = self._completion_enqueued - tracked
+        if stale_enqueued:
+            self._completion_enqueued -= stale_enqueued
 
     # ----- Checkpoint (crash recovery) -----
 

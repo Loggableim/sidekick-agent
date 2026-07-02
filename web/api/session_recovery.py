@@ -200,40 +200,63 @@ def _read_state_db_missing_sidecar_rows(
             message_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
             if not {'id', 'source'}.issubset(session_cols):
                 return []
-            title_expr = _sql_optional_col('title', session_cols)
-            model_expr = _sql_optional_col('model', session_cols)
-            started_expr = _sql_optional_col('started_at', session_cols, '0')
-            parent_expr = _sql_optional_col('parent_session_id', session_cols)
-            msg_count_expr = _sql_optional_col('message_count', session_cols, '0')
-            workspace_expr = _sql_optional_col('workspace', session_cols)
-            worktree_path_expr = _sql_optional_col('worktree_path', session_cols)
-            worktree_branch_expr = _sql_optional_col('worktree_branch', session_cols)
-            worktree_repo_root_expr = _sql_optional_col('worktree_repo_root', session_cols)
-            worktree_created_at_expr = _sql_optional_col('worktree_created_at', session_cols)
             rows = []
-            for row in conn.execute(
-                f"""
-                SELECT id, source, {title_expr}, {model_expr}, {started_expr},
-                       {parent_expr}, {msg_count_expr}, {workspace_expr},
-                       {worktree_path_expr}, {worktree_branch_expr},
-                       {worktree_repo_root_expr}, {worktree_created_at_expr}
-                FROM sessions
-                WHERE source = 'webui'
-                ORDER BY COALESCE(started_at, 0) DESC
-                """
-            ).fetchall():
+            if 'started_at' in session_cols:
+                session_rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM sessions
+                    WHERE source = 'webui'
+                    ORDER BY COALESCE(started_at, 0) DESC
+                    """
+                ).fetchall()
+            else:
+                session_rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM sessions
+                    WHERE source = 'webui'
+                    ORDER BY rowid DESC
+                    """
+                ).fetchall()
+            for row in session_rows:
                 data = dict(row)
                 sid = str(data.get('id') or '').strip()
                 if not sid or (session_dir / f"{sid}.json").exists():
                     continue
                 message_rows: list[dict] = []
                 if {'session_id', 'role', 'content'}.issubset(message_cols):
-                    order = "timestamp, id" if 'timestamp' in message_cols and 'id' in message_cols else "rowid"
-                    ts_expr = 'timestamp' if 'timestamp' in message_cols else 'NULL AS timestamp'
-                    for msg in conn.execute(
-                        f"SELECT role, content, {ts_expr} FROM messages WHERE session_id = ? ORDER BY {order}",
-                        (sid,),
-                    ).fetchall():
+                    if 'timestamp' in message_cols and 'id' in message_cols:
+                        stored_messages = conn.execute(
+                            """
+                            SELECT role, content, timestamp
+                            FROM messages
+                            WHERE session_id = ?
+                            ORDER BY timestamp, id
+                            """,
+                            (sid,),
+                        ).fetchall()
+                    elif 'timestamp' in message_cols:
+                        stored_messages = conn.execute(
+                            """
+                            SELECT role, content, timestamp
+                            FROM messages
+                            WHERE session_id = ?
+                            ORDER BY rowid
+                            """,
+                            (sid,),
+                        ).fetchall()
+                    else:
+                        stored_messages = conn.execute(
+                            """
+                            SELECT role, content, NULL AS timestamp
+                            FROM messages
+                            WHERE session_id = ?
+                            ORDER BY rowid
+                            """,
+                            (sid,),
+                        ).fetchall()
+                    for msg in stored_messages:
                         message = {
                             'role': msg['role'],
                             'content': msg['content'] or '',
@@ -250,10 +273,6 @@ def _read_state_db_missing_sidecar_rows(
     except Exception as exc:
         logger.debug("state_db sidecar reconciliation scan failed for %s: %s", state_db_path, exc)
         return []
-
-
-def _sql_optional_col(name: str, columns: set[str], fallback: str = "NULL") -> str:
-    return name if name in columns else f"{fallback} AS {name}"
 
 
 def _state_db_row_to_sidecar(row: dict) -> dict:

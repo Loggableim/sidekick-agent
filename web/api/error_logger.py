@@ -29,7 +29,6 @@ import logging
 import sqlite3
 import threading
 import time
-from pathlib import Path
 from web.api.config import STATE_DIR
 
 logger = logging.getLogger(__name__)
@@ -156,26 +155,27 @@ def get_errors(
     """
     try:
         conn = _get_conn()
-        clauses = []
-        params = []
-
-        if type_filter:
-            clauses.append("type = ?")
-            params.append(type_filter)
-        if since:
-            clauses.append("timestamp >= ?")
-            params.append(since)
-        if until:
-            clauses.append("timestamp <= ?")
-            params.append(until)
-
-        where = ""
-        if clauses:
-            where = "WHERE " + " AND ".join(clauses)
+        type_filter = type_filter or None
+        since = since or None
+        until = until or None
 
         rows = conn.execute(
-            f"SELECT * FROM webui_errors {where} ORDER BY id DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
+            """SELECT * FROM webui_errors
+               WHERE (? IS NULL OR type = ?)
+                 AND (? IS NULL OR timestamp >= ?)
+                 AND (? IS NULL OR timestamp <= ?)
+               ORDER BY id DESC
+               LIMIT ? OFFSET ?""",
+            (
+                type_filter,
+                type_filter,
+                since,
+                since,
+                until,
+                until,
+                int(limit),
+                int(offset),
+            ),
         ).fetchall()
 
         return [dict(r) for r in rows]

@@ -1048,11 +1048,11 @@ def delete_profile_api(name: str) -> dict:
     if _active_profile == name:
         try:
             switch_profile('default')
-        except RuntimeError:
+        except RuntimeError as exc:
             raise RuntimeError(
                 f"Cannot delete active profile '{name}' while an agent is running. "
                 "Cancel or wait for it to finish."
-            )
+            ) from exc
 
     try:
         from cli.profiles import delete_profile
@@ -1064,7 +1064,7 @@ def delete_profile_api(name: str) -> dict:
         if profile_dir.is_dir():
             shutil.rmtree(str(profile_dir))
         else:
-            raise ValueError(f"Profile '{name}' does not exist.")
+            raise ValueError(f"Profile '{name}' does not exist.") from None
 
     # Drop cached root-profile-name lookup — list_profiles_api() shape changed.
     _invalidate_root_profile_cache()

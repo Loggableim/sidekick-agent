@@ -7,6 +7,7 @@ These stubs exist so gateway/run.py can be imported without errors.
 from __future__ import annotations
 
 import re
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional
@@ -43,6 +44,58 @@ class MessageEvent:
     raw: Optional[Dict[str, Any]] = None
     attachments: list = field(default_factory=list)
 
+    @property
+    def source(self):
+        """
+        Build a SessionSource on-demand for compatibility with the
+        rest of the gateway (which expects event.source to be a SessionSource
+        with platform / chat_id / user_id / etc.).
+        """
+        from ..session import Platform, SessionSource
+        try:
+            platform = Platform(self.platform)
+        except (ValueError, ImportError):
+            platform = Platform.LOCAL
+        return SessionSource(
+            platform=platform,
+            chat_id=self.chat_id,
+            chat_name=self.chat_name or None,
+            chat_type=self.chat_type,
+            user_id=self.user_id,
+            user_name=self.user_name or None,
+            thread_id=self.thread_id,
+            message_id=self.message_id,
+        )
+
+    def get_command(self) -> Optional[str]:
+        """
+        If text starts with a slash-command (e.g. /new, /status), return the
+        command name (without leading slash). Otherwise return None.
+        """
+        text = (self.text or "").strip()
+        if not text.startswith("/"):
+            return None
+        # Take the first whitespace-delimited token, strip the leading slash
+        first = text.split(maxsplit=1)[0]
+        if first.startswith("/"):
+            first = first[1:]
+        # Strip @bot suffix (Telegram): "/cmd@botname" -> "cmd"
+        if "@" in first:
+            first = first.split("@", 1)[0]
+        return first or None
+
+    def get_command_args(self) -> str:
+        """
+        Return the text after the slash-command token. If no command, return "".
+        """
+        text = (self.text or "").strip()
+        if not text.startswith("/"):
+            return ""
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            return ""
+        return parts[1]
+
 
 @dataclass
 class EphemeralReply:
@@ -59,6 +112,9 @@ class BasePlatformAdapter:
 
     async def start(self):
         pass
+
+    async def connect(self):
+        return await self.start()
 
     @property
     def has_fatal_error(self) -> bool:
@@ -84,10 +140,45 @@ class BasePlatformAdapter:
     async def stop(self):
         pass
 
-    async def send(self, chat_id: str, message: str, **kwargs) -> dict:
-        return {"success": True, "message_id": None}
+    async def disconnect(self):
+        await self.stop()
 
-    def extract_media(self, text: str) -> tuple[list[tuple[str, bool]], str]:
+    async def cancel_background_tasks(self):
+        return None
+
+    async def send(self, chat_id: str, message: str, **kwargs) -> dict:
+        return {
+            "success": False,
+            "error": f"{type(self).__name__} does not implement send()",
+        }
+
+    @staticmethod
+    def truncate_message(text: str, max_length: int, len_fn=None) -> list[str]:
+        """Split text into chunks that fit a platform message limit."""
+        message = str(text or "")
+        if max_length <= 0:
+            return [message]
+        measure = len_fn or len
+        if measure(message) <= max_length:
+            return [message]
+
+        chunks: list[str] = []
+        current: list[str] = []
+        current_len = 0
+        for char in message:
+            char_len = measure(char)
+            if current and current_len + char_len > max_length:
+                chunks.append("".join(current))
+                current = []
+                current_len = 0
+            current.append(char)
+            current_len += char_len
+        if current:
+            chunks.append("".join(current))
+        return chunks or [""]
+
+    @staticmethod
+    def extract_media(text: str) -> tuple[list[tuple[str, bool]], str]:
         """Extract MEDIA:path tags and optional [[audio_as_voice]] directives."""
         media: list[tuple[str, bool]] = []
         cleaned_lines: list[str] = []
@@ -146,3 +237,28 @@ def should_send_media_as_audio(platform: Any, ext: str, *, is_voice: bool = Fals
     if platform_name == "telegram":
         return True
     return bool(is_voice)
+
+
+def utf16_len(value: str) -> int:
+    """Return the number of UTF-16 code units used by a message."""
+    return len(str(value or "").encode("utf-16-le")) // 2
+
+
+def resolve_proxy_url(*, platform_env_var: str | None = None) -> Optional[str]:
+    """Return the configured outbound proxy URL for platform REST calls."""
+    candidates = []
+    if platform_env_var:
+        candidates.append(platform_env_var)
+    candidates.extend(("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"))
+    for name in candidates:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def proxy_kwargs_for_aiohttp(proxy_url: Optional[str]) -> tuple[dict, dict]:
+    """Split a proxy URL into aiohttp session and request kwargs."""
+    if not proxy_url:
+        return {}, {}
+    return {}, {"proxy": proxy_url}

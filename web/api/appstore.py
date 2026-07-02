@@ -13,7 +13,6 @@ import logging
 import os
 import re
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -256,7 +255,7 @@ def _unpatch_config(path_parts: list[str]) -> bool:
 
 def _run_hermes_cli(args: list[str]) -> tuple[int, str]:
     """Run the Sidekick CLI via the venv Python and return ``(returncode, stdout)``."""
-    cmd = [str(_VENV_PYTHON), "-m", "hermes_cli.main"] + args
+    cmd = [str(_VENV_PYTHON), "-m", "sidekick_cli.main"] + args
     env = os.environ.copy()
 
     # Ensure PYTHONPATH includes the agent directory so hermes_cli resolves

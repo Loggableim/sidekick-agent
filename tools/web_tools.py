@@ -751,7 +751,6 @@ Create a markdown summary that captures all key information in a well-organized,
     # is a nice-to-have; the caller falls back to truncated content on failure.
     max_retries = 2
     retry_delay = 2
-    last_error = None
 
     for attempt in range(max_retries):
         try:
@@ -791,15 +790,14 @@ Create a markdown summary that captures all key information in a well-organized,
             logger.warning("No auxiliary model available for web content processing")
             return None
         except Exception as api_error:
-            last_error = api_error
             if attempt < max_retries - 1:
                 logger.warning("LLM API call failed (attempt %d/%d): %s", attempt + 1, max_retries, str(api_error)[:100])
                 logger.warning("Retrying in %ds...", retry_delay)
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 60)
             else:
-                raise last_error
-    
+                raise
+
     return None
 
 
@@ -1765,7 +1763,7 @@ async def web_crawl_tool(
 
                 tasks = [_process_tavily_crawl(r) for r in response.get('results', [])]
                 processed_results = await asyncio.gather(*tasks)
-                for result, metrics, status in processed_results:
+                for _result, metrics, status in processed_results:
                     if status == "processed":
                         debug_call_data["compression_metrics"].append(metrics)
                         debug_call_data["pages_processed_with_llm"] += 1

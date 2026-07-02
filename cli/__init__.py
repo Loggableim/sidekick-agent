@@ -14,8 +14,9 @@ Provides subcommands for:
 import os
 import sys
 
-from sidekick_cli import __version__  # single source of truth
+from sidekick_cli import __version__ as __version__  # single source of truth
 __release_date__ = "2026.6.11"
+__all__ = ["__version__", "__release_date__"]
 
 
 def _ensure_utf8():

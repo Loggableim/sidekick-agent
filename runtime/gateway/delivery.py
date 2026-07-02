@@ -155,6 +155,14 @@ class DeliveryRouter:
                     result = self._deliver_local(content, job_id, job_name, metadata)
                 else:
                     result = await self._deliver_to_platform(target, content, metadata)
+
+                if _is_delivery_failure(result):
+                    results[target.to_string()] = {
+                        "success": False,
+                        "error": _delivery_error_text(result),
+                        "result": result,
+                    }
+                    continue
                 
                 results[target.to_string()] = {
                     "success": True,
@@ -207,7 +215,7 @@ class DeliveryRouter:
         lines.append("")
         lines.append(content)
         
-        output_path.write_text("\n".join(lines))
+        output_path = _write_unique_text(output_path, "\n".join(lines))
         
         return {
             "path": str(output_path),
@@ -217,11 +225,10 @@ class DeliveryRouter:
     def _save_full_output(self, content: str, job_id: str) -> Path:
         """Save full cron output to disk and return the file path."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dir = get_sidekick_home() / "cron" / "output"
+        out_dir = self.output_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{job_id}_{timestamp}.txt"
-        path.write_text(content)
-        return path
+        return _write_unique_text(path, content)
 
     async def _deliver_to_platform(
         self,
@@ -235,7 +242,15 @@ class DeliveryRouter:
         if not adapter:
             raise ValueError(f"No adapter configured for {target.platform.value}")
         
-        if not target.chat_id:
+        chat_id = target.chat_id
+        thread_id = target.thread_id
+        if not chat_id and not target.is_explicit:
+            home = self.config.get_home_channel(target.platform)
+            if home:
+                chat_id = home.chat_id
+                thread_id = thread_id or home.thread_id
+
+        if not chat_id:
             raise ValueError(f"No chat ID for {target.platform.value} delivery")
         
         # Guard: truncate oversized cron output to stay within platform limits
@@ -249,6 +264,36 @@ class DeliveryRouter:
             )
         
         send_metadata = dict(metadata or {})
-        if target.thread_id and "thread_id" not in send_metadata:
-            send_metadata["thread_id"] = target.thread_id
-        return await adapter.send(target.chat_id, content, metadata=send_metadata or None)
+        if thread_id and "thread_id" not in send_metadata:
+            send_metadata["thread_id"] = thread_id
+        return await adapter.send(chat_id, content, metadata=send_metadata or None)
+
+
+def _is_delivery_failure(result: Any) -> bool:
+    if isinstance(result, dict):
+        return result.get("success") is False or bool(result.get("error"))
+    success = getattr(result, "success", None)
+    if success is False:
+        return True
+    return bool(getattr(result, "error", None))
+
+
+def _delivery_error_text(result: Any) -> str:
+    if isinstance(result, dict):
+        return str(result.get("error") or "delivery failed")
+    return str(getattr(result, "error", None) or "delivery failed")
+
+
+def _write_unique_text(path: Path, content: str) -> Path:
+    """Write text without clobbering an existing delivery output file."""
+    for index in range(1000):
+        candidate = path if index == 0 else path.with_name(
+            f"{path.stem}_{index:03d}{path.suffix}"
+        )
+        try:
+            with candidate.open("x", encoding="utf-8") as handle:
+                handle.write(content)
+            return candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"Could not allocate unique output path for {path}")

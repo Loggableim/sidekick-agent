@@ -331,10 +331,50 @@ def _run_in_terminal(session: dict, command: str, timeout: int = 120) -> dict:
                             "session_id": session["id"],
                         })
             except (ValueError, OSError):
+                try:
+                    remaining, _ = process.communicate(
+                        timeout=max(0.1, timeout - (time.time() - start))
+                    )
+                    if remaining:
+                        output_lines.append(remaining)
+                        session["event_queue"].put({
+                            "type": "output", "data": remaining,
+                            "session_id": session["id"],
+                        })
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    try:
+                        remaining, _ = process.communicate(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        remaining, _ = process.communicate()
+                    if remaining:
+                        output_lines.append(remaining)
+                        session["event_queue"].put({
+                            "type": "output", "data": remaining,
+                            "session_id": session["id"],
+                        })
+                    msg = f"\nTimeout after {timeout}s\n"
+                    output_lines.append(msg)
+                    session["event_queue"].put({
+                        "type": "output", "data": msg,
+                        "session_id": session["id"],
+                    })
                 break
 
             if time.time() - start > timeout:
                 process.terminate()
+                try:
+                    remaining, _ = process.communicate(timeout=1)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    remaining, _ = process.communicate()
+                if remaining:
+                    output_lines.append(remaining)
+                    session["event_queue"].put({
+                        "type": "output", "data": remaining,
+                        "session_id": session["id"],
+                    })
                 msg = f"\n⏱ Timeout nach {timeout}s\n"
                 output_lines.append(msg)
                 session["event_queue"].put({

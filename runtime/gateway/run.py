@@ -23,7 +23,7 @@ import inspect
 import json
 
 # Agent pool for per-provider concurrency limiting
-from gateway.agent_pool import AgentPool, AgentPoolContext
+from gateway.agent_pool import AgentPool
 import logging
 import os
 import re
@@ -387,7 +387,7 @@ _sidekick_home = get_sidekick_home()
 
 # Load environment variables from ~/.sidekick/.env first.
 # User-managed env files should override stale shell exports on restart.
-from dotenv import load_dotenv  # backward-compat for tests that monkeypatch this symbol
+from dotenv import load_dotenv as load_dotenv  # backward-compat for tests that monkeypatch this symbol
 from runtime._compat.shim_env_loader import load_hermes_dotenv
 _env_path = _sidekick_home / '.env'
 load_hermes_dotenv(path=_sidekick_home / '.env')
@@ -3800,8 +3800,8 @@ class GatewayRunner:
         # Resolve platform enum
         try:
             platform = Platform(platform_name)
-        except (ValueError, KeyError):
-            raise RuntimeError(f"unknown platform '{platform_name}'")
+        except (ValueError, KeyError) as exc:
+            raise RuntimeError(f"unknown platform '{platform_name}'") from exc
 
         # Adapter must be live
         adapter = self.adapters.get(platform)
@@ -5235,7 +5235,7 @@ class GatewayRunner:
         elif platform == Platform.SLACK:
             from gateway.platforms.slack import SlackAdapter, check_slack_requirements
             if not check_slack_requirements():
-                logger.warning("Slack: slack-bolt not installed. Run: pip install 'sidekick-agent[slack]'")
+                logger.warning("Slack: aiohttp not installed. Run: pip install aiohttp")
                 return None
             return SlackAdapter(config)
 
@@ -5958,10 +5958,14 @@ class GatewayRunner:
                 return await self._handle_status_command(event)
 
             # Resolve the command once for all early-intercept checks below.
-            from sidekick_cli.commands import (
-                ACTIVE_SESSION_BYPASS_COMMANDS as _DEDICATED_HANDLERS,
-                resolve_command as _resolve_cmd_inner,
-            )
+            try:
+                from sidekick_cli.commands import (
+                    ACTIVE_SESSION_BYPASS_COMMANDS as _DEDICATED_HANDLERS,
+                    resolve_command as _resolve_cmd_inner,
+                )
+            except (ImportError, ModuleNotFoundError):
+                _DEDICATED_HANDLERS = set()
+                _resolve_cmd_inner = lambda _cmd: None
             _evt_cmd = event.get_command()
             _cmd_def_inner = _resolve_cmd_inner(_evt_cmd) if _evt_cmd else None
 
@@ -6260,11 +6264,17 @@ class GatewayRunner:
         # Check for commands
         command = event.get_command()
 
-        from sidekick_cli.commands import (
-            GATEWAY_KNOWN_COMMANDS,
-            is_gateway_known_command,
-            resolve_command as _resolve_cmd,
-        )
+        try:
+            from sidekick_cli.commands import (
+                GATEWAY_KNOWN_COMMANDS,
+                is_gateway_known_command,
+                resolve_command as _resolve_cmd,
+            )
+        except (ImportError, ModuleNotFoundError):
+            # sidekick_cli.commands was removed — fall back to built-in command handling only.
+            GATEWAY_KNOWN_COMMANDS = set()
+            is_gateway_known_command = lambda _cmd: False
+            _resolve_cmd = lambda _cmd: None
 
         # Resolve aliases to canonical name so dispatch and hook names
         # don't depend on the exact alias the user typed.
@@ -8760,10 +8770,14 @@ class GatewayRunner:
 
     async def _handle_help_command(self, event: MessageEvent) -> str:
         """Handle /help command - list available commands."""
-        from sidekick_cli.commands import gateway_help_lines
+        try:
+            from sidekick_cli.commands import gateway_help_lines
+            help_lines = gateway_help_lines()
+        except (ImportError, ModuleNotFoundError):
+            help_lines = ["(command catalog unavailable — sidekick_cli.commands removed)"]
         lines = [
             t("gateway.help.header"),
-            *gateway_help_lines(),
+            *help_lines,
         ]
         try:
             from agent.skill_commands import get_skill_commands
@@ -8785,7 +8799,11 @@ class GatewayRunner:
 
     async def _handle_commands_command(self, event: MessageEvent) -> str:
         """Handle /commands [page] - paginated list of all commands and skills."""
-        from sidekick_cli.commands import gateway_help_lines
+        try:
+            from sidekick_cli.commands import gateway_help_lines
+            help_lines = gateway_help_lines()
+        except (ImportError, ModuleNotFoundError):
+            help_lines = ["(command catalog unavailable — sidekick_cli.commands removed)"]
 
         raw_args = event.get_command_args().strip()
         if raw_args:
@@ -8797,7 +8815,7 @@ class GatewayRunner:
             requested_page = 1
 
         # Build combined entry list: built-in commands + skill commands
-        entries = list(gateway_help_lines())
+        entries = list(help_lines)
         try:
             from agent.skill_commands import get_skill_commands
             skill_cmds = get_skill_commands()
@@ -13150,8 +13168,8 @@ class GatewayRunner:
                     from gateway.platform_registry import platform_registry
                     if not platform_registry.is_registered(platform.value):
                         raise ValueError(platform_name)
-                except Exception:
-                    raise ValueError(platform_name)
+                except Exception as exc:
+                    raise ValueError(platform_name) from exc
         except Exception:
             logger.warning(
                 "Synthetic process event has invalid platform metadata: %r",
@@ -13622,7 +13640,7 @@ class GatewayRunner:
         try:
             interrupt_event = getattr(adapter, "_active_sessions", {}).get(session_key)
             if interrupt_event is not None:
-                setattr(interrupt_event, "_hermes_run_generation", int(generation))
+                interrupt_event._hermes_run_generation = int(generation)
         except Exception:
             pass
 

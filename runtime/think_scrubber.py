@@ -254,7 +254,7 @@ class StreamingThinkScrubber:
         """
         buf_lower = buf.lower()
         best: "tuple[int, int] | None" = None
-        for open_tag, close_tag in zip(self._OPEN_TAGS, self._CLOSE_TAGS):
+        for open_tag, close_tag in zip(self._OPEN_TAGS, self._CLOSE_TAGS, strict=True):
             open_lower = open_tag.lower()
             close_lower = close_tag.lower()
             open_idx = buf_lower.find(open_lower)

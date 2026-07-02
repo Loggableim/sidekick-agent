@@ -744,13 +744,13 @@ def prompt_dangerous_approval(command: str, description: str,
             sys.stdout.flush()
 
             result = {"choice": ""}
+            prompt = t("approval.prompt_long") if allow_permanent else t("approval.prompt_short")
 
-            def get_input():
+            def get_input(choice_result=result, input_prompt=prompt):
                 try:
-                    prompt = t("approval.prompt_long") if allow_permanent else t("approval.prompt_short")
-                    result["choice"] = input(prompt).strip().lower()
+                    choice_result["choice"] = input(input_prompt).strip().lower()
                 except (EOFError, OSError):
-                    result["choice"] = ""
+                    choice_result["choice"] = ""
 
             thread = threading.Thread(target=get_input, daemon=True)
             thread.start()

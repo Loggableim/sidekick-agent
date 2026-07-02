@@ -86,11 +86,9 @@ def rewrite_imports(content: str) -> str:
     lines = content.splitlines(keepends=True)
     result = []
     for line in lines:
-        rewritten = False
         for old_pattern, new_pattern in REWRITE_RULES:
             if re.match(old_pattern, line):
                 line = re.sub(old_pattern, new_pattern, line)
-                rewritten = True
                 break  # only first matching rule per line
         result.append(line)
     return ''.join(result)
@@ -103,7 +101,6 @@ def main():
     os.makedirs(DST_SHARED, exist_ok=True)
 
     copied = []
-    skipped = []
     errors = []
 
     for filename in AGENT_FILES:

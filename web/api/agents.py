@@ -535,28 +535,40 @@ def update_agent(slug: str, updates: dict) -> Optional[dict]:
     allowed_fields = {"name", "avatar_emoji", "description", "personality",
                       "color", "workdir", "tools", "status", "memory_mode", "profile"}
 
-    set_parts = []
-    params = []
+    values: dict[str, object] = {}
 
     for key, value in updates.items():
         if key not in allowed_fields:
             continue
         if key == "tools" and isinstance(value, (list, tuple)):
             value = json.dumps(value)
-        set_parts.append(f"{key}=?")
-        params.append(value)
+        values[key] = value
 
-    if not set_parts:
+    if not values:
         return get_agent(slug)
 
-    set_parts.append("updated_at=datetime('now')")
-    params.append(slug)
-
     with _db_lock, closing(_get_conn()) as conn:
-        conn.execute(
-            f"UPDATE agents SET {', '.join(set_parts)} WHERE slug=?",
-            params,
-        )
+        for key, value in values.items():
+            if key == "name":
+                conn.execute("UPDATE agents SET name=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "avatar_emoji":
+                conn.execute("UPDATE agents SET avatar_emoji=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "description":
+                conn.execute("UPDATE agents SET description=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "personality":
+                conn.execute("UPDATE agents SET personality=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "color":
+                conn.execute("UPDATE agents SET color=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "workdir":
+                conn.execute("UPDATE agents SET workdir=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "tools":
+                conn.execute("UPDATE agents SET tools=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "status":
+                conn.execute("UPDATE agents SET status=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "memory_mode":
+                conn.execute("UPDATE agents SET memory_mode=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
+            elif key == "profile":
+                conn.execute("UPDATE agents SET profile=?, updated_at=datetime('now') WHERE slug=?", (value, slug))
         conn.commit()
 
     # Wenn personality geändert wurde, SOUL.md aktualisieren
@@ -1108,7 +1120,7 @@ def agent_creator_step(answers: list) -> dict:
     messages = [{"role": "system", "content": _AGENT_CREATOR_SYSTEM_PROMPT}]
     
     # Vorhandene Antworten als Kontext
-    for i, a in enumerate(answers):
+    for _i, a in enumerate(answers):
         if a.get("question") and a.get("answer"):
             messages.append({"role": "assistant", "content": a["question"]})
             messages.append({"role": "user", "content": a["answer"]})

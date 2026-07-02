@@ -1,7 +1,6 @@
 """Telegram platform adapter — minimal polling with Groq Whisper STT + Fish Audio TTS."""
 from __future__ import annotations
 
-import asyncio
 import io
 import json
 import logging
@@ -39,6 +38,8 @@ def check_telegram_requirements() -> bool:
 
 class TelegramAdapter(BasePlatformAdapter):
     """Telegram Bot adapter using python-telegram-bot (polling)."""
+
+    MAX_MESSAGE_LENGTH = 4096
 
     def __init__(self, config: PlatformConfig):
         super().__init__(config)
@@ -186,7 +187,35 @@ class TelegramAdapter(BasePlatformAdapter):
         await self._on_text(update, ctx)
 
     # ── Transcribe ──────────────────────────────────────
+    _whisper_model = None  # cache WhisperModel so we don't reload per call
+
+    def _get_whisper_model(self):
+        if self._whisper_model is None:
+            from faster_whisper import WhisperModel
+            # Try GPU (Vulkan/CUDA) first, fall back to CPU
+            try:
+                self._whisper_model = WhisperModel(
+                    "large-v3-turbo", device="cuda", compute_type="float16"
+                )
+                logger.info("Whisper STT loaded on CUDA")
+            except Exception:
+                try:
+                    self._whisper_model = WhisperModel(
+                        "large-v3-turbo", device="cpu", compute_type="int8"
+                    )
+                    logger.info("Whisper STT loaded on CPU (int8)")
+                except Exception as e:
+                    logger.error(f"Whisper STT model load failed: {e}")
+                    self._whisper_model = False  # mark unavailable
+        return self._whisper_model if self._whisper_model else None
+
     async def _transcribe(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
+        # Local Whisper first — fastest, no codec issues, accepts OGG Opus directly.
+        local_model = self._get_whisper_model()
+        if local_model:
+            text = await self._transcribe_local(audio_bytes, local_model)
+            if text:
+                return text
         if self._fish_audio_key():
             text = await self._transcribe_fish_audio(audio_bytes, mime_type=mime_type)
             if text:
@@ -194,7 +223,7 @@ class TelegramAdapter(BasePlatformAdapter):
         key = os.getenv("GROQ_API_KEY", "")
         if key:
             return await self._transcribe_groq(audio_bytes, key)
-        return await self._transcribe_local(audio_bytes)
+        return None  # no providers left
 
     async def _transcribe_fish_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
         key = self._fish_audio_key()
@@ -229,15 +258,14 @@ class TelegramAdapter(BasePlatformAdapter):
             logger.error(f"Groq: {e}")
         return None
 
-    async def _transcribe_local(self, audio_bytes: bytes) -> Optional[str]:
+    async def _transcribe_local(self, audio_bytes: bytes, model) -> Optional[str]:
         try:
-            from faster_whisper import WhisperModel
-            model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 tmp.write(audio_bytes)
                 p = tmp.name
             try:
-                segs, _ = model.transcribe(p, language="de")
+                # faster_whisper handles OGG Opus natively via ffmpeg bindings.
+                segs, _ = model.transcribe(p, language="de", beam_size=1)
                 return " ".join(s.text for s in segs).strip() or None
             finally:
                 os.unlink(p)

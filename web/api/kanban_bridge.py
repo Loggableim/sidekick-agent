@@ -366,8 +366,8 @@ def _create_task_payload(body: dict, *, board=None):
         raise ValueError("title is required")
     try:
         priority = int(body.get("priority") or 0)
-    except (TypeError, ValueError):
-        raise ValueError("priority must be an integer")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("priority must be an integer") from exc
     kb = _kb()
     requested_status = body.get("status")
     with _conn(board=board) as conn:
@@ -411,8 +411,8 @@ def _patch_task(conn, task_id: str, body: dict):
     if "priority" in body:
         try:
             updates["priority"] = int(body.get("priority") or 0)
-        except (TypeError, ValueError):
-            raise ValueError("priority must be an integer")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("priority must be an integer") from exc
 
     for field, value in updates.items():
         if hasattr(task, field):
@@ -421,8 +421,14 @@ def _patch_task(conn, task_id: str, body: dict):
             except Exception:
                 pass
     if updates:
-        assignments = ", ".join(f"{field} = ?" for field in updates)
-        conn.execute(f"UPDATE tasks SET {assignments} WHERE id = ?", [*updates.values(), task_id])
+        if "title" in updates:
+            conn.execute("UPDATE tasks SET title = ? WHERE id = ?", (updates["title"], task_id))
+        if "body" in updates:
+            conn.execute("UPDATE tasks SET body = ? WHERE id = ?", (updates["body"], task_id))
+        if "tenant" in updates:
+            conn.execute("UPDATE tasks SET tenant = ? WHERE id = ?", (updates["tenant"], task_id))
+        if "priority" in updates:
+            conn.execute("UPDATE tasks SET priority = ? WHERE id = ?", (updates["priority"], task_id))
         if hasattr(kb, "_append_event"):
             kb._append_event(conn, task_id, "updated", {"fields": list(updates), "source": "webui"})
 

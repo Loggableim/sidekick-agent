@@ -481,7 +481,6 @@ def _print_setup_summary(config: dict, hermes_home):
             tool_status.append(("Text-to-Speech (NeuTTS — not installed)", False, "run 'sidekick setup tts'"))
     elif tts_provider == "kittentts":
         try:
-            import importlib.util
             kittentts_ok = importlib.util.find_spec("kittentts") is not None
         except Exception:
             kittentts_ok = False
@@ -1250,7 +1249,6 @@ def _setup_tts_provider(config: dict):
     elif selected == "kittentts":
         # Check if already installed
         try:
-            import importlib.util
             already_installed = importlib.util.find_spec("kittentts") is not None
         except Exception:
             already_installed = False

@@ -86,6 +86,10 @@ from typing import Any, Iterable, Optional
 from toolsets import get_toolset_names
 
 
+def _json_list_param(values: Iterable[Any]) -> str:
+    return json.dumps([str(value) for value in values])
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -1358,9 +1362,8 @@ def create_task(
                             raise ValueError(f"unknown parent task(s): {', '.join(missing)}")
                         # If any parent is not yet done, we're todo.
                         rows = conn.execute(
-                            "SELECT status FROM tasks WHERE id IN "
-                            "(" + ",".join("?" * len(parents)) + ")",
-                            parents,
+                            "SELECT status FROM tasks WHERE id IN (SELECT value FROM json_each(?))",
+                            (_json_list_param(parents),),
                         ).fetchall()
                         if any(r["status"] != "done" for r in rows):
                             initial_status = "todo"
@@ -1428,10 +1431,9 @@ def _find_missing_parents(conn: sqlite3.Connection, parents: Iterable[str]) -> l
     parents = list(parents)
     if not parents:
         return []
-    placeholders = ",".join("?" * len(parents))
     rows = conn.execute(
-        f"SELECT id FROM tasks WHERE id IN ({placeholders})",
-        parents,
+        "SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?))",
+        (_json_list_param(parents),),
     ).fetchall()
     present = {r["id"] for r in rows}
     return [p for p in parents if p not in present]
@@ -2261,10 +2263,9 @@ def _verify_created_cards(
     completing_assignee = row["assignee"]
 
     # Batch-fetch existence + created_by in one query.
-    placeholders = ",".join(["?"] * len(ordered))
     rows = conn.execute(
-        f"SELECT id, created_by FROM tasks WHERE id IN ({placeholders})",
-        tuple(ordered),
+        "SELECT id, created_by FROM tasks WHERE id IN (SELECT value FROM json_each(?))",
+        (_json_list_param(ordered),),
     ).fetchall()
     found = {r["id"]: r["created_by"] for r in rows}
 
@@ -2321,10 +2322,9 @@ def _scan_prose_for_phantom_ids(
         if m not in seen:
             seen.add(m)
             unique.append(m)
-    placeholders = ",".join(["?"] * len(unique))
     rows = conn.execute(
-        f"SELECT id FROM tasks WHERE id IN ({placeholders})",
-        tuple(unique),
+        "SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?))",
+        (_json_list_param(unique),),
     ).fetchall()
     existing = {r["id"] for r in rows}
     return [m for m in unique if m not in existing]
@@ -2724,23 +2724,35 @@ def specify_triage_task(
         ).fetchone()
         if existing is None:
             return False
-        sets: list[str] = ["status = 'todo'"]
-        params: list[Any] = []
         changed_fields: list[str] = []
+        new_title = None
+        new_body = None
         if title is not None and title.strip() != (existing["title"] or ""):
-            sets.append("title = ?")
-            params.append(title.strip())
+            new_title = title.strip()
             changed_fields.append("title")
         if body is not None and (body or "") != (existing["body"] or ""):
-            sets.append("body = ?")
-            params.append(body)
+            new_body = body
             changed_fields.append("body")
-        params.append(task_id)
-        cur = conn.execute(
-            f"UPDATE tasks SET {', '.join(sets)} "
-            f"WHERE id = ? AND status = 'triage'",
-            tuple(params),
-        )
+        if new_title is not None and new_body is not None:
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'todo', title = ?, body = ? WHERE id = ? AND status = 'triage'",
+                (new_title, new_body, task_id),
+            )
+        elif new_title is not None:
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'todo', title = ? WHERE id = ? AND status = 'triage'",
+                (new_title, task_id),
+            )
+        elif new_body is not None:
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'todo', body = ? WHERE id = ? AND status = 'triage'",
+                (new_body, task_id),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE tasks SET status = 'todo' WHERE id = ? AND status = 'triage'",
+                (task_id,),
+            )
         if cur.rowcount != 1:
             return False
         if changed_fields and author and author.strip():
@@ -3472,7 +3484,6 @@ def _record_task_failure(
         if row is None:
             return False
         failures = int(row["consecutive_failures"]) + 1
-        cur_status = row["status"]
 
         # Per-task override wins over both caller-supplied and default
         # thresholds. None (the common case) falls through.
@@ -4029,12 +4040,12 @@ def _default_spawn(
             env=env,
             start_new_session=True,
         )
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         log_f.close()
         raise RuntimeError(
             "`sidekick` executable not found on PATH. "
             "Install Sidekick Agent or activate its venv before running the kanban dispatcher."
-        )
+        ) from exc
     # NOTE: we intentionally do NOT close log_f here — we want Popen's
     # child process to keep writing after this function returns.  The
     # handle is kept alive by the child's inheritance.  The parent's
@@ -4446,15 +4457,17 @@ def unseen_events_for_sub(
         return 0, []
     cursor = int(row["last_event_id"])
     kind_list = list(kinds) if kinds else None
-    q = (
-        "SELECT * FROM task_events WHERE task_id = ? AND id > ? "
-        + ("AND kind IN (" + ",".join("?" * len(kind_list)) + ") " if kind_list else "")
-        + "ORDER BY id ASC"
-    )
-    params: list[Any] = [task_id, cursor]
     if kind_list:
-        params.extend(kind_list)
-    rows = conn.execute(q, params).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM task_events WHERE task_id = ? AND id > ? "
+            "AND kind IN (SELECT value FROM json_each(?)) ORDER BY id ASC",
+            (task_id, cursor, _json_list_param(kind_list)),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM task_events WHERE task_id = ? AND id > ? ORDER BY id ASC",
+            (task_id, cursor),
+        ).fetchall()
     out: list[Event] = []
     max_id = cursor
     for r in rows:
@@ -4824,9 +4837,8 @@ def latest_summaries(
     ids = list(task_ids)
     if not ids:
         return {}
-    placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"""
+        """
         SELECT task_id, summary FROM (
             SELECT task_id, summary,
                    ROW_NUMBER() OVER (
@@ -4834,10 +4846,10 @@ def latest_summaries(
                        ORDER BY COALESCE(ended_at, started_at) DESC, id DESC
                    ) AS rn
               FROM task_runs
-             WHERE task_id IN ({placeholders})
+             WHERE task_id IN (SELECT value FROM json_each(?))
                AND summary IS NOT NULL AND summary != ''
         ) WHERE rn = 1
         """,
-        ids,
+        (_json_list_param(ids),),
     ).fetchall()
     return {r["task_id"]: r["summary"] for r in rows}

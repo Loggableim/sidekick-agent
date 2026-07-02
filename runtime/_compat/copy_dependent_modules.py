@@ -85,7 +85,6 @@ def rewrite_file(content: str) -> tuple[str, list[str]]:
             pending.append(stripped)
 
         # Apply rewrite rules
-        rewritten = False
         for old_pattern, new_pattern in REWRITE_RULES:
             if re.search(old_pattern, line):
                 if new_pattern is None:
@@ -94,10 +93,8 @@ def rewrite_file(content: str) -> tuple[str, list[str]]:
                     # If the whole line is now empty (or just whitespace), make it truly empty
                     if not line.strip():
                         line = '\n'
-                    rewritten = True
                 else:
                     line = re.sub(old_pattern, new_pattern, line)
-                    rewritten = True
                 break  # first matching rule per line
 
         result_lines.append(line)

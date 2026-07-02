@@ -110,6 +110,7 @@ class MemoryProvider(ABC):
         by prefetch() on the next turn. Default is no-op — providers
         that do background prefetching should override this.
         """
+        return None
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         """Persist a completed turn to the backend.
@@ -117,6 +118,7 @@ class MemoryProvider(ABC):
         Called after each turn. Should be non-blocking — queue for
         background processing if the backend has latency.
         """
+        return None
 
     @abstractmethod
     def get_tool_schemas(self) -> List[Dict[str, Any]]:
@@ -138,6 +140,7 @@ class MemoryProvider(ABC):
 
     def shutdown(self) -> None:
         """Clean shutdown — flush queues, close connections."""
+        return None
 
     # -- Optional hooks (override to opt in) ---------------------------------
 
@@ -149,6 +152,7 @@ class MemoryProvider(ABC):
         kwargs may include: remaining_tokens, model, platform, tool_count.
         Providers use what they need; extras are ignored.
         """
+        return None
 
     def on_session_end(self, messages: List[Dict[str, Any]]) -> None:
         """Called when a session ends (explicit exit or timeout).
@@ -159,6 +163,7 @@ class MemoryProvider(ABC):
         NOT called after every turn — only at actual session boundaries
         (CLI exit, /reset, gateway session expiry).
         """
+        return None
 
     def on_session_switch(
         self,
@@ -198,6 +203,7 @@ class MemoryProvider(ABC):
 
         Default is no-op for backward compatibility.
         """
+        return None
 
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
         """Called before context compression discards old messages.
@@ -223,6 +229,7 @@ class MemoryProvider(ABC):
         result: the subagent's final response
         child_session_id: the subagent's session_id
         """
+        return None
 
     def get_config_schema(self) -> List[Dict[str, Any]]:
         """Return config fields this provider needs for setup.
@@ -258,6 +265,7 @@ class MemoryProvider(ABC):
         - use only env vars (in which case get_config_schema() fields
           should all have ``env_var`` set and this method stays no-op).
         """
+        return None
 
     def on_memory_write(
         self,
@@ -277,3 +285,4 @@ class MemoryProvider(ABC):
 
         Use to mirror built-in memory writes to your backend.
         """
+        return None

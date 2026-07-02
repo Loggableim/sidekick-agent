@@ -44,7 +44,6 @@ import queue
 import re
 import shlex
 import shutil
-import signal
 import subprocess
 import tempfile
 import threading
@@ -986,12 +985,12 @@ def _generate_minimax_tts(text: str, output_path: str, tts_config: Dict[str, Any
     # Legacy / fallback: try parsing as JSON with hex-encoded audio
     try:
         result = response.json()
-    except Exception:
+    except Exception as exc:
         response.raise_for_status()
         raise RuntimeError(
             f"MiniMax TTS returned unexpected Content-Type '{content_type}' "
             f"({len(response.content)} bytes)"
-        )
+        ) from exc
 
     base_resp = result.get("base_resp", {})
     status_code = base_resp.get("status_code", -1)

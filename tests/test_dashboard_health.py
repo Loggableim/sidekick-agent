@@ -130,6 +130,72 @@ def test_workspaces_endpoint_requires_session_token(monkeypatch, tmp_path):
     assert authorized.status_code == 200
 
 
+def test_profile_switch_invalid_name_returns_bad_request(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"name": "Bad Name"})
+    monkeypatch.setattr(
+        routes,
+        "bad",
+        lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}},
+    )
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/profile/switch"),
+    )
+
+    assert response["status"] == 400
+
+
+def test_profile_switch_missing_profile_returns_not_found(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import profiles, routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"name": "missing-profile"})
+    monkeypatch.setattr(
+        routes,
+        "bad",
+        lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}},
+    )
+
+    def missing_profile(_name, *, process_wide=True):
+        raise ValueError("Profile 'missing-profile' does not exist.")
+
+    monkeypatch.setattr(profiles, "switch_profile", missing_profile)
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/profile/switch"),
+    )
+
+    assert response["status"] == 404
+
+
+def test_profile_delete_default_returns_delete_specific_error(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"name": "default"})
+    monkeypatch.setattr(
+        routes,
+        "bad",
+        lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}},
+    )
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/profile/delete"),
+    )
+
+    assert response["status"] == 400
+    assert "Cannot delete the default profile" in response["payload"]["error"]
+
+
 def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -1398,6 +1464,68 @@ def test_discord_full_view_stacks_columns_on_mobile():
     assert ".discord-col-handle {\n    display: none !important;" in discord_chat_css
 
 
+def test_discord_fastapi_admin_reads_from_gateway_when_available(monkeypatch):
+    from cli import web_server
+
+    calls = []
+
+    def fake_discord_api(method, path, data=None):
+        calls.append((method, path, data))
+        if path.endswith("/roles"):
+            return [{"id": "role-1", "name": "Moderators"}]
+        if path.endswith("/members?limit=2"):
+            return [{"user": {"id": "user-1", "username": "Ada"}}]
+        raise AssertionError(path)
+
+    monkeypatch.setattr(web_server, "_DISCORD_GATEWAY_AVAILABLE", True)
+    monkeypatch.setattr(web_server, "_discord_api", fake_discord_api, raising=False)
+
+    client = TestClient(web_server.app)
+    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    roles = client.get("/api/discord/guilds/guild-1/roles", headers=headers)
+    members = client.get("/api/discord/guilds/guild-1/members?limit=2", headers=headers)
+
+    assert roles.status_code == 200
+    assert roles.json() == {"roles": [{"id": "role-1", "name": "Moderators"}]}
+    assert members.status_code == 200
+    assert members.json() == {"members": [{"user": {"id": "user-1", "username": "Ada"}}]}
+    assert calls == [
+        ("GET", "/guilds/guild-1/roles", None),
+        ("GET", "/guilds/guild-1/members?limit=2", None),
+    ]
+
+
+def test_discord_fastapi_admin_updates_member_roles_when_available(monkeypatch):
+    from cli import web_server
+
+    calls = []
+
+    def fake_discord_api(method, path, data=None):
+        calls.append((method, path, data))
+        return {"status": 204}
+
+    monkeypatch.setattr(web_server, "_DISCORD_GATEWAY_AVAILABLE", True)
+    monkeypatch.setattr(web_server, "_discord_api", fake_discord_api, raising=False)
+
+    client = TestClient(web_server.app)
+    response = client.put(
+        "/api/discord/members/member-1/roles",
+        json={
+            "guild_id": "guild-1",
+            "add_role_ids": ["role-add"],
+            "remove_role_ids": ["role-remove"],
+        },
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "updated": {"added": ["role-add"], "removed": ["role-remove"]}}
+    assert calls == [
+        ("PUT", "/guilds/guild-1/members/member-1/roles/role-add", None),
+        ("DELETE", "/guilds/guild-1/members/member-1/roles/role-remove", None),
+    ]
+
+
 def test_websearch_mobile_history_overlays_search_content():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
@@ -1762,6 +1890,40 @@ def test_cast_start_configured_host_toggles_only_when_inactive(monkeypatch):
     }
 
 
+def test_cast_autostart_reuses_running_local_cockpit_without_launch(monkeypatch):
+    from web.api import routes
+
+    captured = {}
+
+    def fake_j(handler, payload, status=200, extra_headers=None):
+        captured["payload"] = payload
+        captured["status"] = status
+
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.setattr(routes, "j", fake_j)
+    monkeypatch.setattr(routes, "_cockpit_launch_available", lambda: True)
+    monkeypatch.setattr(
+        routes,
+        "_cast_read_json",
+        lambda url, method="GET", timeout=2.5: {"active": True, "available": True},
+    )
+    monkeypatch.setattr(
+        routes,
+        "_start_cockpit_launcher",
+        lambda: (_ for _ in ()).throw(AssertionError("running cockpit must not be launched again")),
+    )
+
+    routes._handle_cast_autostart(object())
+
+    assert captured["status"] == 200
+    assert captured["payload"]["active"] is True
+    assert captured["payload"]["available"] is True
+    assert captured["payload"]["configured"] is True
+    assert captured["payload"]["host"] == "http://127.0.0.1:8765"
+    assert captured["payload"]["dashboard_url"] == "http://127.0.0.1:8765"
+
+
 def test_boot_uses_realistic_metadata_timeouts():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
@@ -1882,15 +2044,50 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "let _castConfigured=true;" in ui_js
     assert "let _castHost='';" in ui_js
     assert "s.configured!==false" in ui_js
-    assert "if(!_castConfigured)_cleanupCastTimers()" in ui_js
+    assert "if(!_castConfigured)_cleanupCastTimers()" not in cast_js
     assert "Hub Cast nicht konfiguriert" in ui_js
     assert "function openHubCastDashboard()" in ui_js
     assert "window.openHubCastDashboard=openHubCastDashboard;" in ui_js
     assert "window.toggleHubCast=toggleHubCast;" in ui_js
     assert "window.open(url,'_blank','noopener,noreferrer')" in ui_js
-    assert "_castFetch('/api/cast/start',{method:'POST'})" in ui_js
+    assert "_castFetch('/api/cast/start',{method:'POST'},10000)" in ui_js
     assert "_castFetch('/api/cast/toggle',{method:'POST'})" not in ui_js
     assert "btn.style.display='none'" not in cast_js
+
+
+def test_hub_cast_monitor_starts_immediately_and_retries_every_15_seconds():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    cast_js = ui_js[ui_js.index("let _castActive=false;") : ui_js.index("function _initDashboardLinkProbe()")]
+
+    assert "const CAST_RECONNECT_INTERVAL_MS=15000;" in cast_js
+    assert "let _castConnectPromise=null;" in cast_js
+    assert "function _startHubCastMonitor()" in cast_js
+    assert "_ensureHubCastConnected({interactive:false});" in cast_js
+    assert "setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS)" in cast_js
+    assert "setTimeout(_refreshCastStatus,2000)" not in cast_js
+
+
+def test_hub_cast_connect_is_single_flight_and_auto_failures_are_silent():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    cast_js = ui_js[ui_js.index("let _castActive=false;") : ui_js.index("function _initDashboardLinkProbe()")]
+
+    assert "if(_castConnectPromise)return _castConnectPromise;" in cast_js
+    assert "_castFetch('/api/cast/start',{method:'POST'},10000)" in cast_js
+    assert "if(!_castActive&&_castInteractiveRequested&&typeof showToast==='function')" in cast_js
+    assert "const connected=await _ensureHubCastConnected({interactive:true});" in cast_js
+    assert "if(connected)openHubCastDashboard();" in cast_js
+
+
+def test_manual_hub_connect_escalates_an_inflight_auto_attempt_to_interactive():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    cast_js = ui_js[ui_js.index("let _castActive=false;") : ui_js.index("function _initDashboardLinkProbe()")]
+
+    interactive_mark = cast_js.index("if(interactive)_castInteractiveRequested=true;")
+    single_flight_return = cast_js.index("if(_castConnectPromise)return _castConnectPromise;")
+
+    assert interactive_mark < single_flight_return
+    assert "if(!_castActive&&_castInteractiveRequested&&typeof showToast==='function')" in cast_js
+    assert "if(_castInteractiveRequested&&typeof showToast==='function')showToast(_castLastError,'error');" in cast_js
 
 
 def test_inline_titlebar_and_mobile_handlers_are_exported():
@@ -2264,6 +2461,122 @@ def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path
     assert handler.status_code == 200
     payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
     assert payload == {"ok": True, "game_mode_enabled": True}
+
+
+def test_media_endpoint_serves_allowed_local_file(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import quote, urlparse
+
+    from web.api import routes
+
+    media_root = tmp_path / "media"
+    media_root.mkdir()
+    media_file = media_root / "preview.txt"
+    media_file.write_text("hello from media", encoding="utf-8")
+    monkeypatch.setenv("MEDIA_ALLOWED_ROOTS", str(media_root))
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(
+        handler,
+        urlparse(f"/api/media?path={quote(str(media_file))}"),
+    )
+
+    assert handled is True
+    assert handler.status_code == 200
+    assert handler.wfile.getvalue() == b"hello from media"
+    assert handler.response_headers["content-type"] == "application/octet-stream"
+
+
+def test_extension_url_list_caps_without_crashing(monkeypatch, tmp_path):
+    from web.api import extensions
+
+    extension_root = tmp_path / "extensions"
+    extension_root.mkdir()
+    values = [f"/extensions/script-{idx}.js" for idx in range(40)]
+
+    monkeypatch.setenv("SIDEKICK_WEBUI_EXTENSION_DIR", str(extension_root))
+    monkeypatch.setenv("SIDEKICK_WEBUI_EXTENSION_SCRIPT_URLS", ",".join(values))
+    extensions._warned_urls.clear()
+
+    config = extensions.get_extension_config()
+
+    assert config["enabled"] is True
+    assert config["script_urls"] == values[:32]
+
+
+def test_cli_session_messages_stitch_continuation_parent(monkeypatch, tmp_path):
+    import sqlite3
+
+    from web.api import models
+
+    home = tmp_path / "home"
+    home.mkdir()
+    db_path = home / "state.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                source TEXT,
+                started_at REAL,
+                parent_session_id TEXT,
+                ended_at REAL,
+                end_reason TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                role TEXT,
+                content TEXT,
+                timestamp REAL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)",
+            ("parent", "cli", 1.0, None, 2.0, "compression"),
+        )
+        conn.execute(
+            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?)",
+            ("child", "cli", 3.0, "parent", None, None),
+        )
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+            ("parent", "user", "from parent", 1.1),
+        )
+        conn.execute(
+            "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+            ("child", "assistant", "from child", 3.1),
+        )
+
+    monkeypatch.setattr("web.api.profiles.get_active_hermes_home", lambda: str(home))
+
+    messages = models.get_cli_session_messages("child")
+
+    assert [m["content"] for m in messages] == ["from parent", "from child"]
 
 
 def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch, tmp_path):

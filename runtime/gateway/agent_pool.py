@@ -27,7 +27,7 @@ import logging
 import os
 import time
 from collections import OrderedDict
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 

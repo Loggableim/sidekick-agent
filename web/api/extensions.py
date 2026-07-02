@@ -128,11 +128,12 @@ def _read_url_list(*env_names: str) -> List[str]:
                 # Stop accumulating after the cap. Anything past this point
                 # would be silently dropped anyway; logging once makes the
                 # truncation visible to a confused operator.
+                env_name = env_names[0] if env_names else "<unknown>"
                 if env_name not in _warned_urls:
                     _warned_urls.add(env_name)
                     _log.warning(
                         "Extension URL list %s truncated at %d entries",
-                        env_names[0], _MAX_URL_LIST,
+                        env_name, _MAX_URL_LIST,
                     )
                 break
         elif value not in _warned_urls:

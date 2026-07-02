@@ -502,12 +502,31 @@ def _run_local_script(script: str, *args: str, timeout: int = 20) -> dict[str, A
 
 
 def _game_mode_enabled() -> bool:
+    # ═══ PRIMARY: game_mode.lock — ULTIMATIVE Barriere ═══
+    try:
+        lock_file = Path("C:/sidekick/home/state/game_mode.lock")
+        if lock_file.exists():
+            return True
+    except Exception:
+        pass
+
     try:
         from web.api.config import is_game_mode_enabled
 
-        return bool(is_game_mode_enabled())
+        if bool(is_game_mode_enabled()):
+            return True
     except Exception:
-        return False
+        pass
+    # Secondary check: watchdog state file
+    try:
+        wd_path = Path("C:/sidekick/home/state/gpu_watchdog_state.json")
+        if wd_path.exists():
+            wd = json.loads(wd_path.read_text(encoding="utf-8"))
+            if wd.get("last_game_mode") is True:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _game_mode_model_health() -> dict[str, Any]:
@@ -713,18 +732,27 @@ def _merge_ltm_facts_db(source: Path, target: Path) -> str:
             try:
                 target_cols = [row[1] for row in conn.execute("PRAGMA table_info(ltm_facts)")]
                 source_cols = [row[1] for row in conn.execute("PRAGMA legacy.table_info(ltm_facts)")]
-                common = [col for col in target_cols if col in source_cols]
-                if not common or "id" not in common:
+                if "id" not in target_cols or "id" not in source_cols:
                     return "unresolved"
-                cols = ", ".join(f'"{col}"' for col in common)
                 before = conn.execute("SELECT COUNT(*) FROM ltm_facts").fetchone()[0]
-                conn.execute(
-                    f"""
-                    INSERT OR IGNORE INTO ltm_facts ({cols})
-                    SELECT {cols}
-                    FROM legacy.ltm_facts
-                    """
-                )
+                if target_cols == source_cols:
+                    conn.execute("INSERT OR IGNORE INTO ltm_facts SELECT * FROM legacy.ltm_facts")
+                elif "fact" in target_cols and "fact" in source_cols:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO ltm_facts (id, fact)
+                        SELECT id, fact
+                        FROM legacy.ltm_facts
+                        """
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO ltm_facts (id)
+                        SELECT id
+                        FROM legacy.ltm_facts
+                        """
+                    )
                 conn.commit()
                 after = conn.execute("SELECT COUNT(*) FROM ltm_facts").fetchone()[0]
                 if after > before:

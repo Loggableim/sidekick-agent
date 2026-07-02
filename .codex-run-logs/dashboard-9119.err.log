@@ -1,0 +1,100 @@
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 74, in emit
+    self.doRollover()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 179, in doRollover
+    self.rotate(self.baseFilename, dfn)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 115, in rotate
+    os.rename(source, dest)
+PermissionError: [WinError 32] Der Prozess kann nicht auf die Datei zugreifen, da sie von einem anderen Prozess verwendet wird: 'C:\\sidekick\\home\\logs\\agent.log' -> 'C:\\sidekick\\home\\logs\\agent.log.1'
+Call stack:
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1002, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 83, in _worker
+    work_item.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\sidekick\sidekick\runtime\cron\scheduler.py", line 1765, in _process_job
+    logger.info("Job '%s': agent returned %s — skipping delivery", job["id"], SILENT_MARKER)
+Message: "Job '%s': agent returned %s — skipping delivery"
+Arguments: ('dccb9aa9cfcf', '[SILENT]')
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 74, in emit
+    self.doRollover()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 179, in doRollover
+    self.rotate(self.baseFilename, dfn)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 115, in rotate
+    os.rename(source, dest)
+PermissionError: [WinError 32] Der Prozess kann nicht auf die Datei zugreifen, da sie von einem anderen Prozess verwendet wird: 'C:\\sidekick\\home\\logs\\agent.log' -> 'C:\\sidekick\\home\\logs\\agent.log.1'
+Call stack:
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1002, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 83, in _worker
+    work_item.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\sidekick\sidekick\runtime\cron\scheduler.py", line 1753, in _process_job
+    success, output, final_response, error = run_job(job)
+  File "C:\sidekick\sidekick\runtime\cron\scheduler.py", line 1112, in run_job
+    logger.info(
+Message: "Job '%s' (no_agent): wakeAgent=false gate — silent run"
+Arguments: ('126a1d254f12',)
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 74, in emit
+    self.doRollover()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 179, in doRollover
+    self.rotate(self.baseFilename, dfn)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\logging\handlers.py", line 115, in rotate
+    os.rename(source, dest)
+PermissionError: [WinError 32] Der Prozess kann nicht auf die Datei zugreifen, da sie von einem anderen Prozess verwendet wird: 'C:\\sidekick\\home\\logs\\agent.log' -> 'C:\\sidekick\\home\\logs\\agent.log.1'
+Call stack:
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1002, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 83, in _worker
+    work_item.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\concurrent\futures\thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\sidekick\sidekick\runtime\cron\scheduler.py", line 1765, in _process_job
+    logger.info("Job '%s': agent returned %s — skipping delivery", job["id"], SILENT_MARKER)
+Message: "Job '%s': agent returned %s — skipping delivery"
+Arguments: ('126a1d254f12', '[SILENT]')
+Exception in thread Thread-2117 (_readerthread):
+Traceback (most recent call last):
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\subprocess.py", line 1599, in _readerthread
+    buffer.append(fh.read())
+                  ^^^^^^^^^
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\encodings\cp1252.py", line 23, in decode
+    return codecs.charmap_decode(input,self.errors,decoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x8f in position 85: character maps to <undefined>
+Exception in thread Thread-5029 (_readerthread):
+Traceback (most recent call last):
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 1045, in _bootstrap_inner
+    self.run()
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\threading.py", line 982, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\subprocess.py", line 1599, in _readerthread
+    buffer.append(fh.read())
+                  ^^^^^^^^^
+  File "C:\Users\logga\AppData\Roaming\uv\python\cpython-3.11.14-windows-x86_64-none\Lib\encodings\cp1252.py", line 23, in decode
+    return codecs.charmap_decode(input,self.errors,decoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d in position 44: character maps to <undefined>

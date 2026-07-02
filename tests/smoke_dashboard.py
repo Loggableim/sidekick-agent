@@ -7,7 +7,6 @@ the checks stay deterministic and do not require external providers.
 """
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from dataclasses import dataclass

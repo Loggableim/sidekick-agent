@@ -1,4 +1,5 @@
 """Shared helpers for reading Nova sessions from state.db."""
+import json
 import logging
 import sqlite3
 from contextlib import closing
@@ -70,8 +71,28 @@ def _with_normalized_source(row: dict) -> dict:
     return {**row, **normalized}
 
 
-def _optional_col(name: str, columns: set[str], fallback: str = "NULL") -> str:
-    return f"s.{name}" if name in columns else f"{fallback} AS {name}"
+def _with_session_defaults(row: dict, columns: set[str]) -> dict:
+    defaults = {
+        'session_source': None,
+        'user_id': None,
+        'chat_id': None,
+        'chat_type': None,
+        'thread_id': None,
+        'session_key': None,
+        'origin_chat_id': None,
+        'origin_user_id': None,
+        'platform': None,
+        'parent_session_id': None,
+        'ended_at': None,
+        'end_reason': None,
+        'source': None,
+        'title': None,
+        'started_at': 0,
+    }
+    for key, value in defaults.items():
+        if key not in columns and key not in row:
+            row[key] = value
+    return row
 
 
 def _safe_lower(value) -> str:
@@ -384,69 +405,98 @@ def read_importable_agent_session_rows(
             )
             return []
 
-        parent_expr = _optional_col('parent_session_id', session_cols)
-        session_source_expr = _optional_col('session_source', session_cols)
-        ended_expr = _optional_col('ended_at', session_cols)
-        end_reason_expr = _optional_col('end_reason', session_cols)
-        user_id_expr = _optional_col('user_id', session_cols)
-        chat_id_expr = _optional_col('chat_id', session_cols)
-        chat_type_expr = _optional_col('chat_type', session_cols)
-        thread_id_expr = _optional_col('thread_id', session_cols)
-        session_key_expr = _optional_col('session_key', session_cols)
-        origin_chat_id_expr = _optional_col('origin_chat_id', session_cols)
-        origin_user_id_expr = _optional_col('origin_user_id', session_cols)
-        platform_expr = _optional_col('platform', session_cols)
-        user_message_count_expr = (
-            "SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END)"
-            if 'role' in message_cols
-            else "COUNT(*)"
-        )
-        last_activity_expr = "MAX(timestamp)" if 'timestamp' in message_cols else "NULL"
-
-        where_clauses = ["s.source IS NOT NULL"]
-        params: list[str] = []
+        params: tuple[object, ...]
+        exclude_clause = ""
         if exclude_sources:
             excluded = tuple(str(source) for source in exclude_sources if source)
             if excluded:
-                placeholders = ", ".join("?" for _ in excluded)
-                where_clauses.append(f"s.source NOT IN ({placeholders})")
-                params.extend(excluded)
+                exclude_clause = "AND s.source NOT IN (SELECT value FROM json_each(?))"
+                params = (json.dumps(excluded),)
+            else:
+                params = ()
+        else:
+            params = ()
 
-        cur.execute(
-            f"""
-            WITH message_stats AS (
-                SELECT session_id,
-                       COUNT(*) AS actual_message_count,
-                       {user_message_count_expr} AS actual_user_message_count,
-                       {last_activity_expr} AS last_activity
-                FROM messages
-                GROUP BY session_id
-            )
-            SELECT s.id, s.title, s.model, s.message_count,
-                   s.started_at, s.source,
-                   {session_source_expr},
-                   {user_id_expr},
-                   {chat_id_expr},
-                   {chat_type_expr},
-                   {thread_id_expr},
-                   {session_key_expr},
-                   {origin_chat_id_expr},
-                   {origin_user_id_expr},
-                   {platform_expr},
-                   {parent_expr},
-                   {ended_expr},
-                   {end_reason_expr},
-                   COALESCE(ms.actual_message_count, 0) AS actual_message_count,
-                   COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
-                   ms.last_activity AS last_activity
-            FROM sessions s
-            LEFT JOIN message_stats ms ON ms.session_id = s.id
-            WHERE {' AND '.join(where_clauses)}
-            ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
-            """,
-            params,
-        )
-        projected = _project_agent_session_rows([dict(row) for row in cur.fetchall()])
+        if 'role' in message_cols and 'timestamp' in message_cols:
+            sql = """
+                WITH message_stats AS (
+                    SELECT session_id,
+                           COUNT(*) AS actual_message_count,
+                           SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                           MAX(timestamp) AS last_activity
+                    FROM messages
+                    GROUP BY session_id
+                )
+                SELECT s.*,
+                       COALESCE(ms.actual_message_count, 0) AS actual_message_count,
+                       COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
+                       ms.last_activity AS last_activity
+                FROM sessions s
+                LEFT JOIN message_stats ms ON ms.session_id = s.id
+                WHERE s.source IS NOT NULL
+            """
+        elif 'role' in message_cols:
+            sql = """
+                WITH message_stats AS (
+                    SELECT session_id,
+                           COUNT(*) AS actual_message_count,
+                           SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                           NULL AS last_activity
+                    FROM messages
+                    GROUP BY session_id
+                )
+                SELECT s.*,
+                       COALESCE(ms.actual_message_count, 0) AS actual_message_count,
+                       COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
+                       ms.last_activity AS last_activity
+                FROM sessions s
+                LEFT JOIN message_stats ms ON ms.session_id = s.id
+                WHERE s.source IS NOT NULL
+            """
+        elif 'timestamp' in message_cols:
+            sql = """
+                WITH message_stats AS (
+                    SELECT session_id,
+                           COUNT(*) AS actual_message_count,
+                           COUNT(*) AS actual_user_message_count,
+                           MAX(timestamp) AS last_activity
+                    FROM messages
+                    GROUP BY session_id
+                )
+                SELECT s.*,
+                       COALESCE(ms.actual_message_count, 0) AS actual_message_count,
+                       COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
+                       ms.last_activity AS last_activity
+                FROM sessions s
+                LEFT JOIN message_stats ms ON ms.session_id = s.id
+                WHERE s.source IS NOT NULL
+            """
+        else:
+            sql = """
+                WITH message_stats AS (
+                    SELECT session_id,
+                           COUNT(*) AS actual_message_count,
+                           COUNT(*) AS actual_user_message_count,
+                           NULL AS last_activity
+                    FROM messages
+                    GROUP BY session_id
+                )
+                SELECT s.*,
+                       COALESCE(ms.actual_message_count, 0) AS actual_message_count,
+                       COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
+                       ms.last_activity AS last_activity
+                FROM sessions s
+                LEFT JOIN message_stats ms ON ms.session_id = s.id
+                WHERE s.source IS NOT NULL
+            """
+        if exclude_clause:
+            sql += "\n                " + exclude_clause
+        sql += "\n                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC"
+
+        cur.execute(sql, params)
+        projected = _project_agent_session_rows([
+            _with_session_defaults(dict(row), session_cols) for row in cur.fetchall()
+        ])
         projected = [_with_normalized_source(row) for row in projected]
         projected = [row for row in projected if is_cli_session_row_visible(row)]
         if limit is None:
@@ -511,34 +561,19 @@ def read_session_lineage_report(db_path: Path, session_id: str | None, max_hops:
             if not required.issubset(session_cols):
                 return _empty_lineage_report(sid)
 
-            source_expr = _optional_col('source', session_cols)
-            session_source_expr = _optional_col('session_source', session_cols)
-            title_expr = _optional_col('title', session_cols)
-            started_expr = _optional_col('started_at', session_cols, '0')
-            ended_expr = _optional_col('ended_at', session_cols)
-            end_reason_expr = _optional_col('end_reason', session_cols)
-            parent_expr = _optional_col('parent_session_id', session_cols)
-
             def fetch_one(row_id: str | None) -> dict | None:
                 if not row_id:
                     return None
                 cur.execute(
-                    f"""
-                    SELECT s.id,
-                           {source_expr},
-                           {session_source_expr},
-                           {title_expr},
-                           {started_expr},
-                           {parent_expr},
-                           {ended_expr},
-                           {end_reason_expr}
+                    """
+                    SELECT s.*
                     FROM sessions s
                     WHERE s.id = ?
                     """,
                     (row_id,),
                 )
                 row = cur.fetchone()
-                return dict(row) if row else None
+                return _with_session_defaults(dict(row), session_cols) if row else None
 
             target = fetch_one(sid)
             if not target:
@@ -565,24 +600,28 @@ def read_session_lineage_report(db_path: Path, session_id: str | None, max_hops:
             segment_ids = {row['id'] for row in segments}
             child_rows: list[dict] = []
             for parent in segments:
-                cur.execute(
-                    f"""
-                    SELECT s.id,
-                           {source_expr},
-                           {session_source_expr},
-                           {title_expr},
-                           {started_expr},
-                           {parent_expr},
-                           {ended_expr},
-                           {end_reason_expr}
-                    FROM sessions s
-                    WHERE s.parent_session_id = ?
-                    ORDER BY s.started_at DESC
-                    """,
-                    (parent['id'],),
-                )
+                if 'started_at' in session_cols:
+                    cur.execute(
+                        """
+                        SELECT s.*
+                        FROM sessions s
+                        WHERE s.parent_session_id = ?
+                        ORDER BY s.started_at DESC
+                        """,
+                        (parent['id'],),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT s.*
+                        FROM sessions s
+                        WHERE s.parent_session_id = ?
+                        ORDER BY s.rowid DESC
+                        """,
+                        (parent['id'],),
+                    )
                 for child_row in cur.fetchall():
-                    child = dict(child_row)
+                    child = _with_session_defaults(dict(child_row), session_cols)
                     if child['id'] in segment_ids:
                         continue
                     if _is_continuation_session(parent, child):
@@ -639,7 +678,6 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
             session_cols = {row[1] for row in cur.fetchall()}
             if 'parent_session_id' not in session_cols or 'end_reason' not in session_cols:
                 return {}
-            session_source_expr = _optional_col('session_source', session_cols)
             # Scoped fetch via PRIMARY KEY + idx_sessions_parent rather than a
             # full table scan. The sessions table grows unbounded over time
             # (1000+ rows is normal, 10000+ for power users), and this function
@@ -670,17 +708,16 @@ def read_session_lineage_metadata(db_path: Path, session_ids: list[str] | set[st
                 to_fetch = set()
                 for i in range(0, len(fetch_list), IN_CHUNK):
                     chunk = fetch_list[i:i + IN_CHUNK]
-                    placeholders = ','.join('?' * len(chunk))
                     cur.execute(
-                        f"""
-                        SELECT s.id, s.source, {session_source_expr}, s.title, s.started_at, s.parent_session_id, s.ended_at, s.end_reason
+                        """
+                        SELECT s.*
                         FROM sessions s
-                        WHERE s.id IN ({placeholders})
+                        WHERE s.id IN (SELECT value FROM json_each(?))
                         """,
-                        chunk,
+                        (json.dumps(chunk),),
                     )
                     for row in cur.fetchall():
-                        rows[row['id']] = dict(row)
+                        rows[row['id']] = _with_session_defaults(dict(row), session_cols)
                 # Queue up parents we haven't fetched yet.
                 for sid in fetch_list:
                     parent_id = rows.get(sid, {}).get('parent_session_id')

@@ -7,7 +7,6 @@ resolve to the new runtime/compat structure.
 from __future__ import annotations
 
 import sys
-import types
 
 
 def _bootstrap() -> None:

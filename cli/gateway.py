@@ -5,6 +5,7 @@ Handles: sidekick gateway [run|start|stop|restart|status|install|uninstall|setup
 """
 
 import asyncio
+import logging
 import os
 import shutil
 import signal
@@ -15,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
+logger = logging.getLogger(__name__)
 
 from gateway.status import terminate_pid
 from gateway.restart import (
@@ -336,7 +338,6 @@ def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> li
             # PowerShell's Get-CimInstance.  Any OSError here (FileNotFoundError
             # on missing wmic) trips the fallback.
             wmic_path = shutil.which("wmic")
-            used_fallback = False
             result = None
             if wmic_path is not None:
                 try:
@@ -375,7 +376,6 @@ def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> li
                     )
                 except (OSError, subprocess.TimeoutExpired):
                     return []
-                used_fallback = True
             if result.returncode != 0 or result.stdout is None:
                 return []
             current_cmd = ""
@@ -499,7 +499,7 @@ def _filter_venv_launcher_stubs(pids: list[int]) -> list[int]:
 
     # For each child whose parent is also in our set, drop the parent.
     drop: set[int] = set()
-    for pid, ppid in parent_of.items():
+    for _pid, ppid in parent_of.items():
         if ppid is not None and ppid in pid_set:
             drop.add(ppid)
 
@@ -1655,7 +1655,7 @@ def print_legacy_unit_warning() -> None:
     if not legacy:
         return
     print_warning("Legacy Sidekick gateway unit(s) detected from an older install:")
-    for name, path, is_system in legacy:
+    for _name, path, is_system in legacy:
         scope = "system" if is_system else "user"
         print_info(f"    {path}  ({scope} scope)")
     print_info("  These run alongside the current sidekick-gateway service and")
@@ -1695,7 +1695,7 @@ def remove_legacy_hermes_units(
     print()
     print_warning("⚠ Legacy Sidekick gateway unit(s) detected:")
     print("Legacy Sidekick gateway unit(s) found:")
-    for name, path, is_system in legacy:
+    for _name, path, is_system in legacy:
         scope = "system" if is_system else "user"
         print(f"  {path}  ({scope} scope)")
     print()
@@ -2486,7 +2486,7 @@ def _require_service_installed(action: str, system: bool = False) -> None:
     unit_path = get_systemd_unit_path(system=system)
     if not unit_path.exists():
         scope_flag = " --system" if system else ""
-        print(f"✗ Gateway service is not installed")
+        print("✗ Gateway service is not installed")
         print(f"  Run: {'sudo ' if system else ''}sidekick gateway install{scope_flag}")
         sys.exit(1)
 

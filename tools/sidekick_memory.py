@@ -235,7 +235,7 @@ SIDEKICK_MEMORY_STATUS_SCHEMA = {
 # =============================================================================
 # Registry
 # =============================================================================
-from tools.registry import registry, tool_error
+from tools.registry import registry
 
 registry.register(
     name="sidekick_memory_store",

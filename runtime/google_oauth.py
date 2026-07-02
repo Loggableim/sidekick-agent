@@ -193,11 +193,11 @@ def _credentials_lock(timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
                     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     acquired = True
                     break
-                except BlockingIOError:
+                except BlockingIOError as exc:
                     if time.monotonic() >= deadline:
                         raise TimeoutError(
                             f"Timed out acquiring Google OAuth credentials lock at {lock_file_path}."
-                        )
+                        ) from exc
                     time.sleep(0.05)
         else:
             try:
@@ -209,11 +209,11 @@ def _credentials_lock(timeout_seconds: float = LOCK_TIMEOUT_SECONDS):
                         msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
                         acquired = True
                         break
-                    except OSError:
+                    except OSError as exc:
                         if time.monotonic() >= deadline:
                             raise TimeoutError(
                                 f"Timed out acquiring Google OAuth credentials lock at {lock_file_path}."
-                            )
+                            ) from exc
                         time.sleep(0.05)
             except ImportError:
                 acquired = True

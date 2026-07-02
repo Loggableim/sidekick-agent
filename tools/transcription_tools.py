@@ -153,6 +153,13 @@ def _find_whisper_binary() -> Optional[str]:
     return _find_binary("whisper")
 
 
+def _quote_shell_arg(value: str) -> str:
+    """Quote one argument for the platform shell used by subprocess shell=True."""
+    if os.name == "nt":
+        return subprocess.list2cmdline([value])
+    return shlex.quote(value)
+
+
 def _get_local_command_template() -> Optional[str]:
     configured = os.getenv("SIDEKICK_LOCAL_STT_COMMAND") or os.getenv(LOCAL_STT_COMMAND_ENV, "").strip()
     if configured:
@@ -160,7 +167,7 @@ def _get_local_command_template() -> Optional[str]:
 
     whisper_binary = _find_whisper_binary()
     if whisper_binary:
-        quoted_binary = shlex.quote(whisper_binary)
+        quoted_binary = _quote_shell_arg(whisper_binary)
         return (
             f"{quoted_binary} {{input_path}} --model {{model}} --output_format txt "
             "--output_dir {output_dir} --language {language}"
@@ -496,10 +503,10 @@ def _transcribe_local_command(file_path: str, model_name: str) -> Dict[str, Any]
                 return {"success": False, "transcript": "", "error": prep_error}
 
             command = command_template.format(
-                input_path=shlex.quote(prepared_input),
-                output_dir=shlex.quote(output_dir),
-                language=shlex.quote(language),
-                model=shlex.quote(normalized_model),
+                input_path=_quote_shell_arg(prepared_input),
+                output_dir=_quote_shell_arg(output_dir),
+                language=_quote_shell_arg(language),
+                model=_quote_shell_arg(normalized_model),
             )
             subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
 
@@ -899,7 +906,7 @@ def _extract_transcript_text(transcription: Any) -> str:
         return transcription.strip()
 
     if hasattr(transcription, "text"):
-        value = getattr(transcription, "text")
+        value = transcription.text
         if isinstance(value, str):
             return value.strip()
 

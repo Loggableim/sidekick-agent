@@ -10,13 +10,11 @@ Legacy session migration: ``shared.sessions.migrate_legacy_sessions()``.
 from __future__ import annotations
 
 import logging
-import json
-import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-from web.api.config import LOCK, SESSIONS, _get_session_agent_lock
+from web.api.config import SESSIONS, _get_session_agent_lock
 from web.api.models import get_session as _get_session, _active_stream_ids
 
 # Re-export get_session for internal callers
@@ -228,7 +226,6 @@ def retry_last(session_id: str) -> dict[str, Any]:
         KeyError: session not found.
         ValueError: no user message in transcript.
     """
-    from shared.sessions import retry_last as _shared_retry
 
     with _get_session_agent_lock(session_id):
         s = get_session(session_id)  # raises KeyError if missing

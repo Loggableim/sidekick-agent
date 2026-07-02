@@ -116,8 +116,6 @@ def _cleanup_stale_subscribers(session_id: str | None = None) -> None:
     for >300s is considered stale — the client disconnected without closing
     the EventSource. This prevents unbounded growth in ``_clarify_sse_subscribers``.
     """
-    import time as _time
-    now = _time.time()
     with _lock:
         targets = [session_id] if session_id else list(_clarify_sse_subscribers.keys())
         for sid in targets:

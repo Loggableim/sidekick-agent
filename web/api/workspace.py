@@ -21,8 +21,9 @@ from web.api.config import (
     WORKSPACES_FILE as _GLOBAL_WS_FILE,
     LAST_WORKSPACE_FILE as _GLOBAL_LW_FILE,
     DEFAULT_WORKSPACE as _BOOT_DEFAULT_WORKSPACE,
-    MAX_FILE_BYTES, IMAGE_EXTS, MD_EXTS
+    MAX_FILE_BYTES
 )
+from web.api.helpers import reject_windows_device_path
 
 
 # ── Profile-aware path resolution ───────────────────────────────────────────
@@ -700,6 +701,7 @@ def safe_resolve_ws(root: Path, requested: str) -> Path:
     the root is blocked.
     """
     import os
+    reject_windows_device_path(requested)
     unresolved = root / requested
     resolved = unresolved.resolve()
     # Fast path: resolved path is inside root (covers most cases)
@@ -713,8 +715,8 @@ def safe_resolve_ws(root: Path, requested: str) -> Path:
     norm = Path(os.path.normpath(str(unresolved)))
     try:
         norm.relative_to(root)
-    except ValueError:
-        raise ValueError(f"Path traversal blocked: {requested}")
+    except ValueError as exc:
+        raise ValueError(f"Path traversal blocked: {requested}") from exc
     # Symlink points outside workspace root — additionally block system directories.
     # Even if the user placed the symlink intentionally, prevent reads from
     # /etc, /proc, /sys, /dev and other blocked roots (LLM agents can call
@@ -776,11 +778,19 @@ def list_dir(workspace: Path, rel: str='.'):
             entry_path = item.name
             if rel and rel != '.':
                 entry_path = rel + '/' + item.name
+            is_dir = item.is_dir()
+            is_file = item.is_file()
+            size = None
+            if is_file:
+                try:
+                    size = item.stat().st_size
+                except OSError:
+                    size = None
             entries.append({
                 'name': item.name,
                 'path': entry_path,
-                'type': 'dir' if item.is_dir() else 'file',
-                'size': item.stat().st_size if item.is_file() else None,
+                'type': 'dir' if is_dir else 'file',
+                'size': size,
             })
         if len(entries) >= 200:
             break
@@ -814,8 +824,6 @@ def _run_git(args, cwd, timeout=3):
 
 def git_info_for_workspace(workspace: Path) -> dict:
     """Return git info for a workspace directory, or None if not a git repo."""
-    if not (workspace / '.git').exists():
-        return None
     branch = _run_git(['rev-parse', '--abbrev-ref', 'HEAD'], workspace)
     if branch is None:
         return None

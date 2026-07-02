@@ -161,18 +161,32 @@ class SessionDB:
         if "parent_session_id" not in columns:
             return 0
         pk_col = self._session_pk_column()
-        cursor = self._conn.execute(
-            f"""
-            UPDATE sessions
-               SET parent_session_id = NULL
-             WHERE parent_session_id IS NOT NULL
-               AND NOT EXISTS (
-                   SELECT 1
-                     FROM sessions parent
-                    WHERE parent.{pk_col} = sessions.parent_session_id
-               )
-            """
-        )
+        if pk_col == "session_id":
+            cursor = self._conn.execute(
+                """
+                UPDATE sessions
+                   SET parent_session_id = NULL
+                 WHERE parent_session_id IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM sessions parent
+                        WHERE parent.session_id = sessions.parent_session_id
+                   )
+                """
+            )
+        else:
+            cursor = self._conn.execute(
+                """
+                UPDATE sessions
+                   SET parent_session_id = NULL
+                 WHERE parent_session_id IS NOT NULL
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM sessions parent
+                        WHERE parent.id = sessions.parent_session_id
+                   )
+                """
+            )
         return int(cursor.rowcount or 0)
 
     # ------------------------------------------------------------------
@@ -205,7 +219,7 @@ class SessionDB:
     def get_session(self, session_id: str) -> dict[str, Any] | None:
         pk_col = self._session_pk_column()
         cursor = self._conn.execute(
-            f"SELECT * FROM sessions WHERE {pk_col} = ?",
+            f"SELECT * FROM sessions WHERE {pk_col} = ?",  # noqa: S608 - pk_col is session_id/id only.
             (session_id,),
         )
         row = cursor.fetchone()
@@ -218,7 +232,7 @@ class SessionDB:
             return None
         pk_col = self._session_pk_column()
         row = self._conn.execute(
-            f"SELECT {pk_col} FROM sessions WHERE {pk_col} = ?",
+            f"SELECT {pk_col} FROM sessions WHERE {pk_col} = ?",  # noqa: S608 - pk_col is session_id/id only.
             (session_id,),
         ).fetchone()
         if row is not None:
@@ -227,7 +241,7 @@ class SessionDB:
         alt_col = "id" if pk_col == "session_id" and "id" in columns else None
         if alt_col:
             row = self._conn.execute(
-                f"SELECT {pk_col} FROM sessions WHERE {alt_col} = ?",
+                f"SELECT {pk_col} FROM sessions WHERE {alt_col} = ?",  # noqa: S608 - identifiers are hardcoded.
                 (session_id,),
             ).fetchone()
             if row is not None:
@@ -288,7 +302,7 @@ class SessionDB:
                     values.append(value)
             placeholders = ", ".join("?" for _ in insert_cols)
             self._conn.execute(
-                f"INSERT OR IGNORE INTO sessions ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                f"INSERT OR IGNORE INTO sessions ({', '.join(insert_cols)}) VALUES ({placeholders})",  # noqa: S608 - insert_cols comes from hardcoded candidates intersected with PRAGMA columns.
                 values,
             )
 
@@ -352,7 +366,7 @@ class SessionDB:
             values.append(time.time())
         values.append(session_id)
         self._conn.execute(
-            f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?",
+            f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?",  # noqa: S608 - set_clause/pk_col are built from hardcoded schema branches.
             values,
         )
 
@@ -369,7 +383,7 @@ class SessionDB:
             set_clause += ", updated_at = ?"
             values.append(time.time())
         values.append(session_id)
-        self._conn.execute(f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?", values)
+        self._conn.execute(f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?", values)  # noqa: S608 - set_clause/pk_col are built from hardcoded schema branches.
 
     def end_session(self, session_id: str, status: str = "ended") -> None:
         import time
@@ -391,7 +405,7 @@ class SessionDB:
             return
         values.append(session_id)
         self._conn.execute(
-            f"UPDATE sessions SET {', '.join(updates)} WHERE {pk_col} = ?",
+            f"UPDATE sessions SET {', '.join(updates)} WHERE {pk_col} = ?",  # noqa: S608 - updates/pk_col are hardcoded schema branches.
             values,
         )
 
@@ -468,7 +482,7 @@ class SessionDB:
         if insert_cols:
             placeholders = ", ".join("?" for _ in insert_cols)
             self._conn.execute(
-                f"INSERT INTO messages ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                f"INSERT INTO messages ({', '.join(insert_cols)}) VALUES ({placeholders})",  # noqa: S608 - insert_cols comes from hardcoded candidates intersected with PRAGMA columns.
                 values,
             )
 
@@ -484,7 +498,7 @@ class SessionDB:
         if updates:
             update_values.append(session_id)
             self._conn.execute(
-                f"UPDATE sessions SET {', '.join(updates)} WHERE {pk_col} = ?",
+                f"UPDATE sessions SET {', '.join(updates)} WHERE {pk_col} = ?",  # noqa: S608 - updates/pk_col are hardcoded schema branches.
                 update_values,
             )
 
@@ -499,7 +513,7 @@ class SessionDB:
             order_cols = "created_at ASC, id ASC"
         else:
             order_cols = "id ASC"
-        sql = f"SELECT * FROM messages WHERE {session_col} = ? ORDER BY {order_cols}"
+        sql = f"SELECT * FROM messages WHERE {session_col} = ? ORDER BY {order_cols}"  # noqa: S608 - session_col/order_cols are hardcoded schema branches.
         params: list[Any] = [session_id]
         if limit is not None:
             sql += " LIMIT ?"
@@ -518,8 +532,8 @@ class SessionDB:
         pk_col = "session_id" if "session_id" in session_columns else "id"
         message_columns = self._table_columns("messages")
         message_session_col = "session_id" if "session_id" in message_columns else "sid"
-        self._conn.execute(f"DELETE FROM messages WHERE {message_session_col} = ?", (sid,))
-        cur = self._conn.execute(f"DELETE FROM sessions WHERE {pk_col} = ?", (sid,))
+        self._conn.execute(f"DELETE FROM messages WHERE {message_session_col} = ?", (sid,))  # noqa: S608 - message_session_col is session_id/sid only.
+        cur = self._conn.execute(f"DELETE FROM sessions WHERE {pk_col} = ?", (sid,))  # noqa: S608 - pk_col is session_id/id only.
         return cur.rowcount > 0
 
     def get_next_title_in_lineage(self, title: str) -> str:
@@ -613,12 +627,12 @@ class SessionDB:
 
         if source and "source" in columns:
             cursor = self._conn.execute(
-                f"SELECT * FROM sessions WHERE source = ? ORDER BY {order_col} DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM sessions WHERE source = ? ORDER BY {order_col} DESC LIMIT ? OFFSET ?",  # noqa: S608 - order_col is selected from hardcoded schema branches.
                 (source, limit, offset),
             )
         else:
             cursor = self._conn.execute(
-                f"SELECT * FROM sessions ORDER BY {order_col} DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM sessions ORDER BY {order_col} DESC LIMIT ? OFFSET ?",  # noqa: S608 - order_col is selected from hardcoded schema branches.
                 (limit, offset),
             )
         rows = [self._normalize_session_row(dict(row)) for row in cursor.fetchall()]
