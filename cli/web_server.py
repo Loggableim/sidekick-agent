@@ -87,7 +87,7 @@ _WEB_DIST_CANDIDATES = [
     Path(__file__).parent.parent / "web_dist",         # web_dist at repo root
     Path(__file__).parent.parent / "dist",             # dist at repo root
 ]
-_web_dist = os.environ.get("SIDEKICK_WEB_DIST") or os.environ.get("HERMES_WEB_DIST")
+_web_dist = os.environ.get("SIDEKICK_WEB_DIST")
 WEB_DIST = Path(_web_dist) if _web_dist else next(
     (p for p in _WEB_DIST_CANDIDATES if (p / "index.html").exists()),
     _WEB_DIST_CANDIDATES[1]  # final fallback
@@ -3117,7 +3117,7 @@ def _codex_full_login_worker(session_id: str) -> None:
         import uuid as _uuid
         pool = load_pool("openai-codex")
         base_url = (
-            (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/")
+            (os.getenv("SIDEKICK_CODEX_BASE_URL")).strip().rstrip("/")
             or DEFAULT_CODEX_BASE_URL
         )
         entry = PooledCredential(
@@ -4059,20 +4059,12 @@ async def get_models_analytics(days: int = 30):
 
 import re
 
-# PTY bridge is POSIX-only (depends on fcntl/termios/ptyprocess).  On native
-# Windows the import raises; catch and leave PtyBridge=None so the rest of
-# the dashboard (sessions, jobs, metrics, config editor) still loads and the
-# /api/pty endpoint cleanly refuses with a WSL-suggested message.
-try:
-    from cli.pty_bridge import PtyBridge, PtyUnavailableError
-    _PTY_BRIDGE_AVAILABLE = True
-except ImportError as _pty_import_err:  # pragma: no cover - Windows-only path
-    PtyBridge = None  # type: ignore[assignment]
-    _PTY_BRIDGE_AVAILABLE = False
+# PTY bridge is cross-platform: POSIX (ptyprocess) and Windows (winpty).
+# The import itself always succeeds; PtyBridge.is_available() tells us
+# whether a PTY can actually be spawned on this platform.
+from cli.pty_bridge import PtyBridge, PtyUnavailableError
 
-    class PtyUnavailableError(RuntimeError):  # type: ignore[no-redef]
-        """Stub on platforms where pty_bridge can't be imported."""
-        pass
+_PTY_BRIDGE_AVAILABLE = PtyBridge.is_available()
 
 _RESIZE_RE = re.compile(rb"\x1b\[RESIZE:(\d+);(\d+)\]")
 _PTY_READ_CHUNK_TIMEOUT = 0.2
@@ -4206,15 +4198,20 @@ async def pty_ws(ws: WebSocket) -> None:
 
     await ws.accept()
 
-    # On native Windows, the POSIX PTY bridge can't be imported.  Tell the
-    # client and close cleanly rather than pretending the feature works.
+    # PTY bridge unavailable — tell the client and close cleanly.
     if not _PTY_BRIDGE_AVAILABLE:
-        await ws.send_text(
-            "\r\n\x1b[31mChat unavailable: the embedded terminal requires a "
-            "POSIX PTY, which native Windows Python doesn't provide.\x1b[0m\r\n"
-            "\x1b[33mInstall Hermes inside WSL2 to use the dashboard's /chat "
-            "tab — the rest of the dashboard works here.\x1b[0m\r\n"
-        )
+        if sys.platform.startswith("win"):
+            await ws.send_text(
+                "\r\n\x1b[31mChat unavailable: the embedded terminal requires "
+                "pywinpty on Windows.\x1b[0m\r\n"
+                "\x1b[33mInstall with: pip install pywinpty\x1b[0m\r\n"
+            )
+        else:
+            await ws.send_text(
+                "\r\n\x1b[31mChat unavailable: the embedded terminal requires "
+                "ptyprocess.\x1b[0m\r\n"
+                "\x1b[33mInstall with: pip install ptyprocess\x1b[0m\r\n"
+            )
         await ws.close(code=1011)
         return
 
@@ -4870,7 +4867,7 @@ def _discover_dashboard_plugins() -> list:
         (bundled_root / "memory", "bundled"),
         (bundled_root, "bundled"),
     ]
-    if os.environ.get("SIDEKICK_ENABLE_PROJECT_PLUGINS") or os.environ.get("HERMES_ENABLE_PROJECT_PLUGINS"):
+    if os.environ.get("SIDEKICK_ENABLE_PROJECT_PLUGINS"):
         search_dirs.append((Path.cwd() / ".hermes" / "plugins", "project"))
 
     for plugins_root, source in search_dirs:

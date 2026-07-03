@@ -7,44 +7,63 @@ keystrokes can be fed back in.  The only caller today is the
 
 Design constraints:
 
-* **POSIX-only.**  This module depends on ``fcntl``, ``termios``, and
-  ``ptyprocess``, none of which exist on native Windows Python.  Native
-  Windows ConPTY is a different API (Windows 10 build 17763+) and would
-  need a separate Windows implementation (``pywinpty``) — that's tracked
-  as a future enhancement.  On native Windows, importing this module
-  raises :class:`ImportError` and the dashboard's ``/chat`` tab shows a
-  WSL-recommended banner instead of crashing.  Every other feature in the
-  dashboard (sessions, jobs, metrics, config editor) works natively.
-* **Zero Node dependency on the server side.**  We use :mod:`ptyprocess`,
-  which is a pure-Python wrapper around the OS calls.  The browser talks
-  to the same ``sidekick --tui`` binary it would launch from the CLI, so
-  every TUI feature (slash popover, model picker, tool rows, markdown,
-  skin engine, clarify/sudo/approval prompts) ships automatically.
+* **Cross-platform.**  On POSIX (Linux/macOS/WSL) we use ``ptyprocess``
+  (``fcntl`` + ``termios`` + ``os.openpty``).  On native Windows we use
+  ``winpty`` (ConPTY via ``pywinpty``).  The :class:`PtyBridge` API is
+  identical on both platforms — callers don't branch on OS.
+* **Zero Node dependency on the server side.**  We use pure-Python PTY
+  wrappers.  The browser talks to the same ``sidekick --tui`` binary it
+  would launch from the CLI, so every TUI feature (slash popover, model
+  picker, tool rows, markdown, skin engine, clarify/sudo/approval
+  prompts) ships automatically.
 * **Byte-safe I/O.**  Reads and writes go through the PTY master fd
   directly — we avoid :class:`ptyprocess.PtyProcessUnicode` because
   streaming ANSI is inherently byte-oriented and UTF-8 boundaries may land
-  mid-read.
+  mid-read.  On Windows, ``winpty`` returns ``str``; we encode to
+  ``bytes`` so callers always receive bytes regardless of platform.
 """
 
 from __future__ import annotations
 
 import errno
-import fcntl
 import os
 import select
 import signal
 import struct
 import sys
-import termios
 import time
 from typing import Optional, Sequence
 
-try:
-    import ptyprocess  # type: ignore
-    _PTY_AVAILABLE = not sys.platform.startswith("win")
-except ImportError:  # pragma: no cover - dev env without ptyprocess
-    ptyprocess = None  # type: ignore
-    _PTY_AVAILABLE = False
+# ── Platform detection ───────────────────────────────────────────────────
+_IS_WINDOWS = sys.platform.startswith("win")
+
+# ── POSIX imports (fcntl, termios, ptyprocess) ───────────────────────────
+fcntl = None
+termios = None
+ptyprocess = None
+_POSIX_PTY_AVAILABLE = False
+
+if not _IS_WINDOWS:
+    try:
+        import fcntl
+        import termios
+        import ptyprocess  # type: ignore
+        _POSIX_PTY_AVAILABLE = True
+    except ImportError:
+        pass
+
+# ── Windows imports (winpty / pywinpty) ──────────────────────────────────
+winpty = None
+_WINPTY_AVAILABLE = False
+
+if _IS_WINDOWS:
+    try:
+        import winpty  # type: ignore
+        _WINPTY_AVAILABLE = True
+    except ImportError:
+        pass
+
+_PTY_AVAILABLE = _POSIX_PTY_AVAILABLE or _WINPTY_AVAILABLE
 
 
 __all__ = ["PtyBridge", "PtyUnavailableError"]
@@ -53,27 +72,44 @@ __all__ = ["PtyBridge", "PtyUnavailableError"]
 class PtyUnavailableError(RuntimeError):
     """Raised when a PTY cannot be created on this platform.
 
-    Today this means native Windows (no ConPTY bindings) or a dev
-    environment missing the ``ptyprocess`` dependency.  The dashboard
-    surfaces the message to the user as a chat-tab banner.
+    On POSIX this means ``ptyprocess`` is missing.  On Windows this means
+    ``pywinpty`` is not installed.  The dashboard surfaces the message to
+    the user as a chat-tab banner.
     """
 
 
 class PtyBridge:
-    """Thin wrapper around ``ptyprocess.PtyProcess`` for byte streaming.
+    """Thin wrapper around a platform PTY process for byte streaming.
+
+    On POSIX: wraps ``ptyprocess.PtyProcess``.
+    On Windows: wraps ``winpty.PtyProcess`` (ConPTY).
+
+    Both platforms use the same ``select`` + ``read`` pattern because
+    ``winpty.fileno()`` returns a socket fd that ``select.select()`` can
+    poll.  No dedicated reader thread needed.
 
     Not thread-safe.  A single bridge is owned by the WebSocket handler
     that spawned it; the reader runs in an executor thread while writes
-    happen on the event-loop thread.  Both sides are OK because the
-    kernel PTY is the actual synchronization point — we never call
-    :mod:`ptyprocess` methods concurrently, we only call ``os.read`` and
-    ``os.write`` on the master fd, which is safe.
+    happen on the event-loop thread.
+
+    Public API is identical on both platforms:
+    - ``.fd`` — master file descriptor (int)
+    - ``.pid`` — child process ID (int)
+    - ``.read(timeout)`` — read up to 64 KiB, returns ``bytes``, ``b""``,
+      or ``None`` (EOF)
+    - ``.write(data: bytes)`` — write raw bytes to child stdin
+    - ``.resize(cols, rows)`` — forward terminal resize
+    - ``.close()`` — terminate child and close fds
+    - ``.is_alive()`` — True if child is still running
+    - ``.is_available()`` — classmethod, True if PTY can be spawned
+    - ``.spawn(argv, ...)`` — classmethod, spawn a new PTY
     """
 
-    def __init__(self, proc: "ptyprocess.PtyProcess"):  # type: ignore[name-defined]
+    def __init__(self, proc, *, _is_winpty: bool = False):
         self._proc = proc
         self._fd: int = proc.fd
         self._closed = False
+        self._is_winpty = _is_winpty
 
     # -- lifecycle --------------------------------------------------------
 
@@ -99,33 +135,44 @@ class PtyBridge:
         ordinary exec failures (missing binary, bad cwd, etc.).
         """
         if not _PTY_AVAILABLE:
-            if sys.platform.startswith("win"):
+            if _IS_WINDOWS and not _WINPTY_AVAILABLE:
                 raise PtyUnavailableError(
                     "Pseudo-terminals are unavailable on this platform. "
-                    "Sidekick Agent supports Windows only via WSL."
+                    "Install pywinpty: pip install pywinpty"
                 )
-            if ptyprocess is None:
+            if not _POSIX_PTY_AVAILABLE:
+                if ptyprocess is None:
+                    raise PtyUnavailableError(
+                        "The `ptyprocess` package is missing. "
+                        "Install with: pip install ptyprocess "
+                        "(or pip install -e '.[pty]')."
+                    )
                 raise PtyUnavailableError(
-                    "The `ptyprocess` package is missing. "
-                    "Install with: pip install ptyprocess "
-                    "(or pip install -e '.[pty]')."
+                    "Pseudo-terminals are unavailable on this platform."
                 )
             raise PtyUnavailableError("Pseudo-terminals are unavailable.")
+
         # PTY-hosted programs expect TERM to describe the terminal type.
-        # CI often runs without TERM in the parent process, which makes
-        # simple terminal probes like `tput cols` fail before winsize reads.
-        # Preserve explicit caller overrides, but backfill a sensible default
-        # when TERM is missing or blank.
-        spawn_env = (os.environ.copy() if env is None else env.copy())
+        spawn_env = (os.environ.copy() if env is None else dict(env))
         if not spawn_env.get("TERM"):
             spawn_env["TERM"] = "xterm-256color"
-        proc = ptyprocess.PtyProcess.spawn(  # type: ignore[union-attr]
-            list(argv),
-            cwd=cwd,
-            env=spawn_env,
-            dimensions=(rows, cols),
-        )
-        return cls(proc)
+
+        if _IS_WINDOWS and _WINPTY_AVAILABLE:
+            proc = winpty.PtyProcess.spawn(
+                list(argv),
+                cwd=cwd,
+                env=spawn_env,
+                dimensions=(rows, cols),
+            )
+            return cls(proc, _is_winpty=True)
+        else:
+            proc = ptyprocess.PtyProcess.spawn(  # type: ignore[union-attr]
+                list(argv),
+                cwd=cwd,
+                env=spawn_env,
+                dimensions=(rows, cols),
+            )
+            return cls(proc, _is_winpty=False)
 
     @property
     def pid(self) -> int:
@@ -154,16 +201,25 @@ class PtyBridge:
         """
         if self._closed:
             return None
+
         try:
             readable, _, _ = select.select([self._fd], [], [], timeout)
         except (OSError, ValueError):
             return None
+
         if not readable:
             return b""
+
+        if self._is_winpty:
+            return self._read_winpty()
+        else:
+            return self._read_posix()
+
+    def _read_posix(self) -> Optional[bytes]:
+        """POSIX: os.read on the master fd."""
         try:
             data = os.read(self._fd, 65536)
         except OSError as exc:
-            # EIO on Linux = slave side closed.  EBADF = already closed.
             if exc.errno in {errno.EIO, errno.EBADF}:
                 return None
             raise
@@ -171,11 +227,32 @@ class PtyBridge:
             return None
         return data
 
+    def _read_winpty(self) -> Optional[bytes]:
+        """Windows: proc.read() returns str; encode to bytes."""
+        try:
+            data = self._proc.read(65536)
+        except EOFError:
+            return None
+        except Exception:
+            return None
+        if not data:
+            return None
+        return data.encode("utf-8", errors="replace")
+
     def write(self, data: bytes) -> None:
         """Write raw bytes to the PTY master (i.e. the child's stdin)."""
         if self._closed or not data:
             return
-        # os.write can return a short write under load; loop until drained.
+
+        if self._is_winpty:
+            text = data.decode("utf-8", errors="replace")
+            try:
+                self._proc.write(text)
+            except (OSError, EOFError):
+                pass
+            return
+
+        # POSIX: os.write with short-write loop
         view = memoryview(data)
         while view:
             try:
@@ -189,10 +266,18 @@ class PtyBridge:
             view = view[n:]
 
     def resize(self, cols: int, rows: int) -> None:
-        """Forward a terminal resize to the child via ``TIOCSWINSZ``."""
+        """Forward a terminal resize to the child."""
         if self._closed:
             return
-        # struct winsize: rows, cols, xpixel, ypixel (all unsigned short)
+
+        if self._is_winpty:
+            try:
+                self._proc.setwinsize(max(1, rows), max(1, cols))
+            except Exception:
+                pass
+            return
+
+        # POSIX: TIOCSWINSZ ioctl
         winsize = struct.pack("HHHH", max(1, rows), max(1, cols), 0, 0)
         try:
             fcntl.ioctl(self._fd, termios.TIOCSWINSZ, winsize)
@@ -202,7 +287,7 @@ class PtyBridge:
     # -- teardown ---------------------------------------------------------
 
     def close(self) -> None:
-        """Terminate the child (SIGTERM → 0.5s grace → SIGKILL) and close fds.
+        """Terminate the child and close fds.
 
         Idempotent.  Reaping the child is important so we don't leak
         zombies across the lifetime of the dashboard process.
@@ -211,9 +296,19 @@ class PtyBridge:
             return
         self._closed = True
 
-        # SIGHUP is the conventional "your terminal went away" signal.
-        # We escalate if the child ignores it.
-        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGKILL):  # windows-footgun: ok — POSIX-only module (imports fcntl/termios/ptyprocess at top)
+        if self._is_winpty:
+            try:
+                self._proc.terminate(force=True)
+            except Exception:
+                pass
+            try:
+                self._proc.close(force=True)
+            except Exception:
+                pass
+            return
+
+        # POSIX: SIGHUP → SIGTERM → SIGKILL escalation
+        for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGKILL):
             if not self._proc.isalive():
                 break
             try:
