@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
+from shared.paths import sidekick_home
 from shared.utils import atomic_replace
 
 
@@ -139,7 +140,7 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
         pass  # best-effort — don't block gateway startup
 
 
-def load_hermes_dotenv(
+def load_sidekick_dotenv(
     *,
     hermes_home: str | os.PathLike | None = None,
     project_env: str | os.PathLike | None = None,
@@ -154,7 +155,7 @@ def load_hermes_dotenv(
     """
     loaded: list[Path] = []
 
-    home_path = Path(hermes_home or os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", Path.home() / ".hermes"))
+    home_path = Path(sidekick_home or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick")))
     user_env = home_path / ".env"
     project_env_path = Path(project_env) if project_env else None
 
