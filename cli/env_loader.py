@@ -155,7 +155,7 @@ def load_sidekick_dotenv(
     """
     loaded: list[Path] = []
 
-    home_path = Path(sidekick_home or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick")))
+    home_path = Path(sidekick_home() or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick")))
     user_env = home_path / ".env"
     project_env_path = Path(project_env) if project_env else None
 
