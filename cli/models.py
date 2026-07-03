@@ -20,7 +20,7 @@ from cli import __version__ as _SIDEKICK_VERSION
 
 # Identify ourselves so endpoints fronted by Cloudflare's Browser Integrity
 # Check (error 1010) don't reject the default ``Python-urllib/*`` signature.
-_HERMES_USER_AGENT = f"hermes-cli/{_SIDEKICK_VERSION}"
+_HERMES_USER_AGENT = f"sidekick-cli/{_SIDEKICK_VERSION}"
 
 COPILOT_BASE_URL = "https://api.githubcopilot.com"
 COPILOT_MODELS_URL = f"{COPILOT_BASE_URL}/models"
@@ -74,21 +74,6 @@ _openrouter_catalog_cache: list[tuple[str, str]] | None = None
 # Slugs match Vercel's actual /v1/models catalog (e.g. alibaba/ for Qwen,
 # zai/ and xai/ without hyphens).
 VERCEL_AI_GATEWAY_MODELS: list[tuple[str, str]] = [
-    ("moonshotai/kimi-k2.6",                 "recommended"),
-    ("alibaba/qwen3.6-plus",                 ""),
-    ("zai/glm-5.1",                          ""),
-    ("minimax/minimax-m2.7",                 ""),
-    ("anthropic/claude-sonnet-4.6",          ""),
-    ("anthropic/claude-opus-4.7",            ""),
-    ("anthropic/claude-opus-4.6",            ""),
-    ("anthropic/claude-haiku-4.5",           ""),
-    ("openai/gpt-5.4",                       ""),
-    ("openai/gpt-5.4-mini",                  ""),
-    ("openai/gpt-5.3-codex",                 ""),
-    ("google/gemini-3.1-pro-preview",        ""),
-    ("google/gemini-3-flash",                ""),
-    ("google/gemini-3.1-flash-lite-preview", ""),
-    ("xai/grok-4.20-reasoning",              ""),
 ]
 
 _ai_gateway_catalog_cache: list[tuple[str, str]] | None = None
@@ -116,10 +101,6 @@ def _codex_curated_models() -> list[str]:
 # (grok-4, grok-4-0709, grok-4-fast{,-reasoning,-non-reasoning},
 #  grok-4-1-fast{,-reasoning,-non-reasoning}, grok-code-fast-1 → grok-4.3).
 _XAI_STATIC_FALLBACK: list[str] = [
-    "grok-4.20-0309-reasoning",
-    "grok-4.20-0309-non-reasoning",
-    "grok-4.20-multi-agent-0309",
-    "grok-4.3",
 ]
 
 
@@ -154,105 +135,38 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     # Native OpenAI Chat Completions (api.openai.com). Used by /model counts and
     # provider_model_ids fallback when /v1/models is unavailable.
     "openai": [
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-5-mini",
-        "gpt-5.3-codex",
-        "gpt-5.2-codex",
-        "gpt-4.1",
-        "gpt-4o",
-        "gpt-4o-mini",
     ],
     "openai-codex": _codex_curated_models(),
     "copilot-acp": [
         "copilot-acp",
     ],
     "copilot": [
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-5-mini",
-        "gpt-5.3-codex",
-        "gpt-5.2-codex",
-        "gpt-4.1",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "claude-sonnet-4.6",
-        "claude-sonnet-4",
-        "claude-sonnet-4.5",
-        "claude-haiku-4.5",
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-pro",
     ],
     "gemini": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
     ],
     "google-gemini-cli": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
     ],
     "zai": [
-        "glm-5.1",
-        "glm-5",
-        "glm-5v-turbo",
+        "glm-5.2",
         "glm-5-turbo",
         "glm-4.7",
-        "glm-4.5",
+        "glm-4.7-flash",
         "glm-4.5-flash",
     ],
     "xai": _xai_curated_models(),
     "nvidia": [
-        # NVIDIA flagship reasoning models
-        "nvidia/nemotron-3-super-120b-a12b",
-        "nvidia/nemotron-3-nano-30b-a3b",
-        "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        # Third-party agentic models hosted on build.nvidia.com
-        # (map to OpenRouter defaults — users get familiar picks on NIM)
-        "qwen/qwen3.5-397b-a17b",
-        "deepseek-ai/deepseek-v3.2",
-        "moonshotai/kimi-k2.6",
-        "minimaxai/minimax-m2.5",
-        "z-ai/glm5",
-        "openai/gpt-oss-120b",
     ],
     "kimi-coding": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "kimi-for-coding",
-        "kimi-k2-thinking",
-        "kimi-k2-thinking-turbo",
-        "kimi-k2-turbo-preview",
-        "kimi-k2-0905-preview",
     ],
     "kimi-coding-cn": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "kimi-k2-thinking",
-        "kimi-k2-turbo-preview",
-        "kimi-k2-0905-preview",
     ],
     "stepfun": [
-        "step-3.5-flash",
-        "step-3.5-flash-2603",
     ],
     "moonshot": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "kimi-k2-thinking",
-        "kimi-k2-turbo-preview",
-        "kimi-k2-0905-preview",
     ],
 "minimax": [
         "MiniMax-M3",
-        "MiniMax-M2.7",
-        "MiniMax-M2.5",
-        "MiniMax-M2.1",
-        "MiniMax-M2",
+        "MiniMax-M2.7-highspeed",
     ],
 "minimax-oauth": [
         "MiniMax-M3",
@@ -260,11 +174,6 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "MiniMax-M2.7-highspeed",
     ],
 "minimax-cn": [
-        "MiniMax-M3",
-        "MiniMax-M2.7",
-        "MiniMax-M2.5",
-        "MiniMax-M2.1",
-        "MiniMax-M2",
     ],
     "anthropic": [
         "claude-opus-4-7",
@@ -277,96 +186,24 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
         "claude-haiku-4-5-20251001",
     ],
     "deepseek": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "deepseek-chat",
-        "deepseek-reasoner",
     ],
     "xiaomi": [
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "mimo-v2-pro",
-        "mimo-v2-omni",
-        "mimo-v2-flash",
     ],
     "tencent-tokenhub": [
-        "hy3-preview",
     ],
     "arcee": [
-        "trinity-large-thinking",
-        "trinity-large-preview",
-        "trinity-mini",
     ],
     "gmi": [
-        "zai-org/GLM-5.1-FP8",
-        "deepseek-ai/DeepSeek-V3.2",
-        "moonshotai/Kimi-K2.5",
-        "google/gemini-3.1-flash-lite-preview",
-        "anthropic/claude-sonnet-4.6",
-        "openai/gpt-5.4",
     ],
     "opencode-zen": [
-        "kimi-k2.5",
-        "gpt-5.4-pro",
-        "gpt-5.4",
-        "gpt-5.3-codex",
-        "gpt-5.2",
-        "gpt-5.2-codex",
-        "gpt-5.1",
-        "gpt-5.1-codex",
-        "gpt-5.1-codex-max",
-        "gpt-5.1-codex-mini",
-        "gpt-5",
-        "gpt-5-codex",
-        "gpt-5-nano",
-        "claude-opus-4-6",
-        "claude-opus-4-5",
-        "claude-opus-4-1",
-        "claude-sonnet-4-6",
-        "claude-sonnet-4-5",
-        "claude-sonnet-4",
-        "claude-haiku-4-5",
-        "claude-3-5-haiku",
-        "gemini-3.1-pro",
-        "gemini-3-pro",
-"gemini-3-flash",
-        "minimax-m3",
-        "minimax-m2.7",
-        "minimax-m2.5",
-        "minimax-m2.5-free",
-        "minimax-m2.1",
-        "glm-5",
-        "glm-4.7",
-        "glm-4.6",
-        "kimi-k2-thinking",
-        "kimi-k2",
-        "qwen3-coder",
-        "big-pickle",
     ],
     "opencode-go": [
-        "kimi-k2.6",
-        "kimi-k2.5",
-        "glm-5.2",
-        "glm-5.1",
-        "glm-5",
         "deepseek-v4-pro",
         "deepseek-v4-flash",
-        "mimo-v2.5-pro",
-        "mimo-v2.5",
-        "mimo-v2-pro",
-        "mimo-v2-omni",
+        "glm-5.2",
         "minimax-m3",
-        "minimax-m2.7",
-        "minimax-m2.5",
-        "qwen3.6-plus",
-        "qwen3.5-plus",
     ],
     "kilocode": [
-        "anthropic/claude-opus-4.6",
-        "anthropic/claude-sonnet-4.6",
-        "openai/gpt-5.4",
-        "google/gemini-3-pro-preview",
-        "google/gemini-3-flash-preview",
     ],
     # Alibaba DashScope Coding platform (coding-intl) — default endpoint.
     # Supports Qwen models + third-party providers (GLM, Kimi, MiniMax).
@@ -374,55 +211,19 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     # to https://dashscope-intl.aliyuncs.com/compatible-mode/v1 (OpenAI-compat)
     # or https://dashscope-intl.aliyuncs.com/apps/anthropic (Anthropic-compat).
     "alibaba": [
-        "qwen3.6-plus",
-        "kimi-k2.5",
-        "qwen3.5-plus",
-        "qwen3-coder-plus",
-        "qwen3-coder-next",
-        # Third-party models available on coding-intl
-        "glm-5",
-        "glm-4.7",
-        "MiniMax-M2.5",
     ],
     # Alibaba Coding Plan — same platform as alibaba (DashScope coding-intl),
     # separate provider ID with its own base_url_env_var.
     "alibaba-coding-plan": [
-        "qwen3.6-plus",
-        "qwen3.5-plus",
-        "qwen3-coder-plus",
-        "qwen3-coder-next",
-        "kimi-k2.5",
-        "glm-5",
-        "glm-4.7",
-        "MiniMax-M2.5",
     ],
     # Curated HF model list — only agentic models that map to OpenRouter defaults.
     "huggingface": [
-        "moonshotai/Kimi-K2.5",
-        "Qwen/Qwen3.5-397B-A17B",
-        "Qwen/Qwen3.5-35B-A3B",
-        "deepseek-ai/DeepSeek-V3.2",
-        "MiniMaxAI/MiniMax-M2.5",
-        "zai-org/GLM-5",
-        "XiaomiMiMo/MiMo-V2-Flash",
-        "moonshotai/Kimi-K2-Thinking",
-        "moonshotai/Kimi-K2.6",
     ],
     # AWS Bedrock — static fallback list used when dynamic discovery is
     # unavailable (no boto3, no credentials, or API error).  The agent
     # prefers live discovery via ListFoundationModels + ListInferenceProfiles.
     # Use inference profile IDs (us.*) since most models require them.
     "bedrock": [
-        "us.anthropic.claude-sonnet-4-6",
-        "us.anthropic.claude-opus-4-6-v1",
-        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "us.amazon.nova-pro-v1:0",
-        "us.amazon.nova-lite-v1:0",
-        "us.amazon.nova-micro-v1:0",
-        "deepseek.v3.2",
-        "us.meta.llama4-maverick-17b-instruct-v1:0",
-        "us.meta.llama4-scout-17b-instruct-v1:0",
     ],
     # Azure Foundry: user-provided endpoint and model.
     # Empty list because models depend on the endpoint configuration.
@@ -473,33 +274,13 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("lmstudio",       "LM Studio",                "LM Studio (local desktop app with built-in model server)"),
     ProviderEntry("anthropic",      "Anthropic",                "Anthropic (Claude models — API key or Claude Code)"),
     ProviderEntry("openai-codex",   "OpenAI Codex",             "OpenAI Codex"),
-    ProviderEntry("alibaba",        "Qwen Cloud",               "Qwen Cloud / DashScope Coding (Qwen + multi-provider)"),
-    ProviderEntry("xiaomi",         "Xiaomi MiMo",              "Xiaomi MiMo (MiMo-V2.5 and V2 models — pro, omni, flash)"),
-    ProviderEntry("tencent-tokenhub", "Tencent TokenHub",       "Tencent TokenHub (Hy3 Preview — direct API via tokenhub.tencentmaas.com)"),
-    ProviderEntry("nvidia",         "NVIDIA NIM",               "NVIDIA NIM (Nemotron models — build.nvidia.com or local NIM)"),
-    ProviderEntry("copilot",        "GitHub Copilot",           "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
     ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
-    ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face Inference Providers (20+ open models)"),
-    ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio (Gemini models — native Gemini API)"),
-    ProviderEntry("google-gemini-cli", "Google Gemini (OAuth)",   "Google Gemini via OAuth + Code Assist (free tier supported; no API key needed)"),
-    ProviderEntry("deepseek",       "DeepSeek",                 "DeepSeek (DeepSeek-V3, R1, coder — direct API)"),
-    ProviderEntry("xai",            "xAI",                      "xAI (Grok models — direct API)"),
     ProviderEntry("zai",            "Z.AI / GLM",               "Z.AI / GLM (Zhipu AI direct API)"),
-    ProviderEntry("kimi-coding",    "Kimi / Kimi Coding Plan",  "Kimi Coding Plan (api.kimi.com) & Moonshot API"),
-    ProviderEntry("kimi-coding-cn", "Kimi / Moonshot (China)",  "Kimi / Moonshot China (Moonshot CN direct API)"),
-    ProviderEntry("stepfun",        "StepFun Step Plan",       "StepFun Step Plan (agent/coding models via Step Plan API)"),
     ProviderEntry("minimax",        "MiniMax",                  "MiniMax (global direct API)"),
     ProviderEntry("minimax-oauth",  "MiniMax (OAuth)",          "MiniMax via OAuth browser login (Coding Plan, minimax.io)"),
-    ProviderEntry("minimax-cn",     "MiniMax (China)",          "MiniMax China (domestic direct API)"),
     ProviderEntry("ollama-cloud",   "Ollama Cloud",             "Ollama Cloud (cloud-hosted open models — ollama.com)"),
-    ProviderEntry("arcee",          "Arcee AI",                 "Arcee AI (Trinity models — direct API)"),
-    ProviderEntry("gmi",            "GMI Cloud",                "GMI Cloud (multi-model direct API)"),
-    ProviderEntry("kilocode",       "Kilo Code",                "Kilo Code (Kilo Gateway API)"),
-    ProviderEntry("opencode-zen",   "OpenCode Zen",             "OpenCode Zen (35+ curated models, pay-as-you-go)"),
     ProviderEntry("opencode-go",    "OpenCode Go",              "OpenCode Go (open models, $10/month subscription)"),
-    ProviderEntry("bedrock",        "AWS Bedrock",              "AWS Bedrock (Claude, Nova, Llama, DeepSeek — IAM or API key)"),
     ProviderEntry("azure-foundry",  "Azure Foundry",            "Azure Foundry (OpenAI-style or Anthropic-style endpoint — your Azure AI deployment)"),
-    ProviderEntry("ai-gateway",     "Vercel AI Gateway",        "Vercel AI Gateway"),
     ProviderEntry("qwen-oauth",     "Qwen OAuth (Portal)",      "Qwen OAuth (reuses local Qwen CLI login)"),
 ]
 
@@ -2625,8 +2406,21 @@ def fetch_api_models(
 # ---------------------------------------------------------------------------
 
 
+# Cache TTL: 1 hour
+_OLLAMA_CLOUD_CACHE_TTL = 3600
 
-_OLLAMA_CLOUD_CACHE_TTL = 3600  # 1 hour
+# Curated subset of Ollama Cloud models shown in the WebUI picker.
+# Models not in this list are filtered out of the live catalog.
+OLLAMA_CLOUD_CURATED_MODELS: list[str] = [
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "gemma4:31b",
+    "glm-5.2",
+    "minimax-m3",
+    "nemotron-3-super",
+    "nemotron-3-ultra",
+]
+
 
 
 def _strip_ollama_cloud_suffix(model_id: str) -> str:
@@ -2742,6 +2536,13 @@ def fetch_ollama_cloud_models(
                 seen.add(normalized)
                 merged.append(normalized)
         if merged:
+            # Filter to curated subset for WebUI picker
+            curated = [m for m in merged if m in OLLAMA_CLOUD_CURATED_MODELS]
+            if curated:
+                _save_ollama_cloud_cache(curated)
+                return curated
+            # Fallback: if none matched curated, return merged anyway
+            # (avoids empty picker when curated list is stale)
             _save_ollama_cloud_cache(merged)
             return merged
 

@@ -6,7 +6,7 @@ from providers.base import ProviderProfile
 ollama_cloud = ProviderProfile(
     name="ollama-cloud",
     aliases=("ollama_cloud",),
-    default_aux_model="nemotron-3-nano:30b",
+    default_aux_model="deepseek-v4-flash",
     env_vars=("OLLAMA_API_KEY",),
     base_url="https://ollama.com/v1",
 )

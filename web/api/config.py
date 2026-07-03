@@ -32,17 +32,17 @@ HOME = Path.home()
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 
 # ── Network config (env-overridable) ─────────────────────────────────────────
-HOST = os.getenv("SIDEKICK_WEBUI_HOST") or os.getenv("HERMES_WEBUI_HOST", "127.0.0.1")
-PORT = int(os.getenv("SIDEKICK_WEBUI_PORT") or os.getenv("HERMES_WEBUI_PORT", "8787"))
+HOST = os.getenv("SIDEKICK_WEBUI_HOST")
+PORT = int(os.getenv("SIDEKICK_WEBUI_PORT"))
 
 # ── TLS/HTTPS config (optional, env-overridable) ────────────────────────────
-TLS_CERT = (os.getenv("SIDEKICK_WEBUI_TLS_CERT") or os.getenv("HERMES_WEBUI_TLS_CERT", "")).strip() or None
-TLS_KEY = (os.getenv("SIDEKICK_WEBUI_TLS_KEY") or os.getenv("HERMES_WEBUI_TLS_KEY", "")).strip() or None
+TLS_CERT = (os.getenv("SIDEKICK_WEBUI_TLS_CERT")).strip() or None
+TLS_KEY = (os.getenv("SIDEKICK_WEBUI_TLS_KEY")).strip() or None
 TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
 def _resolve_state_dir_from_env() -> Path:
-    configured_home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
+    configured_home = os.getenv("SIDEKICK_HOME")
     default_state = (
         Path(configured_home).expanduser() / "state" / "webui"
         if configured_home
@@ -51,9 +51,9 @@ def _resolve_state_dir_from_env() -> Path:
     return (
         Path(
             os.getenv("SIDEKICK_WEBUI_STATE_DIR")
-            or os.getenv("HERMES_WEBUI_STATE_DIR")
+
             or os.getenv("SIDEKICK_STATE_DIR")
-            or os.getenv("HERMES_STATE_DIR")
+
             or default_state
         )
         .expanduser()
@@ -79,8 +79,8 @@ def refresh_runtime_paths_from_env() -> None:
     global SESSION_INDEX_FILE, SETTINGS_FILE, LAST_WORKSPACE_FILE, PROJECTS_FILE
     global _models_cache_path
 
-    HOST = os.getenv("SIDEKICK_WEBUI_HOST") or os.getenv("HERMES_WEBUI_HOST", "127.0.0.1")
-    PORT = int(os.getenv("SIDEKICK_WEBUI_PORT") or os.getenv("HERMES_WEBUI_PORT", "8787"))
+    HOST = os.getenv("SIDEKICK_WEBUI_HOST")
+    PORT = int(os.getenv("SIDEKICK_WEBUI_PORT"))
     STATE_DIR = _resolve_state_dir_from_env()
     SESSION_DIR = STATE_DIR / "sessions"
     WORKSPACES_FILE = STATE_DIR / "workspaces.json"
@@ -129,19 +129,21 @@ def _discover_agent_dir() -> Path:
 
     In the monorepo, ``run_agent.py`` lives at the repo root.  The old
     split-repo search path (scanning sibling ``hermes-agent`` directories)
-    is preserved as a fallback for transitional setups.
+    is preserved as a legacy fallback for transitional setups.
 
     Priority:
       1. SIDEKICK_WEBUI_AGENT_DIR / HERMES_WEBUI_AGENT_DIR env var
       2. This repo root (monorepo — run_agent.py is in-repo)
-      3. Sidekick home / hermes-agent   -- e.g. ~/.sidekick/hermes-agent
-      4. Sibling of this repo            -- ../hermes-agent
-      5. HOME / hermes-agent             -- ~/hermes-agent
+      3. Sidekick home / sidekick-agent   -- e.g. ~/.sidekick/sidekick-agent
+      4. Hermes home (legacy fallback)     -- e.g. ~/.hermes/hermes-agent
+      5. Sibling of this repo              -- ../hermes-agent (legacy)
+      6. HOME / sidekick-agent             -- ~/sidekick-agent
+      7. HOME / hermes-agent               -- ~/hermes-agent (legacy)
     """
     candidates = []
 
     # 1. Explicit env var (both new and legacy)
-    explicit = os.getenv("SIDEKICK_WEBUI_AGENT_DIR") or os.getenv("HERMES_WEBUI_AGENT_DIR")
+    explicit = os.getenv("SIDEKICK_WEBUI_AGENT_DIR")
     if explicit:
         candidates.append(Path(explicit).expanduser().resolve())
 
@@ -157,13 +159,13 @@ def _discover_agent_dir() -> Path:
     # 5. ~/sidekick-agent (direct checkout)
     candidates.append(HOME / "sidekick-agent")
 
-    # 6. ~/hermes-agent
+    # 6. ~/hermes-agent (legacy fallback)
     candidates.append(HOME / "hermes-agent")
 
     # 7. XDG_DATA_HOME / sidekick-agent
     xdg_data = Path(os.getenv("XDG_DATA_HOME", str(HOME / ".local" / "share")))
     candidates.append(xdg_data.expanduser() / "sidekick-agent")
-    candidates.append(xdg_data.expanduser() / "hermes-agent")
+    candidates.append(xdg_data.expanduser() / "hermes-agent")  # legacy fallback
 
     # 8. Windows: LOCALAPPDATA\\sidekick\\sidekick-agent (Sidekick installer default)
     local_appdata = os.getenv("LOCALAPPDATA")
@@ -192,8 +194,8 @@ def _discover_python(agent_dir: Path) -> str:
       3. Local .venv inside this repo
       4. System python3
     """
-    if os.getenv("SIDEKICK_WEBUI_PYTHON") or os.getenv("HERMES_WEBUI_PYTHON"):
-        return os.getenv("SIDEKICK_WEBUI_PYTHON") or os.getenv("HERMES_WEBUI_PYTHON")
+    if os.getenv("SIDEKICK_WEBUI_PYTHON"):
+        return os.getenv("SIDEKICK_WEBUI_PYTHON")
 
     if agent_dir:
         venv_py = agent_dir / "venv" / "bin" / "python"
@@ -302,7 +304,7 @@ def _cfg_has_in_memory_overrides() -> bool:
 
 def _get_config_path() -> Path:
     """Return config.yaml path for the active profile."""
-    env_override = os.getenv("SIDEKICK_CONFIG_PATH") or os.getenv("HERMES_CONFIG_PATH")
+    env_override = os.getenv("SIDEKICK_CONFIG_PATH")
     if env_override:
         return Path(env_override).expanduser()
     try:
@@ -452,8 +454,8 @@ def _workspace_candidates(raw: str | Path | None = None) -> list[Path]:
             candidates.append(path)
 
     add(raw)
-    if os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"):
-        add(os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE"))
+    if os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE"):
+        add(os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE"))
 
     home_workspace = HOME / "workspace"
     home_work = HOME / "work"
@@ -504,7 +506,7 @@ def _discover_default_workspace() -> Path:
 
 
 DEFAULT_WORKSPACE = _discover_default_workspace()
-DEFAULT_MODEL = os.getenv("SIDEKICK_WEBUI_DEFAULT_MODEL") or os.getenv("HERMES_WEBUI_DEFAULT_MODEL", "")  # Empty = use provider default; avoids showing unavailable OpenAI model to non-OpenAI users (#646)
+DEFAULT_MODEL = os.getenv("SIDEKICK_WEBUI_DEFAULT_MODEL")  # Empty = use provider default; avoids showing unavailable OpenAI model to non-OpenAI users (#646)
 
 
 # ── Startup diagnostics ───────────────────────────────────────────────────────
@@ -749,29 +751,14 @@ _PROVIDER_DISPLAY = {
     "nous": "Nous Portal",
     "openrouter": "OpenRouter",
     "anthropic": "Anthropic",
-    "openai": "OpenAI",
     "openai-codex": "OpenAI Codex",
-    "copilot": "GitHub Copilot",
     "zai": "Z.AI / GLM",
-    "kimi-coding": "Kimi / Moonshot",
-    "deepseek": "DeepSeek",
     "minimax": "MiniMax",
-    "minimax-cn": "MiniMax (China)",
-    "gemini-router": "Gemini Router",
-    "google": "Google",
-    "meta-llama": "Meta Llama",
-    "huggingface": "HuggingFace",
-    "alibaba": "Alibaba",
+    "minimax-oauth": "MiniMax (OAuth)",
     "ollama": "Ollama",
     "ollama-cloud": "Ollama Cloud",
-    "opencode-zen": "OpenCode Zen",
     "opencode-go": "OpenCode Go",
     "lmstudio": "LM Studio",
-    "mistralai": "Mistral",
-    "qwen": "Qwen",
-    "x-ai": "xAI",
-    "nvidia": "NVIDIA NIM",
-    "xiaomi": "Xiaomi",
     "morph": "Morph",
 }
 
@@ -1036,21 +1023,11 @@ _PROVIDER_MODELS = {
         {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5"},
     ],
     "openai": [
-        {"id": "gpt-5.5",      "label": "GPT-5.5"},
-        {"id": "gpt-5.5-mini", "label": "GPT-5.5 Mini"},
-        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"},
-        {"id": "gpt-5.4",      "label": "GPT-5.4"},
     ],
     "openai-codex": [
         {"id": "gpt-5.5", "label": "GPT-5.5"},
-        {"id": "gpt-5.5-mini", "label": "GPT-5.5 Mini"},
-        {"id": "gpt-5.4", "label": "GPT-5.4"},
         {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"},
-        {"id": "gpt-5.3-codex", "label": "GPT-5.3 Codex"},
-        {"id": "gpt-5.2-codex", "label": "GPT-5.2 Codex"},
-        {"id": "gpt-5.1-codex-max", "label": "GPT-5.1 Codex Max"},
-        {"id": "gpt-5.1-codex-mini", "label": "GPT-5.1 Codex Mini"},
-        {"id": "codex-mini-latest", "label": "Codex Mini (latest)"},
+        {"id": "gpt-5.3-codex-spark", "label": "GPT-5.3 Codex Spark"},
     ],
     "google": [
         {"id": "gemini-router", "label": "Gemini Router (Free Tier)"},
@@ -1059,10 +1036,6 @@ _PROVIDER_MODELS = {
         {"id": "gemini-router", "label": "Gemini Router (Free Tier)"},
     ],
     "deepseek": [
-        {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
-        {"id": "deepseek-v4-pro", "label": "DeepSeek V4 Pro"},
-        {"id": "deepseek-chat-v3-0324", "label": "DeepSeek V3 (legacy)"},
-        {"id": "deepseek-reasoner", "label": "DeepSeek Reasoner (legacy)"},
     ],
     "nous": [
         {"id": "@nous:anthropic/claude-opus-4.6",     "label": "Claude Opus 4.6 (via Nous)"},
@@ -1071,111 +1044,37 @@ _PROVIDER_MODELS = {
         {"id": "@nous:google/gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview (via Nous)"},
     ],
     "zai": [
-        {"id": "glm-5.1", "label": "GLM-5.1"},
-        {"id": "glm-5", "label": "GLM-5"},
+        {"id": "glm-5.2", "label": "GLM-5.2"},
         {"id": "glm-5-turbo", "label": "GLM-5 Turbo"},
         {"id": "glm-4.7", "label": "GLM-4.7"},
-        {"id": "glm-4.5", "label": "GLM-4.5"},
+        {"id": "glm-4.7-flash", "label": "GLM-4.7 Flash"},
         {"id": "glm-4.5-flash", "label": "GLM-4.5 Flash"},
     ],
     "kimi-coding": [
-        {"id": "moonshot-v1-8k", "label": "Moonshot v1 8k"},
-        {"id": "moonshot-v1-32k", "label": "Moonshot v1 32k"},
-        {"id": "moonshot-v1-128k", "label": "Moonshot v1 128k"},
-        {"id": "kimi-latest", "label": "Kimi Latest"},
-        {"id": "kimi-k2.5", "label": "Kimi K2.5"},
     ],
     "minimax": [
         {"id": "MiniMax-M3", "label": "MiniMax M3"},
-        {"id": "MiniMax-M2.7", "label": "MiniMax M2.7"},
         {"id": "MiniMax-M2.7-highspeed", "label": "MiniMax M2.7 Highspeed"},
-        {"id": "MiniMax-M2.5", "label": "MiniMax M2.5"},
-        {"id": "MiniMax-M2.5-highspeed", "label": "MiniMax M2.5 Highspeed"},
-        {"id": "MiniMax-M2.1", "label": "MiniMax M2.1"},
     ],
     "minimax-cn": [
-        {"id": "MiniMax-M2.7", "label": "MiniMax M2.7"},
-        {"id": "MiniMax-M2.5", "label": "MiniMax M2.5"},
-        {"id": "MiniMax-M2.1", "label": "MiniMax M2.1"},
-        {"id": "MiniMax-M2", "label": "MiniMax M2"},
     ],
     # GitHub Copilot — model IDs served via the Copilot API
     "copilot": [
-        {"id": "gpt-5.5", "label": "GPT-5.5"},
-        {"id": "gpt-5.5-mini", "label": "GPT-5.5 Mini"},
-        {"id": "gpt-5.4", "label": "GPT-5.4"},
-        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"},
-        {"id": "gpt-4o", "label": "GPT-4o"},
-        {"id": "claude-opus-4.6", "label": "Claude Opus 4.6"},
-        {"id": "claude-sonnet-4.6", "label": "Claude Sonnet 4.6"},
-        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash Preview"},
     ],
     # OpenCode Zen — curated models via opencode.ai/zen (pay-as-you-go credits)
     "opencode-zen": [
-        {"id": "gpt-5.4-pro", "label": "GPT-5.4 Pro"},
-        {"id": "gpt-5.4", "label": "GPT-5.4"},
-        {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"},
-        {"id": "gpt-5.4-nano", "label": "GPT-5.4 Nano"},
-        {"id": "gpt-5.3-codex", "label": "GPT-5.3 Codex"},
-        {"id": "gpt-5.3-codex-spark", "label": "GPT-5.3 Codex Spark"},
-        {"id": "gpt-5.2", "label": "GPT-5.2"},
-        {"id": "gpt-5.2-codex", "label": "GPT-5.2 Codex"},
-        {"id": "gpt-5.1", "label": "GPT-5.1"},
-        {"id": "gpt-5.1-codex", "label": "GPT-5.1 Codex"},
-        {"id": "gpt-5.1-codex-max", "label": "GPT-5.1 Codex Max"},
-        {"id": "gpt-5.1-codex-mini", "label": "GPT-5.1 Codex Mini"},
-        {"id": "gpt-5", "label": "GPT-5"},
-        {"id": "gpt-5-codex", "label": "GPT-5 Codex"},
-        {"id": "gpt-5-nano", "label": "GPT-5 Nano"},
-        {"id": "claude-opus-4-7", "label": "Claude Opus 4.7"},
-        {"id": "claude-opus-4-6", "label": "Claude Opus 4.6"},
-        {"id": "claude-opus-4-5", "label": "Claude Opus 4.5"},
-        {"id": "claude-opus-4-1", "label": "Claude Opus 4.1"},
-        {"id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6"},
-        {"id": "claude-sonnet-4-5", "label": "Claude Sonnet 4.5"},
-        {"id": "claude-sonnet-4", "label": "Claude Sonnet 4"},
-        {"id": "claude-haiku-4-5", "label": "Claude Haiku 4.5"},
-        {"id": "claude-3-5-haiku", "label": "Claude 3.5 Haiku"},
-        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview"},
-        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash Preview"},
-        {"id": "gemini-3.1-flash-lite-preview", "label": "Gemini 3.1 Flash Lite Preview"},
-        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
-        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
-        {"id": "glm-5.1", "label": "GLM-5.1"},
-        {"id": "glm-5", "label": "GLM-5"},
-        {"id": "kimi-k2.5", "label": "Kimi K2.5"},
-        {"id": "minimax-m2.5", "label": "MiniMax M2.5"},
-        {"id": "minimax-m2.5-free", "label": "MiniMax M2.5 Free"},
-        {"id": "nemotron-3-super-free", "label": "Nemotron 3 Super Free"},
-        {"id": "big-pickle", "label": "Big Pickle"},
     ],
     # OpenCode Go — flat-rate models via opencode.ai/go ($10/month)
     "opencode-go": [
-        {"id": "glm-5.2",          "label": "GLM-5.2"},
-        {"id": "glm-5.1",          "label": "GLM-5.1"},
-        {"id": "glm-5",            "label": "GLM-5"},
-        {"id": "kimi-k2.5",        "label": "Kimi K2.5"},
-        {"id": "kimi-k2.6",        "label": "Kimi K2.6"},
         {"id": "deepseek-v4-pro",  "label": "DeepSeek V4 Pro"},
         {"id": "deepseek-v4-flash","label": "DeepSeek V4 Flash"},
-        {"id": "mimo-v2-pro",      "label": "MiMo V2 Pro"},
-        {"id": "mimo-v2-omni",     "label": "MiMo V2 Omni"},
-        {"id": "mimo-v2.5-pro",    "label": "MiMo V2.5 Pro"},
-        {"id": "mimo-v2.5",        "label": "MiMo V2.5"},
-        {"id": "minimax-m2.7",     "label": "MiniMax M2.7"},
-        {"id": "minimax-m2.5",     "label": "MiniMax M2.5"},
-        {"id": "qwen3.6-plus",     "label": "Qwen3.6 Plus"},
-        {"id": "qwen3.5-plus",     "label": "Qwen3.5 Plus"},
+        {"id": "glm-5.2",          "label": "GLM-5.2"},
+        {"id": "minimax-m3",       "label": "MiniMax M3"},
     ],
     # 'gemini' is the hermes_cli provider ID for Google AI Studio
     # Model IDs are bare — sent directly to:
     #   https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
     "gemini": [
-        {"id": "gemini-3.1-pro-preview",            "label": "Gemini 3.1 Pro Preview"},
-        {"id": "gemini-3-flash-preview",            "label": "Gemini 3 Flash Preview"},
-        {"id": "gemini-3.1-flash-lite-preview",     "label": "Gemini 3.1 Flash Lite Preview"},
-        {"id": "gemini-2.5-pro",                    "label": "Gemini 2.5 Pro"},
-        {"id": "gemini-2.5-flash",                  "label": "Gemini 2.5 Flash"},
     ],
     # Mistral — prefix used in OpenRouter model IDs (mistralai/mistral-large-latest)
     "mistralai": [
@@ -1189,22 +1088,12 @@ _PROVIDER_MODELS = {
     ],
     # NVIDIA NIM — NVIDIA's inference platform
     "nvidia": [
-        {"id": "nvidia/nemotron-3-super-120b-a12b", "label": "Nemotron 3 Super 120B"},
-        {"id": "nvidia/nemotron-3-nano-30b-a3b", "label": "Nemotron 3 Nano 30B"},
-        {"id": "nvidia/llama-3.3-nemotron-super-49b-v1.5", "label": "Llama 3.3 Nemotron Super 49B"},
-        {"id": "qwen/qwen3-next-80b-a3b-instruct", "label": "Qwen3 Next 80B"},
     ],
     # Xiaomi MiMo — direct API via api.xiaomimimo.com
     "xiaomi": [
-        {"id": "mimo-v2.5-pro",    "label": "MiMo V2.5 Pro"},
-        {"id": "mimo-v2.5",        "label": "MiMo V2.5"},
-        {"id": "mimo-v2-pro",      "label": "MiMo V2 Pro"},
-        {"id": "mimo-v2-omni",     "label": "MiMo V2 Omni"},
-        {"id": "mimo-v2-flash",    "label": "MiMo V2 Flash"},
     ],
     # xAI — prefix used in OpenRouter model IDs (x-ai/grok-4-20)
     "x-ai": [
-        {"id": "grok-4.20", "label": "Grok 4.20"},
     ],
     # Morph — specialized models and subagents for AI coding agents
     "morph": [
@@ -1996,7 +1885,7 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
             default_model = cfg_default
 
     env_model = (
-        os.getenv("SIDEKICK_MODEL") or os.getenv("HERMES_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL")
+        os.getenv("SIDEKICK_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL")
     )
     if env_model:
         default_model = env_model.strip()
@@ -2232,7 +2121,7 @@ def _get_auth_store_path() -> Path:
 
         return _gah() / "auth.json"
     except ImportError:
-        return HOME / ".hermes" / "auth.json"
+        return HOME / ".hermes" / "auth.json"  # legacy fallback
 
 
 def _read_auth_store() -> dict:
@@ -3103,7 +2992,7 @@ def get_available_models() -> dict:
 
                 hermes_env_path = _gah2() / ".env"
             except ImportError:
-                hermes_env_path = HOME / ".hermes" / ".env"
+                hermes_env_path = HOME / ".hermes" / ".env"  # legacy fallback
             env_keys = {}
             if hermes_env_path.exists():
                 try:
@@ -4587,7 +4476,7 @@ try:
 except OSError:
     _settings_file_exists = False
 if _settings_file_exists:
-    if not (os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or os.getenv("HERMES_WEBUI_DEFAULT_WORKSPACE")):
+    if not (os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE")):
         DEFAULT_WORKSPACE = resolve_default_workspace(
             _startup_settings.get("default_workspace")
         )
