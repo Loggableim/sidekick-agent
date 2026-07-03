@@ -16,12 +16,20 @@ def get_logs_dir() -> Path:
 
 def _read_logging_config() -> tuple[str, int, int]:
     config = load_config()
+    if not isinstance(config, dict):
+        return ("INFO", 5, 3)
     logging_cfg = config.get("logging", {})
     if not isinstance(logging_cfg, dict):
         return ("INFO", 5, 3)
     level = str(logging_cfg.get("level", "INFO")).upper()
-    max_size_mb = int(logging_cfg.get("max_size_mb", 5))
-    backup_count = int(logging_cfg.get("backup_count", 3))
+    try:
+        max_size_mb = int(logging_cfg.get("max_size_mb", 5))
+    except (TypeError, ValueError):
+        max_size_mb = 5
+    try:
+        backup_count = int(logging_cfg.get("backup_count", 3))
+    except (TypeError, ValueError):
+        backup_count = 3
     return (level, max_size_mb, backup_count)
 
 
