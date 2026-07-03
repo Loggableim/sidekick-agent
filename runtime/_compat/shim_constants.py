@@ -58,6 +58,28 @@ def get_hermes_dir(new_subpath: str, old_name: str) -> Path:
 
 # ── Also add the sidekick-specific helpers that existed in the old sidekick_constants ──
 
+def get_hermes_home() -> Path:
+    """Return the Hermes home directory path. MUST return Path, not str."""
+    return get_sidekick_home()
+
+
+def find_node_executable() -> str | None:
+    """Find Node.js executable. Returns None if not found."""
+    import shutil
+    node = shutil.which("node")
+    if node:
+        return node
+    for base in [
+        os.environ.get("ProgramFiles", "C:\\Program Files"),
+        os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+    ]:
+        for d in ["nodejs", "node"]:
+            p = os.path.join(base, d, "node.exe")
+            if os.path.isfile(p):
+                return p
+    return None
+
+
 def get_subprocess_home_sidekick() -> str | None:
     """Return a per-profile HOME directory for subprocesses, or None.
 
@@ -86,6 +108,8 @@ __all__ = [
     "get_default_sidekick_root",
     "get_env_path",
     "get_hermes_dir",
+    "get_hermes_home",
+    "find_node_executable",
     "get_optional_skills_dir",
     "get_sidekick_dir",
     "get_sidekick_home",
