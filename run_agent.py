@@ -102,7 +102,7 @@ OpenAI = _OpenAIProxy()
 
 # Load .env from ~/.sidekick/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
-from cli.env_loader import load_hermes_dotenv
+from cli.env_loader import load_sidekick_dotenv as load_hermes_dotenv
 from cli.timeouts import (
     get_provider_request_timeout,
     get_provider_stale_timeout,
@@ -1829,7 +1829,6 @@ class AIAgent:
         # sessions in one process).  Also writes os.environ as fallback for
         # CLI mode where ContextVars aren't used.
         os.environ["SIDEKICK_SESSION_ID"] = self.session_id
-        os.environ["HERMES_SESSION_ID"] = self.session_id  # backward compat
         try:
             from gateway.session_context import _SESSION_ID
             _SESSION_ID.set(self.session_id)
@@ -2441,7 +2440,7 @@ class AIAgent:
         try:
             self._session_db.create_session(
                 session_id=self.session_id,
-                source=self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                source=self.platform or os.environ.get("SIDEKICK_SESSION_SOURCE", "cli"),
                 model=self.model,
                 model_config=self._session_init_model_config,
                 system_prompt=self._cached_system_prompt,
@@ -3345,7 +3344,7 @@ class AIAgent:
         cfg = get_provider_request_timeout(self.provider, self.model)
         if cfg is not None:
             return cfg
-        return float(os.getenv("SIDEKICK_API_TIMEOUT") or os.getenv("HERMES_API_TIMEOUT", 1800.0))
+        return float(os.getenv("SIDEKICK_API_TIMEOUT", 1800.0))
 
     def _resolved_api_call_stale_timeout_base(self) -> tuple[float, bool]:
         """Resolve the base non-stream stale timeout and whether it is implicit.
@@ -3365,7 +3364,7 @@ class AIAgent:
         if cfg is not None:
             return cfg, False
 
-        env_timeout = os.getenv("SIDEKICK_API_CALL_STALE_TIMEOUT") or os.getenv("HERMES_API_CALL_STALE_TIMEOUT")
+        env_timeout = os.getenv("SIDEKICK_API_CALL_STALE_TIMEOUT")
         if env_timeout is not None:
             return float(env_timeout), False
 
@@ -4288,7 +4287,7 @@ class AIAgent:
             ),
             "session_id": self.session_id or "",
             "parent_session_id": self._parent_session_id or "",
-            "platform": self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+            "platform": self.platform or os.environ.get("SIDEKICK_SESSION_SOURCE", "cli"),
             "tool_name": "memory",
         }
         if task_id:
@@ -7632,14 +7631,14 @@ class AIAgent:
             _base_timeout = (
                 _provider_timeout_cfg
                 if _provider_timeout_cfg is not None
-                else float(os.getenv("SIDEKICK_API_TIMEOUT") or os.getenv("HERMES_API_TIMEOUT", 1800.0))
+                else float(os.getenv("SIDEKICK_API_TIMEOUT", 1800.0))
             )
             # Read timeout: config wins here too.  Otherwise use
             # HERMES_STREAM_READ_TIMEOUT (default 120s) for cloud providers.
             if _provider_timeout_cfg is not None:
                 _stream_read_timeout = _provider_timeout_cfg
             else:
-                _stream_read_timeout = float(os.getenv("SIDEKICK_STREAM_READ_TIMEOUT") or os.getenv("HERMES_STREAM_READ_TIMEOUT", 120.0))
+                _stream_read_timeout = float(os.getenv("SIDEKICK_STREAM_READ_TIMEOUT", 120.0))
                 # Local providers (Ollama, llama.cpp, vLLM) can take minutes for
                 # prefill on large contexts before producing the first token.
                 # Auto-increase the httpx read timeout unless the user explicitly
@@ -7990,7 +7989,7 @@ class AIAgent:
         def _call():
             import httpx as _httpx
 
-            _max_stream_retries = int(os.getenv("SIDEKICK_STREAM_RETRIES") or os.getenv("HERMES_STREAM_RETRIES", 2))
+            _max_stream_retries = int(os.getenv("SIDEKICK_STREAM_RETRIES", 2))
 
             try:
                 for _stream_attempt in range(_max_stream_retries + 1):
@@ -8237,7 +8236,7 @@ class AIAgent:
                 if request_client is not None:
                     self._close_request_openai_client(request_client, reason="stream_request_complete")
 
-        _stream_stale_timeout_base = float(os.getenv("SIDEKICK_STREAM_STALE_TIMEOUT") or os.getenv("HERMES_STREAM_STALE_TIMEOUT", 180.0))
+        _stream_stale_timeout_base = float(os.getenv("SIDEKICK_STREAM_STALE_TIMEOUT", 180.0))
         # Local providers (Ollama, oMLX, llama-cpp) can take 300+ seconds
         # for prefill on large contexts.  Disable the stale detector unless
         # the user explicitly set HERMES_STREAM_STALE_TIMEOUT.
@@ -10103,7 +10102,6 @@ class AIAgent:
                 old_session_id = self.session_id
                 self.session_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
                 os.environ["SIDEKICK_SESSION_ID"] = self.session_id
-                os.environ["HERMES_SESSION_ID"] = self.session_id  # backward compat
                 try:
                     from gateway.session_context import _SESSION_ID
                     _SESSION_ID.set(self.session_id)
@@ -10114,7 +10112,7 @@ class AIAgent:
                 self._session_db_created = False
                 self._session_db.create_session(
                     session_id=self.session_id,
-                    source=self.platform or os.environ.get("HERMES_SESSION_SOURCE", "cli"),
+                    source=self.platform or os.environ.get("SIDEKICK_SESSION_SOURCE", "cli"),
                     model=self.model,
                     model_config=self._session_init_model_config,
                     parent_session_id=old_session_id,
@@ -14869,7 +14867,7 @@ class AIAgent:
             # protocol violation).  The agent loop strips tools before calling
             # _handle_max_iterations, so the model cannot call kanban_block
             # itself — we must do it on its behalf.
-            _kanban_task = os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")
+            _kanban_task = os.environ.get("SIDEKICK_KANBAN_TASK")
             if _kanban_task:
                 try:
                     handle_function_call(
