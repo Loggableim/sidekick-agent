@@ -11,6 +11,22 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# Re-export _hermes_home from the real run_agent (lazy, to avoid circular imports)
+_hermes_home = None
+try:
+    import run_agent as _real_run_agent
+    _hermes_home = getattr(_real_run_agent, '_hermes_home', None)
+except Exception:
+    pass
+
+# Re-export get_tool_definitions from the real run_agent
+get_tool_definitions = None
+try:
+    import run_agent as _real_run_agent
+    get_tool_definitions = getattr(_real_run_agent, 'get_tool_definitions', None)
+except Exception:
+    pass
+
 # Try to load the real AIAgent if run_agent.py is available
 _real_aiagent = None
 try:
@@ -71,4 +87,6 @@ def _sanitize_surrogates(text: str) -> str:
 __all__ = [
     "AIAgent",
     "_sanitize_surrogates",
+    "_hermes_home",
+    "get_tool_definitions",
 ]
