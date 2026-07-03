@@ -14,6 +14,22 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+
+def _get_morph_api_key() -> str | None:
+    """Resolve MORPH_API_KEY: env var first, then auth.json credential pool."""
+    key = os.environ.get("MORPH_API_KEY")
+    if key:
+        return key
+    try:
+        from cli.config import get_sidekick_home
+        auth = json.loads((get_sidekick_home() / "auth.json").read_text())
+        pool = auth.get("credential_pool", {}).get("morph", [])
+        if pool:
+            return pool[0].get("access_token") or None
+    except Exception:
+        pass
+    return None
+
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
@@ -70,7 +86,7 @@ def _morph_apply_handler(args: dict, **kw) -> str:
     if not target_file or not code_edit:
         return json.dumps({"error": "target_file and code_edit are required"})
 
-    api_key = os.environ.get("MORPH_API_KEY")
+    api_key = _get_morph_api_key()
     if not api_key:
         return json.dumps({"error": "MORPH_API_KEY not set. Set it in your environment or config.yaml."})
 
@@ -124,11 +140,16 @@ def _morph_apply_handler(args: dict, **kw) -> str:
 
 from tools.registry import registry
 
+def _morph_available() -> bool:
+    """Runtime check: Morph tools are available if we can resolve an API key."""
+    return _get_morph_api_key() is not None
+
+
 registry.register(
     name="morph_apply",
     toolset="morph",
     schema=MORPH_APPLY_SCHEMA,
     handler=_morph_apply_handler,
-    requires_env=["MORPH_API_KEY"],
+    check_fn=_morph_available,
     emoji="⚡",
 )
