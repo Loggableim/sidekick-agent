@@ -108,7 +108,7 @@ def _workspace_slug_from_request(handler, parsed=None) -> str | None:
         slug = handler.headers.get("X-Hermes-Workspace", "").strip().lower()
         if slug:
             return slug
-    slug = os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    slug = os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
     if slug:
         return slug
     return None
@@ -3448,7 +3448,7 @@ def _handle_mail_config_get(handler, parsed) -> bool:
         space_slug = _workspace_slug_from_request(handler, parsed) or "default"
         sidekick_home = Path(
             os.environ.get("SIDEKICK_HOME")
-            or os.environ.get("HERMES_HOME")
+           
             or Path.home() / ".sidekick"
         )
         mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
@@ -3473,7 +3473,7 @@ def _handle_mail_config_post(handler, parsed, body) -> bool:
             return bad(handler, "Invalid config: 'inboxes' must be a list")
         sidekick_home = Path(
             os.environ.get("SIDEKICK_HOME")
-            or os.environ.get("HERMES_HOME")
+           
             or Path.home() / ".sidekick"
         )
         mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
@@ -3489,7 +3489,7 @@ def _handle_mail_config_post(handler, parsed, body) -> bool:
 
 
 def _cockpit_settings_path() -> Path:
-    home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
+    home = os.getenv("SIDEKICK_HOME")
     if home:
         sidekick_home = Path(home).expanduser()
     else:
@@ -3925,7 +3925,7 @@ def handle_get(handler, parsed) -> bool:
         # had no way to know — see issue #1139 / #1560.
         settings["password_env_var"] = bool(
             os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
-            or os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
+            or os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
         )
         # Inject the running version so the UI badge stays in sync with git tags
         # without any manual release step.
@@ -3976,7 +3976,7 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/session":
         import time as _time
         _t0 = _time.monotonic()
-        _debug_slow = os.environ.get("SIDEKICK_DEBUG_SLOW") or os.environ.get("HERMES_DEBUG_SLOW", "")
+        _debug_slow = os.environ.get("SIDEKICK_DEBUG_SLOW")
         query = parse_qs(parsed.query)
         sid = query.get("session_id", [""])[0]
         if not sid:
@@ -5065,7 +5065,7 @@ def _handle_apply_code(handler, body) -> bool:
     path_obj = Path(file_path)
     if not path_obj.is_absolute():
         # Try to resolve relative to the workspace or cwd
-        workspace = os.environ.get("SIDEKICK_KANBAN_WORKSPACE") or os.environ.get("HERMES_KANBAN_WORKSPACE", "")
+        workspace = os.environ.get("SIDEKICK_KANBAN_WORKSPACE")
         if workspace:
             path_obj = Path(workspace) / file_path
         else:
@@ -5144,7 +5144,7 @@ def _handle_window_control(handler, body):
 def _cast_api_host() -> str:
     return (
         os.getenv("SIDEKICK_CAST_API_HOST", "").strip()
-        or os.getenv("HERMES_CAST_API_HOST", "").strip()
+        or os.getenv("SIDEKICK_CAST_API_HOST", "").strip()
     ).rstrip("/")
 
 
@@ -6511,7 +6511,7 @@ def handle_post(handler, parsed) -> bool:
         if requested_password or requested_clear_password:
             if (
                 os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
-                or os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
+                or os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
             ):
                 return bad(
                     handler,
@@ -6569,7 +6569,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -6606,7 +6606,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -6641,7 +6641,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -8132,7 +8132,7 @@ def _handle_media(handler, parsed):
     import os as _os
     from web.api.auth import is_auth_enabled, parse_cookie, verify_session
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = Path(_os.getenv("SIDEKICK_HOME") or _os.getenv("HERMES_HOME", str(_HOME / ".sidekick"))).expanduser()
+    _HERMES_HOME = Path(_os.getenv("SIDEKICK_HOME") or _os.getenv("SIDEKICK_HOME", str(_HOME / ".sidekick"))).expanduser()
 
     # Auth check
     if is_auth_enabled():
@@ -10123,12 +10123,12 @@ def _handle_chat_sync(handler, body):
     with _ENV_LOCK:
         old_cwd = os.environ.get("TERMINAL_CWD")
         os.environ["TERMINAL_CWD"] = str(workspace)
-        old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK") or os.environ.get("HERMES_EXEC_ASK")
-        old_session_key = os.environ.get("SIDEKICK_SESSION_KEY") or os.environ.get("HERMES_SESSION_KEY")
+        old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK")
+        old_session_key = os.environ.get("SIDEKICK_SESSION_KEY")
         os.environ["SIDEKICK_EXEC_ASK"] = "1"
-        os.environ["HERMES_EXEC_ASK"] = "1"
+        os.environ["SIDEKICK_EXEC_ASK"] = "1"
         os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
-        os.environ["HERMES_SESSION_KEY"] = s.session_id
+        os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
     try:
         from run_agent import AIAgent
 
@@ -10228,13 +10228,13 @@ def _handle_chat_sync(handler, body):
                 os.environ.pop("HERMES_EXEC_ASK", None)
             else:
                 os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
-                os.environ["HERMES_EXEC_ASK"] = old_exec_ask
+                os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
             if old_session_key is None:
                 os.environ.pop("SIDEKICK_SESSION_KEY", None)
                 os.environ.pop("HERMES_SESSION_KEY", None)
             else:
                 os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
-                os.environ["HERMES_SESSION_KEY"] = old_session_key
+                os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
     with _get_session_agent_lock(s.session_id):
         _result_messages = result.get("messages") or _previous_context_messages
         _next_context_messages = _restore_reasoning_metadata(

@@ -328,7 +328,7 @@ def _secure_dir(path):
     if is_managed():
         return
     try:
-        mode_str = (os.environ.get("SIDEKICK_HOME_MODE")).strip()
+        mode_str = (os.environ.get("SIDEKICK_HOME_MODE", "")).strip()
         mode = int(mode_str, 8) if mode_str else 0o700
     except ValueError:
         mode = 0o700
