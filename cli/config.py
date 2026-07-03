@@ -172,7 +172,7 @@ _MANAGED_SYSTEM_NAMES = {
 
 def get_managed_system() -> Optional[str]:
     """Return the package manager owning this install, if any."""
-    raw = (os.getenv("SIDEKICK_MANAGED") or os.getenv("HERMES_MANAGED", "")).strip()
+    raw = (os.getenv("SIDEKICK_MANAGED", "")).strip()
     if raw:
         normalized = raw.lower()
         if normalized in _MANAGED_TRUE_VALUES:
@@ -213,7 +213,7 @@ def recommended_update_command() -> str:
 def format_managed_message(action: str = "modify this Sidekick installation") -> str:
     """Build a user-facing error for managed installs."""
     managed_system = get_managed_system() or "a package manager"
-    raw = (os.getenv("SIDEKICK_MANAGED") or os.getenv("HERMES_MANAGED", "")).strip().lower()
+    raw = (os.getenv("SIDEKICK_MANAGED")).strip().lower()
 
     if managed_system == "NixOS":
         env_hint = "true" if raw in _MANAGED_TRUE_VALUES else raw or "true"
@@ -258,7 +258,7 @@ def get_container_exec_info() -> Optional[dict]:
     container.enable = true. It tells the host CLI to exec into the container
     instead of running locally.
     """
-    if os.environ.get("SIDEKICK_DEV") == "1" or os.environ.get("HERMES_DEV") == "1":
+    if os.environ.get("SIDEKICK_DEV") == "1" == "1":
         return None
 
     from runtime._compat.shim_constants import is_container
@@ -328,7 +328,7 @@ def _secure_dir(path):
     if is_managed():
         return
     try:
-        mode_str = (os.environ.get("SIDEKICK_HOME_MODE") or os.environ.get("HERMES_HOME_MODE", "")).strip()
+        mode_str = (os.environ.get("SIDEKICK_HOME_MODE")).strip()
         mode = int(mode_str, 8) if mode_str else 0o700
     except ValueError:
         mode = 0o700
@@ -347,7 +347,7 @@ def _is_container() -> bool:
     permissions.
     """
     # Explicit opt-out
-    if os.environ.get("SIDEKICK_CONTAINER") or os.environ.get("HERMES_CONTAINER") or os.environ.get("SIDEKICK_SKIP_CHMOD") or os.environ.get("HERMES_SKIP_CHMOD"):
+    if os.environ.get("SIDEKICK_CONTAINER") or os.environ.get("SIDEKICK_SKIP_CHMOD"):
         return True
     # Docker / Podman marker file
     if os.path.exists("/.dockerenv"):
@@ -3304,7 +3304,7 @@ def warn_deprecated_cwd_env_vars(config: Optional[Dict[str, Any]] = None) -> Non
             f"this is deprecated."
         )
     if lines:
-        hint_path = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", "~/.sidekick")
+        hint_path = os.environ.get("SIDEKICK_HOME")
         lines.insert(0, "\033[33m⚠ Deprecated .env settings detected:\033[0m")
         lines.append(
             "  \033[2mMove to config.yaml instead:  "
@@ -3347,8 +3347,8 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
         if not isinstance(display, dict):
             display = {}
         if "tool_progress" not in display:
-            old_enabled = get_env_value("SIDEKICK_TOOL_PROGRESS") or get_env_value("HERMES_TOOL_PROGRESS")
-            old_mode = get_env_value("SIDEKICK_TOOL_PROGRESS_MODE") or get_env_value("HERMES_TOOL_PROGRESS_MODE")
+            old_enabled = get_env_value("SIDEKICK_TOOL_PROGRESS")
+            old_mode = get_env_value("SIDEKICK_TOOL_PROGRESS_MODE")
             if old_enabled and old_enabled.lower() in {"false", "0", "no"}:
                 display["tool_progress"] = "off"
                 results["config_added"].append("display.tool_progress=off (from SIDEKICK_TOOL_PROGRESS/HERMES_TOOL_PROGRESS=false)")
@@ -3367,7 +3367,7 @@ def migrate_config(interactive: bool = True, quiet: bool = False) -> Dict[str, A
     if current_ver < 5:
         config = load_config()
         if "timezone" not in config:
-            old_tz = os.getenv("SIDEKICK_TIMEZONE") or os.getenv("HERMES_TIMEZONE", "")
+            old_tz = os.getenv("SIDEKICK_TIMEZONE")
             if old_tz and old_tz.strip():
                 config["timezone"] = old_tz.strip()
                 results["config_added"].append(f"timezone={old_tz.strip()} (from HERMES_TIMEZONE)")
