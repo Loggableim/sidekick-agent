@@ -118,9 +118,9 @@ _SANE_PATH = os.pathsep.join(_SANE_PATH_DIRS)
 
 
 def _webui_browser_context() -> tuple[str, str, str]:
-    session_id = os.getenv("SIDEKICK_WEBUI_BROWSER_SESSION_ID") or os.getenv("HERMES_WEBUI_BROWSER_SESSION_ID", "").strip()
-    base_url = os.getenv("SIDEKICK_WEBUI_BROWSER_BASE_URL") or os.getenv("HERMES_WEBUI_BROWSER_BASE_URL", "").strip().rstrip("/")
-    token = os.getenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN") or os.getenv("HERMES_WEBUI_BROWSER_PERMISSION_TOKEN", "").strip()
+    session_id = os.getenv("SIDEKICK_WEBUI_BROWSER_SESSION_ID", "").strip()
+    base_url = os.getenv("SIDEKICK_WEBUI_BROWSER_BASE_URL", "").strip().rstrip("/")
+    token = os.getenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN", "").strip()
     return session_id, base_url, token
 
 
@@ -3495,7 +3495,7 @@ def _chromium_search_roots() -> List[str]:
     Order mirrors what agent-browser and Playwright actually probe:
 
     1. ``PLAYWRIGHT_BROWSERS_PATH`` when set (Docker image sets this to
-       ``/opt/hermes/.playwright``).
+       ``/opt/hermes/.playwright`` — legacy Docker path).
     2. ``~/.cache/ms-playwright`` — Playwright's default on Linux/macOS.
     3. ``~/Library/Caches/ms-playwright`` — Playwright's default on macOS.
     4. ``%USERPROFILE%\\AppData\\Local\\ms-playwright`` — Playwright's default
