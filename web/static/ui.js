@@ -6171,8 +6171,10 @@ function renderMessages(options){
       filesHtml=`<div class="msg-files">${m.attachments.map(f=>{
         const fLabel=typeof f==='string'?f:(f&&(f.name||f.filename||f.path))||'';
         const fname=String(fLabel).split('/').pop()||String(fLabel);
-        // Use api/file/raw which resolves filename relative to the session workspace.
-        const fileUrl='api/file/raw?session_id='+encodeURIComponent(_attachSid)+'&path='+encodeURIComponent(fname);
+        // Use the full path (f.path) for the URL so the server can resolve it.
+        // f.name/filename is the display label; f.path is the absolute workspace path.
+        const fpath=typeof f==='string'?f:(f&&f.path)||fLabel;
+        const fileUrl='api/file/raw?session_id='+encodeURIComponent(_attachSid)+'&path='+encodeURIComponent(fpath);
         return _renderAttachmentHtml(fname,fileUrl);
       }).join('')}</div>`;
     }
