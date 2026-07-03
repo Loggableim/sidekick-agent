@@ -7,9 +7,13 @@ markers, and Morph returns the fully merged file.
 Requires ``MORPH_API_KEY`` environment variable.
 """
 
+import difflib
 import json
 import logging
 import os
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,48 @@ def _get_morph_api_key() -> str | None:
         pass
     return None
 
+
+def _syntax_check(path: Path) -> str | None:
+    """Run a syntax check on the file. Returns error message or None if OK."""
+    if path.suffix == ".py":
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "py_compile", str(path)],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode != 0:
+                return result.stderr.strip() or result.stdout.strip() or "Syntax error"
+        except subprocess.TimeoutExpired:
+            return "Syntax check timed out"
+        except FileNotFoundError:
+            return "Python interpreter not found"
+    elif path.suffix in (".json", ".yaml", ".yml", ".toml"):
+        # Basic structural check via compile/parse
+        try:
+            if path.suffix == ".json":
+                json.loads(path.read_text())
+            elif path.suffix in (".yaml", ".yml"):
+                import yaml
+                yaml.safe_load(path.read_text())
+            elif path.suffix == ".toml":
+                import tomllib
+                tomllib.loads(path.read_text())
+        except (json.JSONDecodeError, ValueError, Exception) as e:
+            return str(e)
+    return None
+
+
+def _compute_diff(original: str, merged: str, file_path: str) -> str:
+    """Generate a unified diff between original and merged content."""
+    diff = difflib.unified_diff(
+        original.splitlines(keepends=True),
+        merged.splitlines(keepends=True),
+        fromfile=f"a/{file_path}",
+        tofile=f"b/{file_path}",
+    )
+    return "".join(diff)
+
+
 # ---------------------------------------------------------------------------
 # Schema
 # ---------------------------------------------------------------------------
@@ -41,6 +87,8 @@ MORPH_APPLY_SCHEMA = {
         "Use // ... existing code ... markers for unchanged sections. "
         "The tool reads the original file, sends it to Morph's Fast Apply API, "
         "and writes the merged result back. "
+        "Creates a .bak backup before editing and validates syntax after. "
+        "Returns a diff of changes. "
         "Faster and more accurate than patch for complex edits."
     ),
     "parameters": {
@@ -78,7 +126,7 @@ MORPH_APPLY_SCHEMA = {
 # ---------------------------------------------------------------------------
 
 def _morph_apply_handler(args: dict, **kw) -> str:
-    """Execute a Morph Fast Apply edit."""
+    """Execute a Morph Fast Apply edit with backup, validation, and diff."""
     target_file = args.get("target_file", "")
     code_edit = args.get("code_edit", "")
     instructions = args.get("instructions", "")
@@ -121,12 +169,63 @@ def _morph_apply_handler(args: dict, **kw) -> str:
         if not merged_code:
             return json.dumps({"error": "Morph returned empty response"})
 
-        # Write merged result
-        path.write_text(merged_code, encoding="utf-8")
+        # ── Validation 1: Non-empty output ──
+        if len(merged_code.strip()) < 10:
+            return json.dumps({"error": f"Morph returned suspiciously short output ({len(merged_code.strip())} chars). Aborting."})
+
+        # ── Validation 2: Not identical to input (no change made) ──
+        if merged_code == original_code:
+            return json.dumps({"warning": "Morph returned identical content — no changes were applied.", "diff": ""})
+
+        # ── Backup ──
+        backup_path = path.with_suffix(path.suffix + ".bak")
+        try:
+            path.rename(backup_path)
+        except Exception as e:
+            return json.dumps({"error": f"Failed to create backup: {e}"})
+
+        # ── Write merged result ──
+        try:
+            path.write_text(merged_code, encoding="utf-8")
+        except Exception as e:
+            # Restore backup on write failure
+            backup_path.rename(path)
+            return json.dumps({"error": f"Failed to write merged file: {e}. Backup restored."})
+
+        # ── Validation 3: Syntax check ──
+        syntax_error = _syntax_check(path)
+        if syntax_error:
+            # Rollback: restore backup
+            path.write_text(original_code, encoding="utf-8")
+            backup_path.rename(path)
+            return json.dumps({
+                "error": f"Syntax check failed after merge. Changes rolled back.\nError: {syntax_error}",
+                "backup_restored": True,
+            })
+
+        # ── Compute diff ──
+        diff = _compute_diff(original_code, merged_code, path.name)
+
+        # Count changes
+        added = sum(1 for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+        removed = sum(1 for line in diff.splitlines() if line.startswith("-") and not line.startswith("---"))
+
+        # Clean up backup on success
+        try:
+            backup_path.unlink()
+        except Exception:
+            pass
+
         return json.dumps({
             "success": True,
             "file": str(path),
             "message": f"Applied edit to {path.name}",
+            "changes": {
+                "added": added,
+                "removed": removed,
+                "total_lines": len(merged_code.splitlines()),
+            },
+            "diff": diff,
         })
 
     except Exception as e:

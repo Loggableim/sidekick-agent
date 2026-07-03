@@ -118,29 +118,31 @@ def run_read(root: str, path: str, start: int = 1, end: int | None = None) -> st
 
 
 def run_list_dir(root: str, path: str, max_depth: int = 3) -> str:
-    """List directory tree with paths relative to repo root."""
+    """List directory tree with paths relative to repo root (pure Python, cross-platform)."""
     dp = Path(_resolve_path(root, path))
     if not dp.exists():
         return f"Error: directory not found: {path}"
     try:
-        r = subprocess.run(
-            ["find", str(dp), "-maxdepth", str(max_depth),
-             "-not", "-path", "*/.git/*",
-             "-not", "-path", "*/node_modules/*",
-             "-not", "-path", "*/__pycache__/*"],
-            capture_output=True, text=True, timeout=5, cwd=root,
-        )
-        if not r.stdout.strip():
-            return "empty directory"
-        root_prefix = root.rstrip("/") + "/"
+        root_resolved = Path(root).resolve()
+        exclude_dirs = {".git", "node_modules", "__pycache__", ".venv", "venv"}
         lines = []
-        for line in r.stdout.strip().split("\n"):
-            if line.startswith(root_prefix):
-                lines.append(line[len(root_prefix):])
-            elif line == root.rstrip("/"):
-                lines.append(".")
-            else:
-                lines.append(line)
+        for dirpath, dirnames, filenames in os.walk(dp):
+            # Filter excluded dirs in-place so os.walk skips them
+            dirnames[:] = [d for d in dirnames if d not in exclude_dirs]
+            # Calculate depth relative to start
+            rel = Path(dirpath).relative_to(dp)
+            depth = 0 if rel == Path(".") else len(rel.parts)
+            if depth > max_depth:
+                dirnames.clear()  # Don't descend further
+                continue
+            # Add directory itself
+            full_rel = Path(dirpath).relative_to(root_resolved)
+            lines.append(str(full_rel))
+            # Add files
+            for f in sorted(filenames):
+                lines.append(str(full_rel / f))
+        if not lines:
+            return "empty directory"
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"

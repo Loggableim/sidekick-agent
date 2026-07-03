@@ -7,7 +7,7 @@
 | Dokument | Beschreibung |
 |----------|--------------|
 | [`README.md`](../README.md) | Übersicht, Installation, Quickstart |
-| [`troubleshooting.md`](troubleshooting.md) | Hilfe bei Problemen |
+| [`morph-worker-integration.md`](morph-worker-integration.md) | Morph Worker Network — Fast Apply, WarpGrep, Compactor |
 | [`known-issues.md`](known-issues.md) | Bekannte Einschränkungen |
 
 ## Architektur & Design
