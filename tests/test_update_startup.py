@@ -117,6 +117,32 @@ def test_windows_zip_update_fallback_uses_sidekick_master_archive():
     assert 'branch = "main"' not in source
 
 
+def test_windows_update_quarantines_running_entrypoints_from_dot_venv(monkeypatch, tmp_path):
+    import cli.main as main
+
+    scripts = tmp_path / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    entrypoints = [
+        scripts / "sidekick.exe",
+        scripts / "sidekick-gateway.exe",
+        scripts / "hermes.exe",
+        scripts / "hermes-gateway.exe",
+    ]
+    for path in entrypoints:
+        path.write_text("old launcher", encoding="utf-8")
+    (tmp_path / "venv" / "Scripts").mkdir(parents=True)
+
+    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(main, "_is_windows", lambda: True)
+
+    assert main._venv_scripts_dir() == scripts
+    moved = main._quarantine_running_sidekick_exe(scripts)
+
+    assert {original for original, _ in moved} == set(entrypoints)
+    assert all(not path.exists() for path in entrypoints)
+    assert all(quarantined.name.startswith(original.name + ".old.") for original, quarantined in moved)
+
+
 def test_import_fastapi_web_server_does_not_run_git():
     script = textwrap.dedent(
         """
