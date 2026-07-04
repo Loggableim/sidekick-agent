@@ -24,7 +24,6 @@ def _bootstrap() -> None:
         ("sidekick_bootstrap", "runtime._compat.shim_bootstrap"),
         ("sidekick_time", "runtime._compat.shim_time"),
         ("hermes_constants", "runtime._compat.shim_constants"),
-        ("hermes_logging", "runtime._compat.shim_logging"),
         ("hermes_state", "runtime._compat.shim_state"),
         ("hermes_bootstrap", "runtime._compat.shim_bootstrap"),
         ("hermes_time", "runtime._compat.shim_time"),
@@ -38,23 +37,16 @@ def _bootstrap() -> None:
             except Exception:
                 pass
 
-    # run_agent needs a special alias — the module itself imports other things
+    # run_agent: import the REAL module, not a lazy stub.
+    # The real run_agent.py lives at the repo root and has all the attributes
+    # (AIAgent, _sidekick_home, get_tool_definitions, etc.). The compat stub
+    # in runtime/_compat/run_agent.py re-exports from it, but if we set a lazy
+    # empty proxy here, the WebUI crashes with
+    # "module 'run_agent' has no attribute '_hermes_home'" because the proxy
+    # is empty. Import the real module directly.
     if "run_agent" not in sys.modules:
         try:
-            # Can't eagerly import — too many side effects during bootstrap
-            # Create a lazy module proxy
-            import importlib.abc
-
-            class _LazyRunAgentLoader(importlib.abc.Loader):
-                def create_module(self, spec):
-                    return None  # Use default semantics
-
-                def exec_module(self, module):
-                    pass  # Will be populated by the real import
-
-            spec = importlib.machinery.ModuleSpec("run_agent", _LazyRunAgentLoader(), is_package=False)
-            lazy_mod = importlib.util.module_from_spec(spec)
-            sys.modules["run_agent"] = lazy_mod
+            import run_agent as _real_ra  # noqa: F401
         except Exception:
             pass
 

@@ -690,6 +690,9 @@ for _attr in dir(_real_run_agent):
                 setattr(_run_agent_stub, _attr, getattr(_real_run_agent, _attr))
             except Exception:
                 pass
+# Alias: real run_agent uses _sidekick_home, but WebUI code expects _hermes_home
+if getattr(_run_agent_stub, "_hermes_home", None) is None:
+    _run_agent_stub._hermes_home = getattr(_real_run_agent, "_sidekick_home", None)
 sys.modules["run_agent"] = _run_agent_stub
 
 from run_agent import AIAgent

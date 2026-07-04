@@ -12,10 +12,13 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 # Re-export _hermes_home from the real run_agent (lazy, to avoid circular imports)
+# The real run_agent.py uses _sidekick_home, not _hermes_home. Alias it.
 _hermes_home = None
 try:
     import run_agent as _real_run_agent
     _hermes_home = getattr(_real_run_agent, '_hermes_home', None)
+    if _hermes_home is None:
+        _hermes_home = getattr(_real_run_agent, '_sidekick_home', None)
 except Exception:
     pass
 
