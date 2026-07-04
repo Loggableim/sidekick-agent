@@ -241,7 +241,7 @@ def _effective_port(scheme: str, port: int | None) -> int | None:
 
 
 def _env_allowed_hosts() -> list[str]:
-    raw = _safe_getenv("SIDEKICK_BROWSER_ALLOW_HOSTS") or _safe_getenv("HERMES_BROWSER_ALLOW_HOSTS")
+    raw = _safe_getenv("SIDEKICK_BROWSER_ALLOW_HOSTS")
     if not raw:
         return []
     parts = [p.strip() for p in re.split(r"[,\s]+", raw) if p.strip()]
@@ -249,7 +249,7 @@ def _env_allowed_hosts() -> list[str]:
 
 
 def _env_require_allowlist() -> bool:
-    raw = _safe_getenv("SIDEKICK_BROWSER_REQUIRE_ALLOWLIST") or _safe_getenv("HERMES_BROWSER_REQUIRE_ALLOWLIST")
+    raw = _safe_getenv("SIDEKICK_BROWSER_REQUIRE_ALLOWLIST")
     return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
 
 

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from cli.config import get_sidekick_home, get_env_path, get_project_root, load_config
-from cli.env_loader import load_hermes_dotenv
+from cli.env_loader import load_sidekick_dotenv
 from runtime._compat.shim_constants import display_sidekick_home
 
 
@@ -197,7 +197,7 @@ def run_dump(args):
 
     # Load env from .env file so key checks work
     env_path = get_env_path()
-    load_hermes_dotenv(
+    load_sidekick_dotenv(
         hermes_home=env_path.parent,
         project_env=get_project_root() / ".env",
     )

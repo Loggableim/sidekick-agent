@@ -53,7 +53,7 @@ def _invalidate_manifest_cache() -> None:
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # sidekick/
 _SIDEKICK_HOME = Path(
     os.environ.get("SIDEKICK_HOME")
-    or os.environ.get("HERMES_HOME")
+   
     or Path.home() / ".sidekick"
 )
 _HOME_DIR = _SIDEKICK_HOME

@@ -44,7 +44,7 @@ def _hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return Path(get_active_hermes_home())
     except Exception:
-        return Path(os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", "~/.sidekick")).expanduser()
+        return Path(os.environ.get("SIDEKICK_HOME")).expanduser()
 
 
 def _workspace_hash(workspace: str) -> str:

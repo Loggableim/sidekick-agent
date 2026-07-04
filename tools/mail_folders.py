@@ -51,7 +51,7 @@ SCHEMA = {
 def _get_space_slug(kw: dict) -> str:
     slug = kw.get("user_task", "")
     if not slug:
-        slug = os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "default")
+        slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "default")
     return slug or "default"
 
 

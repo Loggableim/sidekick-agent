@@ -794,7 +794,7 @@ def _get_profile_home(profile) -> Path:
         from web.api.profiles import get_hermes_home_for_profile
         return Path(get_hermes_home_for_profile(profile))
     except ImportError:
-        return Path(os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME') or '~/.hermes').expanduser()
+        return Path(os.environ.get('SIDEKICK_HOME', '~/.sidekick')).expanduser()
 
 
 def _apply_core_sync_or_error_marker(
@@ -1176,7 +1176,7 @@ def _active_state_db_path() -> Path:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
     return hermes_home / 'state.db'
 
 
@@ -1695,10 +1695,10 @@ CLAUDE_CODE_MAX_CONTENT_CHARS = 200_000
 
 def _default_claude_code_projects_dir() -> Path | None:
     """Resolve the Claude Code projects directory without touching real home in tests."""
-    override = os.getenv('SIDEKICK_WEBUI_CLAUDE_PROJECTS_DIR') or os.getenv('HERMES_WEBUI_CLAUDE_PROJECTS_DIR')
+    override = os.getenv('SIDEKICK_WEBUI_CLAUDE_PROJECTS_DIR')
     if override:
         return Path(override).expanduser()
-    if os.getenv('SIDEKICK_WEBUI_TEST_STATE_DIR') or os.getenv('HERMES_WEBUI_TEST_STATE_DIR'):
+    if os.getenv('SIDEKICK_WEBUI_TEST_STATE_DIR'):
         return None
     return Path.home() / '.claude' / 'projects'
 
@@ -1935,7 +1935,7 @@ def get_cli_sessions() -> list:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
 
     db_path = hermes_home / 'state.db'
     if not db_path.exists():
@@ -2089,7 +2089,7 @@ def get_cli_session_messages(sid) -> list:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
     db_path = hermes_home / 'state.db'
     if not db_path.exists():
         return []
@@ -2211,7 +2211,7 @@ def count_conversation_rounds(sid: str, since: float | None = None) -> int:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
     db_path = hermes_home / 'state.db'
     if not db_path.exists():
         return 0
@@ -2288,7 +2288,7 @@ def delete_cli_session(sid) -> bool:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
     db_path = hermes_home / 'state.db'
     if not db_path.exists():
         return False

@@ -29,14 +29,14 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # ── Root directory for all workspaces ─────────────────────────────────────────
-DEFAULT_WORKSPACE_SLUG = (os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE") or os.getenv("HERMES_WEBUI_DEFAULT_SPACE", "nova")).strip().lower() or "nova"
+DEFAULT_WORKSPACE_SLUG = (os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE") or "").strip().lower() or "nova"
 
 WORKSPACES_ROOT = (
     Path(
         os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR")
         or os.getenv(
             "HERMES_WEBUI_WORKSPACES_DIR",
-            str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
+            str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
         )
     )
     .expanduser()
@@ -305,6 +305,6 @@ def resolve_active_workspace() -> Workspace:
     """
     slug = get_active_workspace_slug()
     if not slug:
-        slug = (os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "")).strip().lower() or DEFAULT_WORKSPACE_SLUG
+        slug = (os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or "").strip().lower() or DEFAULT_WORKSPACE_SLUG
     ws = get_or_create_workspace(slug)
     return ws

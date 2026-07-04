@@ -1727,7 +1727,7 @@ def test_cast_status_uses_user_safe_error_summary():
 
     assert '"error": "Hub nicht erreichbar"' in routes_py
     assert '"detail": _sanitize_error(exc)' in routes_py
-    assert 'os.getenv("HERMES_CAST_API_HOST", "").strip()' in routes_py
+    assert 'os.getenv("SIDEKICK_CAST_API_HOST", "").strip()' in routes_py
 
 
 def test_cast_status_without_config_reports_default_host_when_cockpit_unavailable(monkeypatch):

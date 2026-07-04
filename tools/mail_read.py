@@ -53,7 +53,7 @@ def _handler(args: dict, **kw) -> str:
     Parameters are validated against :data:`SCHEMA` by the tool framework.
     """
     # Resolve the active space slug.
-    space_slug = kw.get("user_task") or os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "default")
+    space_slug = kw.get("user_task") or os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "default")
 
     inbox_id = args.get("inbox_id")
     folder = args.get("folder", "INBOX")

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _SIDEKICK_HOME = Path(
     os.environ.get("SIDEKICK_HOME")
-    or os.environ.get("HERMES_HOME")
+   
     or Path.home() / ".sidekick"
 )
 

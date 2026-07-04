@@ -87,11 +87,11 @@ def _resolve_base_sidekick_home() -> Path:
     and per-request resolution share one base-root contract (#749).
     """
     # Explicit override for tests or unusual setups
-    base_override = (os.getenv('SIDEKICK_BASE_HOME') or os.getenv('HERMES_BASE_HOME', '')).strip()
+    base_override = (os.getenv('SIDEKICK_BASE_HOME', '')).strip()
     if base_override:
         return _unwrap_profile_home_to_base(Path(base_override).expanduser())
 
-    hermes_home = (os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', '')).strip()
+    hermes_home = (os.getenv('SIDEKICK_HOME') or '').strip()
     if hermes_home:
         p = Path(hermes_home).expanduser()
         # If HERMES_HOME points to a profiles/ subdir, walk up two levels to the base
@@ -391,7 +391,7 @@ class cron_profile_context_for_home:
         _cron_env_lock.acquire()
         _push_cron_profile_context_depth()
         try:
-            self._prev_env = os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME')
+            self._prev_env = os.environ.get('SIDEKICK_HOME')
             os.environ['SIDEKICK_HOME'] = str(self._home)
             os.environ['HERMES_HOME'] = str(self._home)
 
@@ -473,7 +473,7 @@ class cron_profile_context:
         _cron_env_lock.acquire()
         _push_cron_profile_context_depth()
         try:
-            self._prev_env = os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME')
+            self._prev_env = os.environ.get('SIDEKICK_HOME')
             home = get_active_hermes_home()
             os.environ['SIDEKICK_HOME'] = str(home)
             os.environ['HERMES_HOME'] = str(home)

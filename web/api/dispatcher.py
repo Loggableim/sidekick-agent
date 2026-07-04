@@ -339,7 +339,6 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 def _set_space_kanban_home(space_root: str) -> None:
     """Set kanban home for this thread (bypasses request-local)."""
     os.environ["SIDEKICK_KANBAN_HOME"] = space_root
-    os.environ["HERMES_KANBAN_HOME"] = space_root  # backward compat
 
 
 def _clear_kanban_home() -> None:

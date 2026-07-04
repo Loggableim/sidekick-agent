@@ -199,7 +199,7 @@ def _find_bash() -> str:
             or "/bin/sh"
         )
 
-    custom = os.environ.get("SIDEKICK_GIT_BASH_PATH") or os.environ.get("HERMES_GIT_BASH_PATH")
+    custom = os.environ.get("SIDEKICK_GIT_BASH_PATH")
     if custom and os.path.isfile(custom):
         return custom
 

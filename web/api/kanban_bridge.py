@@ -121,17 +121,15 @@ def _conn(board=None):
     """
     _ws_home = _get_ws_kanban_home()
     if _ws_home:
-        old_home = os.environ.get("SIDEKICK_KANBAN_HOME") or os.environ.get("HERMES_KANBAN_HOME", "")
+        old_home = os.environ.get("SIDEKICK_KANBAN_HOME")
         try:
             os.environ["SIDEKICK_KANBAN_HOME"] = _ws_home
-            os.environ["HERMES_KANBAN_HOME"] = _ws_home  # backward compat
             kb = _kb()
             kb.init_db(board=board)
             return kb.connect(board=board)
         finally:
             if old_home:
                 os.environ["SIDEKICK_KANBAN_HOME"] = old_home
-                os.environ["HERMES_KANBAN_HOME"] = old_home  # backward compat
             else:
                 os.environ.pop("SIDEKICK_KANBAN_HOME", None)
                 os.environ.pop("HERMES_KANBAN_HOME", None)

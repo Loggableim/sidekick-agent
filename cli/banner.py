@@ -134,6 +134,60 @@ UPDATE_AVAILABLE_NO_COUNT = -1
 _UPSTREAM_REPO_URL = "https://github.com/Loggableim/sidekick-agent.git"
 
 
+def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> str:
+    """Resolve a remote's default branch for banner update checks."""
+    try:
+        result = subprocess.run(
+            ["git", "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(repo_dir),
+        )
+        ref = (result.stdout or "").strip()
+        prefix = f"{remote}/"
+        if result.returncode == 0 and ref.startswith(prefix):
+            branch = ref[len(prefix):].strip()
+            if branch:
+                return branch
+    except Exception:
+        pass
+
+    try:
+        result = subprocess.run(
+            ["git", "remote", "show", remote],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=str(repo_dir),
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                label, _, value = line.partition(":")
+                if label.strip().lower() == "head branch":
+                    branch = value.strip()
+                    if branch and branch != "(unknown)":
+                        return branch
+    except Exception:
+        pass
+
+    for branch in ("master", "main"):
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=str(repo_dir),
+            )
+            if result.returncode == 0:
+                return branch
+        except Exception:
+            pass
+
+    return "master"
+
+
 def _check_via_rev(local_rev: str) -> Optional[int]:
     """Compare an embedded git revision to upstream master via ls-remote.
 
@@ -156,7 +210,7 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
 
 
 def _check_via_local_git(repo_dir: Path) -> Optional[int]:
-    """Count commits behind origin/master in a local checkout."""
+    """Count commits behind the origin default branch in a local checkout."""
     try:
         subprocess.run(
             ["git", "fetch", "origin", "--quiet"],
@@ -166,9 +220,12 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     except Exception:
         pass  # Offline or timeout — use stale refs, that's fine
 
+    branch = _resolve_remote_default_branch(repo_dir, "origin")
+    compare_ref = f"origin/{branch}"
+
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "HEAD..origin/master"],
+            ["git", "rev-list", "--count", f"HEAD..{compare_ref}"],
             capture_output=True, text=True, timeout=5,
             cwd=str(repo_dir),
         )
@@ -184,7 +241,7 @@ def check_for_updates() -> Optional[int]:
 
     Two paths: if ``HERMES_REVISION`` is set (nix builds embed it), compare
     it to upstream master via ``git ls-remote``. Otherwise look for a local
-    git checkout and count commits behind ``origin/master``.
+    git checkout and count commits behind the origin default branch.
 
     Returns the number of commits behind, ``UPDATE_AVAILABLE_NO_COUNT`` (-1)
     if behind but the count is unknown, ``0`` if up-to-date, or ``None`` if
@@ -192,7 +249,7 @@ def check_for_updates() -> Optional[int]:
     """
     hermes_home = get_sidekick_home()
     cache_file = hermes_home / ".update_check"
-    embedded_rev = os.environ.get("SIDEKICK_REVISION") or os.environ.get("HERMES_REVISION") or None
+    embedded_rev = os.environ.get("SIDEKICK_REVISION") or None
 
     # Read cache — invalidate if the embedded rev has changed since last check
     now = time.time()
@@ -266,7 +323,9 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
     if repo_dir is None:
         return None
 
-    upstream = _git_short_hash(repo_dir, "origin/master")
+    branch = _resolve_remote_default_branch(repo_dir, "origin")
+    upstream_ref = f"origin/{branch}"
+    upstream = _git_short_hash(repo_dir, upstream_ref)
     local = _git_short_hash(repo_dir, "HEAD")
     if not upstream or not local:
         return None
@@ -274,7 +333,7 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
     ahead = 0
     try:
         result = subprocess.run(
-            ["git", "rev-list", "--count", "origin/master..HEAD"],
+            ["git", "rev-list", "--count", f"{upstream_ref}..HEAD"],
             capture_output=True,
             text=True,
             timeout=5,

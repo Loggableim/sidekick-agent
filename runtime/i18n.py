@@ -196,7 +196,7 @@ def reset_language_cache() -> None:
 
 def get_language() -> str:
     """Resolve the active language using env > config > default order."""
-    env_lang = os.environ.get("SIDEKICK_LANGUAGE") or os.environ.get("HERMES_LANGUAGE")
+    env_lang = os.environ.get("SIDEKICK_LANGUAGE")
     if env_lang:
         return _normalize_lang(env_lang)
     cfg_lang = _config_language_cached()

@@ -11,7 +11,7 @@ The gateway processes messages concurrently via ``asyncio``.  When two
 messages arrive at the same time the old code did::
 
     os.environ["SIDEKICK_SESSION_THREAD_ID"] = str(context.source.thread_id)
-    os.environ["HERMES_SESSION_THREAD_ID"] = str(context.source.thread_id)
+    os.environ["SIDEKICK_SESSION_THREAD_ID"] = str(context.source.thread_id)
 
 Because ``os.environ`` is *process-global*, Message A's value was
 silently overwritten by Message B before Message A's agent finished
@@ -25,12 +25,12 @@ so concurrent messages never interfere.
 **Backward compatibility**
 
 The public helper ``get_session_env(name, default="")`` mirrors the old
-``os.getenv("SIDEKICK_SESSION_*") or os.getenv("HERMES_SESSION_*", ...)`` calls.  Existing tool code only
+``os.getenv("SIDEKICK_SESSION_*") or os.getenv("SIDEKICK_SESSION_*", ...)`` calls.  Existing tool code only
 needs to replace the import + call site::
 
     # before
     import os
-    platform = os.getenv("SIDEKICK_SESSION_PLATFORM") or os.getenv("HERMES_SESSION_PLATFORM", "")
+    platform = os.getenv("SIDEKICK_SESSION_PLATFORM")
 
     # after
     from gateway.session_context import get_session_env
@@ -134,7 +134,7 @@ def clear_session_vars(tokens: list) -> None:
 def get_session_env(name: str, default: str = "") -> str:
     """Read a session context variable by its legacy ``HERMES_SESSION_*`` / ``SIDEKICK_SESSION_*`` name.
 
-    Drop-in replacement for ``os.getenv("SIDEKICK_SESSION_*") or os.getenv("HERMES_SESSION_*", default)``.
+    Drop-in replacement for ``os.getenv("SIDEKICK_SESSION_*") or os.getenv("SIDEKICK_SESSION_*", default)``.
 
     Resolution order:
     1. Context variable (set by the gateway for concurrency-safe access).

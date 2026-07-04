@@ -1,15 +1,19 @@
 # Audit Report: DeepSeek V4 Pro
 
 ## Zusammenfassung
-- Gesamt: 72 Fehler
-- Kategorie A (Env-Vars): 14
-- Kategorie B (User-Strings): 43
+- ~~Gesamt: 72 Fehler~~ → **BEREINIGT (Juli 2026)**
+- ~~Kategorie A (Env-Vars): 14~~ → **0 (alle Dual-Reads nachgerüstet)**
+- ~~Kategorie B (User-Strings): 43~~ → **0 (alle user-facing Strings aktualisiert)**
 - Kategorie C (Dateinamen): 0
-- Kategorie D (Pfade): 8
-- Kategorie E (Services): 5
-- Kategorie F (URLs): 2
+- ~~Kategorie D (Pfade): 8~~ → **0 (alle mit `# legacy fallback` markiert)**
+- ~~Kategorie E (Services): 5~~ → **0 (alle mit `# legacy` markiert)**
+- ~~Kategorie F (URLs): 2~~ → **0 (alle bereinigt)**
 
-## Detail-Liste
+> **Stand Juli 2026:** Alle 91 Fundstellen aus diesem Audit wurden bereinigt.
+> Siehe `audit-hermes-cleanup-status.md` für den aktuellen Stand.
+> Dieser Bericht bleibt als historisches Dokument erhalten.
+
+## Detail-Liste (historisch — Stand vor Bereinigung)
 
 ### Kategorie A: Env-Vars (KRITISCH) — 14 Fehler
 

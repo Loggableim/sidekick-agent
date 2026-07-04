@@ -23,7 +23,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ── Pfade ──────────────────────────────────────────────────────────────
-HERMES_HOME = Path(os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", os.path.expanduser("~/.hermes")))
+HERMES_HOME = Path(os.environ.get("SIDEKICK_HOME"))
 WORKSPACES_ROOT = HERMES_HOME / "workspaces"
 
 _LLM_CACHE = {}  # Cache für Config

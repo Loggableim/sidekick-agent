@@ -1014,7 +1014,7 @@ def build_skills_system_prompt(
     # produce distinct cache entries (gateway serves multiple platforms).
     from gateway.session_context import get_session_env
     _platform_hint = (
-        os.environ.get("SIDEKICK_PLATFORM") or os.environ.get("HERMES_PLATFORM")
+        os.environ.get("SIDEKICK_PLATFORM")
         or get_session_env("HERMES_SESSION_PLATFORM")
         or ""
     )

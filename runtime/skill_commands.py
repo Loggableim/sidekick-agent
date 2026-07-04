@@ -43,11 +43,11 @@ def _resolve_skill_commands_platform() -> Optional[str]:
         from gateway.session_context import get_session_env
 
         resolved_platform = (
-            os.getenv("SIDEKICK_PLATFORM") or os.getenv("HERMES_PLATFORM")
+            os.getenv("SIDEKICK_PLATFORM")
             or get_session_env("HERMES_SESSION_PLATFORM")
         )
     except Exception:
-        resolved_platform = os.getenv("SIDEKICK_PLATFORM") or os.getenv("HERMES_PLATFORM")
+        resolved_platform = os.getenv("SIDEKICK_PLATFORM")
     return resolved_platform or None
 
 def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tuple[dict[str, Any], Path | None, str] | None:

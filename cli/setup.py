@@ -1711,7 +1711,6 @@ def setup_agent_settings(config: dict):
             # SIDEKICK_MAX_ITERATIONS from runtime.max_turns at startup.
             config.setdefault("agent", {})["max_turns"] = max_iter
             config.pop("max_turns", None)
-            remove_env_value("HERMES_MAX_ITERATIONS")  # backward compat
             print_success(f"Max iterations set to {max_iter}")
     except ValueError:
         print_warning("Invalid number, keeping current value")

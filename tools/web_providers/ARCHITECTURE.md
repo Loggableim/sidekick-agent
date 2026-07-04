@@ -70,4 +70,4 @@ The provider picker uses **progressive disclosure**:
 - **Default path** (90% of users): Pick one provider → sets `web.backend` for both. One selection, done.
 - **Advanced path**: "Configure separately" option at bottom → two-step sub-picker for search + extract independently.
 
-See `.hermes/plans/2026-05-03-web-tools-provider-architecture.md` for the full UX flow diagram.
+See `.sidekick/plans/2026-05-03-web-tools-provider-architecture.md` for the full UX flow diagram.

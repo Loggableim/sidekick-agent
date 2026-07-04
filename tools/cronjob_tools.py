@@ -649,9 +649,9 @@ def check_cronjob_requirements() -> bool:
     so no external crontab executable is required.
     """
     return bool(
-        os.getenv("SIDEKICK_INTERACTIVE") or os.getenv("HERMES_INTERACTIVE")
-        or os.getenv("SIDEKICK_GATEWAY_SESSION") or os.getenv("HERMES_GATEWAY_SESSION")
-        or os.getenv("SIDEKICK_EXEC_ASK") or os.getenv("HERMES_EXEC_ASK")
+        os.getenv("SIDEKICK_INTERACTIVE")
+        or os.getenv("SIDEKICK_GATEWAY_SESSION")
+        or os.getenv("SIDEKICK_EXEC_ASK")
     )
 
 

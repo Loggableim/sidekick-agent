@@ -52,7 +52,6 @@ all = [
 
 [project.scripts]
 sidekick = "cli.main:main"
-hermes = "cli.main:main"
 
 [project.urls]
 Homepage = "https://github.com/sidekick-ai/sidekick"

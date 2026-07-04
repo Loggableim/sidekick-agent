@@ -47,12 +47,12 @@ def discover_agent_dir(repo_root: Path) -> Path | None:
 
     home = sidekick_home()
     candidates.append((home / "sidekick-agent").resolve())
-    candidates.append((home / "hermes-agent").resolve())
+    candidates.append((home / "hermes-agent").resolve())  # legacy fallback
     # Monorepo: ourselves (discovery in shared.runtime should prefer the running repo)
     candidates.append((repo_root).resolve())
     candidates.append((repo_root.parent / "sidekick-agent").resolve())
     candidates.append((Path.home() / ".sidekick" / "sidekick-agent").resolve())
-    candidates.append((Path.home() / ".hermes" / "hermes-agent").resolve())
+    candidates.append((Path.home() / ".hermes" / "hermes-agent").resolve())  # legacy fallback
 
     seen: set[Path] = set()
     for candidate in candidates:

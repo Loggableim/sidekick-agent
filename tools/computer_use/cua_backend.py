@@ -44,9 +44,9 @@ logger = logging.getLogger(__name__)
 # Version pinning
 # ---------------------------------------------------------------------------
 
-PINNED_CUA_DRIVER_VERSION = os.environ.get("SIDEKICK_CUA_DRIVER_VERSION") or os.environ.get("HERMES_CUA_DRIVER_VERSION", "0.5.0")
+PINNED_CUA_DRIVER_VERSION = os.environ.get("SIDEKICK_CUA_DRIVER_VERSION")
 
-_CUA_DRIVER_CMD = os.environ.get("SIDEKICK_CUA_DRIVER_CMD") or os.environ.get("HERMES_CUA_DRIVER_CMD", "cua-driver")
+_CUA_DRIVER_CMD = os.environ.get("SIDEKICK_CUA_DRIVER_CMD")
 _CUA_DRIVER_ARGS = ["mcp"]  # stdio MCP transport
 
 # Regex to parse list_windows text output lines:

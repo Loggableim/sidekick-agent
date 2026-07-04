@@ -33,7 +33,6 @@ def _bootstrap_aliases() -> None:
         "sidekick_bootstrap": "runtime._compat.shim_bootstrap",
         "sidekick_time": "runtime._compat.shim_time",
         "hermes_constants": "runtime._compat.shim_constants",
-        "hermes_logging": "runtime._compat.shim_logging",
         "hermes_state": "runtime._compat.shim_state",
         "hermes_bootstrap": "runtime._compat.shim_bootstrap",
         "hermes_time": "runtime._compat.shim_time",

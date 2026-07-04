@@ -345,7 +345,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
             or_config = {}
 
     # Determine cache enabled: env var overrides config.
-    env_cache = (os.environ.get("SIDEKICK_OPENROUTER_CACHE") or os.environ.get("HERMES_OPENROUTER_CACHE", "")).strip().lower()
+    env_cache = (os.environ.get("SIDEKICK_OPENROUTER_CACHE")).strip().lower()
     if env_cache:
         cache_enabled = env_cache in _TRUTHY_ENV_VALUES
     else:
@@ -357,7 +357,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
     headers["X-OpenRouter-Cache"] = "true"
 
     # Determine TTL: env var overrides config.
-    env_ttl = (os.environ.get("SIDEKICK_OPENROUTER_CACHE_TTL") or os.environ.get("HERMES_OPENROUTER_CACHE_TTL", "")).strip()
+    env_ttl = (os.environ.get("SIDEKICK_OPENROUTER_CACHE_TTL")).strip()
     if env_ttl:
         if env_ttl.isdigit():
             ttl = int(env_ttl)

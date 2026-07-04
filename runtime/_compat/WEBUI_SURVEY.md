@@ -1,8 +1,8 @@
 # WebUI Source Structure Survey — Phase 4 Migration Planning
 
 > Generated: 2026-06-07
-> Source: `C:\HermesPortable\cids-hermes-webui`
-> Target: `C:\HermesPortable\sidekick/web/`
+> Source: `C:\HermesPortable\cids-hermes-webui` (legacy)
+> Target: `C:\HermesPortable\sidekick/web/` (legacy)
 
 ---
 

@@ -714,7 +714,7 @@ def _transcribe_xai(file_path: str, model_name: str) -> Dict[str, Any]:
     ).strip().rstrip("/")
     language = str(
         xai_config.get("language")
-        or os.getenv("SIDEKICK_LOCAL_STT_LANGUAGE") or os.getenv("HERMES_LOCAL_STT_LANGUAGE")
+        or os.getenv("SIDEKICK_LOCAL_STT_LANGUAGE")
         or DEFAULT_LOCAL_STT_LANGUAGE
     ).strip()
     # .get("format", True) already defaults to True when the key is absent;

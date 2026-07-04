@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 def get_hermes_home() -> Path:
-    val = (os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME") or "").strip()
+    val = (os.environ.get("SIDEKICK_HOME") or "").strip()
     return Path(val) if val else Path.home() / ".hermes"
 
 

@@ -43,7 +43,7 @@ def _resolve_session_ttl() -> int:
     first, then settings.json, falling back to ``SESSION_TTL`` (30 days).
     Clamped to [60s, 1 year] to prevent runaway cookies or self-lockout.
     """
-    env_v = (os.getenv('SIDEKICK_WEBUI_SESSION_TTL') or os.getenv('HERMES_WEBUI_SESSION_TTL', '')).strip()
+    env_v = (os.getenv('SIDEKICK_WEBUI_SESSION_TTL', '')).strip()
     if env_v.isdigit():
         val = int(env_v)
         if 60 <= val <= 86400 * 365:

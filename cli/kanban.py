@@ -652,7 +652,7 @@ def kanban_command(args: argparse.Namespace) -> int:
     # keeps the patch small and inherits the exact same resolution the
     # dispatcher uses for workers — consistency is a feature here.
     board_override = getattr(args, "board", None)
-    prev_board_env = os.environ.get("SIDEKICK_KANBAN_BOARD") or os.environ.get("HERMES_KANBAN_BOARD")
+    prev_board_env = os.environ.get("SIDEKICK_KANBAN_BOARD")
     restore_board_env = False
 
     def _restore_board_env() -> None:
@@ -662,7 +662,6 @@ def kanban_command(args: argparse.Namespace) -> int:
             os.environ.pop("HERMES_KANBAN_BOARD", None)
         else:
             os.environ["SIDEKICK_KANBAN_BOARD"] = prev_board_env
-            os.environ["HERMES_KANBAN_BOARD"] = prev_board_env  # backward compat
     if board_override:
         try:
             normed = kb._normalize_board_slug(board_override)
@@ -682,7 +681,6 @@ def kanban_command(args: argparse.Namespace) -> int:
             )
             return 1
         os.environ["SIDEKICK_KANBAN_BOARD"] = normed
-        os.environ["HERMES_KANBAN_BOARD"] = normed  # backward compat
         restore_board_env = True
 
     # Boards management doesn't touch the DB at all — dispatch early so
@@ -1522,9 +1520,9 @@ def _cmd_comment(args: argparse.Namespace) -> int:
 
 
 def _worker_run_id_for(task_id: str) -> Optional[int]:
-    if (os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")) != task_id:
+    if (os.environ.get("SIDEKICK_KANBAN_TASK")) != task_id:
         return None
-    raw = os.environ.get("SIDEKICK_KANBAN_RUN_ID") or os.environ.get("HERMES_KANBAN_RUN_ID")
+    raw = os.environ.get("SIDEKICK_KANBAN_RUN_ID")
     if not raw:
         return None
     try:

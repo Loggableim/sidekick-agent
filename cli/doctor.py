@@ -12,7 +12,7 @@ import importlib.util
 from pathlib import Path
 
 from cli.config import get_project_root, get_sidekick_home, get_env_path
-from cli.env_loader import load_hermes_dotenv
+from cli.env_loader import load_sidekick_dotenv
 from runtime._compat.shim_constants import display_sidekick_home
 
 PROJECT_ROOT = get_project_root()
@@ -21,7 +21,7 @@ _DHH = display_sidekick_home()  # user-facing display path (e.g. ~/.sidekick or 
 
 # Load environment variables from ~/.sidekick/.env so API key checks work
 _env_path = get_env_path()
-load_hermes_dotenv(hermes_home=_env_path.parent, project_env=PROJECT_ROOT / ".env")
+load_sidekick_dotenv(hermes_home=_env_path.parent, project_env=PROJECT_ROOT / ".env")
 
 from cli.colors import Colors, color
 from cli.models import _HERMES_USER_AGENT
@@ -149,7 +149,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
     """Return True when Kanban is unavailable only because this is not a worker process."""
     if item.get("name") != "kanban":
         return False
-    if os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK"):
+    if os.environ.get("SIDEKICK_KANBAN_TASK"):
         return False
 
     tools = item.get("tools") or []
@@ -158,7 +158,7 @@ def _is_kanban_worker_env_gate(item: dict) -> bool:
 
 def _doctor_tool_availability_detail(toolset: str) -> str:
     """Optional explanatory suffix for toolsets whose doctor status needs context."""
-    if toolset == "kanban" and not (os.environ.get("SIDEKICK_KANBAN_TASK") or os.environ.get("HERMES_KANBAN_TASK")):
+    if toolset == "kanban" and not (os.environ.get("SIDEKICK_KANBAN_TASK")):
         return "(runtime-gated; loaded only for dispatcher-spawned workers)"
     return ""
 

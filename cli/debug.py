@@ -287,7 +287,7 @@ def _upload_dpaste_com(content: str, expiry_days: int = 7) -> str:
 
     dpaste.com uses multipart form data.
     """
-    boundary = "----HermesDebugBoundary9f3c"
+    boundary = "----SidekickDebugBoundary9f3c"
 
     def _field(name: str, value: str) -> str:
         return (

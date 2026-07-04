@@ -131,7 +131,7 @@ def _apply_portable_home_default() -> None:
         return
 
     os.environ["SIDEKICK_HOME"] = str(portable_home)
-    os.environ["HERMES_HOME"] = str(portable_home)
+    os.environ["SIDEKICK_HOME"] = str(portable_home)
 
 
 _apply_portable_home_default()
@@ -183,7 +183,7 @@ def _apply_profile_override() -> None:
     # still read active_profile — the user may have switched profiles via
     # `sidekick profile use` and the gateway should honour that choice.
     # See issue #22502.
-    sidekick_home_env = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME", "")
+    sidekick_home_env = os.environ.get("SIDEKICK_HOME")
     if profile_name is None and sidekick_home_env:
         if Path(sidekick_home_env).parent.name == "profiles":
             return
@@ -219,7 +219,6 @@ def _apply_profile_override() -> None:
             )
             return
         os.environ["SIDEKICK_HOME"] = hermes_home
-        os.environ["HERMES_HOME"] = hermes_home  # backward compat
         # Strip the flag from argv so argparse doesn't choke
         if consume > 0:
             for i, arg in enumerate(argv):
@@ -238,9 +237,9 @@ _apply_profile_override()
 # Load .env from ~/.sidekick/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
 from cli.config import get_sidekick_home
-from cli.env_loader import load_hermes_dotenv
+from cli.env_loader import load_sidekick_dotenv
 
-load_hermes_dotenv(project_env=PROJECT_ROOT / ".env")
+load_sidekick_dotenv(project_env=PROJECT_ROOT / ".env")
 
 # Bridge security.redact_secrets from config.yaml → HERMES_REDACT_SECRETS env
 # var BEFORE hermes_logging imports agent.redact (which snapshots the flag at
@@ -259,7 +258,6 @@ try:
                 _early_redact = _early_sec_cfg.get("redact_secrets")
                 if _early_redact is not None:
                     os.environ["SIDEKICK_REDACT_SECRETS"] = str(_early_redact).lower()
-                    os.environ["HERMES_REDACT_SECRETS"] = str(_early_redact).lower()  # backward compat
             del _early_sec_cfg
         del _cfg_path
 except Exception:
@@ -1014,14 +1012,14 @@ def _ensure_tui_node() -> None:
     """
     if shutil.which("node") and shutil.which("npm"):
         return
-    if os.environ.get("SIDEKICK_SKIP_NODE_BOOTSTRAP") or os.environ.get("HERMES_SKIP_NODE_BOOTSTRAP"):
+    if os.environ.get("SIDEKICK_SKIP_NODE_BOOTSTRAP"):
         return
 
     helper = PROJECT_ROOT / "scripts" / "lib" / "node-bootstrap.sh"
     if not helper.is_file():
         return
 
-    hermes_home = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")
+    hermes_home = os.environ.get("SIDEKICK_HOME") or str(Path.home() / ".hermes")
     try:
         # Helper writes logs to stderr; we ask bash to print `command -v node`
         # on stdout once ensure_node succeeds. Subshell PATH edits don't leak
@@ -1062,7 +1060,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
 
     def _node_bin(bin: str) -> str:
         if bin == "node":
-            env_node = os.environ.get("SIDEKICK_NODE") or os.environ.get("HERMES_NODE")
+            env_node = os.environ.get("SIDEKICK_NODE")
             if env_node and os.path.isfile(env_node) and os.access(env_node, os.X_OK):
                 return env_node
         path = shutil.which(bin)
@@ -1072,7 +1070,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         return path
 
     # Footgun: --dev against a prebuilt bundle that has no source/node_modules.
-    ext_dir = os.environ.get("SIDEKICK_TUI_DIR") or os.environ.get("HERMES_TUI_DIR")
+    ext_dir = os.environ.get("SIDEKICK_TUI_DIR")
     if tui_dev and ext_dir:
         print(
             f"Error: --dev is incompatible with HERMES_TUI_DIR={ext_dir}\n"
@@ -1094,7 +1092,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
     #    --dev flow: npm install if needed, then tsx src/entry.tsx (no build).
     if _tui_need_npm_install(tui_dir):
         npm = _node_bin("npm")
-        if not (os.environ.get("SIDEKICK_QUIET") or os.environ.get("HERMES_QUIET")):
+        if not (os.environ.get("SIDEKICK_QUIET")):
             print("Installing TUI dependencies…")
         result = subprocess.run(
             [npm, "install", "--silent", "--no-fund", "--no-audit", "--progress=false"],
@@ -1307,20 +1305,19 @@ def _pin_kanban_board_env() -> None:
     calls hit board B (#20074). Pinning at chat boot mirrors what the
     dispatcher already does for spawned workers.
     """
-    if os.environ.get("SIDEKICK_KANBAN_BOARD") or os.environ.get("HERMES_KANBAN_BOARD"):
+    if os.environ.get("SIDEKICK_KANBAN_BOARD"):
         return
     try:
         from cli.kanban_db import get_current_board
 
         os.environ["SIDEKICK_KANBAN_BOARD"] = get_current_board()
-        os.environ["HERMES_KANBAN_BOARD"] = get_current_board()  # backward compat
     except Exception:
         pass
 
 
 def cmd_chat(args):
     """Run interactive chat CLI."""
-    use_tui = getattr(args, "tui", False) or os.environ.get("SIDEKICK_TUI") == "1" or os.environ.get("HERMES_TUI") == "1"
+    use_tui = getattr(args, "tui", False) or os.environ.get("SIDEKICK_TUI") == "1" == "1"
 
     # Resolve --continue into --resume with the latest session or by name
     continue_val = getattr(args, "continue_last", None)
@@ -1407,7 +1404,6 @@ def cmd_chat(args):
     # --yolo: bypass all dangerous command approvals
     if getattr(args, "yolo", False):
         os.environ["SIDEKICK_YOLO_MODE"] = "1"
-        os.environ["HERMES_YOLO_MODE"] = "1"  # backward compat
 
     # --ignore-user-config: make load_cli_config() / load_config() skip the
     # user's ~/.sidekick/config.yaml and return built-in defaults. Set BEFORE
@@ -1416,19 +1412,16 @@ def cmd_chat(args):
     # ignores behavioral/config settings.
     if getattr(args, "ignore_user_config", False):
         os.environ["SIDEKICK_IGNORE_USER_CONFIG"] = "1"
-        os.environ["HERMES_IGNORE_USER_CONFIG"] = "1"  # backward compat
 
     # --ignore-rules: skip auto-injection of AGENTS.md/SOUL.md/.cursorrules
     # (rules), memory entries, and any preloaded skills coming from user config.
     # Maps to AIAgent(skip_context_files=True, skip_memory=True).
     if getattr(args, "ignore_rules", False):
         os.environ["SIDEKICK_IGNORE_RULES"] = "1"
-        os.environ["HERMES_IGNORE_RULES"] = "1"  # backward compat
 
     # --source: tag session source for filtering (e.g. 'tool' for third-party integrations)
     if getattr(args, "source", None):
         os.environ["SIDEKICK_SESSION_SOURCE"] = args.source
-        os.environ["HERMES_SESSION_SOURCE"] = args.source  # backward compat
 
     _pin_kanban_board_env()
 
@@ -1758,7 +1751,7 @@ def select_provider_and_model(args=None):
         config_provider = model_cfg.get("provider")
 
     effective_provider = (
-        config_provider or os.getenv("SIDEKICK_INFERENCE_PROVIDER") or os.getenv("HERMES_INFERENCE_PROVIDER") or "auto"
+        config_provider or os.getenv("SIDEKICK_INFERENCE_PROVIDER") or "auto"
     )
     compatible_custom_providers = get_compatible_custom_providers(config)
     active = None
@@ -8473,9 +8466,9 @@ def _cmd_update_impl(args, gateway_mode: bool):
         except Exception as e:
             logger.debug("Gateway restart during update failed: %s", e)
 
-        # Warn if legacy Hermes gateway unit files are still installed.
+        # Warn if legacy Hermes gateway unit files (pre-rename) are still installed.
         # When both hermes.service (from a pre-rename install) and the
-        # current hermes-gateway.service are enabled, they SIGTERM-fight
+        # current sidekick-gateway.service are enabled, they SIGTERM-fight
         # for the same bot token (see PR #11909). Flagging here means
         # every `sidekick update` surfaces the issue until the user migrates.
         try:
@@ -8492,7 +8485,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     scope = "system" if is_sys else "user"
                     print(f"    {path}  ({scope} scope)")
                 print()
-                print("  These pre-rename units (hermes.service) fight the current")
+                print("  These pre-rename units (hermes.service — legacy) fight the current")
                 print("  sidekick-gateway.service for the bot token and cause SIGTERM")
                 print("  flap loops. Remove them with:")
                 print()
@@ -9200,7 +9193,7 @@ def cmd_dashboard(args):
         print(f"Import error: {e}")
         sys.exit(1)
 
-    web_dist_env = os.environ.get("SIDEKICK_WEB_DIST") or os.environ.get("HERMES_WEB_DIST")
+    web_dist_env = os.environ.get("SIDEKICK_WEB_DIST")
     if not web_dist_env and not getattr(args, "skip_build", False):
         if not _build_web_ui(PROJECT_ROOT / "web", fatal=True):
             sys.exit(1)
@@ -9213,8 +9206,8 @@ def cmd_dashboard(args):
 
     if getattr(args, "skip_build", False):
         _dist_root = (
-            Path(os.environ.get("SIDEKICK_WEB_DIST") or os.environ["HERMES_WEB_DIST"])
-            if os.environ.get("SIDEKICK_WEB_DIST") or "HERMES_WEB_DIST" in os.environ
+Path(os.environ.get("SIDEKICK_WEB_DIST"))
+            if os.environ.get("SIDEKICK_WEB_DIST")
             else PROJECT_ROOT / "sidekick_cli" / "web_dist"
         )
         # PRÜFE ZUERST ob web/static/index.html existiert (static fallback!)
@@ -9230,7 +9223,7 @@ def cmd_dashboard(args):
 
     from cli.web_server import start_server
 
-    embedded_chat = args.tui or os.environ.get("SIDEKICK_DASHBOARD_TUI") == "1" or os.environ.get("HERMES_DASHBOARD_TUI") == "1"
+    embedded_chat = args.tui or os.environ.get("SIDEKICK_DASHBOARD_TUI") == "1" == "1"
     start_server(
         host=args.host,
         port=args.port,

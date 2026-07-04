@@ -764,7 +764,7 @@ class KawaiiSpinner:
         wings = _skin_get_spinner_wings(skin) if skin else []
 
         while self.running:
-            if os.getenv("SIDEKICK_SPINNER_PAUSE") or os.getenv("HERMES_SPINNER_PAUSE"):
+            if os.getenv("SIDEKICK_SPINNER_PAUSE"):
                 time.sleep(0.1)
                 continue
             frame = self.spinner_frames[self.frame_idx % len(self.spinner_frames)]

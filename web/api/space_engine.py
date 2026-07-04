@@ -43,7 +43,7 @@ SPACES_ROOT: Path = Path(
     os.getenv("SIDEKICK_WEBUI_SPACES_DIR")
     or os.getenv(
         _SPACES_ROOT_KEY,
-        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "spaces"),
+        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))) / "spaces"),
     )
 ).expanduser().resolve()
 
@@ -52,7 +52,7 @@ _OLD_ROOT: Path = Path(
     os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR")
     or os.getenv(
         _OLD_WORKSPACES_KEY,
-        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
+        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
     )
 ).expanduser().resolve()
 
@@ -60,19 +60,19 @@ _AGENT_SLUG_RE = None  # lazy import
 
 DEFAULT_SPACE_SLUG = (
     (os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE", "").strip()
-     or os.getenv("HERMES_WEBUI_DEFAULT_SPACE", "nova").strip()).lower()
+     or os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE", "nova").strip()).lower()
     or "nova"
 )
 DEFAULT_SPACE_NAME = (
     os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE_NAME", "").strip()
-    or os.getenv("HERMES_WEBUI_DEFAULT_SPACE_NAME", "Nova").strip()
+    or os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE_NAME", "Nova").strip()
     or "Nova"
 )
 DEFAULT_SPACE_ALIASES = {
     alias.strip().lower()
     for alias in (
         os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE_ALIASES", "")
-        or os.getenv("HERMES_WEBUI_DEFAULT_SPACE_ALIASES", "novaspace,nova-space,nova_space")
+        or os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE_ALIASES", "novaspace,nova-space,nova_space")
     ).split(",")
     if alias.strip()
 }
@@ -81,12 +81,12 @@ LEGACY_DEFAULT_SPACE_SLUG = "default"
 PROTECTED_SPACE_SLUGS = {DEFAULT_SPACE_SLUG, LEGACY_DEFAULT_SPACE_SLUG}
 CONSCIOUSNESS_SOURCE_SPACE_SLUG = (
     os.getenv("SIDEKICK_WEBUI_CONSCIOUSNESS_SPACE", "").strip().lower()
-    or os.getenv("HERMES_WEBUI_CONSCIOUSNESS_SPACE", "bewusstsein").strip().lower()
+    or os.getenv("SIDEKICK_WEBUI_CONSCIOUSNESS_SPACE", "bewusstsein").strip().lower()
     or "bewusstsein"
 )
 DEFAULT_NOVA_CHARACTER = (
     os.getenv("SIDEKICK_WEBUI_DEFAULT_NOVA_CHARACTER", "").strip()
-    or os.getenv("HERMES_WEBUI_DEFAULT_NOVA_CHARACTER", "nova").strip()
+    or os.getenv("SIDEKICK_WEBUI_DEFAULT_NOVA_CHARACTER", "nova").strip()
     or "nova"
 )
 _GENERIC_DEFAULT_SOUL_MARKER = "Customize this SOUL.md to define your personality and behavior."
@@ -803,7 +803,7 @@ def resolve_active_space() -> Space:
     """Resolve the active space (never returns None)."""
     slug = get_active_space_slug()
     if not slug:
-        slug = (os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "")).strip().lower() or DEFAULT_SPACE_SLUG
+        slug = (os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE") or "").strip().lower() or DEFAULT_SPACE_SLUG
     return get_or_create_space(slug)
 
 
