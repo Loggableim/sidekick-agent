@@ -726,7 +726,7 @@ def _token_fingerprint(token: Any) -> Optional[str]:
 
 
 def _oauth_trace_enabled() -> bool:
-    raw = (os.getenv("SIDEKICK_OAUTH_TRACE") or os.getenv("HERMES_OAUTH_TRACE", "")).strip().lower()
+    raw = (os.getenv("SIDEKICK_OAUTH_TRACE", "")).strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -1701,7 +1701,7 @@ def resolve_qwen_runtime_credentials(
             code="qwen_access_token_missing",
         )
 
-    base_url = (os.getenv("SIDEKICK_QWEN_BASE_URL") or os.getenv("HERMES_QWEN_BASE_URL", "")).strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
+    base_url = (os.getenv("SIDEKICK_QWEN_BASE_URL", "")).strip().rstrip("/") or DEFAULT_QWEN_BASE_URL
     return {
         "provider": "qwen-oauth",
         "base_url": base_url,
@@ -1833,7 +1833,7 @@ def _spotify_client_id(
 
     candidates = (
         explicit,
-        get_env_value("SIDEKICK_SPOTIFY_CLIENT_ID") or get_env_value("HERMES_SPOTIFY_CLIENT_ID"),
+        get_env_value("SIDEKICK_SPOTIFY_CLIENT_ID"),
         get_env_value("SPOTIFY_CLIENT_ID"),
         state.get("client_id") if isinstance(state, dict) else None,
     )
@@ -1856,7 +1856,7 @@ def _spotify_redirect_uri(
 
     candidates = (
         explicit,
-        get_env_value("SIDEKICK_SPOTIFY_REDIRECT_URI") or get_env_value("HERMES_SPOTIFY_REDIRECT_URI"),
+        get_env_value("SIDEKICK_SPOTIFY_REDIRECT_URI"),
         get_env_value("SPOTIFY_REDIRECT_URI"),
         state.get("redirect_uri") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_REDIRECT_URI,
@@ -1872,7 +1872,7 @@ def _spotify_api_base_url(state: Optional[Dict[str, Any]] = None) -> str:
     from cli.config import get_env_value
 
     candidates = (
-        get_env_value("SIDEKICK_SPOTIFY_API_BASE_URL") or get_env_value("HERMES_SPOTIFY_API_BASE_URL"),
+        get_env_value("SIDEKICK_SPOTIFY_API_BASE_URL"),
         state.get("api_base_url") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_API_BASE_URL,
     )
@@ -1887,7 +1887,7 @@ def _spotify_accounts_base_url(state: Optional[Dict[str, Any]] = None) -> str:
     from cli.config import get_env_value
 
     candidates = (
-        get_env_value("SIDEKICK_SPOTIFY_ACCOUNTS_BASE_URL") or get_env_value("HERMES_SPOTIFY_ACCOUNTS_BASE_URL"),
+        get_env_value("SIDEKICK_SPOTIFY_ACCOUNTS_BASE_URL"),
         state.get("accounts_base_url") if isinstance(state, dict) else None,
         DEFAULT_SPOTIFY_ACCOUNTS_BASE_URL,
     )
@@ -2294,12 +2294,12 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
 
     # Persist so subsequent `sidekick auth spotify` runs skip the wizard.
     save_env_value("SIDEKICK_SPOTIFY_CLIENT_ID", raw)
-    save_env_value("HERMES_SPOTIFY_CLIENT_ID", raw)  # backward compat
+
     # Only persist the redirect URI if it's non-default, to avoid pinning
     # users to a value the default might later change to.
     if redirect_uri_hint and redirect_uri_hint != DEFAULT_SPOTIFY_REDIRECT_URI:
         save_env_value("SIDEKICK_SPOTIFY_REDIRECT_URI", redirect_uri_hint)
-        save_env_value("HERMES_SPOTIFY_REDIRECT_URI", redirect_uri_hint)  # backward compat
+    
 
     print()
     print("Saved HERMES_SPOTIFY_CLIENT_ID to ~/.sidekick/.env")
@@ -2648,7 +2648,7 @@ def resolve_codex_runtime_credentials(
     data = _read_codex_tokens()
     tokens = dict(data["tokens"])
     access_token = str(tokens.get("access_token", "") or "").strip()
-    refresh_timeout_seconds = float(os.getenv("SIDEKICK_CODEX_REFRESH_TIMEOUT_SECONDS") or os.getenv("HERMES_CODEX_REFRESH_TIMEOUT_SECONDS", "20"))
+    refresh_timeout_seconds = float(os.getenv("SIDEKICK_CODEX_REFRESH_TIMEOUT_SECONDS", "300"))
 
     should_refresh = bool(force_refresh)
     if (not should_refresh) and refresh_if_expiring:
@@ -2669,7 +2669,7 @@ def resolve_codex_runtime_credentials(
                 access_token = str(tokens.get("access_token", "") or "").strip()
 
     base_url = (
-        (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/")
+        (os.getenv("SIDEKICK_CODEX_BASE_URL", "")).strip().rstrip("/")
         or DEFAULT_CODEX_BASE_URL
     )
 
@@ -2721,7 +2721,7 @@ def _resolve_verify(
     effective_ca = (
         ca_bundle
         or tls_state.get("ca_bundle")
-        or os.getenv("SIDEKICK_CA_BUNDLE") or os.getenv("HERMES_CA_BUNDLE")
+        or os.getenv("SIDEKICK_CA_BUNDLE")
         or os.getenv("SSL_CERT_FILE")
         or os.getenv("REQUESTS_CA_BUNDLE")
     )
@@ -2909,11 +2909,11 @@ def get_external_process_provider_status(provider_id: str) -> Dict[str, Any]:
         return {"configured": False}
 
     command = (
-        (os.getenv("SIDEKICK_COPILOT_ACP_COMMAND") or os.getenv("HERMES_COPILOT_ACP_COMMAND", "")).strip()
+        (os.getenv("SIDEKICK_COPILOT_ACP_COMMAND", "")).strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
-    raw_args = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS") or os.getenv("HERMES_COPILOT_ACP_ARGS", "")).strip()
+    raw_args = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS", "")).strip()
     args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
     base_url = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
     if not base_url:
@@ -3021,11 +3021,11 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
         base_url = pconfig.inference_base_url
 
     command = (
-        (os.getenv("SIDEKICK_COPILOT_ACP_COMMAND") or os.getenv("HERMES_COPILOT_ACP_COMMAND", "")).strip()
+        (os.getenv("SIDEKICK_COPILOT_ACP_COMMAND", "")).strip()
         or os.getenv("COPILOT_CLI_PATH", "").strip()
         or "copilot"
     )
-    raw_args = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS") or os.getenv("HERMES_COPILOT_ACP_ARGS", "")).strip()
+    raw_args = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS", "")).strip()
     args = shlex.split(raw_args) if raw_args else ["--acp", "--stdio"]
     resolved_command = shutil.which(command) if command else None
     if not resolved_command and not base_url.startswith("acp+tcp://"):
@@ -3432,7 +3432,7 @@ def _login_openai_codex(
                 do_import = "n"
             if do_import in {"y", "yes"}:
                 _save_codex_tokens(cli_tokens)
-                base_url = (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
+                base_url = (os.getenv("SIDEKICK_CODEX_BASE_URL", "")).strip().rstrip("/") or DEFAULT_CODEX_BASE_URL
                 config_path = _update_config_for_provider("openai-codex", base_url)
                 print()
                 print("Credentials imported. Note: if Codex CLI refreshes its token,")
@@ -3587,7 +3587,7 @@ def _codex_device_code_login() -> Dict[str, Any]:
 
     # Return tokens for the caller to persist (no longer writes to ~/.codex/)
     base_url = (
-        (os.getenv("SIDEKICK_CODEX_BASE_URL") or os.getenv("HERMES_CODEX_BASE_URL", "")).strip().rstrip("/")
+        (os.getenv("SIDEKICK_CODEX_BASE_URL", "")).strip().rstrip("/")
         or DEFAULT_CODEX_BASE_URL
     )
 

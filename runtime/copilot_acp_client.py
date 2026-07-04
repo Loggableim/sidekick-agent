@@ -40,7 +40,7 @@ def _resolve_command() -> str:
 
 
 def _resolve_args() -> list[str]:
-    raw = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS")).strip()
+    raw = (os.getenv("SIDEKICK_COPILOT_ACP_ARGS", "")).strip()
     if not raw:
         return ["--acp", "--stdio"]
     return shlex.split(raw)

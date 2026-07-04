@@ -32,12 +32,12 @@ HOME = Path.home()
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 
 # ── Network config (env-overridable) ─────────────────────────────────────────
-HOST = os.getenv("SIDEKICK_WEBUI_HOST")
-PORT = int(os.getenv("SIDEKICK_WEBUI_PORT"))
+HOST = os.getenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
+PORT = int(os.getenv("SIDEKICK_WEBUI_PORT", "9119"))
 
 # ── TLS/HTTPS config (optional, env-overridable) ────────────────────────────
-TLS_CERT = (os.getenv("SIDEKICK_WEBUI_TLS_CERT")).strip() or None
-TLS_KEY = (os.getenv("SIDEKICK_WEBUI_TLS_KEY")).strip() or None
+TLS_CERT = (os.getenv("SIDEKICK_WEBUI_TLS_CERT", "")).strip() or None
+TLS_KEY = (os.getenv("SIDEKICK_WEBUI_TLS_KEY", "")).strip() or None
 TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
@@ -79,8 +79,8 @@ def refresh_runtime_paths_from_env() -> None:
     global SESSION_INDEX_FILE, SETTINGS_FILE, LAST_WORKSPACE_FILE, PROJECTS_FILE
     global _models_cache_path
 
-    HOST = os.getenv("SIDEKICK_WEBUI_HOST")
-    PORT = int(os.getenv("SIDEKICK_WEBUI_PORT"))
+    HOST = os.getenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
+    PORT = int(os.getenv("SIDEKICK_WEBUI_PORT", "9119"))
     STATE_DIR = _resolve_state_dir_from_env()
     SESSION_DIR = STATE_DIR / "sessions"
     WORKSPACES_FILE = STATE_DIR / "workspaces.json"

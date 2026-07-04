@@ -13079,7 +13079,7 @@ class SidekickCLI:
                 if getattr(self, "agent", None) and getattr(self, "_agent_running", False):
                     self.agent.interrupt(f"received signal {signum}")
                     try:
-                        _grace = float(os.getenv("SIDEKICK_SIGTERM_GRACE"))
+                        _grace = float(os.getenv("SIDEKICK_SIGTERM_GRACE", "5"))
                     except (TypeError, ValueError):
                         _grace = 1.5
                     if _grace > 0:
@@ -13455,7 +13455,7 @@ def main(
             if _agent is not None:
                 _agent.interrupt(f"received signal {signum}")
                 try:
-                    _grace = float(os.getenv("SIDEKICK_SIGTERM_GRACE"))
+                    _grace = float(os.getenv("SIDEKICK_SIGTERM_GRACE", "5"))
                 except (TypeError, ValueError):
                     _grace = 1.5
                 if _grace > 0:
