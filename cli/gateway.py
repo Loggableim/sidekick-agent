@@ -1238,7 +1238,7 @@ def _windows_gateway_should_absorb_console_controls() -> bool:
     if not is_windows():
         return False
 
-    detached = (os.getenv("SIDEKICK_GATEWAY_DETACHED")).strip().lower()
+    detached = (os.getenv("SIDEKICK_GATEWAY_DETACHED") or "").strip().lower()
     if detached in {"1", "true", "yes", "on"}:
         return True
 
@@ -2394,7 +2394,7 @@ def _print_system_scope_remediation(action: str) -> None:
 
 def _get_restart_drain_timeout() -> float:
     """Return the configured gateway restart drain timeout in seconds."""
-    raw = (os.getenv("SIDEKICK_RESTART_DRAIN_TIMEOUT")).strip()
+    raw = (os.getenv("SIDEKICK_RESTART_DRAIN_TIMEOUT") or "").strip()
     if not raw:
         cfg = read_raw_config()
         agent_cfg = cfg.get("agent", {}) if isinstance(cfg, dict) else {}

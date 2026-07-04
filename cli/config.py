@@ -213,7 +213,7 @@ def recommended_update_command() -> str:
 def format_managed_message(action: str = "modify this Sidekick installation") -> str:
     """Build a user-facing error for managed installs."""
     managed_system = get_managed_system() or "a package manager"
-    raw = (os.getenv("SIDEKICK_MANAGED")).strip().lower()
+    raw = (os.getenv("SIDEKICK_MANAGED") or "").strip().lower()
 
     if managed_system == "NixOS":
         env_hint = "true" if raw in _MANAGED_TRUE_VALUES else raw or "true"

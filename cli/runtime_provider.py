@@ -316,7 +316,7 @@ def resolve_requested_provider(requested: Optional[str] = None) -> str:
 
     # Prefer the persisted config selection over any stale shell/.env
     # provider override so chat uses the endpoint the user last saved.
-    env_provider = (os.getenv("SIDEKICK_INFERENCE_PROVIDER")).strip().lower()
+    env_provider = (os.getenv("SIDEKICK_INFERENCE_PROVIDER") or "").strip().lower()
     if env_provider:
         return env_provider
 

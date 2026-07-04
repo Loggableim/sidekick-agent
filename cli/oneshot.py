@@ -152,7 +152,7 @@ def run_oneshot(
     # not host it), and silently picking the provider's catalog default hides
     # the mismatch.  Require the caller to be explicit.  Validate BEFORE the
     # stderr redirect so the message actually reaches the terminal.
-    env_model_early = (os.getenv("SIDEKICK_INFERENCE_MODEL")).strip()
+    env_model_early = (os.getenv("SIDEKICK_INFERENCE_MODEL") or "").strip()
     if provider and not ((model or "").strip() or env_model_early):
         sys.stderr.write(
             "sidekick -z: --provider requires --model (or SIDEKICK_INFERENCE_MODEL / HERMES_INFERENCE_MODEL). "
@@ -241,7 +241,7 @@ def _run_agent(
     else:
         cfg_model = model_cfg.get("default") or model_cfg.get("model") or ""
 
-    env_model = (os.getenv("SIDEKICK_INFERENCE_MODEL")).strip()
+    env_model = (os.getenv("SIDEKICK_INFERENCE_MODEL") or "").strip()
     effective_model = (model or "").strip() or env_model or cfg_model
 
     # Resolve effective provider: explicit arg → (auto-detect from model if
