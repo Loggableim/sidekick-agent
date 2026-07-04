@@ -1104,12 +1104,7 @@ function Install-Repository {
             # "update" branch forever, emitting three ``fatal: not a git
             # repository`` errors and failing with "not in a git directory".
             Write-Warn "Existing directory at $InstallDir is not a valid git repo - replacing it."
-            try {
-                Remove-Item -Recurse -Force $InstallDir -ErrorAction Stop
-            } catch {
-                Write-Err "Could not remove $InstallDir : $_"
-                Write-Info "Close any programs that might be using files in $InstallDir (editors,"
-                Write-Info "terminals, running sidekick processes) and try again."
+            if (-not (Remove-InstallDirSafely -TargetPath $InstallDir -Reason "replace invalid installation")) {
                 Pause-IfElevated -ExitCode 4
                 exit 4
             }
@@ -1139,7 +1134,12 @@ function Install-Repository {
         $env:GIT_SSH_COMMAND = $null
 
         if (-not $cloneSuccess) {
-            if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
+            if (Test-Path $InstallDir) {
+                if (-not (Remove-InstallDirSafely -TargetPath $InstallDir -Reason "retry clone via HTTPS")) {
+                    Pause-IfElevated -ExitCode 4
+                    exit 4
+                }
+            }
             Write-Info "SSH failed, trying HTTPS..."
             try {
                 git -c windows.appendAtomically=false clone --depth 1 --branch $Branch --recurse-submodules $RepoUrlHttps $InstallDir
@@ -1149,7 +1149,12 @@ function Install-Repository {
 
         # Fallback: download ZIP archive (bypasses git file I/O issues entirely)
         if (-not $cloneSuccess) {
-            if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue }
+            if (Test-Path $InstallDir) {
+                if (-not (Remove-InstallDirSafely -TargetPath $InstallDir -Reason "retry clone via ZIP archive")) {
+                    Pause-IfElevated -ExitCode 4
+                    exit 4
+                }
+            }
             Write-Warn "Git clone failed - downloading ZIP archive instead..."
             try {
                 $zipUrl = "https://github.com/Loggableim/sidekick-agent/archive/refs/heads/$Branch.zip"
@@ -1211,7 +1216,7 @@ function Install-Repository {
 }
 
 function Stop-RunningSidekickProcesses {
-    Write-Info "Stopping any running Sidekick processes before dependency install..."
+    Write-Info "Stopping any running Sidekick processes..."
 
     $stopped = @()
     try {
@@ -1258,6 +1263,41 @@ function Stop-RunningSidekickProcesses {
     } else {
         Write-Info "No running Sidekick runtime process found"
     }
+}
+
+
+function Remove-InstallDirSafely {
+    param(
+        [string]$TargetPath,
+        [string]$Reason = "replace installation"
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
+        return $true
+    }
+
+    Write-Info "Preparing to remove $TargetPath ($Reason)..."
+    Stop-RunningSidekickProcesses
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            Remove-Item -LiteralPath $TargetPath -Recurse -Force -ErrorAction Stop
+            Write-Success "Removed old installation directory"
+            return $true
+        } catch {
+            $lastError = $_
+            if ($attempt -lt 3) {
+                Write-Warn "Could not remove $TargetPath on attempt $attempt - retrying..."
+                Start-Sleep -Seconds (2 * $attempt)
+            }
+        }
+    }
+
+    Write-Err "Could not remove $TargetPath : $lastError"
+    Write-Info "Close any programs that might be using files in $TargetPath (editors,"
+    Write-Info "terminals, running sidekick processes) and try again."
+    return $false
 }
 
 
