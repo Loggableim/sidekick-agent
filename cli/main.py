@@ -5980,15 +5980,15 @@ def _update_via_zip(args):
     import zipfile
     from urllib.request import urlretrieve
 
-    branch = "main"
+    branch = "master"
     zip_url = (
-        f"https://github.com/NousResearch/hermes-agent/archive/refs/heads/{branch}.zip"
+        f"https://github.com/Loggableim/sidekick-agent/archive/refs/heads/{branch}.zip"
     )
 
     print("→ Downloading latest version...")
     try:
-        tmp_dir = tempfile.mkdtemp(prefix="hermes-update-")
-        zip_path = os.path.join(tmp_dir, f"hermes-agent-{branch}.zip")
+        tmp_dir = tempfile.mkdtemp(prefix="sidekick-update-")
+        zip_path = os.path.join(tmp_dir, f"sidekick-agent-{branch}.zip")
         urlretrieve(zip_url, zip_path)
 
         print("→ Extracting...")
@@ -6006,8 +6006,8 @@ def _update_via_zip(args):
                     )
             zf.extractall(tmp_dir)
 
-        # GitHub ZIPs extract to hermes-agent-<branch>/
-        extracted = os.path.join(tmp_dir, f"hermes-agent-{branch}")
+        # GitHub ZIPs extract to sidekick-agent-<branch>/
+        extracted = os.path.join(tmp_dir, f"sidekick-agent-{branch}")
         if not os.path.isdir(extracted):
             # Try to find it
             for d in os.listdir(tmp_dir):
@@ -6309,12 +6309,12 @@ def _restore_stashed_changes(
 # =========================================================================
 
 OFFICIAL_REPO_URLS = {
-    "https://github.com/NousResearch/hermes-agent.git",
-    "git@github.com:NousResearch/hermes-agent.git",
-    "https://github.com/NousResearch/hermes-agent",
-    "git@github.com:NousResearch/hermes-agent",
+    "https://github.com/Loggableim/sidekick-agent.git",
+    "git@github.com:Loggableim/sidekick-agent.git",
+    "https://github.com/Loggableim/sidekick-agent",
+    "git@github.com:Loggableim/sidekick-agent",
 }
-OFFICIAL_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
+OFFICIAL_REPO_URL = "https://github.com/Loggableim/sidekick-agent.git"
 SKIP_UPSTREAM_PROMPT_FILE = ".skip_upstream_prompt"
 
 
@@ -6339,11 +6339,11 @@ def _is_fork(origin_url: Optional[str]) -> bool:
     if not origin_url:
         return False
     # Normalize URL for comparison (strip trailing .git if present)
-    normalized = origin_url.rstrip("/")
+    normalized = origin_url.rstrip("/").lower()
     if normalized.endswith(".git"):
         normalized = normalized[:-4]
     for official in OFFICIAL_REPO_URLS:
-        official_normalized = official.rstrip("/")
+        official_normalized = official.rstrip("/").lower()
         if official_normalized.endswith(".git"):
             official_normalized = official_normalized[:-4]
         if normalized == official_normalized:
@@ -6395,6 +6395,75 @@ def _count_commits_between(git_cmd: list[str], cwd: Path, base: str, head: str) 
     return -1
 
 
+def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -> str:
+    """Resolve a remote's default branch, falling back to common branch names."""
+    remote = str(remote or "origin").strip() or "origin"
+
+    try:
+        result = subprocess.run(
+            git_cmd + ["symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        ref = result.stdout.strip()
+        prefix = f"{remote}/"
+        if result.returncode == 0 and ref.startswith(prefix):
+            branch = ref[len(prefix):].strip()
+            if branch:
+                return branch
+    except Exception:
+        pass
+
+    try:
+        result = subprocess.run(
+            git_cmd + ["remote", "show", remote],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                label, _, value = line.partition(":")
+                if label.strip().lower() == "head branch":
+                    branch = value.strip()
+                    if branch and branch != "(unknown)":
+                        return branch
+    except Exception:
+        pass
+
+    try:
+        result = subprocess.run(
+            git_cmd + ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        upstream = result.stdout.strip()
+        prefix = f"{remote}/"
+        if result.returncode == 0 and upstream.startswith(prefix):
+            branch = upstream[len(prefix):].strip()
+            if branch:
+                return branch
+    except Exception:
+        pass
+
+    for branch in ("master", "main"):
+        try:
+            result = subprocess.run(
+                git_cmd + ["rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}"],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return branch
+        except Exception:
+            pass
+
+    return "master"
+
+
 def _should_skip_upstream_prompt() -> bool:
     """Check if user previously declined to add upstream."""
     from runtime._compat.shim_constants import get_sidekick_home
@@ -6412,14 +6481,14 @@ def _mark_skip_upstream_prompt():
         pass
 
 
-def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path) -> bool:
-    """Attempt to push updated main to origin (sync fork).
+def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path, branch: str) -> bool:
+    """Attempt to push the updated branch to origin (sync fork).
 
     Returns True if push succeeded, False otherwise.
     """
     try:
         result = subprocess.run(
-            git_cmd + ["push", "origin", "main", "--force-with-lease"],
+            git_cmd + ["push", "origin", branch, "--force-with-lease"],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -6434,8 +6503,8 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
 
     This implements the fork upstream sync logic:
     - If upstream remote doesn't exist, ask user if they want to add it
-    - Compare origin/main with upstream/main
-    - If origin/main is strictly behind upstream/main, pull from upstream
+    - Compare origin's default branch with upstream's default branch
+    - If origin is strictly behind upstream, pull from upstream
     - Try to sync fork back to origin if possible
     """
     has_upstream = _has_upstream_remote(git_cmd, cwd)
@@ -6448,7 +6517,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         # Ask user if they want to add upstream
         print()
         print("ℹ Your fork is not tracking the official Sidekick repository.")
-        print("  This means you may miss updates from NousResearch/hermes-agent.")
+        print("  This means you may miss updates from Loggableim/sidekick-agent.")
         print()
         try:
             response = (
@@ -6462,7 +6531,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
             print("→ Adding upstream remote...")
             if _add_upstream_remote(git_cmd, cwd):
                 print(
-                    "  ✓ Added upstream: https://github.com/NousResearch/hermes-agent.git"
+                    f"  ✓ Added upstream: {OFFICIAL_REPO_URL}"
                 )
                 has_upstream = True
             else:
@@ -6470,7 +6539,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
                 return
         else:
             print(
-                "  Skipped. Run 'git remote add upstream https://github.com/NousResearch/hermes-agent.git' to add later."
+                f"  Skipped. Run 'git remote add upstream {OFFICIAL_REPO_URL}' to add later."
             )
             _mark_skip_upstream_prompt()
             return
@@ -6489,23 +6558,26 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         print("  ✗ Failed to fetch upstream. Skipping upstream sync.")
         return
 
-    # Compare origin/main with upstream/main
-    origin_ahead = _count_commits_between(git_cmd, cwd, "upstream/main", "origin/main")
-    upstream_ahead = _count_commits_between(
-        git_cmd, cwd, "origin/main", "upstream/main"
-    )
+    origin_branch = _resolve_remote_default_branch(git_cmd, cwd, "origin")
+    upstream_branch = _resolve_remote_default_branch(git_cmd, cwd, "upstream")
+    origin_ref = f"origin/{origin_branch}"
+    upstream_ref = f"upstream/{upstream_branch}"
+
+    # Compare origin's default branch with upstream's default branch.
+    origin_ahead = _count_commits_between(git_cmd, cwd, upstream_ref, origin_ref)
+    upstream_ahead = _count_commits_between(git_cmd, cwd, origin_ref, upstream_ref)
 
     if origin_ahead < 0 or upstream_ahead < 0:
         print("  ✗ Could not compare branches. Skipping upstream sync.")
         return
 
-    # If origin/main has commits not on upstream, don't trample
+    # If origin has commits not on upstream, don't trample
     if origin_ahead > 0:
         print()
         print(f"ℹ Your fork has {origin_ahead} commit(s) not on upstream.")
         print("  Skipping upstream sync to preserve your changes.")
         print("  If you want to merge upstream changes, run:")
-        print("    git pull upstream main")
+        print(f"    git pull upstream {upstream_branch}")
         return
 
     # If upstream is not ahead, fork is up to date
@@ -6513,14 +6585,14 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
         print("  ✓ Fork is up to date with upstream")
         return
 
-    # origin/main is strictly behind upstream/main (can fast-forward)
+    # origin is strictly behind upstream (can fast-forward)
     print()
     print(f"→ Fork is {upstream_ahead} commit(s) behind upstream")
     print("→ Pulling from upstream...")
 
     try:
         subprocess.run(
-            git_cmd + ["pull", "--ff-only", "upstream", "main"],
+            git_cmd + ["pull", "--ff-only", "upstream", upstream_branch],
             cwd=cwd,
             check=True,
         )
@@ -6534,7 +6606,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path) -> None:
 
     # Try to sync fork back to origin
     print("→ Syncing fork...")
-    if _sync_fork_with_upstream(git_cmd, cwd):
+    if _sync_fork_with_upstream(git_cmd, cwd, origin_branch):
         print("  ✓ Fork synced with upstream")
     else:
         print(
@@ -7110,9 +7182,9 @@ def _cmd_update_check():
             capture_output=True,
             text=True,
         )
-        compare_branch = "origin/main"
+        compare_remote = "origin"
     else:
-        compare_branch = "upstream/main"
+        compare_remote = "upstream"
 
     if fetch_result.returncode != 0:
         stderr = fetch_result.stderr.strip()
@@ -7125,6 +7197,9 @@ def _cmd_update_check():
             if stderr:
                 print(f"  {stderr.splitlines()[0]}")
         sys.exit(1)
+
+    compare_name = _resolve_remote_default_branch(git_cmd, PROJECT_ROOT, compare_remote)
+    compare_branch = f"{compare_remote}/{compare_name}"
 
     rev_result = subprocess.run(
         git_cmd + ["rev-list", f"HEAD..{compare_branch}", "--count"],
@@ -7388,7 +7463,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         else:
             print("✗ Not a git repository. Please reinstall:")
             print(
-                "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"
+                "  git clone https://github.com/Loggableim/sidekick-agent.git && cd sidekick-agent && python -m pip install -e ."
             )
             sys.exit(1)
 
@@ -7465,21 +7540,21 @@ def _cmd_update_impl(args, gateway_mode: bool):
         )
         current_branch = result.stdout.strip()
 
-        # Always update against main
-        branch = "main"
+        # Always update against the origin default branch.
+        branch = _resolve_remote_default_branch(git_cmd, PROJECT_ROOT, "origin")
 
-        # If user is on a non-main branch or detached HEAD, switch to main
-        if current_branch != "main":
+        # If user is on a non-default branch or detached HEAD, switch first.
+        if current_branch != branch:
             label = (
                 "detached HEAD"
                 if current_branch == "HEAD"
                 else f"branch '{current_branch}'"
             )
-            print(f"  ⚠ Currently on {label} — switching to main for update...")
+            print(f"  ⚠ Currently on {label} — switching to {branch} for update...")
             # Stash before checkout so uncommitted work isn't lost
             auto_stash_ref = _stash_local_changes_if_needed(git_cmd, PROJECT_ROOT)
             subprocess.run(
-                git_cmd + ["checkout", "main"],
+                git_cmd + ["checkout", branch],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
                 text=True,
@@ -7515,7 +7590,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     prompt_user=prompt_for_restore,
                     input_fn=gw_input_fn,
                 )
-            if current_branch not in {"main", "HEAD"}:
+            if current_branch not in {branch, "HEAD"}:
                 subprocess.run(
                     git_cmd + ["checkout", current_branch],
                     cwd=PROJECT_ROOT,
@@ -7571,7 +7646,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     if reset_result.stderr.strip():
                         print(f"  {reset_result.stderr.strip()}")
                     print(
-                        "  Try manually: git fetch origin && git reset --hard origin/main"
+                        f"  Try manually: git fetch origin && git reset --hard origin/{branch}"
                     )
                     sys.exit(1)
             update_succeeded = True
@@ -7604,8 +7679,8 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 f"  ✓ Cleared {removed} stale __pycache__ director{'y' if removed == 1 else 'ies'}"
             )
 
-        # Fork upstream sync logic (only for main branch on forks)
-        if is_fork and branch == "main":
+        # Fork upstream sync logic for the origin default branch.
+        if is_fork:
             _sync_with_upstream_if_needed(git_cmd, PROJECT_ROOT)
 
         # Reinstall Python dependencies. Prefer .[all], but if one optional extra

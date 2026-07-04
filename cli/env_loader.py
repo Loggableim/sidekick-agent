@@ -174,3 +174,7 @@ def load_sidekick_dotenv(
         loaded.append(project_env_path)
 
     return loaded
+
+
+# Legacy public API kept for installed entrypoints and older integrations.
+load_hermes_dotenv = load_sidekick_dotenv
