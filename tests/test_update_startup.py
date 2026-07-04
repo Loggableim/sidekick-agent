@@ -1,5 +1,7 @@
 import subprocess
 import inspect
+import sys
+import textwrap
 from pathlib import Path
 
 
@@ -69,3 +71,33 @@ def test_windows_zip_update_fallback_uses_sidekick_master_archive():
     assert 'branch = "master"' in source
     assert "NousResearch/hermes-agent" not in source
     assert 'branch = "main"' not in source
+
+
+def test_import_web_server_does_not_run_git():
+    script = textwrap.dedent(
+        """
+        import subprocess
+
+        real_run = subprocess.run
+
+        def blocked_run(cmd, *args, **kwargs):
+            if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "git":
+                raise AssertionError("web.server import ran git")
+            return real_run(cmd, *args, **kwargs)
+
+        subprocess.run = blocked_run
+
+        import web.server
+        assert web.server.Handler.server_version
+        """
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr

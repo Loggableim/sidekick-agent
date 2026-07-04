@@ -615,11 +615,12 @@ def status(deep: bool = False) -> None:
 
     if task_installed:
         print(f"✓ Scheduled Task registered: {task_name}")
-        info = query_task_status()
-        if info:
-            for key in ("status", "last run time", "last run result"):
-                if key in info:
-                    print(f"  {key.title()}: {info[key]}")
+        if deep:
+            info = query_task_status()
+            if info:
+                for key in ("status", "last run time", "last run result"):
+                    if key in info:
+                        print(f"  {key.title()}: {info[key]}")
     elif startup_installed:
         print(f"✓ Windows login item installed: {get_startup_entry_path()}")
     else:

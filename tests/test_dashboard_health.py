@@ -5,6 +5,7 @@ import sys
 import warnings
 import pytest
 from pathlib import Path
+from types import SimpleNamespace
 from starlette.requests import Request
 
 TestClient = pytest.importorskip("fastapi.testclient").TestClient
@@ -72,6 +73,69 @@ def test_openapi_schema_excludes_legacy_proxy_without_duplicate_operation_warnin
     schema = response.json()
     assert "/api/{path}" not in schema["paths"]
     assert not any("Duplicate Operation ID" in str(item.message) for item in caught)
+
+
+def test_codex_device_login_uses_default_base_url_when_env_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_CODEX_BASE_URL", raising=False)
+
+    from cli import web_server
+    from cli.auth import DEFAULT_CODEX_BASE_URL
+    import httpx
+    import runtime.credential_pool as credential_pool
+
+    responses = iter(
+        [
+            SimpleNamespace(
+                status_code=200,
+                json=lambda: {"user_code": "ABCD-EFGH", "device_auth_id": "device-1", "interval": "0"},
+            ),
+            SimpleNamespace(
+                status_code=200,
+                json=lambda: {"authorization_code": "auth-code", "code_verifier": "verifier"},
+            ),
+            SimpleNamespace(
+                status_code=200,
+                json=lambda: {"access_token": "access-token", "refresh_token": "refresh-token"},
+            ),
+        ]
+    )
+
+    class FakeHttpxClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, *args, **kwargs):
+            return next(responses)
+
+    added_entries = []
+
+    class FakePool:
+        def add_entry(self, entry):
+            added_entries.append(entry)
+
+    monkeypatch.setattr(httpx, "Client", FakeHttpxClient)
+    monkeypatch.setattr(web_server.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(credential_pool, "load_pool", lambda provider: FakePool())
+
+    session_id = "test-codex-device-session"
+    with web_server._oauth_sessions_lock:
+        web_server._oauth_sessions[session_id] = {"status": "pending", "created_at": web_server.time.time()}
+    try:
+        web_server._codex_full_login_worker(session_id)
+        session = web_server._oauth_sessions[session_id]
+    finally:
+        with web_server._oauth_sessions_lock:
+            web_server._oauth_sessions.pop(session_id, None)
+
+    assert session["status"] == "approved"
+    assert added_entries[0].base_url == DEFAULT_CODEX_BASE_URL
 
 
 def test_workspaces_endpoint_merges_space_engine_entries(monkeypatch, tmp_path):

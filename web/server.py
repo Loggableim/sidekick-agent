@@ -146,7 +146,7 @@ from web.api.profiles import set_request_profile, clear_request_profile
 from web.api.routes import handle_delete, handle_get, handle_patch, handle_post
 from web.api.routes import _setup_workspace_from_request, _teardown_workspace_context
 from web.api.startup import auto_install_agent_deps, fix_credential_permissions
-from web.api.updates import WEBUI_VERSION
+from cli import __version__ as WEBUI_VERSION
 
 
 class QuietHTTPServer(ThreadingHTTPServer):

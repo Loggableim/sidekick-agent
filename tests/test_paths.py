@@ -211,6 +211,41 @@ def test_setup_logging_creates_log_files(monkeypatch, tmp_path):
     assert (logs_dir / "errors.log").exists()
 
 
+def test_setup_logging_ignores_locked_agent_log_rollover(monkeypatch, tmp_path):
+    import logging.handlers
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(home))
+    setup_logging(force=True)
+
+    agent_handler = next(
+        handler
+        for handler in logging.getLogger().handlers
+        if getattr(handler, "_sidekick_managed", False)
+        and Path(getattr(handler, "baseFilename", "")).name == "agent.log"
+    )
+    agent_handler.maxBytes = 1
+    agent_handler.backupCount = 1
+
+    logging.getLogger("sidekick.test").warning("seed rollover file")
+
+    handled_errors = []
+    monkeypatch.setattr(agent_handler, "handleError", lambda record: handled_errors.append(record))
+
+    real_rename = logging.handlers.os.rename
+
+    def locked_rename(source, dest):
+        if Path(source).name == "agent.log" and Path(dest).name == "agent.log.1":
+            raise PermissionError(32, "locked log", str(source), str(dest))
+        return real_rename(source, dest)
+
+    monkeypatch.setattr(logging.handlers.os, "rename", locked_rename)
+
+    logging.getLogger("sidekick.test").warning("trigger locked rollover")
+
+    assert handled_errors == []
+
+
 def test_run_assistant_once_returns_fallback_when_command_missing(monkeypatch):
     monkeypatch.setattr("shared.agent_bridge._detect_legacy_sidekick", lambda: None)
     result = run_assistant_once("Hello")

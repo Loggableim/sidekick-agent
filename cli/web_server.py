@@ -3117,7 +3117,7 @@ def _codex_full_login_worker(session_id: str) -> None:
         import uuid as _uuid
         pool = load_pool("openai-codex")
         base_url = (
-            (os.getenv("SIDEKICK_CODEX_BASE_URL")).strip().rstrip("/")
+            (os.getenv("SIDEKICK_CODEX_BASE_URL") or "").strip().rstrip("/")
             or DEFAULT_CODEX_BASE_URL
         )
         entry = PooledCredential(

@@ -10,6 +10,18 @@ from shared.config import ensure_sidekick_home, load_config
 _INITIALIZED = False
 
 
+class SidekickRotatingFileHandler(RotatingFileHandler):
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except PermissionError:
+            # Windows can refuse log renames while another Sidekick process
+            # still has the file open. Keep logging to the current file instead
+            # of printing noisy logging-internal tracebacks to the terminal.
+            if self.stream is None:
+                self.stream = self._open()
+
+
 def get_logs_dir() -> Path:
     return get_sidekick_home() / "logs"
 
@@ -55,7 +67,7 @@ def setup_logging(force: bool = False) -> Path:
 
     formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    agent_handler = RotatingFileHandler(
+    agent_handler = SidekickRotatingFileHandler(
         logs_dir / "agent.log",
         maxBytes=max_bytes,
         backupCount=backup_count,
@@ -66,7 +78,7 @@ def setup_logging(force: bool = False) -> Path:
     agent_handler.setFormatter(formatter)
     root.addHandler(agent_handler)
 
-    errors_handler = RotatingFileHandler(
+    errors_handler = SidekickRotatingFileHandler(
         logs_dir / "errors.log",
         maxBytes=2 * 1024 * 1024,
         backupCount=2,
