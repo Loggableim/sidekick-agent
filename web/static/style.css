@@ -2075,7 +2075,18 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .composer-mobile-context-action{flex:1 1 100%;}
   }
   .composer-right{display:flex;gap:8px;align-items:center;flex-shrink:0;}
-  .composer-status{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;}
+  .composer-status{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;display:inline-flex;align-items:center;gap:6px;}
+  .composer-status.is-loading::before{
+    content:'';
+    width:8px;
+    height:8px;
+    border:1.5px solid currentColor;
+    border-top-color:transparent;
+    border-radius:50%;
+    animation:spin .6s linear infinite;
+    flex-shrink:0;
+  }
+  .composer-status.is-loading{color:var(--text);}
   /* Context usage indicator */
   .ctx-indicator-wrap{position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
   .ctx-indicator{width:34px;height:34px;padding:0;border:none;background:none;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity .15s,transform .15s;}

@@ -3465,15 +3465,18 @@ function setStatus(t){
   showToast(t, 4000);
 }
 
-function setComposerStatus(t){
+function setComposerStatus(t, isLoading){
   const el=$('composerStatus');
   if(!el)return;
   if(!t){
     el.style.display='none';
     el.textContent='';
+    el.classList.remove('is-loading');
     return;
   }
   el.textContent=t;
+  if(isLoading) el.classList.add('is-loading');
+  else el.classList.remove('is-loading');
   el.style.display='';
 }
 

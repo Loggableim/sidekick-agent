@@ -68,7 +68,17 @@ function _showGameModeClientBlock(){
   if(typeof showToast==='function') showToast(msg,5000,'warning');
 }
 
+let _isSendingChat=false;
+
 async function send(){
+  if(_isSendingChat){
+    if(typeof showToast==='function') showToast('Send in progress, please wait.',2500,'warning');
+    return;
+  }
+  const originalText=$('msg').value;
+  const originalFiles=[...S.pendingFiles];
+  _isSendingChat=true;
+  try{
   let text=$('msg').value.trim();
   // Plan/Action mode: `/plan` automatisch voranstellen
   const composerMode = (() => {
@@ -214,14 +224,19 @@ async function send(){
 
   const activeSid=S.session.session_id;
 
-  setComposerStatus(S.pendingFiles&&S.pendingFiles.length?'Uploading…':'');
+  setComposerStatus(S.pendingFiles&&S.pendingFiles.length?'Dateien werden hochgeladen…':'Senden wird vorbereitet…',true);
   let uploaded=[];
   try{uploaded=await uploadPendingFiles();}
-  catch(e){if(!text){setComposerStatus(`Upload error: ${e.message}`);return;}}
-  // Clear the uploading status now that upload is done — if we don't clear here
-  // it stays visible for the entire duration of the agent stream, since
-  // setComposerStatus('') is only called in setBusy(false), not setBusy(true).
-  setComposerStatus('');
+  catch(e){
+    setComposerStatus(`Upload error: ${e.message}`,false);
+    if(typeof showToast==='function') showToast(`Upload failed: ${e.message}`,5000,'error');
+    $('msg').value = originalText||text;
+    autoResize();
+    S.pendingFiles=[...originalFiles];
+    renderTray();
+    return;
+  }
+  setComposerStatus('Senden an Server…', true);
 
   const uploadedNames=uploaded.map(u=>u.name||u);
   const uploadedPaths=uploaded.map(u=>u&&u.is_image?(u.name||u.filename||u):(u.path||u.name||u));
@@ -365,7 +380,7 @@ async function send(){
       }
       setBusy(false);
       if(typeof updateSendBtn==='function') updateSendBtn();
-      setComposerStatus(errMsg);
+      setComposerStatus(errMsg,false);
       if(typeof showToast==='function') showToast(errMsg,5000,'warning');
       if(typeof renderMessages==='function') renderMessages();
       if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
@@ -393,7 +408,7 @@ async function send(){
         if(typeof updateSendBtn==='function') updateSendBtn();
         if(typeof markInflight==='function') markInflight(activeSid, conflictStreamId);
         attachLiveStream(activeSid, conflictStreamId, [], {reconnecting:true});
-        setComposerStatus('');
+        setComposerStatus('Sendeanfrage läuft…', true);
         return;
       }
       showToast('Current session is still running. Queued your message.',2600);
@@ -406,9 +421,9 @@ async function send(){
     // Only hide approval card if it belongs to the session that just finished
     if(!_approvalSessionId || _approvalSessionId===activeSid) hideApprovalCard(true);removeThinking();
     if(!_clarifySessionId || _clarifySessionId===activeSid) hideClarifyCard(true, 'terminal');
-    S.messages.push({role:'assistant',content:`**Error:** ${errMsg}`});
-    _queueDrainSid=activeSid;renderMessages();setBusy(false);setComposerStatus(`Error: ${errMsg}`);
-    if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+      S.messages.push({role:'assistant',content:`**Error:** ${errMsg}`});
+      _queueDrainSid=activeSid;renderMessages();setBusy(false);setComposerStatus(`Error: ${errMsg}`);
+      if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
     // Reconcile with server truth after immediately clearing the optimistic spinner.
     if(typeof renderSessionList==='function') void renderSessionList();
     return;
@@ -416,6 +431,11 @@ async function send(){
 
   // Open SSE stream and render tokens live
   attachLiveStream(activeSid, streamId, uploadedNames);
+  setComposerStatus('');
+  } finally{
+    _isSendingChat=false;
+    if(typeof updateSendBtn==='function') updateSendBtn();
+  }
 
 }
 
