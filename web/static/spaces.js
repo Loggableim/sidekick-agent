@@ -234,6 +234,26 @@ function _showSessionListSpaceLoading() {
 }
 
 function _showSpaceSwitchLoading(slug) {
+  const switchingSessionId = (typeof S !== 'undefined' && S && S.session) ? S.session.session_id : null;
+  let switchingStreamId = (typeof S !== 'undefined' && S) ? S.activeStreamId : null;
+  if (!switchingStreamId && switchingSessionId && typeof INFLIGHT === 'object' && INFLIGHT[switchingSessionId]) {
+    switchingStreamId = INFLIGHT[switchingSessionId].streamId || null;
+  }
+  if (switchingSessionId && switchingStreamId && typeof closeLiveStream === 'function') {
+    try { closeLiveStream(switchingSessionId, switchingStreamId); } catch (_) {}
+  }
+  try {
+    if (typeof INFLIGHT === 'object' && switchingSessionId && INFLIGHT[switchingSessionId]) {
+      delete INFLIGHT[switchingSessionId];
+      if (typeof clearInflightState === 'function') clearInflightState(switchingSessionId);
+    }
+    if (typeof stopApprovalPolling === 'function') stopApprovalPolling();
+    if (typeof stopClarifyPolling === 'function') stopClarifyPolling();
+    if (typeof hideApprovalCard === 'function') hideApprovalCard(true);
+    if (typeof hideClarifyCard === 'function') hideClarifyCard(true);
+    if (typeof removeThinking === 'function') removeThinking();
+    if (typeof clearLiveToolCards === 'function') clearLiveToolCards();
+  } catch (_) {}
   _resetViewsForSpaceSwitch();
   updateWorkspaceNameBar();
   updateTitlebarSpace();

@@ -70,8 +70,14 @@ function _showGameModeClientBlock(){
 
 async function send(){
   let text=$('msg').value.trim();
-  // Plan Mode: `/plan` automatisch voranstellen
-  if(window._planMode&&text&&!text.startsWith('/')){
+  // Plan/Action mode: `/plan` automatisch voranstellen
+  const composerMode = (() => {
+    const rawMode = typeof window._composerMode === 'string'
+      ? window._composerMode
+      : (typeof localStorage !== 'undefined' ? localStorage.getItem('sidekick-webui-composer-mode') : '');
+    return rawMode === 'plan' ? 'plan' : 'action';
+  })();
+  if (composerMode === 'plan' && text && !text.startsWith('/')) {
     text='/plan '+text;
     $('msg').value=text;
   }
@@ -598,16 +604,31 @@ document.addEventListener('keydown',function _goalInputKeydown(e){
 
 // ── Plan Mode ─────────────────────────────────────────────
 window._planMode=false;
+if(typeof localStorage!=='undefined'){
+  const storedMode=localStorage.getItem('sidekick-webui-composer-mode');
+  window._planMode = storedMode==='plan';
+}
+if(!window._composerMode) window._composerMode = window._planMode ? 'plan' : 'action';
 
 function _togglePlanMode(){
-  window._planMode=!window._planMode;
+  const nextMode=window._planMode?'action':'plan';
+  if(typeof setComposerMode==='function'){
+    try {
+      setComposerMode(nextMode);
+    } catch(_){}
+  }else{
+    window._composerMode=nextMode;
+    window._planMode=nextMode==='plan';
+  }
   _renderPlanBanner();
   // Toggle-Button visuell updaten
   const btn=document.querySelector('.plan-mode-toggle');
   if(btn)btn.classList.toggle('active',window._planMode);
   const box=$('composerBox');
   if(box)box.classList.toggle('plan-mode',window._planMode);
-  showToast(window._planMode?'🧠 Plan Mode ON':'🧠 Plan Mode OFF',1500);
+  if(typeof setComposerMode!=='function'){
+    showToast(window._planMode?'🧠 Plan Mode ON':'🧠 Plan Mode OFF',1500);
+  }
 }
 
 function _renderPlanBanner(){

@@ -9397,3 +9397,147 @@ if(document.readyState==='loading'){
 
 window.setComposerMode=setComposerMode;
 window.syncComposerModeButtons=syncComposerModeButtons;
+
+// Keep legacy plan-mode consumers in sync with Composer Action/Plan mode.
+(function(){
+  const normalizeMode = (value) => (value === 'plan' ? 'plan' : 'action');
+  const applyMode = (mode) => {
+    const nextMode = normalizeMode(mode);
+    window._composerMode = nextMode;
+    window._planMode = nextMode === 'plan';
+    return nextMode;
+  };
+
+  if (!window._composerMode) {
+    const storedMode = (typeof localStorage !== 'undefined') ? localStorage.getItem('sidekick-webui-composer-mode') : null;
+    window._composerMode = normalizeMode(storedMode || 'action');
+  }
+  const syncedMode = applyMode(window._composerMode);
+  if (typeof syncComposerModeButtons === 'function') syncComposerModeButtons(syncedMode);
+
+  if (typeof window.setComposerMode === 'function' && !window.setComposerMode.__sidekickPlanSync) {
+    const rawSetComposerMode = window.setComposerMode;
+    const wrapped = function(mode){
+      const nextMode = applyMode(mode);
+      const result = typeof rawSetComposerMode === 'function' && rawSetComposerMode !== wrapped
+        ? rawSetComposerMode(nextMode)
+        : nextMode;
+      if (typeof syncComposerModeButtons === 'function') syncComposerModeButtons(nextMode);
+      return result;
+    };
+    wrapped.__sidekickPlanSync = true;
+    window.setComposerMode = wrapped;
+  }
+})();
+
+// Improve action transparency for browser tool usage.
+(function(){
+  const browserToolNameMap = {
+    browser_search: '🌐 Browser Search',
+    browser_visit: '🌐 Browser Open URL',
+    browser_click: '🌐 Browser Click',
+    browser_input: '🌐 Browser Input',
+    browser_scroll: '🌐 Browser Scroll',
+    browser_screenshot: '🌐 Browser Screenshot',
+    browser_wait: '🌐 Browser Wait',
+    browser_extract: '🌐 Browser Extract',
+    browser_pdf: '🌐 Browser PDF',
+    browser_search_fallback: '🌐 Browser Search (Fallback)',
+    web_search: '🌐 Web Search',
+    web_open: '🌐 Web Open',
+    web_click: '🌐 Web Click',
+  };
+
+  const browserToolCategoryMap = {
+    browser_search: 'Browser',
+    browser_visit: 'Browser',
+    browser_click: 'Browser',
+    browser_input: 'Browser',
+    browser_scroll: 'Browser',
+    browser_screenshot: 'Browser',
+    browser_wait: 'Browser',
+    browser_extract: 'Browser',
+    browser_pdf: 'Browser',
+    browser_search_fallback: 'Browser',
+    web_search: 'Browser',
+    web_open: 'Browser',
+    web_click: 'Browser',
+  };
+
+  const fallbackToolName = (name) => {
+    if (!name) return 'tool';
+    return String(name).replace(/_/g, ' ')
+      .replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+      .trim() + ' Tool';
+  };
+
+  const originalToolDisplayName = typeof _toolDisplayName === 'function' ? _toolDisplayName : null;
+  _toolDisplayName = function(tc){
+    const name = tc && tc.name ? String(tc.name) : '';
+    if (browserToolNameMap[name]) return browserToolNameMap[name];
+    if (name === 'subagent_progress') return 'Subagent';
+    return originalToolDisplayName ? originalToolDisplayName(tc) : fallbackToolName(name);
+  };
+
+  const originalToolTimelineCategory = typeof _toolTimelineCategory === 'function' ? _toolTimelineCategory : null;
+  _toolTimelineCategory = function(name){
+    const key = String(name || '');
+    if (browserToolCategoryMap[key]) return browserToolCategoryMap[key];
+    return originalToolTimelineCategory ? originalToolTimelineCategory(name) : 'Tools';
+  };
+})();
+
+(function(){
+  const browserToolNameMap = {
+    browser_navigate: '[Browser] Navigate',
+    browser_snapshot: '[Browser] Snapshot',
+    browser_click: '[Browser] Click',
+    browser_type: '[Browser] Type',
+    browser_scroll: '[Browser] Scroll',
+    browser_back: '[Browser] Back',
+    browser_press: '[Browser] Press',
+    browser_action_v1: '[Browser] Action',
+    browser_get_images: '[Browser] Images',
+    browser_vision: '[Browser] Vision',
+    browser_console: '[Browser] Console',
+    browser_search: '[Browser] Search',
+    browser_extract: '[Browser] Extract',
+    browser_search_fallback: '[Browser] Search (Fallback)',
+    web_search: '[Browser] Web Search',
+    web_extract: '[Browser] Web Extract',
+    web_crawl: '[Browser] Web Crawl',
+  };
+
+  const isBrowserTool = (name) => /^(browser_|web_)/.test(String(name || ''));
+  const formatToolLabel = (name) => {
+    if (!name) return '';
+    return String(name)
+      .replace(/_/g, ' ')
+      .replace(/\b([a-z])/g, (_, c) => c.toUpperCase())
+      .trim();
+  };
+
+  const toFallbackToolLabel = (name) => {
+    const label = formatToolLabel(name);
+    return label ? `${label} Tool` : 'Tool';
+  };
+
+  const originalToolDisplayName = typeof _toolDisplayName === 'function' ? _toolDisplayName : null;
+  _toolDisplayName = function(tc){
+    const name = tc && tc.name ? String(tc.name) : '';
+    if (browserToolNameMap[name]) return browserToolNameMap[name];
+    if (name === 'subagent_progress') return 'Subagent';
+    if (isBrowserTool(name)) {
+      const readable = formatToolLabel(name);
+      return readable ? `[Browser] ${readable}` : '[Browser] Tool';
+    }
+    return originalToolDisplayName ? originalToolDisplayName(tc) : toFallbackToolLabel(name);
+  };
+
+  const originalToolTimelineCategory = typeof _toolTimelineCategory === 'function' ? _toolTimelineCategory : null;
+  _toolTimelineCategory = function(name){
+    const key = String(name || '');
+    if (isBrowserTool(key)) return 'Browser';
+    return originalToolTimelineCategory ? originalToolTimelineCategory(name) : 'Tools';
+  };
+})();
