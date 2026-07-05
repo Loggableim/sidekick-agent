@@ -2218,7 +2218,7 @@ def _current_webui_version() -> str | None:
 # guarantees that even if a future release accidentally reuses the same
 # WebUI version string (or a debug build doesn't have a version), a structural
 # change still invalidates the cache.
-_MODELS_CACHE_SCHEMA_VERSION = 3
+_MODELS_CACHE_SCHEMA_VERSION = 4
 
 
 _models_cache_path = STATE_DIR / "models_cache.json"
@@ -2877,6 +2877,16 @@ def get_available_models() -> dict:
         default_model = get_effective_default_model(cfg)
         groups = []
 
+        try:
+            from cli.models import OLLAMA_CLOUD_CURATED_MODELS as _ollama_thinking_model_ids
+            _ollama_thinking_model_ids = {
+                str(mid).strip().lower()
+                for mid in _ollama_thinking_model_ids
+                if str(mid).strip()
+            }
+        except Exception:
+            _ollama_thinking_model_ids = set()
+
         def _norm_model_id(model_id: str) -> str:
             s = str(model_id or "").strip().lower()
             # Strip @provider: prefix (e.g., @custom:jingdong:GLM-5 -> GLM-5).
@@ -2891,6 +2901,26 @@ def get_available_models() -> dict:
                 parts = s.split("/")
                 s = parts[-1] or s
             return s.replace("-", ".")
+
+        def _thinking_model_variants(model_id: str) -> set[str]:
+            raw = str(model_id or "").strip().lower()
+            if not raw:
+                return set()
+            variants = {raw}
+            if raw.startswith("@") and ":" in raw:
+                variants.add(raw.split(":", 1)[1].strip())
+            if "/" in raw:
+                variants.add(raw.split("/", 1)[-1].strip())
+                if raw.startswith("@") and ":" in raw:
+                    after = raw.split(":", 1)[1].strip()
+                    if "/" in after:
+                        variants.add(after.split("/", 1)[-1].strip())
+            return {v for v in variants if v}
+
+        def _is_ollama_thinking_model(model_id: str) -> bool:
+            if not _ollama_thinking_model_ids:
+                return False
+            return any(v in _ollama_thinking_model_ids for v in _thinking_model_variants(model_id))
 
         def _build_configured_model_badges() -> dict[str, dict[str, str]]:
             configured_entries: list[dict[str, str]] = []
@@ -3977,6 +4007,18 @@ def get_available_models() -> dict:
         # collisions with @provider_id: so the frontend can distinguish them.
         _deduplicate_model_ids(groups)
 
+        thinking_models: list[str] = []
+        seen_thinking_models: set[str] = set()
+        for group in groups:
+            for model_bucket in ("models", "extra_models"):
+                for model in group.get(model_bucket, []) or []:
+                    mid = str(model.get("id", "") or "").strip()
+                    if not mid or mid in seen_thinking_models:
+                        continue
+                    if _is_ollama_thinking_model(mid):
+                        seen_thinking_models.add(mid)
+                        thinking_models.append(mid)
+
         # Defense-in-depth: drop any optgroup that ended up with zero models
         # — those are pure UI noise. A zero-model group typically means a
         # detection path added an id that has no static catalog AND the
@@ -3992,11 +4034,24 @@ def get_available_models() -> dict:
             or (g.get("provider_id") or "").startswith("custom:")
         ]
 
+        thinking_models = []
+        seen_thinking_models = set()
+        for group in groups:
+            for model_bucket in ("models", "extra_models"):
+                for model in group.get(model_bucket, []) or []:
+                    mid = str(model.get("id", "") or "").strip()
+                    if not mid or mid in seen_thinking_models:
+                        continue
+                    if _is_ollama_thinking_model(mid):
+                        seen_thinking_models.add(mid)
+                        thinking_models.append(mid)
+
         return {
             "active_provider": active_provider,
             "default_model": default_model,
             "configured_model_badges": _build_configured_model_badges(),
             "groups": groups,
+            "thinking_models": thinking_models,
         }
 
     # ── FAST PATH ─────────────────────────────────────────────────────────────

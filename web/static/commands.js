@@ -9,7 +9,8 @@ const COMMANDS=[
   {name:'clear',     desc:t('cmd_clear'),         fn:cmdClear,     noEcho:true},
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
-  {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|model_name]', subArgs:'models', noEcho:true},
+  {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
+  {name:'thinking',  desc:'Select an Ollama thinking model', fn:cmdThinking, arg:'[status|list|off|<query>]', subArgs:['status','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
   {name:'new',       desc:t('cmd_new'),            fn:cmdNew,       noEcho:true},
@@ -341,6 +342,9 @@ async function cmdModel(args){
   if(!sel)return;
   const raw=(args||'').trim();
   const q=raw.toLowerCase();
+  if(q==='think'||q==='thinking'||q.startsWith('think ')||q.startsWith('thinking ')){
+    return cmdThinking(raw.replace(/^(think|thinking)\s*/i,'').trim());
+  }
   const currentLabel=(typeof _selectedModelOption==='function' && _selectedModelOption() && _selectedModelOption().textContent)
     ? _selectedModelOption().textContent.trim()
     : (sel.value||'');
@@ -369,6 +373,130 @@ async function cmdModel(args){
   sel.value=match;
   await sel.onchange();
   showToast(t('switched_to')+match);
+  return true;
+}
+
+let _availableModelsCatalogCache=null;
+let _availableModelsCatalogPromise=null;
+
+async function _loadAvailableModelsCatalog(force=false){
+  if(window._availableModelsData&&!force) return window._availableModelsData;
+  if(_availableModelsCatalogCache&&!force) return _availableModelsCatalogCache;
+  if(_availableModelsCatalogPromise&&!force) return _availableModelsCatalogPromise;
+  _availableModelsCatalogPromise=(async()=>{
+    try{
+      const data=await api('/api/models');
+      _availableModelsCatalogCache=data||null;
+      if(data) window._availableModelsData=data;
+      return _availableModelsCatalogCache;
+    }catch(_){
+      return _availableModelsCatalogCache||window._availableModelsData||null;
+    }finally{
+      _availableModelsCatalogPromise=null;
+    }
+  })();
+  return _availableModelsCatalogPromise;
+}
+
+function _modelSearchKey(value){
+  return String(value||'')
+    .trim()
+    .toLowerCase()
+    .replace(/^@[^:]+:/,'')
+    .replace(/^[^/]+\//,'')
+    .replace(/[^a-z0-9]+/g,'');
+}
+
+function _thinkingModelIdsFromCatalog(catalog){
+  return Array.isArray(catalog&&catalog.thinking_models)
+    ? catalog.thinking_models.map(id=>String(id||'').trim()).filter(Boolean)
+    : [];
+}
+
+function _findThinkingModelMatch(ids, query, currentModel){
+  const list=Array.isArray(ids)?ids.map(id=>String(id||'').trim()).filter(Boolean):[];
+  if(!list.length) return '';
+  const current=String(currentModel||'').trim();
+  const currentKey=_modelSearchKey(current);
+  const q=_modelSearchKey(query);
+  if(!q){
+    if(currentKey){
+      const currentMatch=list.find(id=>_modelSearchKey(id)===currentKey);
+      if(currentMatch) return currentMatch;
+    }
+    return list[0]||'';
+  }
+  const exact=list.find(id=>_modelSearchKey(id)===q);
+  if(exact) return exact;
+  const partial=list.find(id=>_modelSearchKey(id).includes(q));
+  if(partial) return partial;
+  if(currentKey){
+    const currentMatch=list.find(id=>_modelSearchKey(id)===currentKey);
+    if(currentMatch) return currentMatch;
+  }
+  return '';
+}
+
+async function cmdThinking(args){
+  if(!S.session){
+    showToast(t('no_active_session'));
+    return true;
+  }
+  const sel=$('modelSelect');
+  if(!sel){
+    showToast('Model picker unavailable');
+    return true;
+  }
+  const raw=(args||'').trim();
+  const q=raw.toLowerCase();
+  const catalog=await _loadAvailableModelsCatalog();
+  const thinkingIds=_thinkingModelIdsFromCatalog(catalog);
+  if(!thinkingIds.length){
+    showToast('No Ollama thinking models available in this catalog');
+    return true;
+  }
+  const currentModel=String((S.session&&S.session.model)||sel.value||'').trim();
+  const currentKey=_modelSearchKey(currentModel);
+  const currentThinking=currentKey
+    ? (thinkingIds.find(id=>_modelSearchKey(id)===currentKey)||'')
+    : '';
+  if(q==='status'||q==='show'||q==='list'){
+    const currentLabel=currentThinking ? (typeof getModelLabel==='function' ? getModelLabel(currentThinking) : currentThinking) : 'none';
+    showToast('Thinking models: '+thinkingIds.length+' available | current: '+currentLabel);
+    return true;
+  }
+  if(q==='off'||q==='default'||q==='back'){
+    const defaultModel=String(window._defaultModel||'').trim();
+    if(!defaultModel){
+      showToast('No default model configured');
+      return true;
+    }
+    const applied=typeof _applyModelToDropdown==='function'
+      ? _applyModelToDropdown(defaultModel, sel, S.session&&S.session.model_provider||window._activeProvider||null)
+      : null;
+    if(!applied){
+      showToast('Default model is not available in the current picker');
+      return true;
+    }
+    await sel.onchange();
+    showToast('Model: '+(typeof getModelLabel==='function' ? getModelLabel(applied) : applied));
+    return true;
+  }
+  const target=_findThinkingModelMatch(thinkingIds, raw, currentModel);
+  if(!target){
+    showToast('No thinking model match: '+raw);
+    return true;
+  }
+  const applied=typeof _applyModelToDropdown==='function'
+    ? _applyModelToDropdown(target, sel, S.session&&S.session.model_provider||window._activeProvider||null)
+    : null;
+  if(!applied){
+    showToast('Thinking model is not available in the current picker');
+    return true;
+  }
+  await sel.onchange();
+  const label=typeof getModelLabel==='function' ? getModelLabel(applied) : applied;
+  showToast('Thinking model: '+label+' (saved)');
   return true;
 }
 
@@ -3769,6 +3897,7 @@ HANDLERS.approval = cmdApproval;
 HANDLERS.web = cmdWeb;
 HANDLERS.mcp = cmdMcp;
 HANDLERS.subagents = cmdSubagents;
+HANDLERS.thinking = cmdThinking;
 HANDLERS.exec = cmdExec;
 HANDLERS.image = cmdImage;
 HANDLERS.review = cmdReview;
