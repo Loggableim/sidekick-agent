@@ -8859,6 +8859,9 @@ function loadMcpServers(){
       const toggleButton=toggleSupported
         ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleMcpServerEnabled(${JSON.stringify(String(s.name||''))}, ${s.enabled===false ? 'true' : 'false'})" aria-label="${esc(s.enabled===false ? 'Enable MCP server' : 'Disable MCP server')}" title="${esc(s.enabled===false ? 'Enable MCP server' : 'Disable MCP server')}">${esc(s.enabled===false ? 'Enable' : 'Disable')}</button>`
         : '';
+      const deleteButton=toggleSupported
+        ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px;color:var(--error,#e94560);border-color:var(--error,#e94560)" onclick="deleteMcpServer(${JSON.stringify(String(s.name||''))})" aria-label="${esc(t('mcp_delete_confirm_title'))}" title="${esc(t('mcp_delete_confirm_title'))}">${esc(t('delete_title'))}</button>`
+        : '';
       const toolCount=s.tool_count===null||typeof s.tool_count==='undefined'?'—':String(s.tool_count);
       const detail=s.transport==='http'
         ? (s.url||'')
@@ -8873,6 +8876,7 @@ function loadMcpServers(){
             ${transportBadge}
             ${statusBadge}
             ${toggleButton}
+            ${deleteButton}
           </div>
         </div>
         <div class="mcp-server-detail">${esc(detail)}${secretInfo?' | '+esc(secretInfo):''}</div>
@@ -8901,6 +8905,29 @@ async function toggleMcpServerEnabled(name, enabled){
   }
 }
 window.toggleMcpServerEnabled = toggleMcpServerEnabled;
+async function deleteMcpServer(name){
+  const serverName=String(name||'').trim();
+  if(!serverName) return;
+  try{
+    const ok=await showConfirmDialog({
+      title:t('mcp_delete_confirm_title'),
+      message:t('mcp_delete_confirm_message',serverName),
+      confirmLabel:t('delete_title'),
+      danger:true,
+      focusCancel:true,
+    });
+    if(!ok) return false;
+    await api('/api/mcp/servers/'+encodeURIComponent(serverName),{method:'DELETE'});
+    if(typeof loadMcpServers==='function') loadMcpServers();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    if(typeof showToast==='function') showToast(t('mcp_deleted'),2200,'success');
+    return true;
+  }catch(e){
+    if(typeof showToast==='function') showToast(t('mcp_delete_failed')+((e&&e.message)?(': '+e.message):''),2400,'error');
+    return false;
+  }
+}
+window.deleteMcpServer = deleteMcpServer;
 let _mcpToolsCache=[];
 function _filterMcpToolsForSearch(tools, query){
   const q=(query||'').trim().toLowerCase();

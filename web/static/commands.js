@@ -34,7 +34,7 @@ const COMMANDS=[
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
   {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
   {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
-  {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable]', subArgs:['status','open','refresh','tools','toggle','enable','disable'], noEcho:true},
+  {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable|delete]', subArgs:['status','open','refresh','tools','toggle','enable','disable','delete'], noEcho:true},
   {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|refresh|pause|resume]', subArgs:['status','open','refresh','pause','resume'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
@@ -1403,6 +1403,42 @@ async function cmdMcp(args){
     }
     return true;
   }
+  if(raw.startsWith('delete ') || raw.startsWith('remove ')){
+    const name=raw.split(/\s+/).slice(1).join(' ').trim();
+    if(!name){
+      showToast('Use /mcp delete <name>');
+      return true;
+    }
+    try{
+      const server=await findServer(name);
+      if(!server){
+        showToast('MCP server not found: '+name);
+        return true;
+      }
+      let deleted=false;
+      if(typeof deleteMcpServer==='function'){
+        deleted=await deleteMcpServer(server.name||name);
+      }else{
+        const ok=await showConfirmDialog({
+          title:t('mcp_delete_confirm_title'),
+          message:t('mcp_delete_confirm_message',server.name||name),
+          confirmLabel:t('delete_title'),
+          danger:true,
+          focusCancel:true,
+        });
+        if(!ok) return true;
+        await api('/api/mcp/servers/'+encodeURIComponent(server.name||name),{method:'DELETE'});
+        if(typeof loadMcpServers==='function') loadMcpServers();
+        if(typeof loadMcpTools==='function') loadMcpTools();
+        if(typeof showToast==='function') showToast(t('mcp_deleted'),2200,'success');
+        deleted=true;
+      }
+      if(deleted) openSystemSettings();
+    }catch(e){
+      showToast('Failed to delete MCP server: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
   if(raw==='tools'){
     openSystemSettings();
     if(typeof loadMcpTools==='function') loadMcpTools();
@@ -1411,7 +1447,7 @@ async function cmdMcp(args){
     showToast('MCP tools view opened');
     return true;
   }
-  showToast('Use /mcp status|open|refresh|tools|toggle <name>|enable <name>|disable <name>');
+  showToast('Use /mcp status|open|refresh|tools|toggle <name>|enable <name>|disable <name>|delete <name>');
   return true;
 }
 
