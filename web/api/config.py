@@ -1935,6 +1935,22 @@ def _reasoning_allowed_efforts_for_model(model_id=None, model_provider=None):
     return allowed
 
 
+_WEB_BACKEND_VALUES = ("parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs")
+
+
+def _normalize_web_backend_value(value, strict: bool = False) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"", "auto", "default", "none"}:
+        return ""
+    if raw in _WEB_BACKEND_VALUES:
+        return raw
+    if strict:
+        raise ValueError(
+            "backend must be one of auto, firecrawl, parallel, tavily, exa, searxng, brave-free, ddgs"
+        )
+    return ""
+
+
 def parse_reasoning_effort(effort):
     """Parse an effort level into the dict the agent expects.
 
@@ -1980,6 +1996,33 @@ def get_reasoning_status(model_id=None, model_provider=None) -> dict:
     }
 
 
+def get_web_backend_status() -> dict:
+    """Return the current web backend selection from config.yaml.
+
+    ``backend`` is the effective backend the tool layer will use. When the
+    ``web.backend`` override is absent, the UI shows the auto-selected backend
+    so the user can see what is actually active at a glance.
+    """
+    config_data = _load_yaml_config_file(_get_config_path())
+    web_cfg = config_data.get("web") or {}
+    configured_raw = web_cfg.get("backend") if isinstance(web_cfg, dict) else None
+    configured_backend = _normalize_web_backend_value(configured_raw)
+    effective_backend = configured_backend
+    if not effective_backend:
+        try:
+            from tools.web_tools import _get_backend as _resolve_web_backend
+
+            effective_backend = str(_resolve_web_backend() or "").strip().lower() or "auto"
+        except Exception:
+            effective_backend = "auto"
+    return {
+        "backend": effective_backend,
+        "configured_backend": configured_backend,
+        "is_auto": not configured_backend,
+        "is_firecrawl": effective_backend == "firecrawl",
+    }
+
+
 def set_reasoning_display(show: bool, model_id=None, model_provider=None) -> dict:
     """Persist ``display.show_reasoning`` to the active profile's config.yaml.
 
@@ -1998,6 +2041,25 @@ def set_reasoning_display(show: bool, model_id=None, model_provider=None) -> dic
         _save_yaml_config_file(config_path, config_data)
     reload_config()
     return get_reasoning_status(model_id, model_provider)
+
+
+def set_web_backend(backend: str) -> dict:
+    """Persist ``web.backend`` to the active profile's config.yaml."""
+    normalized = _normalize_web_backend_value(backend, strict=True)
+    config_path = _get_config_path()
+    with _cfg_lock:
+        config_data = _load_yaml_config_file(config_path)
+        web_cfg = config_data.get("web")
+        if not isinstance(web_cfg, dict):
+            web_cfg = {}
+        if normalized:
+            web_cfg["backend"] = normalized
+        else:
+            web_cfg.pop("backend", None)
+        config_data["web"] = web_cfg
+        _save_yaml_config_file(config_path, config_data)
+    reload_config()
+    return get_web_backend_status()
 
 
 def set_reasoning_effort(effort: str, model_id=None, model_provider=None) -> dict:

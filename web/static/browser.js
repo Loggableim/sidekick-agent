@@ -26,6 +26,8 @@ let _browserResearchQuestionsBySession = {};
 let _browserResearchResearchPromptBySession = {};
 let _browserResearchModeBySession = {};
 let _browserPermissionMode = 'none';
+let _browserWebBackend = 'auto';
+let _browserWebBackendConfigured = '';
 let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
 let _browserSplitScreen = localStorage.getItem('sidekick-browser-split-open') === '1';
 let _browserDrawerHost = null;
@@ -786,6 +788,56 @@ function browserRenderPermission(permission) {
   }
 }
 
+function browserRenderWebBackend(status) {
+  const backend = status && status.backend ? String(status.backend).trim().toLowerCase() : 'auto';
+  const configuredBackend = status && status.configured_backend ? String(status.configured_backend).trim().toLowerCase() : '';
+  _browserWebBackend = backend || 'auto';
+  _browserWebBackendConfigured = configuredBackend;
+  const el = _browserEl('browserBackendStatus');
+  if (!el) return;
+  const nextMode = configuredBackend === 'firecrawl' ? 'auto' : 'firecrawl';
+  const tooltip = configuredBackend === 'firecrawl'
+    ? 'Return web backend to auto-detect'
+    : 'Pin web backend to Firecrawl';
+  el.textContent = 'Web ' + _browserWebBackend;
+  el.classList.toggle('is-active', _browserWebBackend === 'firecrawl');
+  el.classList.toggle('is-auto', !configuredBackend);
+  el.setAttribute('aria-pressed', configuredBackend === 'firecrawl' ? 'true' : 'false');
+  el.setAttribute('aria-label', tooltip);
+  el.dataset.tooltip = tooltip;
+  el.dataset.backend = _browserWebBackend;
+  el.dataset.configuredBackend = configuredBackend || 'auto';
+  el.dataset.nextMode = nextMode;
+}
+
+async function browserRefreshWebBackend() {
+  try {
+    const data = await api('/api/web/backend');
+    browserRenderWebBackend(data || {backend: 'auto', configured_backend: ''});
+  } catch (_) {
+    browserRenderWebBackend({backend: 'auto', configured_backend: ''});
+  }
+}
+
+async function browserToggleWebBackend() {
+  const nextBackend = _browserWebBackendConfigured === 'firecrawl' ? 'auto' : 'firecrawl';
+  try {
+    const data = await api('/api/web/backend', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({backend: nextBackend}),
+    });
+    browserRenderWebBackend(data || {backend: nextBackend, configured_backend: nextBackend === 'auto' ? '' : nextBackend});
+    if (typeof showToast === 'function') {
+      showToast(nextBackend === 'firecrawl' ? 'Web backend pinned to Firecrawl' : 'Web backend returned to auto', 2200, nextBackend === 'firecrawl' ? 'success' : 'info');
+    }
+  } catch (e) {
+    browserRenderWebBackend({backend: _browserWebBackend, configured_backend: _browserWebBackendConfigured});
+    if (typeof showToast === 'function') showToast('Web backend update failed', 2400, 'error');
+  }
+  return false;
+}
+
 async function browserRefreshPermission() {
   const sid = _browserCurrentSessionId();
   if (!sid) {
@@ -1124,6 +1176,9 @@ function browserSetDrawerOpen(open, opts = {}) {
   document.body.classList.toggle('browser-drawer-open', nextOpen);
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
+  if (nextOpen) {
+    void browserRefreshWebBackend();
+  }
   if (!nextOpen) {
     if (_browserSplitScreen) {
       _browserSetSplitScreen(false);
@@ -1779,6 +1834,8 @@ window.browserToggleDrawer = browserToggleDrawer;
 window.browserTogglePermission = browserTogglePermission;
 window.browserStopPermission = browserStopPermission;
 window.browserRenderPermission = browserRenderPermission;
+window.browserRefreshWebBackend = browserRefreshWebBackend;
+window.browserToggleWebBackend = browserToggleWebBackend;
 window.browserRefreshPermission = browserRefreshPermission;
 window.browserResearchPanelActivated = browserResearchPanelActivated;
 window.browserResearchPanelDeactivated = browserResearchPanelDeactivated;
@@ -1803,6 +1860,7 @@ window.addEventListener('load', function() {
     document.body.classList.add('browser-drawer-open');
     _browserSyncDrawerButton(true);
     _browserSetDrawerAccessibility(true);
+    void browserRefreshWebBackend();
     if (_browserFullscreen) {
       document.body.classList.add('browser-maximized');
       _browserHoistDrawer();

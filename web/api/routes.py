@@ -1012,6 +1012,8 @@ from web.api.config import (
     get_reasoning_status,
     set_reasoning_display,
     set_reasoning_effort,
+    get_web_backend_status,
+    set_web_backend,
     create_stream_channel,
     get_webui_session_save_mode,
     STREAM_GOAL_RELATED,
@@ -4057,6 +4059,9 @@ def handle_get(handler, parsed) -> bool:
         model_provider = (query.get("model_provider", [""])[0] or "").strip() or None
         return j(handler, get_reasoning_status(model_id, model_provider))
 
+    if parsed.path == "/api/web/backend":
+        return j(handler, get_web_backend_status())
+
     if parsed.path == "/api/onboarding/status":
         return j(handler, get_onboarding_status())
 
@@ -6111,6 +6116,17 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, str(e))
         except RuntimeError as e:
             return bad(handler, str(e), 500)
+
+    if parsed.path == "/api/web/backend":
+        backend = body.get("backend")
+        if backend is None:
+            backend = body.get("mode")
+        if backend is None:
+            return bad(handler, "backend is required")
+        try:
+            return j(handler, set_web_backend(backend))
+        except ValueError as e:
+            return bad(handler, str(e))
 
     if parsed.path == "/api/approval":
         raw_mode = str(body.get("mode", "") or "").strip()

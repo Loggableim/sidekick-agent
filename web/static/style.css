@@ -6105,6 +6105,33 @@ body.browser-maximized .browser-drawer .browser-stage {
   text-overflow: ellipsis;
   max-width: 120px;
 }
+.browser-backend-status {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 7px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+  cursor: pointer;
+}
+.browser-backend-status.is-active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent);
+}
+.browser-backend-status.is-auto {
+  opacity: .8;
+}
+.browser-backend-status:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 2px;
+}
 .browser-permission-status {
   border: 1px solid var(--border);
   border-radius: 999px;
