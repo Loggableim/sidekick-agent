@@ -32,6 +32,7 @@ const COMMANDS=[
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
   {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
   {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
+  {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools]', subArgs:['status','open','refresh','tools'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
@@ -1195,6 +1196,67 @@ async function cmdWeb(args){
   return true;
 }
 
+async function cmdMcp(args){
+  const raw=String(args||'').trim().toLowerCase();
+  const openSystemSettings=()=>{
+    if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
+    if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+  };
+  const summarizeServers=(servers)=>{
+    const list=Array.isArray(servers)?servers:[];
+    const total=list.length;
+    const connected=list.filter(server=>server&&server.connected).length;
+    const toolCount=list.reduce((sum,server)=>sum+(Number(server&&server.tools)||0),0);
+    const offline=total-connected;
+    const parts=['MCP: '+connected+'/'+total+' connected'];
+    if(toolCount) parts.push(toolCount+' tools');
+    if(offline) parts.push(offline+' offline');
+    return parts.join(' | ');
+  };
+  const showStatus=async()=>{
+    const data=await api('/api/mcp/servers');
+    const servers=Array.isArray(data&&data.servers)?data.servers:[];
+    const summary=summarizeServers(servers);
+    showToast(summary+' | /mcp open');
+    return servers;
+  };
+  if(!raw||raw==='status'||raw==='show'||raw==='list'){
+    try{
+      await showStatus();
+    }catch(e){
+      showToast('MCP status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(raw==='open'||raw==='system'||raw==='settings'){
+    openSystemSettings();
+    try{
+      await showStatus();
+    }catch(e){
+      showToast('MCP settings opened');
+    }
+    return true;
+  }
+  if(raw==='refresh'){
+    openSystemSettings();
+    if(typeof loadMcpServers==='function') loadMcpServers();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    if(typeof loadGatewayStatus==='function') loadGatewayStatus();
+    showToast('MCP system section refreshed');
+    return true;
+  }
+  if(raw==='tools'){
+    openSystemSettings();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    const search=document.getElementById('mcpToolSearch');
+    if(search&&typeof search.focus==='function') setTimeout(()=>search.focus(),0);
+    showToast('MCP tools view opened');
+    return true;
+  }
+  showToast('Use /mcp status|open|refresh|tools');
+  return true;
+}
+
 async function cmdBrowser(args){
   const arg=String(args||'').trim().toLowerCase();
   const openDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(true, {force:true, keepViewport:true}); };
@@ -1743,6 +1805,7 @@ const HANDLERS = {};
 HANDLERS.skills = cmdSkills;
 HANDLERS.approval = cmdApproval;
 HANDLERS.web = cmdWeb;
+HANDLERS.mcp = cmdMcp;
 HANDLERS.review = cmdReview;
 
 if(typeof window!=='undefined'){
