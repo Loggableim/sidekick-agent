@@ -10,7 +10,7 @@ const COMMANDS=[
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
   {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
-  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','thinking'], noEcho:true},
+  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','thinking'], noEcho:true},
   {name:'thinking',  desc:'Open or filter Ollama thinking models', fn:cmdThinking, arg:'[status|open|toggle|list|off|<query>]', subArgs:['status','open','toggle','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
@@ -1566,8 +1566,18 @@ async function cmdWorkflow(args){
   if(sub==='browser') return cmdBrowser(rest||'status');
   if(sub==='subagents') return cmdSubagents(rest||'status');
   if(sub==='review') return cmdReview(rest||'show');
+  if(sub==='image'){
+    if(rest) return cmdImage(rest);
+    const promptText=typeof window!=='undefined' && typeof window.prompt==='function'
+      ? window.prompt('Image prompt','')
+      : '';
+    if(!promptText) return true;
+    const cleaned=String(promptText||'').trim();
+    if(!cleaned) return true;
+    return cmdImage(cleaned);
+  }
   if(sub==='thinking') return cmdThinking(rest||'status');
-  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|thinking <query>');
+  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|image <prompt>|thinking <query>');
   return true;
 }
 

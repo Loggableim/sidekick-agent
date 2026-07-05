@@ -2242,6 +2242,7 @@ function workflowRefreshHeaderMenu(){
   const primarySubagent=$('workflowHeaderPrimarySubagentAction');
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
+  const imageAction=$('workflowHeaderImageAction');
   const subagents=$('workflowHeaderSubagentsAction');
   const subagentState=_workflowSubagentSummaryState();
   if(menu){
@@ -2289,6 +2290,11 @@ function workflowRefreshHeaderMenu(){
     reviewAction.textContent=reviewLabel;
     reviewAction.title=reviewLabel;
     reviewAction.setAttribute('aria-label',reviewLabel);
+  }
+  if(imageAction){
+    imageAction.textContent='Generate image';
+    imageAction.title='Prompt for local image generation';
+    imageAction.setAttribute('aria-label',imageAction.title);
   }
   const webBackendAction=$('workflowHeaderWebBackendAction');
   if(webBackendAction){
@@ -2436,6 +2442,9 @@ function workflowRunHeaderAction(action){
       if(typeof executeCommand==='function') executeCommand(review.visible ? '/review show' : '/review');
       break;
     }
+    case 'image':
+      if(typeof executeCommand==='function') executeCommand('/workflow image');
+      break;
     case 'subagents':
       if(typeof executeCommand==='function') executeCommand('/subagents open');
       break;
