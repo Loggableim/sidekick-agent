@@ -10,7 +10,7 @@ const COMMANDS=[
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
   {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
-  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','thinking'], noEcho:true},
+  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, research, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|research ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','research','thinking'], noEcho:true},
   {name:'thinking',  desc:'Open or filter Ollama thinking models', fn:cmdThinking, arg:'[status|open|toggle|list|off|<query>]', subArgs:['status','open','toggle','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
@@ -1576,8 +1576,27 @@ async function cmdWorkflow(args){
     if(!cleaned) return true;
     return cmdImage(cleaned);
   }
+  if(sub==='research'){
+    const topic=String(rest||'').trim();
+    if(typeof browserSetDrawerOpen==='function') browserSetDrawerOpen(true,{force:true,keepViewport:true});
+    if(typeof websearchToggleMode==='function') websearchToggleMode('deep');
+    if(typeof browserResearchPanelActivated==='function') browserResearchPanelActivated();
+    if(!topic){
+      showToast('Research panel opened');
+      return true;
+    }
+    const input=document.getElementById('browserResearchTopic');
+    if(input) input.value=topic;
+    if(typeof browserResearchSubmit==='function'){
+      void browserResearchSubmit({preventDefault:function(){}});
+      showToast('Research started: '+topic);
+      return true;
+    }
+    showToast('Research panel unavailable');
+    return true;
+  }
   if(sub==='thinking') return cmdThinking(rest||'status');
-  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|image <prompt>|thinking <query>');
+  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|image <prompt>|research <topic>|thinking <query>');
   return true;
 }
 

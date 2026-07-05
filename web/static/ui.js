@@ -2243,6 +2243,7 @@ function workflowRefreshHeaderMenu(){
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
   const imageAction=$('workflowHeaderImageAction');
+  const researchAction=$('workflowHeaderResearchAction');
   const subagents=$('workflowHeaderSubagentsAction');
   const subagentState=_workflowSubagentSummaryState();
   if(menu){
@@ -2295,6 +2296,11 @@ function workflowRefreshHeaderMenu(){
     imageAction.textContent='Generate image';
     imageAction.title='Prompt for local image generation';
     imageAction.setAttribute('aria-label',imageAction.title);
+  }
+  if(researchAction){
+    researchAction.textContent='Open research panel';
+    researchAction.title='Open the browser research panel';
+    researchAction.setAttribute('aria-label',researchAction.title);
   }
   const webBackendAction=$('workflowHeaderWebBackendAction');
   if(webBackendAction){
@@ -2436,6 +2442,11 @@ function workflowRunHeaderAction(action){
     case 'web-backend':
       if(typeof browserToggleWebBackend==='function') browserToggleWebBackend();
       else if(typeof executeCommand==='function') executeCommand('/web toggle');
+      break;
+    case 'research':
+      if(typeof browserSetDrawerOpen==='function') browserSetDrawerOpen(true,{force:true,keepViewport:true});
+      if(typeof websearchToggleMode==='function') websearchToggleMode('deep');
+      if(typeof browserResearchPanelActivated==='function') browserResearchPanelActivated();
       break;
     case 'review': {
       const review=_workflowReviewState();
