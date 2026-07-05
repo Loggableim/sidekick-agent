@@ -1750,6 +1750,7 @@ source.addEventListener('done',e=>{
         if(reasoningText&&lastAsst&&!lastAsst.reasoning) lastAsst.reasoning=reasoningText;
         // Stamp _ts on the last assistant message if it has no timestamp
         if(lastAsst&&!lastAsst._ts&&!lastAsst.timestamp) lastAsst._ts=Date.now()/1000;
+        if(typeof _reviewFinalizeFromAssistant==='function') _reviewFinalizeFromAssistant(activeSid, lastAsst, d.session);
         if(d.usage){
           S.lastUsage=d.usage;_syncCtxIndicator(d.usage);
           // #503 — compute per-turn cost delta and attach to last assistant message

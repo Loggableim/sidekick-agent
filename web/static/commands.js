@@ -1,4 +1,4 @@
-// ── Slash commands ──────────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Slash commands ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 // Built-in commands intercepted before send(). Each command runs locally
 // (no round-trip to the agent) and shows feedback via toast or local message.
 
@@ -62,7 +62,7 @@ function executeCommand(text){
   if(!parsed)return null;
   const cmd=COMMANDS.find(c=>c.name===parsed.name);
   if(!cmd)return null;
-  // A handler may return `false` to opt out of interception — e.g. /reasoning
+  // A handler may return `false` to opt out of interception ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â e.g. /reasoning
   // with an effort level falls through so the agent's own handler sees it,
   // preserving the pre-existing pass-through behaviour for that subcommand.
   if(cmd.fn(parsed.args)===false)return null;
@@ -122,7 +122,7 @@ function _invalidateSlashModelCache(){
 }
 // Expose on window when available. Guarded by typeof so the module is
 // importable in headless test contexts (vm.runInContext) that don't
-// define a window global — see tests/test_cli_only_slash_commands.py.
+// define a window global ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â see tests/test_cli_only_slash_commands.py.
 if(typeof window!=='undefined'){
   window._invalidateSlashModelCache=_invalidateSlashModelCache;
 }
@@ -162,7 +162,7 @@ async function _loadSlashModelSubArgs(force=false){
         // Include extra_models (the catalog tail that doesn't render as
         // <option> entries when the picker is capped) so /model autocomplete
         // covers the full catalog. The trimming is purely a dropdown
-        // scannability concern — the slash command exists precisely so
+        // scannability concern ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the slash command exists precisely so
         // power users can reach any model by typing its name. #1567.
         for(const model of (group&&group.extra_models)||[]){
           const id=_normalizeSlashSubArg(model&&model.id);
@@ -309,12 +309,12 @@ function _compressionAnchorMessageKey(m){
   return {role:String(m.role||''), ts, text:norm, attachments};
 }
 
-// ── Command handlers ────────────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Command handlers ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 function cmdHelp(){
   const lines=COMMANDS.map(c=>{
     const usage=c.arg ? (String(c.arg).startsWith('[') ? ` ${c.arg}` : ` <${c.arg}>`) : '';
-    return `  /${c.name}${usage} — ${c.desc}`;
+    return `  /${c.name}${usage} ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${c.desc}`;
   });
   const msg={role:'assistant',content:t('available_commands')+'\n'+lines.join('\n')};
   S.messages.push(msg);
@@ -627,7 +627,7 @@ async function cmdSkills(args){
     for(const [cat, items] of Object.entries(byCategory).sort()){
       lines.push(`**${cat}**`);
       items.forEach(s => {
-        const desc = s.description ? ` — ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
+        const desc = s.description ? ` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
         lines.push(`  \`${s.name}\`${desc}`);
       });
       lines.push('');
@@ -653,7 +653,7 @@ async function cmdPersonality(args){
         showToast(t('no_personalities'));
         return;
       }
-      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' — '+p.description:''}`).join('\n');
+      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â '+p.description:''}`).join('\n');
       S.messages.push({role:'assistant',content:t('available_personalities')+'\n\n'+list+t('personality_switch_hint')});
       renderMessages();
     }catch(e){showToast(t('personalities_load_failed'));}
@@ -745,12 +745,12 @@ async function cmdGoal(args){
   }
 }
 
-// ── Busy-input mode commands ──────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Busy-input mode commands ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 // These commands let users override the default busy_input_mode setting for a
 // specific message.  They are only meaningful while the agent is running.
 
 /**
- * /queue <message> — Explicitly queue a message for the next turn.
+ * /queue <message> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Explicitly queue a message for the next turn.
  * Works regardless of the busy_input_mode setting.
  */
 async function cmdQueue(args){
@@ -771,7 +771,7 @@ async function cmdQueue(args){
 }
 
 /**
- * /interrupt <message> — Cancel the current turn and send a new message.
+ * /interrupt <message> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Cancel the current turn and send a new message.
  * Calls cancelStream() then queues the message so the drain picks it up.
  */
 async function cmdInterrupt(args){
@@ -795,12 +795,12 @@ async function cmdInterrupt(args){
 }
 
 /**
- * /steer <message> — Inject a steering hint mid-task without interrupting.
+ * /steer <message> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Inject a steering hint mid-task without interrupting.
  *
  * Calls POST /api/chat/steer which looks up the cached AIAgent for this
  * session and calls agent.steer(text). The agent's run loop appends the
  * steer text to the next tool-result message so the model sees it on its
- * next iteration — same pathway as the CLI's /steer command.
+ * next iteration ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â same pathway as the CLI's /steer command.
  *
  * Falls back to interrupt mode when the agent isn't running, isn't cached,
  * or doesn't support steer (older Sidekick versions).
@@ -838,7 +838,7 @@ async function _trySteer(msg, explicitSteer){
       body:JSON.stringify({session_id:S.session.session_id,text:msg}),
     });
   }catch(e){
-    // Network or server error — fall back to interrupt
+    // Network or server error ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fall back to interrupt
     result={accepted:false, fallback:'network_error'};
   }
   if(result&&result.accepted){
@@ -857,7 +857,7 @@ async function _trySteer(msg, explicitSteer){
   if(explicitSteer){
     showToast(t('cmd_steer_fallback'),2500);
   } else if(reason==='no_cached_agent'||reason==='not_running'||reason==='stream_dead'){
-    // Busy mode hit the steer path before the agent was ready —
+    // Busy mode hit the steer path before the agent was ready ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
     // interrupt is the natural fallback, no need to call out steer.
     showToast(t('busy_interrupt_confirm'),2000);
   } else {
@@ -906,7 +906,7 @@ async function cmdUndo(){
     if(!S.session||S.session.session_id!==activeSid)return;
     const data=await api('/api/session?session_id='+encodeURIComponent(activeSid));
     if(data&&data.session){S.messages=data.session.messages||[];S.toolCalls=[];if(typeof clearLiveToolCards==='function')clearLiveToolCards();if(typeof _messagesTruncated!=='undefined')_messagesTruncated=false;renderMessages();}
-    showToast(`↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
+    showToast(`ÃƒÂ¢Ã¢â‚¬Â Ã‚Â© ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
   }catch(e){showToast(t('undo_failed')+e.message);}
 }
 async function undoLastExchange(){await cmdUndo();}
@@ -955,7 +955,7 @@ function _formatExecuteCodeMessage(result, code){
   const meta=[];
   if(Number.isFinite(toolCalls)) meta.push(`${toolCalls} tool call${toolCalls===1?'':'s'}`);
   if(Number.isFinite(duration)) meta.push(`${duration.toFixed(duration>=10?1:2)}s`);
-  if(meta.length) parts.push(`_${meta.join(' · ')}_`);
+  if(meta.length) parts.push(`_${meta.join(' Ãƒâ€šÃ‚Â· ')}_`);
   if(code) parts.push('```python\n'+code.replace(/\s+$/,'')+'\n```');
   if(output) parts.push('**Output**\n```text\n'+output+'\n```');
   if(error && error!==output) parts.push(`**Error:** ${error}`);
@@ -968,7 +968,7 @@ async function cmdExec(args){
   const activeSid=S.session.session_id;
   const code=String(args||'');
   if(!code.trim()){showToast('Use /exec <python code>');return;}
-  showToast('Running execute_code…');
+  showToast('Running execute_codeÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦');
   try{
     const r=await api('/api/execute_code',{
       method:'POST',
@@ -1022,7 +1022,7 @@ async function cmdImage(args){
   const aspectRatio=aspectMatch ? String(aspectMatch[1]).toLowerCase() : '';
   const prompt=aspectMatch ? String(aspectMatch[2]||'').trim() : raw;
   if(!prompt){showToast('Use /image <prompt>');return;}
-  showToast('Generating image…');
+  showToast('Generating imageÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦');
   try{
     const r=await api('/api/image_generate',{
       method:'POST',
@@ -1613,35 +1613,215 @@ function _buildReviewPrompt(data){
   return lines.join('\n');
 }
 
-function _renderReviewCard(data, prompt){
-  _clearReviewCard();
-  const msgInner=document.getElementById('msgInner');
-  if(!msgInner) return null;
-  const summary=data&&data.summary&&typeof data.summary==='object'?data.summary:{};
-  const viewer=typeof renderDiffViewer==='function'
-    ? renderDiffViewer(String((data&&data.diff)||''), {maxHeight:'420px'})
-    : null;
-  if(viewer) viewer.style.margin='8px 0';
+function _reviewParseAssistantResponse(text){
+  const raw=String(text||'').trim();
+  const normalized=raw.replace(/\r/g,'');
+  const clean=/(?:^|\n)\s*(?:no issues found|no findings|nothing to flag|looks good|all clear)\b/i.test(normalized);
+  const findings=[];
+  let current=null;
+  let inFence=false;
 
-  const state=window._reviewChainState||(window._reviewChainState={});
-  state.visible=true;
-  state.data=data||null;
-  state.prompt=String(prompt||'');
-  state.session_id=String((S&&S.session&&S.session.session_id)||'');
-  state.element=null;
+  const flushCurrent=()=>{
+    if(!current) return;
+    current.details=current.details.join('\n').trim();
+    findings.push(current);
+    current=null;
+  };
 
-  const card=document.createElement('div');
-  card.className='msg-row assistant-turn proposed-patch-card review-card';
-  card.style.margin='8px 0';
+  const startFinding=(content)=>{
+    const line=String(content||'').trim();
+    let severity='';
+    let title=line;
+    const severityMatch=title.match(/^\[?(critical|high|medium|low|info|p0|p1|p2|p3)\]?\s*[:\-]?\s*(.*)$/i);
+    if(severityMatch){
+      severity=String(severityMatch[1]||'').toUpperCase();
+      title=String(severityMatch[2]||'').trim()||title;
+    }
+    return {severity, title, details:[]};
+  };
+
+  for(const rawLine of normalized.split('\n')){
+    const line=String(rawLine||'');
+    const trimmed=line.trim();
+    if(/^```/.test(trimmed)){
+      inFence=!inFence;
+      if(current&&inFence) current.details.push(trimmed);
+      continue;
+    }
+    if(inFence){
+      if(current) current.details.push(line);
+      continue;
+    }
+    const bullet=trimmed.match(/^(?:[-*Ã¢â‚¬Â¢]|\d+\.)\s+(.*)$/);
+    if(bullet){
+      flushCurrent();
+      current=startFinding(bullet[1]);
+      continue;
+    }
+    if(!trimmed){
+      if(current) current.details.push('');
+      continue;
+    }
+    if(current){
+      current.details.push(trimmed);
+    }
+  }
+  flushCurrent();
+  return {raw, normalized, clean, findings};
+}
+
+function _reviewSerializeResult(result){
+  if(!result) return '';
+  if(result.findings&&result.findings.length){
+    return result.findings.map((finding, idx)=>{
+      const sev=finding&&finding.severity?`[${finding.severity}] `:'';
+      const title=String(finding&&finding.title||'').trim();
+      const details=String(finding&&finding.details||'').trim();
+      return `${idx+1}. ${sev}${title}${details?`\n   ${details.replace(/\n/g,'\n   ')}`:''}`;
+    }).join('\n\n');
+  }
+  return String(result.raw||'').trim();
+}
+
+function _reviewSeverityColors(severity){
+  const sev=String(severity||'').toUpperCase();
+  const palette={
+    CRITICAL:['#fef2f2','#ef4444'],
+    HIGH:['#fff7ed','#f97316'],
+    MEDIUM:['#fffbeb','#f59e0b'],
+    LOW:['#ecfeff','#06b6d4'],
+    INFO:['#eff6ff','#3b82f6'],
+    P0:['#fef2f2','#ef4444'],
+    P1:['#fff7ed','#f97316'],
+    P2:['#fffbeb','#f59e0b'],
+    P3:['#ecfeff','#06b6d4'],
+  };
+  return palette[sev]||['rgba(255,255,255,.06)','var(--muted)'];
+}
+
+function _reviewBuildResultSection(state){
+  const wrap=document.createElement('div');
+  wrap.style.display='grid';
+  wrap.style.gap='8px';
+  wrap.style.padding='0 10px';
+
+  const status=document.createElement('div');
+  status.style.border='1px solid var(--border2)';
+  status.style.borderRadius='8px';
+  status.style.padding='8px 10px';
+  status.style.fontSize='12px';
+  status.style.lineHeight='1.5';
+  status.style.background='rgba(255,255,255,.03)';
+
+  const result=state&&state.result||null;
+  if(state&&state.awaitingResult){
+    status.textContent='Review running Ã‚Â· waiting for the assistant response.';
+  }else if(result&&result.clean&&!result.findings.length){
+    status.style.background='rgba(16,185,129,.12)';
+    status.style.borderColor='rgba(16,185,129,.35)';
+    status.textContent='No issues found.';
+  }else if(result&&result.findings&&result.findings.length){
+    status.textContent=`${result.findings.length} finding${result.findings.length===1?'':'s'} captured from the assistant response.`;
+  }else{
+    status.textContent='Ready to run a local review on the current diff.';
+  }
+  wrap.appendChild(status);
+
+  if(result&&result.findings&&result.findings.length){
+    const list=document.createElement('div');
+    list.style.display='grid';
+    list.style.gap='8px';
+    result.findings.forEach((finding, idx)=>{
+      const item=document.createElement('div');
+      item.style.border='1px solid var(--border2)';
+      item.style.borderRadius='8px';
+      item.style.padding='8px 10px';
+      item.style.background='rgba(255,255,255,.03)';
+
+      const top=document.createElement('div');
+      top.style.display='flex';
+      top.style.flexWrap='wrap';
+      top.style.alignItems='center';
+      top.style.gap='8px';
+      top.style.marginBottom='6px';
+
+      const badge=document.createElement('span');
+      const sev=String(finding&&finding.severity||'').trim();
+      const badgeColors=_reviewSeverityColors(sev);
+      badge.style.display='inline-flex';
+      badge.style.alignItems='center';
+      badge.style.padding='2px 7px';
+      badge.style.borderRadius='999px';
+      badge.style.fontSize='10px';
+      badge.style.fontWeight='700';
+      badge.style.letterSpacing='.04em';
+      badge.style.textTransform='uppercase';
+      badge.style.background=badgeColors[0];
+      badge.style.color=badgeColors[1];
+      badge.textContent=sev||`Finding ${idx+1}`;
+      top.appendChild(badge);
+
+      const title=document.createElement('div');
+      title.style.flex='1 1 auto';
+      title.style.minWidth='0';
+      title.style.fontSize='12px';
+      title.style.fontWeight='650';
+      title.style.color='var(--text)';
+      title.textContent=String(finding&&finding.title||'').trim()||'(untitled finding)';
+      top.appendChild(title);
+      item.appendChild(top);
+
+      const details=String(finding&&finding.details||'').trim();
+      if(details){
+        const pre=document.createElement('pre');
+        pre.style.margin='0';
+        pre.style.whiteSpace='pre-wrap';
+        pre.style.wordBreak='break-word';
+        pre.style.fontFamily='inherit';
+        pre.style.fontSize='12px';
+        pre.style.lineHeight='1.55';
+        pre.style.color='var(--muted)';
+        pre.textContent=details;
+        item.appendChild(pre);
+      }
+      list.appendChild(item);
+    });
+    wrap.appendChild(list);
+  }else if(result&&result.raw){
+    const raw=document.createElement('pre');
+    raw.style.margin='0';
+    raw.style.padding='8px 10px';
+    raw.style.border='1px solid var(--border2)';
+    raw.style.borderRadius='8px';
+    raw.style.background='rgba(255,255,255,.03)';
+    raw.style.whiteSpace='pre-wrap';
+    raw.style.wordBreak='break-word';
+    raw.style.fontFamily='inherit';
+    raw.style.fontSize='12px';
+    raw.style.lineHeight='1.55';
+    raw.style.color='var(--muted)';
+    raw.textContent=result.raw;
+    wrap.appendChild(raw);
+  }
+
+  return wrap;
+}
+
+function _reviewSyncCard(state){
+  if(!state||!state.element) return null;
+  const card=state.element;
+  card.innerHTML='';
 
   const role=document.createElement('div');
   role.className='msg-role assistant';
   role.style.fontSize='11px';
   role.style.padding='4px 10px';
   role.style.opacity='0.7';
-  role.textContent='🔎 Local review';
+  role.textContent='Ã°Å¸â€Å½ Local review';
   card.appendChild(role);
 
+  const data=state.data||{};
+  const summary=data&&data.summary&&typeof data.summary==='object'?data.summary:{};
   const meta=document.createElement('div');
   meta.style.fontSize='12px';
   meta.style.lineHeight='1.5';
@@ -1652,7 +1832,7 @@ function _renderReviewCard(data, prompt){
     `Branch: ${String((data&&data.branch)||'detached')}`,
     `Files: ${Number(summary.files||0)||0}`,
     `+${Number(summary.additions||0)||0}/-${Number(summary.deletions||0)||0}${summary.truncated ? ' (truncated)' : ''}`,
-  ].join(' · ');
+  ].join(' Ã‚Â· ');
   card.appendChild(meta);
 
   const actions=document.createElement('div');
@@ -1677,10 +1857,11 @@ function _renderReviewCard(data, prompt){
     return btn;
   };
 
+  const prompt=String(state.prompt||'');
   actions.appendChild(makeBtn('Copy prompt', async()=>{
     try{
       if(navigator.clipboard&&navigator.clipboard.writeText){
-        await navigator.clipboard.writeText(String(prompt||''));
+        await navigator.clipboard.writeText(prompt);
         showToast('Review prompt copied', 1800, 'success');
       }else{
         throw new Error('clipboard unavailable');
@@ -1690,30 +1871,114 @@ function _renderReviewCard(data, prompt){
     }
   }, false));
 
-  actions.appendChild(makeBtn('Review in chat', async()=>{
-    const ta=document.getElementById('msg');
-    if(!ta){
-      showToast('Composer unavailable', 2200, 'error');
-      return;
-    }
-    ta.value=String(prompt||'');
-    if(typeof autoResize==='function') autoResize();
-    if(typeof updateSendBtn==='function') updateSendBtn();
-    if(typeof send==='function'){
-      await send();
-    }else{
-      showToast('Review prompt prepared', 2000, 'info');
-    }
-  }, true));
+  if(state.result){
+    actions.appendChild(makeBtn('Copy findings', async()=>{
+      try{
+        const serialized=_reviewSerializeResult(state.result);
+        if(navigator.clipboard&&navigator.clipboard.writeText){
+          await navigator.clipboard.writeText(serialized);
+          showToast('Review findings copied', 1800, 'success');
+        }else{
+          throw new Error('clipboard unavailable');
+        }
+      }catch(e){
+        showToast('Copy failed: '+(e&&e.message?e.message:e), 2200, 'error');
+      }
+    }, false));
+  }
+
+  const runLabel=state.result&&state.result.findings&&state.result.findings.length ? 'Run review again' : 'Review in chat';
+  const runBtn=makeBtn(state.awaitingResult?'Review runningÃ¢â‚¬Â¦':runLabel, async()=>{
+    await _reviewSendPrompt(prompt, {state});
+  }, true);
+  if(state.awaitingResult){
+    runBtn.disabled=true;
+    runBtn.style.opacity='0.75';
+    runBtn.style.cursor='wait';
+  }
+  actions.appendChild(runBtn);
 
   card.appendChild(actions);
-  if(viewer) card.appendChild(viewer);
-  msgInner.appendChild(card);
-  if(typeof scrollIfPinned==='function') scrollIfPinned();
-  state.element=card;
+  card.appendChild(_reviewBuildResultSection(state));
+
+  const viewer=typeof renderDiffViewer==='function'
+    ? renderDiffViewer(String((data&&data.diff)||''), {maxHeight:'420px'})
+    : null;
+  if(viewer){
+    viewer.style.margin='8px 10px 10px';
+    card.appendChild(viewer);
+  }
   return card;
 }
 
+function _reviewFinalizeFromAssistant(activeSid, assistantMessage){
+  const state=window._reviewChainState;
+  if(!state||!state.visible||!state.awaitingResult) return false;
+  if(!state.session_id||String(state.session_id)!==String(activeSid||'')) return false;
+  const text=String((assistantMessage&&assistantMessage.content)||assistantMessage||'').trim();
+  if(!text) return false;
+  state.awaitingResult=false;
+  state.result=_reviewParseAssistantResponse(text);
+  state.resultText=text;
+  state.lastCompletedAt=Date.now();
+  _reviewSyncCard(state);
+  return true;
+}
+
+async function _reviewSendPrompt(prompt, opts={}){
+  const state=opts&&opts.state ? opts.state : (window._reviewChainState||(window._reviewChainState={}));
+  const ta=document.getElementById('msg');
+  if(!ta){
+    if(typeof showToast==='function') showToast('Composer unavailable', 2200, 'error');
+    state.awaitingResult=false;
+    _reviewSyncCard(state);
+    return;
+  }
+  state.awaitingResult=true;
+  state.result=null;
+  _reviewSyncCard(state);
+  ta.value=String(prompt||'');
+  if(typeof autoResize==='function') autoResize();
+  if(typeof updateSendBtn==='function') updateSendBtn();
+  try{
+    if(typeof send==='function'){
+      await send();
+    }else{
+      if(typeof showToast==='function') showToast('Review prompt prepared', 2000, 'info');
+      state.awaitingResult=false;
+      _reviewSyncCard(state);
+    }
+  }catch(e){
+    state.awaitingResult=false;
+    _reviewSyncCard(state);
+    throw e;
+  }
+}
+function _renderReviewCard(data, prompt){
+  _clearReviewCard();
+  const msgInner=document.getElementById('msgInner');
+  if(!msgInner) return null;
+
+  const state=window._reviewChainState||(window._reviewChainState={});
+  state.visible=true;
+  state.data=data||null;
+  state.prompt=String(prompt||'');
+  state.session_id=String((S&&S.session&&S.session.session_id)||'');
+  state.awaitingResult=false;
+  state.result=null;
+  state.resultText='';
+  state.lastCompletedAt=0;
+  state.element=null;
+
+  const card=document.createElement('div');
+  card.className='msg-row assistant-turn proposed-patch-card review-card';
+  card.style.margin='8px 0';
+  state.element=card;
+  _reviewSyncCard(state);
+  msgInner.appendChild(card);
+  if(typeof scrollIfPinned==='function') scrollIfPinned();
+  return card;
+}
 function _clearReviewCard(){
   const state=window._reviewChainState;
   if(!state) return;
@@ -1754,31 +2019,1237 @@ async function cmdReview(args){
       return true;
     }
     if(arg==='prompt'||arg==='draft'){
-      const ta=document.getElementById('msg');
-      if(ta){
-        ta.value=prompt;
-        if(typeof autoResize==='function') autoResize();
-        if(typeof updateSendBtn==='function') updateSendBtn();
-        ta.focus();
+    await _reviewSendPrompt(prompt, {state: window._reviewChainState});
+  }catch(e){showToast(t('workspace_switch_failed')+e.message);}
+}
+
+async function cmdTerminal(){
+  if(!S.session&&typeof newSession==='function'){
+    if(!S._profileSwitchWorkspace&&!S._profileDefaultWorkspace){
+      try{
+        const data=await api('/api/workspaces');
+        const first=(data.workspaces||[])[0];
+        S._profileSwitchWorkspace=data.last||(first&&first.path)||null;
+      }catch(_){}
+    }
+    await newSession();
+    if(typeof renderSessionList==='function') await renderSessionList();
+  }
+  if(!S.session||!S.session.workspace){
+    showToast(t('terminal_no_workspace_title'),2600,'warning');
+    if(typeof syncTerminalButton==='function') syncTerminalButton();
+    return;
+  }
+  if(typeof toggleComposerTerminal==='function') await toggleComposerTerminal(true);
+}
+
+async function cmdNew(){
+  if(typeof clearCompressionUi==='function') clearCompressionUi();
+  await newSession();
+  await renderSessionList();
+  $('msg').focus();
+  showToast(t('new_session'));
+}
+
+async function _runManualCompression(focusTopic){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  let visibleCount=0;
+  try{
+    const sid=S.session.session_id;
+    // Preflight: verify the viewed session still exists before compressing.
+    // This avoids a confusing "not found" toast when the UI is stale.
+    try{
+      const live=await api(`/api/session?session_id=${encodeURIComponent(sid)}`);
+      if(!live||!live.session||live.session.session_id!==sid){
+        throw new Error('session no longer available');
       }
-      return true;
+      S.session=live.session;
+      S.messages=live.session.messages||[];
+      S.toolCalls=live.session.tool_calls||[];
+      if(typeof _messagesTruncated!=='undefined') _messagesTruncated=false;
+    }catch(preflightErr){
+      if(typeof clearCompressionUi==='function') clearCompressionUi();
+      if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
+      if(typeof setBusy==='function') setBusy(false);
+      if(typeof setComposerStatus==='function') setComposerStatus('');
+      renderMessages();
+      showToast('Compression failed: '+(preflightErr.message||'session no longer available'));
+      return;
     }
-    const ta=document.getElementById('msg');
-    if(ta){
-      ta.value=prompt;
-      if(typeof autoResize==='function') autoResize();
-      if(typeof updateSendBtn==='function') updateSendBtn();
+    if(typeof setBusy==='function') setBusy(true);
+    const body={session_id:sid};
+    if(focusTopic) body.focus_topic=focusTopic;
+    const visibleMessages=(S.messages||[]).filter(m=>{
+      if(!m||!m.role||m.role==='tool') return false;
+      if(m.role==='assistant'){
+        const hasTc=Array.isArray(m.tool_calls)&&m.tool_calls.length>0;
+        const hasTu=Array.isArray(m.content)&&m.content.some(p=>p&&p.type==='tool_use');
+        if(hasTc||hasTu|| (typeof _messageHasReasoningPayload==='function' && _messageHasReasoningPayload(m))) return true;
+      }
+      return typeof msgContent==='function' ? !!msgContent(m) || !!m.attachments?.length : !!m.content || !!m.attachments?.length;
+    });
+    visibleCount=visibleMessages.length;
+    const anchorVisibleIdx=Math.max(0, visibleCount - 1);
+    const anchorMessageKey=_compressionAnchorMessageKey(visibleMessages[visibleMessages.length-1]||null);
+    const commandText=focusTopic?`/compress ${focusTopic}`:'/compress';
+    if(typeof setCompressionUi==='function'){
+      setCompressionUi({
+        sessionId:S.session.session_id,
+        phase:'running',
+        focusTopic:focusTopic||'',
+        commandText,
+        beforeCount:visibleCount,
+        anchorVisibleIdx,
+        anchorMessageKey,
+      });
     }
-    if(typeof send==='function'){
-      await send();
-    }else{
-      showToast('Review prompt prepared', 2000, 'info');
+    if(typeof setComposerStatus==='function') setComposerStatus(t('compressing'));
+    renderMessages();
+    const data=await api('/api/session/compress',{method:'POST',body:JSON.stringify(body)});
+    if(data&&data.session){
+      const currentSid=S.session&&S.session.session_id;
+      if(data.session.session_id&&data.session.session_id!==currentSid){
+        await loadSession(data.session.session_id);
+      }else{
+        S.session=data.session;
+        S.messages=data.session.messages||[];
+        S.toolCalls=data.session.tool_calls||[];
+        clearLiveToolCards();
+        localStorage.setItem('sidekick-webui-session',S.session.session_id);
+        if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(S.session.session_id);
+        syncTopbar();
+        renderMessages();
+        await renderSessionList();
+        updateQueueBadge(S.session.session_id);
+      }
     }
+    const summary=data&&data.summary;
+    if(typeof setCompressionUi==='function'&&S.session){
+      const referenceMsg=(S.messages||[]).find(m=>typeof _isContextCompactionMessage==='function'&&_isContextCompactionMessage(m));
+      const messageRef=referenceMsg?msgContent(referenceMsg)||String(referenceMsg.content||''):'';
+      const summaryRef=summary&&typeof summary.reference_message==='string' ? String(summary.reference_message||'').trim() : '';
+      // Prefer the persisted compaction handoff when it already exists in session state.
+      // The short summary fallback is only for environments where that message is unavailable.
+      const referenceText=messageRef || summaryRef;
+      const effectiveFocus=(data&&data.focus_topic)||focusTopic||'';
+      setCompressionUi({
+        sessionId:S.session.session_id,
+        phase:'done',
+        focusTopic:effectiveFocus,
+        commandText:effectiveFocus?`/compress ${effectiveFocus}`:'/compress',
+        beforeCount:visibleCount,
+        summary:summary||null,
+        referenceText,
+        anchorVisibleIdx: data?.session?.compression_anchor_visible_idx,
+        anchorMessageKey: data?.session?.compression_anchor_message_key||null,
+      });
+    }
+    if(typeof setComposerStatus==='function') setComposerStatus('');
+    renderMessages();
+    if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
   }catch(e){
-    _clearReviewCard();
-    showToast('Review failed: '+(e&&e.message?e.message:e), 2600, 'error');
+    if(typeof setCompressionUi==='function'){
+      const currentSid=S.session&&S.session.session_id;
+      setCompressionUi({
+        sessionId:currentSid||'',
+        phase:'error',
+        focusTopic:(focusTopic||'').trim(),
+        commandText:focusTopic?`/compress ${focusTopic}`:'/compress',
+        beforeCount:(S.messages||[]).filter(m=>m&&m.role&&m.role!=='tool').length,
+        errorText:`Compression failed: ${e.message}`,
+        anchorVisibleIdx: Math.max(0, visibleCount - 1),
+        anchorMessageKey:null,
+      });
+    }
+    if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
+    if(typeof setBusy==='function') setBusy(false);
+    if(typeof setComposerStatus==='function') setComposerStatus('');
+    renderMessages();
+    showToast('Compression failed: '+e.message);
+    return;
+  }
+  if(typeof setBusy==='function') setBusy(false);
+}
+
+async function cmdCompress(args){
+  await _runManualCompression((args||'').trim());
+}
+
+async function cmdCompact(args){
+  await _runManualCompression((args||'').trim());
+}
+
+async function cmdUsage(){
+  const next=!window._showTokenUsage;
+  window._showTokenUsage=next;
+  try{
+    await api('/api/settings',{method:'POST',body:JSON.stringify({show_token_usage:next})});
+  }catch(e){}
+  // Update the settings checkbox if the panel is open
+  const cb=$('settingsShowTokenUsage');
+  if(cb) cb.checked=next;
+  renderMessages();
+  showToast(next?t('token_usage_on'):t('token_usage_off'));
+}
+
+async function cmdTheme(args){
+  const themes=['system','dark','light'];
+  const skins=(_SKINS||[]).map(s=>s.name.toLowerCase());
+  const legacyThemes=Object.keys(_LEGACY_THEME_MAP||{});
+  const val=(args||'').toLowerCase().trim();
+  // Check if it's a theme
+  if(themes.includes(val)||legacyThemes.includes(val)){
+    const appearance=_normalizeAppearance(
+      val,
+      legacyThemes.includes(val)?null:localStorage.getItem('sidekick-skin')
+    );
+    localStorage.setItem('sidekick-theme',appearance.theme);
+    localStorage.setItem('sidekick-skin',appearance.skin);
+    _applyTheme(appearance.theme);
+    _applySkin(appearance.skin);
+    try{await api('/api/settings',{method:'POST',body:JSON.stringify({theme:appearance.theme,skin:appearance.skin})});}catch(e){}
+    const sel=$('settingsTheme');
+    if(sel)sel.value=appearance.theme;
+    const skinSel=$('settingsSkin');
+    if(skinSel)skinSel.value=appearance.skin;
+    if(typeof _syncThemePicker==='function') _syncThemePicker(appearance.theme);
+    if(typeof _syncSkinPicker==='function') _syncSkinPicker(appearance.skin);
+    showToast(t('theme_set')+appearance.theme+(legacyThemes.includes(val)?` + ${appearance.skin}`:''));
+    return;
+  }
+  // Check if it's a skin
+  if(skins.includes(val)){
+    const appearance=_normalizeAppearance(localStorage.getItem('sidekick-theme'),val);
+    localStorage.setItem('sidekick-theme',appearance.theme);
+    localStorage.setItem('sidekick-skin',appearance.skin);
+    _applyTheme(appearance.theme);
+    _applySkin(appearance.skin);
+    try{await api('/api/settings',{method:'POST',body:JSON.stringify({theme:appearance.theme,skin:appearance.skin})});}catch(e){}
+    const sel=$('settingsSkin');
+    if(sel)sel.value=appearance.skin;
+    const themeSel=$('settingsTheme');
+    if(themeSel)themeSel.value=appearance.theme;
+    if(typeof _syncThemePicker==='function') _syncThemePicker(appearance.theme);
+    if(typeof _syncSkinPicker==='function') _syncSkinPicker(appearance.skin);
+    showToast(t('theme_set')+appearance.skin);
+    return;
+  }
+  showToast(t('theme_usage')+themes.join('|')+' | '+skins.join('|')+' | legacy:'+legacyThemes.join('|'));
+}
+
+async function cmdSkills(args){
+  try{
+    const data = await api('/api/skills');
+    let skills = data.skills || [];
+    if(args){
+      const q = args.toLowerCase();
+      skills = skills.filter(s =>
+        (s.name||'').toLowerCase().includes(q) ||
+        (s.description||'').toLowerCase().includes(q) ||
+        (s.category||'').toLowerCase().includes(q)
+      );
+    }
+    if(!skills.length){
+      const msg = {role:'assistant', content: args ? `No skills matching "${args}".` : 'No skills found.'};
+      S.messages.push(msg); renderMessages(); return;
+    }
+    // Group by category
+    const byCategory = {};
+    skills.forEach(s => {
+      const cat = s.category || 'General';
+      if(!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(s);
+    });
+    const lines = [];
+    for(const [cat, items] of Object.entries(byCategory).sort()){
+      lines.push(`**${cat}**`);
+      items.forEach(s => {
+        const desc = s.description ? ` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
+        lines.push(`  \`${s.name}\`${desc}`);
+      });
+      lines.push('');
+    }
+    const header = args
+      ? `Skills matching "${args}" (${skills.length}):\n\n`
+      : `Available skills (${skills.length}):\n\n`;
+    S.messages.push({role:'assistant', content: header + lines.join('\n')});
+    renderMessages();
+    showToast(t('type_slash'));
+  }catch(e){
+    showToast('Failed to load skills: '+e.message);
+  }
+}
+
+async function cmdPersonality(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  if(!args){
+    // List available personalities
+    try{
+      const data=await api('/api/personalities');
+      if(!data.personalities||!data.personalities.length){
+        showToast(t('no_personalities'));
+        return;
+      }
+      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â '+p.description:''}`).join('\n');
+      S.messages.push({role:'assistant',content:t('available_personalities')+'\n\n'+list+t('personality_switch_hint')});
+      renderMessages();
+    }catch(e){showToast(t('personalities_load_failed'));}
+    return;
+  }
+  const name=args.trim();
+  if(name.toLowerCase()==='none'||name.toLowerCase()==='default'||name.toLowerCase()==='clear'){
+    try{
+      await api('/api/personality/set',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,name:''})});
+      showToast(t('personality_cleared'));
+    }catch(e){showToast(t('failed_colon')+e.message);}
+    return;
+  }
+  try{
+    const res=await api('/api/personality/set',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,name})});
+    S.messages.push({role:'assistant',content:t('personality_set')+`**${name}**`});
+    renderMessages();
+    showToast(t('personality_set')+name);
+  }catch(e){showToast(t('failed_colon')+e.message);}
+}
+
+async function cmdStop(){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  if(!S.activeStreamId){showToast(t('no_active_task'));return;}
+  if(typeof cancelStream==='function'){await cancelStream();showToast(t('stream_stopped'));}
+  else showToast(t('cancel_unavailable'));
+}
+
+async function cmdGoal(args){
+  if(!S.session){await newSession();await renderSessionList();}
+  if(!S.session||!S.session.session_id){showToast(t('no_active_session'));return;}
+  const activeSid=S.session.session_id;
+  try{
+    const r=await api('/api/goal',{method:'POST',body:JSON.stringify({
+      session_id:activeSid,
+      args:args||'',
+      workspace:S.session.workspace,
+      model:S.session.model||($('modelSelect')&&$('modelSelect').value)||'',
+      model_provider:S.session.model_provider||null,
+      profile:S.activeProfile||S.session.profile||'default',
+    })});
+    const msg = (() => {
+      const raw = String((r && r.message) || '').trim();
+      const key = String((r && r.message_key) || '').trim();
+      const args = Array.isArray(r && r.message_args) ? r.message_args : [];
+      if (raw.includes('\n')) return raw;
+      if (key && typeof t === 'function') {
+        const translated = String(t(key, ...args));
+        if (translated && translated !== key) return translated;
+      }
+      return raw;
+    })();
+    // Update goal banner from API response
+    if(r&&r.goal){
+      if(typeof _updateGoalState==='function')_updateGoalState(r.goal);
+    }else if(typeof _clearGoalState==='function'){
+      _clearGoalState();
+    }
+    if(msg){
+      S.messages.push({role:'assistant',content:msg,_ts:Date.now()/1000,_goalStatus:true,_transient:true});
+      renderMessages({preserveScroll:true});
+      showToast(msg.split('\n')[0],2600);
+    }
+    if(!r||!r.stream_id)return;
+    S.toolCalls=[];
+    if(typeof clearLiveToolCards==='function')clearLiveToolCards();
+    setBusy(true);appendThinking();
+    setComposerStatus(t('goal_working_toward'));
+    S.activeStreamId=r.stream_id;
+    if(S.session&&S.session.session_id===activeSid){
+      S.session.active_stream_id=r.stream_id;
+      if(typeof r.pending_started_at==='number')S.session.pending_started_at=r.pending_started_at;
+      if(r.effective_model)S.session.model=r.effective_model;
+      if(r.effective_model_provider)S.session.model_provider=r.effective_model_provider;
+    }
+    INFLIGHT[activeSid]={messages:[...S.messages],uploaded:[],toolCalls:[]};
+    if(typeof markInflight==='function')markInflight(activeSid,r.stream_id);
+    if(typeof saveInflightState==='function')saveInflightState(activeSid,{streamId:r.stream_id,messages:INFLIGHT[activeSid].messages,uploaded:[],toolCalls:[]});
+    startApprovalPolling(activeSid);
+    startClarifyPolling(activeSid);
+    if(typeof _fetchYoloState==='function')_fetchYoloState(activeSid);
+    attachLiveStream(activeSid,r.stream_id,[]);
+    if(typeof renderSessionList==='function')void renderSessionList();
+  }catch(e){
+    const err=String((e&&e.message)||e||'Goal command failed');
+    S.messages.push({role:'assistant',content:`**Goal command failed:** ${err}`,_ts:Date.now()/1000,_error:true});
+    renderMessages({preserveScroll:true});
+    showToast(err,3000);
+  }
+}
+
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Busy-input mode commands ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+// These commands let users override the default busy_input_mode setting for a
+// specific message.  They are only meaningful while the agent is running.
+
+/**
+ * /queue <message> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Explicitly queue a message for the next turn.
+ * Works regardless of the busy_input_mode setting.
+ */
+async function cmdQueue(args){
+  const msg=(args||'').trim();
+  if(!msg){showToast(t('cmd_queue_no_msg'));return;}
+  // If nothing is running, /queue <msg> just sends like a normal message
+  if(!S.busy){
+    const inp=$('msg');
+    if(inp){inp.value=msg;}
+    if(typeof send==='function'){await send();}
+    return;
+  }
+  if(!S.session){showToast(t('no_active_session'));return;}
+  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:S.activeProfile||'default'});
+  updateQueueBadge(S.session.session_id);
+  S.pendingFiles=[];renderTray();
+  showToast(t('cmd_queue_confirm'),2000);
+}
+
+/**
+ * /interrupt <message> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Cancel the current turn and send a new message.
+ * Calls cancelStream() then queues the message so the drain picks it up.
+ */
+async function cmdInterrupt(args){
+  const msg=(args||'').trim();
+  if(!msg){showToast(t('cmd_interrupt_no_msg'));return;}
+  // If nothing is running, /interrupt <msg> just sends like a normal message
+  if(!S.busy||!S.activeStreamId){
+    const inp=$('msg');
+    if(inp){inp.value=msg;}
+    if(typeof send==='function'){await send();}
+    return;
+  }
+  if(!S.session){showToast(t('no_active_session'));return;}
+  // Queue the message first (before cancel sets busy=false and drains)
+  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:S.activeProfile||'default'});
+  updateQueueBadge(S.session.session_id);
+  S.pendingFiles=[];renderTray();
+  // Cancel the active stream; setBusy(false) will drain the queue
+  if(typeof cancelStream==='function'){await cancelStream();}
+  showToast(t('cmd_interrupt_confirm'),2000);
+}
+
+/**
+ * /steer <message> ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â Inject a steering hint mid-task without interrupting.
+ *
+ * Calls POST /api/chat/steer which looks up the cached AIAgent for this
+ * session and calls agent.steer(text). The agent's run loop appends the
+ * steer text to the next tool-result message so the model sees it on its
+ * next iteration ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â same pathway as the CLI's /steer command.
+ *
+ * Falls back to interrupt mode when the agent isn't running, isn't cached,
+ * or doesn't support steer (older Sidekick versions).
+ */
+async function cmdSteer(args){
+  const msg=(args||'').trim();
+  if(!msg){showToast(t('cmd_steer_no_msg'));return;}
+  // If nothing is running, /steer <msg> just sends like a normal message
+  if(!S.busy||!S.activeStreamId){
+    const inp=$('msg');
+    if(inp){inp.value=msg;}
+    if(typeof send==='function'){await send();}
+    return;
+  }
+  if(!S.session){showToast(t('no_active_session'));return;}
+  await _trySteer(msg, /*explicitSteer=*/true);
+}
+
+/**
+ * Shared implementation for /steer and the busy_input_mode='steer' path.
+ *
+ * Tries the real steer endpoint first. On any non-accept response (no cached
+ * agent, agent lacks steer, stream dead, etc.) falls back to interrupt+queue:
+ * queues the message and cancels the stream so the drain re-sends it.
+ *
+ * @param {string} msg - The steer text.
+ * @param {boolean} explicitSteer - True if the user explicitly invoked /steer
+ *   (vs the busy-mode auto-fallback). Affects toast wording only.
+ */
+async function _trySteer(msg, explicitSteer){
+  let result=null;
+  try{
+    result=await api('/api/chat/steer',{
+      method:'POST',
+      body:JSON.stringify({session_id:S.session.session_id,text:msg}),
+    });
+  }catch(e){
+    // Network or server error ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â fall back to interrupt
+    result={accepted:false, fallback:'network_error'};
+  }
+  if(result&&result.accepted){
+    showToast(t('cmd_steer_delivered'),2500);
+    return;
+  }
+  // Fall back to interrupt: queue the message + cancel the stream so the
+  // drain in setBusy(false) re-sends it as a fresh turn.
+  queueSessionMessage(S.session.session_id,{text:msg,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',profile:S.activeProfile||'default'});
+  updateQueueBadge(S.session.session_id);
+  S.pendingFiles=[];renderTray();
+  if(typeof cancelStream==='function'){await cancelStream();}
+  // Toast wording differs based on why we're falling back so the user
+  // understands what just happened.
+  const reason=(result&&result.fallback)||'unknown';
+  if(explicitSteer){
+    showToast(t('cmd_steer_fallback'),2500);
+  } else if(reason==='no_cached_agent'||reason==='not_running'||reason==='stream_dead'){
+    // Busy mode hit the steer path before the agent was ready ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â
+    // interrupt is the natural fallback, no need to call out steer.
+    showToast(t('busy_interrupt_confirm'),2000);
+  } else {
+    showToast(t('busy_steer_fallback'),2500);
+  }
+}
+
+async function cmdTitle(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const name=(args||'').trim();
+  if(!name){
+    S.messages.push({role:'assistant',content:`${t('title_current')}: **${S.session.title||t('untitled')}**\n\n${t('title_change_hint')}`});
+    renderMessages();return;
+  }
+  try{
+    const r=await api('/api/session/rename',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,title:name})});
+    if(r&&r.error){showToast(r.error);return;}
+    S.session.title=(r&&r.session&&r.session.title)||name;
+    if(typeof syncTopbar==='function')syncTopbar();
+    if(typeof renderSessionList==='function')renderSessionList();
+    showToast(`${t('title_set')} "${S.session.title}"`);
+    S.messages.push({role:'assistant',content:`${t('title_set')} **${S.session.title}**`});
+    renderMessages();
+  }catch(e){showToast(t('failed_colon')+e.message);}
+}
+async function cmdRetry(){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  if(S.session.is_cli_session){showToast(t('cmd_webui_only_session'));return;}
+  const activeSid=S.session.session_id;
+  try{
+    const r=await api('/api/session/retry',{method:'POST',body:JSON.stringify({session_id:activeSid})});
+    if(r&&r.error){showToast(r.error);return;}
+    if(!S.session||S.session.session_id!==activeSid)return;
+    const data=await api('/api/session?session_id='+encodeURIComponent(activeSid));
+    if(data&&data.session){S.messages=data.session.messages||[];S.toolCalls=[];if(typeof clearLiveToolCards==='function')clearLiveToolCards();if(typeof _messagesTruncated!=='undefined')_messagesTruncated=false;renderMessages();}
+    $('msg').value=r.last_user_text||'';if(typeof autoResize==='function')autoResize();await send();
+  }catch(e){showToast(t('retry_failed')+e.message);}
+}
+async function cmdUndo(){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  if(S.session.is_cli_session){showToast(t('cmd_webui_only_session'));return;}
+  const activeSid=S.session.session_id;
+  try{
+    const r=await api('/api/session/undo',{method:'POST',body:JSON.stringify({session_id:activeSid})});
+    if(r&&r.error){showToast(r.error);return;}
+    if(!S.session||S.session.session_id!==activeSid)return;
+    const data=await api('/api/session?session_id='+encodeURIComponent(activeSid));
+    if(data&&data.session){S.messages=data.session.messages||[];S.toolCalls=[];if(typeof clearLiveToolCards==='function')clearLiveToolCards();if(typeof _messagesTruncated!=='undefined')_messagesTruncated=false;renderMessages();}
+    showToast(`ÃƒÂ¢Ã¢â‚¬Â Ã‚Â© ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
+  }catch(e){showToast(t('undo_failed')+e.message);}
+}
+async function undoLastExchange(){await cmdUndo();}
+async function cmdBtw(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const question=(args||'').trim();
+  if(!question){showToast(t('cmd_btw_usage'));return;}
+  showToast(t('btw_asking'));
+  const activeSid=S.session.session_id;
+  try{
+    const r=await api('/api/btw',{method:'POST',body:JSON.stringify({session_id:activeSid,question})});
+    if(r&&r.error){showToast(r.error);return;}
+    // Connect to the ephemeral SSE stream
+    const streamId=r.stream_id;
+    const parentSid=r.parent_session_id;
+    if(typeof attachBtwStream==='function') attachBtwStream(parentSid,streamId,question);
+  }catch(e){showToast(t('btw_failed')+e.message);}
+}
+async function cmdBackground(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const prompt=(args||'').trim();
+  if(!prompt){showToast(t('cmd_background_usage'));return;}
+  showToast(t('bg_running'));
+  const activeSid=S.session.session_id;
+  try{
+    const r=await api('/api/background',{method:'POST',body:JSON.stringify({session_id:activeSid,prompt})});
+    if(r&&r.error){showToast(r.error);return;}
+    // Show background badge and start polling
+    if(typeof showBackgroundBadge==='function') showBackgroundBadge(r.task_id);
+    if(typeof startBackgroundPolling==='function') startBackgroundPolling(activeSid,r.task_id,prompt);
+  }catch(e){showToast(t('bg_failed')+e.message);}
+}
+
+function _formatExecuteCodeMessage(result, code){
+  const status=String(result&&result.status||'').trim().toLowerCase();
+  const output=String(result&&result.output||'').replace(/\s+$/,'');
+  const error=String(result&&result.error||'').trim();
+  const toolCalls=Number(result&&result.tool_calls_made);
+  const duration=Number(result&&result.duration_seconds);
+  const heading=status==='error'
+    ? '**`/exec` failed**'
+    : status==='timeout'
+      ? '**`/exec` timed out**'
+      : '**`/exec` result**';
+  const parts=[heading];
+  const meta=[];
+  if(Number.isFinite(toolCalls)) meta.push(`${toolCalls} tool call${toolCalls===1?'':'s'}`);
+  if(Number.isFinite(duration)) meta.push(`${duration.toFixed(duration>=10?1:2)}s`);
+  if(meta.length) parts.push(`_${meta.join(' Ãƒâ€šÃ‚Â· ')}_`);
+  if(code) parts.push('```python\n'+code.replace(/\s+$/,'')+'\n```');
+  if(output) parts.push('**Output**\n```text\n'+output+'\n```');
+  if(error && error!==output) parts.push(`**Error:** ${error}`);
+  if(!output && !error) parts.push('_No output_');
+  return parts.join('\n\n');
+}
+
+async function cmdExec(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const activeSid=S.session.session_id;
+  const code=String(args||'');
+  if(!code.trim()){showToast('Use /exec <python code>');return;}
+  showToast('Running execute_codeÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦');
+  try{
+    const r=await api('/api/execute_code',{
+      method:'POST',
+      body:JSON.stringify({session_id:activeSid, code})
+    });
+    if(!S.session||S.session.session_id!==activeSid){
+      showToast('Session changed before execute_code finished');
+      return;
+    }
+    S.messages.push({
+      role:'assistant',
+      content:_formatExecuteCodeMessage(r, code),
+      _ts:Date.now()/1000,
+    });
+    renderMessages();
+    const status=String(r&&r.status||'ok').toLowerCase();
+    showToast(
+      status==='error'
+        ? 'execute_code failed'
+        : status==='timeout'
+          ? 'execute_code timed out'
+          : 'execute_code finished'
+    );
+  }catch(e){
+    showToast('execute_code failed: '+(e&&e.message?e.message:e));
+  }
+}
+
+function _formatImageGenerationMessage(result, prompt){
+  const success=!!(result&&result.success);
+  const image=String(result&&result.image||'').trim();
+  const error=String(result&&result.error||'').trim();
+  const title=success ? '**Image generated**' : '**Image generation failed**';
+  const parts=[title];
+  if(prompt) parts.push(`**Prompt**\n${prompt}`);
+  if(image){
+    parts.push(`![${prompt||'generated image'}](${image})`);
+    parts.push(`[Open full image](${image})`);
+  }
+  if(error) parts.push(`**Error:** ${error}`);
+  if(!image && !error) parts.push('_No output returned_');
+  return parts.join('\n\n');
+}
+
+async function cmdImage(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const activeSid=S.session.session_id;
+  const raw=String(args||'').trim();
+  if(!raw){showToast('Use /image <prompt>');return;}
+  const aspectMatch=raw.match(/^((?:\d+:\d+)|square|portrait|landscape)\s+([\s\S]+)$/i);
+  const aspectRatio=aspectMatch ? String(aspectMatch[1]).toLowerCase() : '';
+  const prompt=aspectMatch ? String(aspectMatch[2]||'').trim() : raw;
+  if(!prompt){showToast('Use /image <prompt>');return;}
+  showToast('Generating imageÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦');
+  try{
+    const r=await api('/api/image_generate',{
+      method:'POST',
+      body:JSON.stringify({session_id:activeSid, prompt, aspect_ratio:aspectRatio})
+    });
+    if(!S.session||S.session.session_id!==activeSid){
+      showToast('Session changed before image generation finished');
+      return;
+    }
+    S.messages.push({
+      role:'assistant',
+      content:_formatImageGenerationMessage(r, prompt),
+      _ts:Date.now()/1000,
+    });
+    renderMessages();
+    showToast((r&&r.success) ? 'Image generated' : 'Image generation failed');
+  }catch(e){
+    showToast('Image generation failed: '+(e&&e.message?e.message:e));
+  }
+}
+
+function _formatStatusTimestamp(value){
+  if(value===undefined||value===null||value==='') return t('status_unknown');
+  let date;
+  if(typeof value==='number') date=new Date(value < 1000000000000 ? value*1000 : value);
+  else date=new Date(value);
+  if(Number.isNaN(date.getTime())) return t('status_unknown');
+  return date.toLocaleString();
+}
+function _formatStatusTokens(s){
+  const lastUsage=(typeof S!=='undefined'&&(S.lastUsage||s.last_usage))||{};
+  const input=Number(s.input_tokens??lastUsage.input_tokens??0)||0;
+  const output=Number(s.output_tokens??lastUsage.output_tokens??0)||0;
+  const total=Number(s.total_tokens??lastUsage.total_tokens??(input+output))||0;
+  const cost=Number(s.estimated_cost??lastUsage.estimated_cost??0)||0;
+  if(!total&&!cost) return t('status_no_tokens');
+  const fmtNum=n=>Number(n||0).toLocaleString();
+  return `${fmtNum(input)} in / ${fmtNum(output)} out${cost?` (~$${cost.toFixed(4)})`:''}`;
+}
+function _statusProviderForSession(s){
+  if(s.model_provider) return String(s.model_provider);
+  if(window._activeProvider) return String(window._activeProvider);
+  const model=String(s.model||'');
+  return model.includes('/') ? model.split('/')[0] : '';
+}
+function _statusCardFromSession(s){
+  const provider=_statusProviderForSession(s);
+  const model=s.model||(($('modelSelect')&&$('modelSelect').value)||t('usage_default_model'));
+  const running=!!(s.active_stream_id||S.activeStreamId||S.busy);
+  const profile=s.profile||S.activeProfile||'default';
+  const workspace=s.workspace||S.currentDir||t('status_unknown');
+  const rows=[
+    {label:t('status_session_id'), value:s.session_id||t('status_unknown')},
+    {label:t('status_title'), value:s.title||t('untitled')},
+    {label:t('status_model'), value:model},
+    {label:t('status_provider'), value:provider||t('status_unknown')},
+    {label:t('status_profile'), value:profile},
+    {label:t('status_workspace'), value:workspace},
+    {label:t('status_personality'), value:s.personality||t('usage_personality_none')},
+    {label:t('status_started'), value:_formatStatusTimestamp(s.created_at)},
+    {label:t('status_updated'), value:_formatStatusTimestamp(s.updated_at||s.last_message_at)},
+    {label:t('status_tokens'), value:_formatStatusTokens(s)},
+    {label:t('status_messages'), value:String(s.message_count??(S.messages||[]).filter(m=>m&&m.role&&m.role!=='tool').length)},
+    {label:t('status_agent_running'), value:running?t('status_yes'):t('status_no')},
+  ];
+  return {
+    title:t('status_heading'),
+    subtitle:t('status_ephemeral'),
+    sessionId:s.session_id||'',
+    rows,
+  };
+}
+function cmdStatus(){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  S.messages.push({
+    role:'assistant',
+    content:'',
+    _ephemeral:true,
+    _statusCard:_statusCardFromSession(S.session),
+    _ts:Date.now()/1000,
+  });
+  renderMessages();
+}
+function _reasoningProviderFromModelValue(model){
+  const value=String(model||'').trim();
+  if(!value) return '';
+  if(value.startsWith('@')&&value.includes(':')){
+    return value.slice(1,value.lastIndexOf(':')).trim().toLowerCase();
+  }
+  const slash=value.indexOf('/');
+  if(slash>0) return value.slice(0,slash).trim().toLowerCase();
+  return '';
+}
+
+function _reasoningCommandContext(){
+  const session=S&&S.session?S.session:null;
+  let model=session&&session.model?String(session.model).trim():'';
+  let modelProvider=session&&session.model_provider?String(session.model_provider).trim():'';
+  if(!model){
+    const sel=$('modelSelect');
+    if(sel&&sel.value) model=String(sel.value).trim();
+  }
+  if(!modelProvider&&model){
+    if(typeof _modelStateForSelect==='function'){
+      const select=$('modelSelect');
+      const state=_modelStateForSelect(select,model);
+      if(state&&state.model_provider) modelProvider=String(state.model_provider).trim();
+    }
+    if(!modelProvider) modelProvider=_reasoningProviderFromModelValue(model);
+  }
+  const params=new URLSearchParams();
+  if(model) params.set('model',model);
+  if(modelProvider) params.set('model_provider',modelProvider);
+  return {model, model_provider:modelProvider||null, query:params.toString()};
+}
+
+function cmdReasoning(args){
+  const arg=(args||'').trim().toLowerCase();
+  const normalizedArg=(arg==='max')?'xhigh':arg;
+  const BRAIN='??';
+  const EFFORTS=['none','minimal','low','medium','high','xhigh'];
+  function _fmtStatus(st){
+    const vis=(st && st.show_reasoning===false)?'off':'on';
+    const eff=(st && st.reasoning_effort)||'default';
+    const allowed=Array.isArray(st && st.allowed_efforts)
+      ? st.allowed_efforts.map(function(v){return String(v||'').trim().toLowerCase();}).filter(Boolean)
+      : [];
+    const fullAllowed=['none','minimal','low','medium','high','xhigh'];
+    const allowedText=allowed.length&&allowed.join('|')!==fullAllowed.join('|')
+      ? ' ? allowed: '+allowed.join('|')
+      : '';
+    const supportText=(st && st.reasoning_effort_supported===false)
+      ? ' (not supported by the selected model)'
+      : '';
+    return BRAIN+' Reasoning effort: '+eff+' ? display: '+vis
+      +allowedText
+      +supportText
+      +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
+  }
+  const ctx=_reasoningCommandContext();
+  const query=ctx.query ? '?' + ctx.query : '';
+  if(!arg){
+    api('/api/reasoning'+query).then(function(st){
+      showToast(_fmtStatus(st));
+      if(typeof _applyReasoningChip==='function') _applyReasoningChip((st && st.reasoning_effort)||'', st||{});
+    })
+      .catch(function(){showToast(BRAIN+' /reasoning ? status unavailable');});
+    return true;
+  }
+  if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){
+    const on=(arg==='show'||arg==='on');
+    // Update the UI render gate immediately for responsiveness.
+    window._showThinking=on;
+    if(typeof renderMessages==='function') renderMessages();
+    // Persist via /api/reasoning ? config.yaml display.show_reasoning
+    // (CLI reads the same key).  Also mirror into WebUI settings.json
+    // show_thinking so boot.js picks it up on reload without hitting
+    // /api/reasoning on every page load.
+    api('/api/reasoning',{method:'POST',body:JSON.stringify({display:arg,model:ctx.model||'',model_provider:ctx.model_provider||null})})
+      .then(function(st){
+        if(typeof _applyReasoningChip==='function') _applyReasoningChip((st && st.reasoning_effort)||'', st||{});
+      })
+      .catch(function(){});
+    api('/api/settings',{method:'POST',body:JSON.stringify({show_thinking:on})}).catch(function(){});
+    showToast(BRAIN+' Thinking blocks: '+(on?'on':'off')+' (saved)');
+    return true;
+  }
+  if(EFFORTS.includes(normalizedArg)){
+    // Persist via /api/reasoning ? config.yaml agent.reasoning_effort.
+    // Takes effect on the NEXT session/turn (agent re-reads config at
+    // construction time), matching CLI semantics where /reasoning high
+    // also forces an agent re-init.
+    api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:normalizedArg,model:ctx.model||'',model_provider:ctx.model_provider||null})})
+      .then(function(st){
+        const eff=(st && st.reasoning_effort)||normalizedArg;
+        showToast(BRAIN+' Reasoning effort: '+eff+' (saved; applies to next turn)');
+        if(typeof _applyReasoningChip==='function') _applyReasoningChip(eff, st||{});
+      })
+      .catch(function(e){
+        showToast(BRAIN+' Failed to set reasoning effort: '+e.message);
+      });
+    return true;
+  }
+  // Any other token falls through to the agent (e.g. user prose after /reasoning).
+  return false;
+}
+
+function cmdApproval(args){
+  const arg=(args||'').trim().toLowerCase();
+  const MODES=['manual','smart','off'];
+  const normalizeMode=arg==='ask'?'manual':arg==='deny'?'smart':arg==='yolo'?'off':arg;
+  const normalizeApprovalMode=(mode)=>{
+    const value=(mode==null?'':String(mode)).trim().toLowerCase();
+    if(value==='ask') return 'manual';
+    if(value==='deny') return 'smart';
+    if(value==='yolo') return 'off';
+    if(value==='manual'||value==='smart'||value==='off') return value;
+    return 'manual';
+  };
+  const formatStatus=(mode)=>'Approval mode: '+mode+' | /approval manual|smart|off';
+  const applyApprovalMode=(mode)=>{
+    const normalized=normalizeApprovalMode(mode);
+    if(typeof window._setApprovalModeIndicator==='function'){
+      return window._setApprovalModeIndicator(normalized)||normalized;
+    }
+    window._approvalMode=normalized;
+    return normalized;
+  };
+  if(!arg||arg==='status'||arg==='show'){
+    try{
+      const st=await api('/api/approval');
+      const mode=applyApprovalMode((st&&st.mode)||'manual');
+      showToast(formatStatus(mode));
+    }catch(e){
+      showToast('Approval mode status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(!MODES.includes(normalizeMode)){
+    showToast('Unknown argument: '+arg+' \u2014 use manual|smart|off|status');
+    return true;
+  }
+  try{
+    const data=await api('/api/approval',{
+      method:'POST',
+      body:JSON.stringify({mode:normalizeMode}),
+    });
+    const mode=applyApprovalMode((data&&data.mode)||normalizeMode);
+    showToast('Approval mode: '+mode+' (saved)');
+  }catch(e){
+    showToast('Approval mode update failed: '+(e&&e.message?e.message:normalizeMode));
   }
   return true;
+}
+
+async function cmdWeb(args){
+  const raw=String(args||'').trim().toLowerCase();
+  const validModes=['auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'];
+  const formatStatus=(st)=>{
+    const backend=String((st&&st.backend)||'auto').trim().toLowerCase()||'auto';
+    const configured=String((st&&st.configured_backend)||'').trim().toLowerCase();
+    const source=configured ? 'pinned' : 'auto';
+    const label=configured ? configured : backend;
+    return 'Web backend: '+label+' ('+source+') | /web status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs';
+  };
+  const applyStatus=(st)=>{
+    if(typeof browserRenderWebBackend==='function') browserRenderWebBackend(st||{backend:'auto',configured_backend:''});
+    return formatStatus(st);
+  };
+  if(!raw||raw==='status'||raw==='show'){
+    try{
+      const st=await api('/api/web/backend');
+      showToast(applyStatus(st));
+    }catch(e){
+      showToast('Web backend status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  let target=raw;
+  if(raw==='toggle'){
+    try{
+      const st=await api('/api/web/backend');
+      target=String((st&&st.configured_backend)||'').trim().toLowerCase()==='firecrawl' ? 'auto' : 'firecrawl';
+    }catch(_){
+      target='firecrawl';
+    }
+  }
+  if(!validModes.includes(target)){
+    showToast('Use /web status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs');
+    return true;
+  }
+  try{
+    const st=await api('/api/web/backend',{
+      method:'POST',
+      body:JSON.stringify({backend:target}),
+    });
+    showToast(applyStatus(st));
+  }catch(e){
+    showToast('Failed to set web backend: '+(e&&e.message?e.message:target));
+  }
+  return true;
+}
+
+async function cmdMcp(args){
+  const raw=String(args||'').trim().toLowerCase();
+  const openSystemSettings=()=>{
+    if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
+    if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+  };
+  const summarizeServers=(servers)=>{
+    const list=Array.isArray(servers)?servers:[];
+    const total=list.length;
+    const connected=list.filter(server=>server&&server.connected).length;
+    const toolCount=list.reduce((sum,server)=>sum+(Number(server&&server.tools)||0),0);
+    const offline=total-connected;
+    const parts=['MCP: '+connected+'/'+total+' connected'];
+    if(toolCount) parts.push(toolCount+' tools');
+    if(offline) parts.push(offline+' offline');
+    return parts.join(' | ');
+  };
+  const showStatus=async()=>{
+    const data=await api('/api/mcp/servers');
+    const servers=Array.isArray(data&&data.servers)?data.servers:[];
+    const summary=summarizeServers(servers);
+    showToast(summary+' | /mcp open');
+    return servers;
+  };
+  if(!raw||raw==='status'||raw==='show'||raw==='list'){
+    try{
+      await showStatus();
+    }catch(e){
+      showToast('MCP status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(raw==='open'||raw==='system'||raw==='settings'){
+    openSystemSettings();
+    try{
+      await showStatus();
+    }catch(e){
+      showToast('MCP settings opened');
+    }
+    return true;
+  }
+  if(raw==='refresh'){
+    openSystemSettings();
+    if(typeof loadMcpServers==='function') loadMcpServers();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    if(typeof loadGatewayStatus==='function') loadGatewayStatus();
+    showToast('MCP system section refreshed');
+    return true;
+  }
+  if(raw==='tools'){
+    openSystemSettings();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    const search=document.getElementById('mcpToolSearch');
+    if(search&&typeof search.focus==='function') setTimeout(()=>search.focus(),0);
+    showToast('MCP tools view opened');
+    return true;
+  }
+  showToast('Use /mcp status|open|refresh|tools');
+  return true;
+}
+
+async function cmdSubagents(args){
+  const raw=String(args||'').trim().toLowerCase();
+  const openSystemSettings=()=>{
+    if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
+    if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+  };
+  const summarize=(payload)=>{
+    const active=Array.isArray(payload&&payload.active)?payload.active:[];
+    const paused=!!(payload&&payload.spawn_paused);
+    const parts=['Subagents: '+active.length+' active',paused?'spawn paused':'spawn open'];
+    const first=active[0];
+    if(first){
+      const goal=String(first.goal||'').trim();
+      const sid=String(first.subagent_id||'').trim();
+      if(goal) parts.push(goal.slice(0,72));
+      else if(sid) parts.push(sid.slice(0,12));
+    }
+    return parts.join(' | ');
+  };
+  const fetchStatus=async()=>{
+    const data=await api('/api/subagents');
+    return {
+      active:Array.isArray(data&&data.active)?data.active:[],
+      spawn_paused:!!(data&&data.spawn_paused),
+    };
+  };
+  if(!raw||raw==='status'||raw==='show'||raw==='list'){
+    try{
+      const payload=await fetchStatus();
+      showToast(summarize(payload)+' | /subagents open');
+    }catch(e){
+      showToast('Subagent status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(raw==='open'||raw==='system'||raw==='settings'){
+    openSystemSettings();
+    try{
+      const payload=await fetchStatus();
+      if(typeof loadSubagentStatus==='function') loadSubagentStatus();
+      showToast(summarize(payload));
+    }catch(e){
+      showToast('Subagent settings opened');
+    }
+    return true;
+  }
+  if(raw==='refresh'){
+    openSystemSettings();
+    if(typeof loadSubagentStatus==='function') loadSubagentStatus();
+    showToast('Subagent status refreshed');
+    return true;
+  }
+  if(raw==='pause'||raw==='resume'){
+    try{
+      const targetPaused=(raw==='pause');
+      const payload=await api('/api/subagents',{
+        method:'POST',
+        body:JSON.stringify({spawn_paused:targetPaused}),
+      });
+      if(typeof loadSubagentStatus==='function') loadSubagentStatus();
+      showToast(summarize(payload)+' | '+(targetPaused?'paused':'resumed'));
+    }catch(e){
+      showToast('Failed to update subagent spawning: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  showToast('Use /subagents status|open|refresh|pause|resume');
+  return true;
+}
+
+async function cmdBrowser(args){
+  const arg=String(args||'').trim().toLowerCase();
+  const openDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(true, {force:true, keepViewport:true}); };
+  const closeDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(false, {force:true}); };
+  const toggleDrawer=()=>{ if(typeof window.browserToggleDrawer==='function') window.browserToggleDrawer(); else if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(!(document.body&&document.body.classList.contains('browser-drawer-open')), {force:true}); };
+  const togglePermission=()=>{ if(typeof window.browserTogglePermission==='function') window.browserTogglePermission(); };
+  const toggleExplore=()=>{ if(typeof window.browserToggleExploreMode==='function') window.browserToggleExploreMode(); };
+  const toggleSplit=()=>{ if(typeof window.browserToggleSplit==='function') window.browserToggleSplit(); };
+  const toggleFullscreen=()=>{ if(typeof window.browserToggleFullscreen==='function') window.browserToggleFullscreen(); };
+  const goBack=()=>{ if(typeof window.browserGoBack==='function') window.browserGoBack(); };
+  const goForward=()=>{ if(typeof window.browserGoForward==='function') window.browserGoForward(); };
+  const reload=()=>{ if(typeof window.browserReload==='function') window.browserReload(); };
+  const stop=()=>{ if(typeof window.browserStop==='function') window.browserStop(); };
+  const screenshot=()=>{ if(typeof window.browserSendScreenshotToChat==='function') window.browserSendScreenshotToChat(); };
+  const currentSessionId=()=>String((S&&S.session&&S.session.session_id)||'').trim();
+  const currentDrawerOpen=()=>!!(document.body&&document.body.classList.contains('browser-drawer-open'));
+  const currentSplit=()=>!!(document.body&&document.body.classList.contains('browser-split'));
+  const currentFullscreen=()=>!!(document.body&&document.body.classList.contains('browser-maximized'));
+  const currentExplore=()=>{
+    const btn=document.getElementById('browserExploreBtn');
+    if(btn) return btn.getAttribute('aria-pressed')==='true' || btn.classList.contains('is-active');
+    return false;
+  };
+  const currentPermission=async()=>{
+    const sid=currentSessionId();
+    if(!sid) return null;
+    try{
+      return await api('/api/browser/permission?session_id='+encodeURIComponent(sid));
+    }catch(_){
+      return null;
+    }
+  };
+  const currentState=async()=>{
+    const sid=currentSessionId();
+    if(!sid) return null;
+    try{
+      return await api('/api/browser/state?session_id='+encodeURIComponent(sid));
+    }catch(_){
+      return null;
+    }
+  };
+  const looksLikeUrl=(value)=>{
+    const text=String(value||'').trim();
+    if(!text) return false;
+    if(/^(https?:\/\/|file:|about:|chrome:|edge:|localhost(?::\d+)?(?:\/|$)|www\.)/i.test(text)) return true;
+    if(/\s/.test(text)) return false;
+    return /^[^\s]+\.[^\s]+(?:\/.*)?$/.test(text);
+  };
+  const navigateTo=(rawUrl)=>{
+    const url=String(rawUrl||'').trim();
+    if(!url){
+      showToast('Use /browser navigate <url>', 2200, 'info');
+      return true;
+    }
+    const input=document.getElementById('browserUrlInput');
+    if(input) input.value=url;
+    openDrawer();
+    if(typeof window.browserNavigateUrl==='function'){
+      window.browserNavigateUrl(url);
+      return true;
+    }
+    if(typeof window.browserSubmitUrl==='function'){
+      window.browserSubmitUrl({preventDefault:function(){}});
+      return true;
+    }
+    showToast('Browser navigation unavailable', 2200, 'error');
+    return true;
+  };
+  const showStatus=async()=>{
+    const [state,perm]=await Promise.all([currentState(),currentPermission()]);
+    const open=currentDrawerOpen()?'open':'closed';
+    const split=currentSplit()?'split':'stacked';
+    const fullscreen=currentFullscreen()?'fullscreen':'drawer';
+    const explore=currentExplore()?'explore':'follow';
+    const back=(state&&state.can_go_back)?'back':'no-back';
+    const forward=(state&&state.can_go_forward)?'forward':'no-forward';
+    const url=(state&&state.url&&state.url!=='about:blank')?state.url:'(no page)';
+    const title=(state&&state.title)?state.title:'';
+    const status=(state&&state.status)?state.status:'idle';
+    const permission=(perm&&perm.mode)?perm.mode:'none';
+    const parts=['Browser: '+open+', '+split+', '+fullscreen+', '+explore,'Permission: '+permission,'State: '+status,'Nav: '+back+', '+forward,'URL: '+url];
+    if(title) parts.push('Title: '+title);
+    showToast(parts.join(' | '), 4000, 'info');
+  };
+  if(!arg||arg==='help'||arg==='status'){
+    await showStatus();
+    if(!arg||arg==='help') showToast('/browser open|open <url>|navigate <url>|back|forward|reload|stop|screenshot|status|permission|explore|split|fullscreen', 3200, 'info');
+    return true;
+  }
+  if(arg.startsWith('open ')){
+    const target=arg.slice(5).trim();
+    if(looksLikeUrl(target)){
+      navigateTo(target);
+      return true;
+    }
+  }
+  if(arg==='open'){ openDrawer(); return true; }
+  if(arg==='close'){ closeDrawer(); return true; }
+  if(arg==='toggle'){ toggleDrawer(); return true; }
+  if(arg==='permission'){ openDrawer(); togglePermission(); return true; }
+  if(arg==='explore'){ openDrawer(); toggleExplore(); return true; }
+  if(arg==='split'){ openDrawer(); toggleSplit(); return true; }
+  if(arg==='fullscreen'){ openDrawer(); toggleFullscreen(); return true; }
+  if(arg==='back'){ openDrawer(); goBack(); return true; }
+  if(arg==='forward'){ openDrawer(); goForward(); return true; }
+  if(arg==='reload'){ openDrawer(); reload(); return true; }
+  if(arg==='stop'){ openDrawer(); stop(); return true; }
+  if(arg==='screenshot'||arg==='shot'||arg==='capture'){ openDrawer(); screenshot(); return true; }
+  if(arg.startsWith('navigate ')){
+    navigateTo(arg.slice('navigate '.length));
+    return true;
+  }
+  if(arg.startsWith('go ')){
+    navigateTo(arg.slice(3));
+    return true;
+  }
+  if(looksLikeUrl(arg)){
+    navigateTo(arg);
+    return true;
+  }
+  showToast('Unknown argument: '+arg+' \u2014 use open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot');
+  return true;
+}
+
+function _buildReviewPrompt(data){
+  const info=data&&data.summary?data.summary:{};
+  const fileEntries=Array.isArray(data&&data.files)?data.files:[];
+  const files=Number(info.files||0)||0;
+  const staged=Number(info.staged||0)||0;
+  const unstaged=Number(info.unstaged||0)||0;
+  const untracked=Number(info.untracked||0)||0;
+  const additions=Number(info.additions||0)||0;
+  const deletions=Number(info.deletions||0)||0;
+  const truncated=!!info.truncated;
+  const binaryPaths=Array.isArray(info.binary_untracked_paths)?info.binary_untracked_paths:[];
+  const skippedPaths=Array.isArray(info.skipped_untracked_paths)?info.skipped_untracked_paths:[];
+  const diff=String((data&&data.diff)||'').trim()||'(empty diff)';
+  const lines=[
+    'Review the following local changes.',
+    'Focus on correctness bugs, regressions, missing tests, API or UX breakage, security, and performance.',
+    `Repository: ${String((data&&data.repo_root)||'(unknown)')}`,
+    `Branch: ${String((data&&data.branch)||'detached')}`,
+    `Commit: ${String((data&&data.commit)||'unknown')}`,
+    `Files changed: ${files} (staged ${staged}, unstaged ${unstaged}, untracked ${untracked})`,
+    `Additions / deletions: +${additions} / -${deletions}${truncated ? ' (diff truncated)' : ''}`,
+  ];
+  if(binaryPaths.length){
+    lines.push(`Binary untracked files: ${binaryPaths.join(', ')}`);
+  }
+  if(skippedPaths.length){
+    lines.push(`Skipped untracked files: ${skippedPaths.join(', ')}`);
+  }
+  if(fileEntries.length){
+    const fileLines=fileEntries.slice(0,40).map(entry=>{
+      const status=String(entry&&entry.status||'').trim()||'?';
+      const stagedMark=entry&&entry.staged?'staged':'unstaged';
+      return `- ${status} [${stagedMark}] ${String(entry&&entry.path||'').trim()}`;
+    });
+    lines.push('', 'Changed files:', ...fileLines);
+    if(fileEntries.length>40){
+      lines.push(`- ... ${fileEntries.length-40} more file(s)`);
+    }
+  }
+  lines.push(
+    '',
+    'Return findings first, ordered by severity.',
+    'For each finding, include severity, file path or line reference if possible, the concrete issue, and a fix suggestion.',
+    'If nothing looks wrong, say "No issues found." explicitly.',
+    '',
+    '```diff',
+    diff,
+    '```',
+  );
+  return lines.join('\n');
+}
+
 }
 function cmdVoice(){
   const mic=document.getElementById('btnMic');
@@ -1786,7 +3257,7 @@ function cmdVoice(){
   showToast(t('cmd_voice_use_mic'));
 }
 
-// ── YOLO mode toggle ──
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ YOLO mode toggle ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 // Session-scoped: skips all approval prompts for the current session.
 // Toggles on/off; state is not persisted across page reloads.
 async function cmdYolo(){
@@ -1810,10 +3281,10 @@ async function cmdYolo(){
   }catch(e){showToast('YOLO: '+e.message);}
 }
 
-// ── Branch / fork command ──
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Branch / fork command ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 // Forks the current conversation into a new session (#465).
-// /branch           → full history copy
-// /branch My Name   → full history copy with custom title
+// /branch           ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ full history copy
+// /branch My Name   ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ full history copy with custom title
 async function cmdBranch(args){
   if(!S.session){showToast(t('no_active_session'));return;}
   const customTitle=(args||'').trim()||null;
@@ -1833,7 +3304,7 @@ async function cmdBranch(args){
   }catch(e){showToast(t('branch_failed')+e.message);}
 }
 
-// ── Fork from a specific message point ──
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Fork from a specific message point ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 // Called from the "Fork from here" button on message hover actions.
 async function forkFromMessage(msgIdx){
   if(!S.session||S.busy)return;
@@ -1901,7 +3372,7 @@ function ensureSkillCommandsLoadedForAutocomplete(){
   }
 }
 
-// ── Autocomplete dropdown ───────────────────────────────────────────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Autocomplete dropdown ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 
 let _cmdSelectedIdx=-1;
 
@@ -1978,7 +3449,7 @@ function selectCmdDropdownItem(){
   hideCmdDropdown();
 }
 
-// ── Handler aliases (for test-discoverable command registration) ──────────────
+// ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Handler aliases (for test-discoverable command registration) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 // The COMMANDS array above is the authoritative dispatch table. These aliases
 // allow tooling and tests to discover command handlers by name independently.
 const HANDLERS = {};
