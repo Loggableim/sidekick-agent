@@ -618,6 +618,58 @@ function browserSendScreenshotToChat() {
   if (typeof showToast === 'function') showToast('Screenshot added to chat', 2000, 'success');
 }
 
+function browserCopyCurrentUrl() {
+  const state = _browserState;
+  const url = state && state.url ? String(state.url).trim() : '';
+  if (!url) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  const clipboard = (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) ? navigator.clipboard.writeText(url) : null;
+  if (!clipboard) {
+    if (typeof showToast === 'function') showToast('Copy failed', 2200, 'error');
+    return;
+  }
+  clipboard.then(function() {
+    if (typeof showToast === 'function') showToast('URL copied to clipboard', 1800, 'success');
+  }).catch(function() {
+    if (typeof showToast === 'function') showToast('Copy failed', 2200, 'error');
+  });
+}
+
+function browserSendPageContextToChat() {
+  const state = _browserState;
+  if (!state || !state.url) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  const url = String(state.url || '').trim();
+  const status = String(state.status || 'idle').trim();
+  const permission = String(_browserPermissionMode || 'none');
+  const actionCount = _browserActionTrace.length;
+  const frameUrl = _browserFrameObjectUrl || '';
+  const lines = [
+    '🌐 **Browser page context**',
+    '',
+    `- URL: ${url}`,
+    `- Status: ${status}`,
+    `- Permission: ${permission}`,
+    `- Actions: ${actionCount}`,
+  ];
+  if (state.last_action_detail) lines.push(`- Last action: ${String(state.last_action_detail)}`);
+  if (state.ready_state) lines.push(`- Ready state: ${String(state.ready_state)}`);
+  if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
+  const text = lines.join('\n');
+  const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
+  if (textarea && typeof insertAtCursor === 'function') {
+    insertAtCursor(textarea, text);
+  } else if (textarea) {
+    textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
+    textarea.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+  if (typeof showToast === 'function') showToast('Page context added to chat', 2000, 'success');
+}
+
 function _browserResearchRenderQuickAnswer(text, meta = {}) {
   return _browserResearchSetQuickAnswer(text, meta);
 }
@@ -805,6 +857,8 @@ function _browserRefreshHeaderMenu() {
   const stopBtn = _browserEl('browserHeaderStopAction');
   const navigateBtn = _browserEl('browserHeaderNavigateAction');
   const newTabBtn = _browserEl('browserHeaderNewTabAction');
+  const copyUrlBtn = _browserEl('browserHeaderCopyUrlAction');
+  const pageContextBtn = _browserEl('browserHeaderPageContextAction');
   const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
   const menuBtn = _browserEl('browserStatusMenuBtn');
 
@@ -829,6 +883,8 @@ function _browserRefreshHeaderMenu() {
   if (stopBtn) stopBtn.textContent = 'Stop loading';
   if (navigateBtn) navigateBtn.textContent = 'Navigate to URL...';
   if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
+  if (copyUrlBtn) copyUrlBtn.textContent = 'Copy current URL';
+  if (pageContextBtn) pageContextBtn.textContent = 'Send page context to chat';
   if (screenshotBtn) {
     screenshotBtn.textContent = 'Send screenshot to chat';
   }
@@ -906,6 +962,12 @@ function browserRunHeaderAction(action) {
       break;
     case 'screenshot':
       browserSendScreenshotToChat();
+      break;
+    case 'copyurl':
+      browserCopyCurrentUrl();
+      break;
+    case 'pagecontext':
+      browserSendPageContextToChat();
       break;
     case 'back':
       browserGoBack();
