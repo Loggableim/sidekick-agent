@@ -696,7 +696,8 @@ async function browserCopyCurrentUrl() {
   });
 }
 
-async function browserSendPageContextToChat() {
+async function browserSendPageContextToChat(opts = {}) {
+  const full = !!(opts && opts.full);
   const state = await _browserEnsureCurrentState();
   const sid = _browserCurrentSessionId();
   if (!sid) {
@@ -714,6 +715,7 @@ async function browserSendPageContextToChat() {
     body: JSON.stringify({
       session_id: sid,
       action: 'snapshot',
+      full,
     }),
   }).then(function(data) {
     const snapshotText = String(data && data.text || '').trim() || _browserFallbackReadableText();
@@ -722,7 +724,8 @@ async function browserSendPageContextToChat() {
     const pageUrl = String((snapshotState && snapshotState.url) || visibleUrl || state && state.url || '').trim();
     const heading = pageTitle || pageUrl || 'Browser page';
     const lines = [
-      '🌐 **' + heading + '**',
+      (full ? '📘 **Full browser page context**' : '🌐 **Browser page context**'),
+      'URL: ' + (pageUrl || heading),
       '',
       snapshotText || 'No readable text returned by the browser snapshot.',
     ];
@@ -735,10 +738,14 @@ async function browserSendPageContextToChat() {
       textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
       textarea.dispatchEvent(new Event('input', {bubbles: true}));
     }
-    if (typeof showToast === 'function') showToast('Readable page text added to chat', 2000, 'success');
+    if (typeof showToast === 'function') showToast(full ? 'Full page context added to chat' : 'Readable page text added to chat', 2000, 'success');
   }).catch(function() {
     if (typeof showToast === 'function') showToast('Page text export failed', 2200, 'error');
   });
+}
+
+async function browserSendFullPageContextToChat() {
+  return browserSendPageContextToChat({full: true});
 }
 
 function _browserResearchRenderQuickAnswer(text, meta = {}) {
@@ -930,6 +937,7 @@ function _browserRefreshHeaderMenu() {
   const newTabBtn = _browserEl('browserHeaderNewTabAction');
   const copyUrlBtn = _browserEl('browserHeaderCopyUrlAction');
   const pageContextBtn = _browserEl('browserHeaderPageContextAction');
+  const fullPageContextBtn = _browserEl('browserHeaderFullPageContextAction');
   const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
   const menuBtn = _browserEl('browserStatusMenuBtn');
 
@@ -956,6 +964,7 @@ function _browserRefreshHeaderMenu() {
   if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
   if (copyUrlBtn) copyUrlBtn.textContent = 'Copy current URL';
   if (pageContextBtn) pageContextBtn.textContent = 'Send readable page text to chat';
+  if (fullPageContextBtn) fullPageContextBtn.textContent = 'Send full page context to chat';
   if (screenshotBtn) {
     screenshotBtn.textContent = 'Send screenshot to chat';
   }
@@ -1039,6 +1048,11 @@ function browserRunHeaderAction(action) {
       break;
     case 'pagecontext':
       browserSendPageContextToChat();
+      break;
+    case 'fullpagecontext':
+    case 'pagecontext-full':
+    case 'extract':
+      browserSendFullPageContextToChat();
       break;
     case 'back':
       browserGoBack();
@@ -2212,6 +2226,7 @@ window.browserNavigateUrl = browserNavigateUrl;
 window.browserToggleExploreMode = browserToggleExploreMode;
 window.browserSendScreenshotToChat = browserSendScreenshotToChat;
 window.browserSendPageContextToChat = browserSendPageContextToChat;
+window.browserSendFullPageContextToChat = browserSendFullPageContextToChat;
 
 window.addEventListener('load', function() {
   _browserEnsureSplitStyles();
