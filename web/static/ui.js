@@ -1042,6 +1042,7 @@ async function populateModelDropdown(){
     const _modelsRes=await fetch(new URL('api/models',document.baseURI||location.href).href,{credentials:'include'});
     if(_redirectIfUnauth(_modelsRes)) return;
     const data=await _modelsRes.json();
+    window._availableModelsData=data||null;
     if(!data.groups||!data.groups.length) return; // keep HTML defaults
     // Store active provider globally so the send path can warn on mismatch
     window._activeProvider=data.active_provider||null;
@@ -1343,12 +1344,17 @@ function syncModelChip(){
   const text=opt?opt.textContent:getModelLabel(sel.value||'');
   const gatewayRouting=_latestGatewayRoutingForSession(S.session);
   const displayText=_formatGatewayModelLabel(sel.value||'',text,gatewayRouting)||text;
-  label.textContent=displayText;
-  if(mobileLabel) mobileLabel.textContent=displayText;
+  const thinkingIds=Array.isArray(window._availableModelsData&&window._availableModelsData.thinking_models)
+    ? window._availableModelsData.thinking_models
+    : [];
+  const _thinkingKey=s=>String(s||'').trim().toLowerCase().replace(/^@[^:]+:/,'').replace(/^[^/]+\//,'').replace(/[^a-z0-9]+/g,'');
+  const isThinking=!!thinkingIds.length && thinkingIds.some(id=>_thinkingKey(id)===_thinkingKey(sel.value||''));
+  label.textContent=isThinking ? `${displayText} (thinking)` : displayText;
+  if(mobileLabel) mobileLabel.textContent=isThinking ? `${displayText} (thinking)` : displayText;
   const badgeTitle=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
   chip.title=badgeTitle;
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
-  if(headerValue) headerValue.textContent=displayText;
+  if(headerValue) headerValue.textContent=isThinking ? `${displayText} (thinking)` : displayText;
   if(headerBadge){
     headerBadge.title=badgeTitle+'. Click to open the model picker.';
     headerBadge.setAttribute('aria-label',badgeTitle+'. Click to open the model picker.');
@@ -8187,7 +8193,7 @@ function _thinkingMarkup(text=''){
   const openClass=isSimplifiedToolCalling()?'':' open';
   return (clean&&String(clean).trim())
     ? `<div class="reasoning-accordion${openClass}"><div class="reasoning-accordion-header" onclick="toggleReasoningAccordion(this)"><span>\u{1F9E0}</span><span class="reasoning-accordion-label">${t('reasoning_thought')}</span><span class="chevron">${li('chevron-right',12)}</span></div><div class="reasoning-accordion-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
-    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">Thinking�</span><div class="thinking-indicator-tools"></div></div>`;
+    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">Thinking�</span><div class="thinking-indicator-tools"></div></div>`;
 }
 
 // ── Thinking-indicator delayed labels ──
@@ -8381,7 +8387,7 @@ function addStreamCursor(){
   const cursor=document.createElement('span');
   cursor.className='stream-cursor';
   cursor.setAttribute('aria-hidden','true');
-  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">Thinking�</span>';
+  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">Thinking�</span>';
   body.appendChild(cursor);
 }
 function removeStreamCursor(){
