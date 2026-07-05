@@ -1916,18 +1916,28 @@ function _workflowSubagentSummaryState(){
   };
 }
 
+function _workflowSubagentPreviewLabel(state){
+  const preview=String(state&&((state.goal||state.subagentId)||'')).trim();
+  if(!preview) return '';
+  return preview.length>42 ? preview.slice(0,42)+'…' : preview;
+}
+
 function _workflowSubagentChipLabel(){
   const state=_workflowSubagentSummaryState();
   if(!state.available) return 'subagents';
   const parts=['subagents '+state.count];
   if(state.paused) parts.push('paused');
+  const preview=_workflowSubagentPreviewLabel(state);
+  if(preview) parts.push(preview);
   return parts.join(' · ');
 }
 
 function _workflowSubagentMenuLabel(){
   const state=_workflowSubagentSummaryState();
   if(!state.available) return 'Open subagents';
-  return 'Open subagents ('+state.count+' active'+(state.paused?', paused':'')+')';
+  const suffix=state.count+' active'+(state.paused?', paused':'');
+  const preview=_workflowSubagentPreviewLabel(state);
+  return 'Open subagents ('+suffix+')'+(preview ? ' · '+preview : '');
 }
 
 function syncWorkflowChip(){
