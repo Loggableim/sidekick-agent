@@ -1832,6 +1832,8 @@ function _applyReasoningChip(eff, status){
   const wrap=$('composerReasoningWrap');
   const label=$('composerReasoningLabel');
   const chip=$('composerReasoningChip');
+  const headerBadge=$('reasoningModeBadge');
+  const headerValue=$('reasoningModeValue');
   const mobileLabel=$('composerMobileReasoningLabel');
   const mobileAction=$('composerMobileReasoningAction');
   if(!wrap||!label) return;
@@ -1850,6 +1852,15 @@ function _applyReasoningChip(eff, status){
     chip.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
     chip.title=title;
   }
+  if(headerBadge){
+    const inactive=!effort||effort==='none';
+    headerBadge.classList.toggle('inactive',inactive);
+    headerBadge.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
+    headerBadge.classList.toggle('active',!!($('composerReasoningDropdown')&&$('composerReasoningDropdown').classList.contains('open')));
+    headerBadge.title=title+'. Click to open the reasoning picker.';
+    headerBadge.setAttribute('aria-label',title+'. Click to open the reasoning picker.');
+  }
+  if(headerValue) headerValue.textContent=text;
   if(mobileAction){
     const inactive=!effort||effort==='none';
     mobileAction.classList.toggle('inactive',inactive);
@@ -1912,6 +1923,7 @@ function _highlightReasoningOption(effort){
 function toggleReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
+  const headerBadge=$('reasoningModeBadge');
   if(!dd||!chip) return;
   const open=dd.classList.contains('open');
   if(open){closeReasoningDropdown();return;}
@@ -1923,6 +1935,7 @@ function toggleReasoningDropdown(){
   dd.classList.add('open');
   _positionReasoningDropdown();
   chip.classList.add('active');
+  if(headerBadge) headerBadge.classList.add('active');
   const mobileAction=$('composerMobileReasoningAction');
   if(mobileAction) mobileAction.classList.add('active');
 }
@@ -1941,9 +1954,11 @@ function _positionReasoningDropdown(){
 function closeReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
+  const headerBadge=$('reasoningModeBadge');
   const mobileAction=$('composerMobileReasoningAction');
   if(dd) dd.classList.remove('open');
   if(chip) chip.classList.remove('active');
+  if(headerBadge) headerBadge.classList.remove('active');
   if(mobileAction) mobileAction.classList.remove('active');
 }
 
