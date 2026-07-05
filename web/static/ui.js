@@ -1967,9 +1967,6 @@ function _workflowHeaderMenuClearActiveButton(){
     if(!btn) return;
     btn.classList.remove('workflow-menu-active');
     btn.removeAttribute('aria-selected');
-    btn.style.removeProperty('background');
-    btn.style.removeProperty('color');
-    btn.style.removeProperty('box-shadow');
   });
   window._workflowHeaderMenuActiveButton=null;
   workflowRefreshHeaderMenuFooter();
@@ -1983,16 +1980,7 @@ function _workflowHeaderMenuSetActiveButton(btn){
     const active=item===btn;
     item.classList.toggle('workflow-menu-active',active);
     item.setAttribute('aria-selected',active?'true':'false');
-    if(active){
-      item.style.setProperty('background','rgba(59,130,246,.18)','important');
-      item.style.setProperty('color','var(--accent-text)','important');
-      item.style.setProperty('box-shadow','0 0 0 1px rgba(59,130,246,.18) inset','important');
-      activeBtn=item;
-    }else{
-      item.style.removeProperty('background');
-      item.style.removeProperty('color');
-      item.style.removeProperty('box-shadow');
-    }
+    if(active) activeBtn=item;
   });
   window._workflowHeaderMenuActiveButton=activeBtn;
   if(activeBtn && typeof activeBtn.scrollIntoView==='function'){
