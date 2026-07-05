@@ -776,7 +776,7 @@ function _browserUpdateHeaderBadge() {
   badge.classList.add('browser-state-' + modeState);
   extraStates.forEach(stateName => badge.classList.add('browser-state-' + stateName));
 
-  value.textContent = 'browser ' + openState;
+  value.textContent = 'browser ' + openState + ' · ' + modeState;
 
   const parts = [
     'Browser drawer ' + openState,
