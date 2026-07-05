@@ -1548,6 +1548,7 @@ function browserSetDrawerOpen(open, opts = {}) {
     }
     return;
   }
+  _browserScheduleSyncRetry(1200);
   if (!prevOpen || opts.force) {
     void browserSyncToCurrentSession({force: true, allowPending: true});
   } else {
@@ -2226,6 +2227,7 @@ window.addEventListener('load', function() {
       document.body.classList.add('browser-split');
     }
     void browserSyncToCurrentSession({force: true, allowPending: true});
+    _browserScheduleSyncRetry(1200);
   } else {
     _browserSetDrawerAccessibility(false);
     _browserSyncFullscreenButton(false);
