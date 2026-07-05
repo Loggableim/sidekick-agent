@@ -1381,6 +1381,7 @@ function syncModelChip(){
     const speedClass=_classifyModelSpeed(sel.value||'');
     speedDot.className='model-speed-dot model-speed-dot--'+speedClass;
   }
+  if(typeof syncWorkflowChip==='function') syncWorkflowChip();
 }
 function _positionComposerDropdownWithinViewport(dd,anchor,footer){
   if(!dd||!anchor||!footer) return;
@@ -1876,6 +1877,7 @@ function _applyReasoningChip(eff, status){
     opt.setAttribute('aria-hidden',String(!visible));
   });
   _highlightReasoningOption(effort);
+  if(typeof syncWorkflowChip==='function') syncWorkflowChip();
 }
 
 function fetchReasoningChip(){
@@ -1899,6 +1901,30 @@ function syncReasoningChip(){
     return;
   }
   _applyReasoningChip(_currentReasoningEffort, {allowed_efforts:_currentReasoningAllowedEfforts});
+}
+
+function syncWorkflowChip(){
+  const badge=$('workflowStatusBadge');
+  const value=$('workflowStatusValue');
+  if(!badge||!value) return;
+  const normalizeApproval=(mode)=>{
+    const text=String(mode||'').trim().toLowerCase();
+    if(text==='ask') return 'manual';
+    if(text==='deny') return 'smart';
+    if(text==='yolo') return 'off';
+    if(text==='manual'||text==='smart'||text==='off') return text;
+    return text||'manual';
+  };
+  const approval=normalizeApproval(window._approvalMode || ($('approvalModeValue')&&$('approvalModeValue').textContent) || 'manual');
+  const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
+  const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
+  const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
+  value.textContent=approval+' · '+reasoning;
+  badge.classList.remove('approval-mode-manual','approval-mode-smart','approval-mode-off');
+  badge.classList.add('approval-mode-'+approval);
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', model '+model+', browser '+browser+'. Click to show workflow status.';
+  badge.title=label;
+  badge.setAttribute('aria-label',label);
 }
 
 function _highlightReasoningOption(effort){

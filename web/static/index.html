@@ -139,6 +139,7 @@
         }
         if (value) value.textContent = normalized;
         window._approvalMode = normalized;
+        if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
         return normalized;
       }
 
@@ -243,14 +244,18 @@
     <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." title="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
       <span id="modelStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">model</span>
     </button>
-    <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." title="Reasoning effort: default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
-      <span class="titlebar-approval-dot" aria-hidden="true"></span>
-      <span class="titlebar-approval-value" id="reasoningModeValue">default</span>
-    </button>
-    <div class="titlebar-lang-selector" id="titlebarLangSelector">
-      <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
-        <span id="currentLangFlag">🇬🇧</span>
+      <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." title="Reasoning effort: default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
+        <span class="titlebar-approval-dot" aria-hidden="true"></span>
+        <span class="titlebar-approval-value" id="reasoningModeValue">default</span>
       </button>
+      <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
+        <span class="titlebar-approval-dot" aria-hidden="true"></span>
+        <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
+      </button>
+      <div class="titlebar-lang-selector" id="titlebarLangSelector">
+        <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
+          <span id="currentLangFlag">🇬🇧</span>
+        </button>
       <div class="lang-dropdown" id="langDropdown" role="menu" hidden>
         <button class="lang-option" data-lang="en" role="menuitem" onclick="switchLang('en')">🇬🇧</button>
         <button class="lang-option" data-lang="de" role="menuitem" onclick="switchLang('de')">🇩🇪</button>

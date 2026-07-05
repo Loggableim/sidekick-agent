@@ -942,6 +942,7 @@ function _browserUpdateHeaderBadge() {
   badge.setAttribute('title', label);
   badge.setAttribute('aria-label', label);
   _browserRefreshHeaderMenu();
+  if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
 }
 
 function _browserRefreshHeaderMenu() {
