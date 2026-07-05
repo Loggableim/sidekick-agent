@@ -6767,6 +6767,55 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(e), 500)
 
     # ── Skills (POST) ──
+    if parsed.path == "/api/execute_code":
+        from tools.code_execution_tool import execute_code
+        from toolsets import resolve_toolset
+
+        sid = str(body.get("session_id") or "").strip()
+        code = str(body.get("code") or "")
+        if not sid:
+            return bad(handler, "session_id is required")
+        if not code.strip():
+            return bad(handler, "code is required")
+        try:
+            session = get_session(sid)
+        except KeyError:
+            return bad(handler, "Session not found", 404)
+        enabled_tools = None
+        toolset_names = getattr(session, "enabled_toolsets", None) or []
+        if toolset_names:
+            resolved_tools: set[str] = set()
+            for toolset_name in toolset_names:
+                if not toolset_name:
+                    continue
+                try:
+                    resolved_tools.update(resolve_toolset(toolset_name))
+                except Exception:
+                    logger.debug(
+                        "Failed to resolve execute_code toolset %s for session %s",
+                        toolset_name,
+                        sid,
+                        exc_info=True,
+                    )
+            if resolved_tools:
+                enabled_tools = sorted(resolved_tools)
+        try:
+            result = json.loads(execute_code(code, task_id=sid, enabled_tools=enabled_tools))
+        except json.JSONDecodeError:
+            result = {
+                "status": "error",
+                "error": "execute_code returned invalid JSON",
+                "output": "",
+            }
+        if not isinstance(result, dict):
+            result = {
+                "status": "error",
+                "error": "execute_code returned unexpected data",
+                "output": str(result),
+            }
+        result["session_id"] = sid
+        return j(handler, result)
+
     if parsed.path == "/api/skills/save":
         return _handle_skill_save(handler, body)
 

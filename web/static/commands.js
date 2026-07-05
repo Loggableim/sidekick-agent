@@ -27,6 +27,7 @@ const COMMANDS=[
   {name:'undo',      desc:t('cmd_undo'),     fn:cmdUndo,      noEcho:true},
   {name:'btw',       desc:t('cmd_btw'),      fn:cmdBtw,       arg:'question', noEcho:true},
   {name:'background',desc:t('cmd_background'),fn:cmdBackground,arg:'prompt',  noEcho:true},
+  {name:'exec',      desc:'Run Python code in the session sandbox', fn:cmdExec, arg:'[python code]', noEcho:true},
   {name:'status',    desc:t('cmd_status'),   fn:cmdStatus},
   {name:'voice',     desc:t('cmd_voice'),    fn:cmdVoice,     noEcho:true},
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
@@ -47,9 +48,11 @@ const SLASH_SUBARG_SOURCES={
 
 function parseCommand(text){
   if(!text.startsWith('/'))return null;
-  const parts=text.slice(1).split(/\s+/);
-  const name=parts[0].toLowerCase();
-  const args=parts.slice(1).join(' ').trim();
+  const raw=text.slice(1);
+  const match=raw.match(/^(\S+)([\s\S]*)$/);
+  if(!match) return null;
+  const name=match[1].toLowerCase();
+  const args=String(match[2]||'').replace(/^[ \t]+/,'');
   return {name,args};
 }
 
@@ -935,6 +938,64 @@ async function cmdBackground(args){
     if(typeof startBackgroundPolling==='function') startBackgroundPolling(activeSid,r.task_id,prompt);
   }catch(e){showToast(t('bg_failed')+e.message);}
 }
+
+function _formatExecuteCodeMessage(result, code){
+  const status=String(result&&result.status||'').trim().toLowerCase();
+  const output=String(result&&result.output||'').replace(/\s+$/,'');
+  const error=String(result&&result.error||'').trim();
+  const toolCalls=Number(result&&result.tool_calls_made);
+  const duration=Number(result&&result.duration_seconds);
+  const heading=status==='error'
+    ? '**`/exec` failed**'
+    : status==='timeout'
+      ? '**`/exec` timed out**'
+      : '**`/exec` result**';
+  const parts=[heading];
+  const meta=[];
+  if(Number.isFinite(toolCalls)) meta.push(`${toolCalls} tool call${toolCalls===1?'':'s'}`);
+  if(Number.isFinite(duration)) meta.push(`${duration.toFixed(duration>=10?1:2)}s`);
+  if(meta.length) parts.push(`_${meta.join(' · ')}_`);
+  if(code) parts.push('```python\n'+code.replace(/\s+$/,'')+'\n```');
+  if(output) parts.push('**Output**\n```text\n'+output+'\n```');
+  if(error && error!==output) parts.push(`**Error:** ${error}`);
+  if(!output && !error) parts.push('_No output_');
+  return parts.join('\n\n');
+}
+
+async function cmdExec(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const activeSid=S.session.session_id;
+  const code=String(args||'');
+  if(!code.trim()){showToast('Use /exec <python code>');return;}
+  showToast('Running execute_code…');
+  try{
+    const r=await api('/api/execute_code',{
+      method:'POST',
+      body:JSON.stringify({session_id:activeSid, code})
+    });
+    if(!S.session||S.session.session_id!==activeSid){
+      showToast('Session changed before execute_code finished');
+      return;
+    }
+    S.messages.push({
+      role:'assistant',
+      content:_formatExecuteCodeMessage(r, code),
+      _ts:Date.now()/1000,
+    });
+    renderMessages();
+    const status=String(r&&r.status||'ok').toLowerCase();
+    showToast(
+      status==='error'
+        ? 'execute_code failed'
+        : status==='timeout'
+          ? 'execute_code timed out'
+          : 'execute_code finished'
+    );
+  }catch(e){
+    showToast('execute_code failed: '+(e&&e.message?e.message:e));
+  }
+}
+
 function _formatStatusTimestamp(value){
   if(value===undefined||value===null||value==='') return t('status_unknown');
   let date;
