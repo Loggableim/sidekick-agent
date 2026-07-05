@@ -10,7 +10,7 @@ const COMMANDS=[
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
   {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
-  {name:'thinking',  desc:'Select an Ollama thinking model', fn:cmdThinking, arg:'[status|list|off|<query>]', subArgs:['status','list','off'], noEcho:true},
+  {name:'thinking',  desc:'Open or filter Ollama thinking models', fn:cmdThinking, arg:'[status|open|toggle|list|off|<query>]', subArgs:['status','open','toggle','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
   {name:'new',       desc:t('cmd_new'),            fn:cmdNew,       noEcho:true},
@@ -460,26 +460,39 @@ async function cmdThinking(args){
   const currentThinking=currentKey
     ? (thinkingIds.find(id=>_modelSearchKey(id)===currentKey)||'')
     : '';
+  const openThinkingPicker=()=>{
+    window._modelDropdownThinkingOnly=true;
+    const dd=$('composerModelDropdown');
+    if(dd&&dd.classList.contains('open')){
+      if(typeof renderModelDropdown==='function') renderModelDropdown();
+      if(typeof _positionModelDropdown==='function') _positionModelDropdown();
+      return true;
+    }
+    if(typeof toggleModelDropdown==='function'){
+      toggleModelDropdown();
+      return true;
+    }
+    return false;
+  };
   if(q==='status'||q==='show'||q==='list'){
     const currentLabel=currentThinking ? (typeof getModelLabel==='function' ? getModelLabel(currentThinking) : currentThinking) : 'none';
+    openThinkingPicker();
     showToast('Thinking models: '+thinkingIds.length+' available | current: '+currentLabel);
     return true;
   }
   if(q==='off'||q==='default'||q==='back'){
-    const defaultModel=String(window._defaultModel||'').trim();
-    if(!defaultModel){
-      showToast('No default model configured');
-      return true;
+    window._modelDropdownThinkingOnly=false;
+    const dd=$('composerModelDropdown');
+    if(dd&&dd.classList.contains('open')){
+      if(typeof renderModelDropdown==='function') renderModelDropdown();
+      if(typeof _positionModelDropdown==='function') _positionModelDropdown();
     }
-    const applied=typeof _applyModelToDropdown==='function'
-      ? _applyModelToDropdown(defaultModel, sel, S.session&&S.session.model_provider||window._activeProvider||null)
-      : null;
-    if(!applied){
-      showToast('Default model is not available in the current picker');
-      return true;
-    }
-    await sel.onchange();
-    showToast('Model: '+(typeof getModelLabel==='function' ? getModelLabel(applied) : applied));
+    showToast('Thinking filter cleared');
+    return true;
+  }
+  if(!raw||q==='open'||q==='toggle'){
+    openThinkingPicker();
+    showToast('Thinking models: '+thinkingIds.length+' available');
     return true;
   }
   const target=_findThinkingModelMatch(thinkingIds, raw, currentModel);
