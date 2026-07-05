@@ -8954,11 +8954,107 @@ function loadGatewayStatus(){
     card.innerHTML=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block"></span><span style="font-size:13px;font-weight:500;color:#22c55e">Running</span></div>${badges?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${badges}</div>`:''}<div style="display:flex;gap:12px">${sessionInfo}${lastActive}</div>`;
   }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px">Failed to load gateway status</div>`});
 }
+function _subagentStatusLabel(status){
+  const normalized=String(status||'').trim().toLowerCase();
+  if(!normalized) return 'Unknown';
+  if(normalized==='running'||normalized==='active') return 'Running';
+  if(normalized==='completed') return 'Completed';
+  if(normalized==='failed') return 'Failed';
+  if(normalized==='interrupted') return 'Interrupted';
+  if(normalized==='paused') return 'Paused';
+  return normalized.charAt(0).toUpperCase()+normalized.slice(1);
+}
+function _renderSubagentStatus(active, paused){
+  const list=$('subagentStatusCard');
+  if(!list) return;
+  const entries=Array.isArray(active)?active:[];
+  const pauseLabel=paused?'Resume spawning':'Pause spawning';
+  const pauseTitle=paused?'Allow new subagents to spawn again':'Temporarily block new subagent spawns';
+  const toggleButton=`<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleSubagentSpawnPause()" aria-label="${esc(pauseTitle)}" title="${esc(pauseTitle)}">${paused?'▶':'⏸'} ${esc(pauseLabel)}</button>`;
+  if(!entries.length){
+    list.innerHTML=`<div class="mcp-server-row">
+      <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
+        <span class="mcp-server-name">No active subagents</span>
+        ${toggleButton}
+      </div>
+      <div class="mcp-server-detail">${paused?'Spawn is paused. No new delegate_task workers will start.':'Spawn is open. New delegate_task workers may start.'}</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML=`<div class="mcp-server-row" style="margin-bottom:8px">
+    <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
+      <span class="mcp-server-name">${entries.length} active subagent${entries.length===1?'':'s'}</span>
+      ${toggleButton}
+    </div>
+    <div class="mcp-server-detail">${paused?'Spawn is paused.':'Spawn is open.'}</div>
+  </div>` + entries.map(item=>{
+    const sid=String(item&&item.subagent_id||'').trim();
+    const goal=String(item&&item.goal||'').trim()||'Untitled task';
+    const model=String(item&&item.model||'').trim();
+    const depth=typeof item?.depth==='number'?item.depth:null;
+    const toolCount=typeof item?.tool_count==='number'?item.tool_count:null;
+    const status=_subagentStatusLabel(item&&item.status);
+    const metaParts=[];
+    if(model) metaParts.push(model);
+    if(depth!==null) metaParts.push('depth '+depth);
+    if(toolCount!==null) metaParts.push(toolCount+' tools');
+    const meta=metaParts.join(' · ');
+    const interruptButton=sid
+      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="interruptActiveSubagent('${esc(sid)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
+      : '';
+    return `<div class="mcp-server-row">
+      <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <span class="mcp-server-name" title="${esc(goal)}">${esc(goal)}</span>
+          <span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sid||'unknown')} · ${esc(status)}</span>
+        </div>
+        ${interruptButton}
+      </div>
+      <div class="mcp-server-detail">${meta?esc(meta):'No additional metadata'}</div>
+    </div>`;
+  }).join('');
+}
+function loadSubagentStatus(){
+  const card=$('subagentStatusCard');
+  if(!card) return;
+  card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
+  api('/api/subagents').then(r=>{
+    _renderSubagentStatus((r&&r.active)||[], !!(r&&r.spawn_paused));
+  }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:6px 0">Failed to load subagent status</div>`});
+}
+async function toggleSubagentSpawnPause(){
+  try{
+    const current=await api('/api/subagents');
+    const nextPaused=!Boolean(current&&current.spawn_paused);
+    const saved=await api('/api/subagents',{
+      method:'POST',
+      body:JSON.stringify({spawn_paused:nextPaused}),
+    });
+    _renderSubagentStatus((saved&&saved.active)||[], !!(saved&&saved.spawn_paused));
+    if(typeof showToast==='function') showToast(nextPaused?'Subagent spawning paused':'Subagent spawning resumed',2200,nextPaused?'info':'success');
+  }catch(e){
+    if(typeof showToast==='function') showToast('Failed to update subagent spawning: '+(e&&e.message?e.message:e),2400,'error');
+  }
+}
+async function interruptActiveSubagent(subagentId){
+  const sid=String(subagentId||'').trim();
+  if(!sid) return;
+  try{
+    const saved=await api('/api/subagents',{
+      method:'POST',
+      body:JSON.stringify({subagent_id:sid}),
+    });
+    _renderSubagentStatus((saved&&saved.active)||[], !!(saved&&saved.spawn_paused));
+    if(typeof showToast==='function') showToast('Subagent interrupted: '+sid.slice(0,8),2200,'info');
+  }catch(e){
+    if(typeof showToast==='function') showToast('Failed to interrupt subagent: '+(e&&e.message?e.message:e),2400,'error');
+  }
+}
 // Load MCP servers when system settings tab opens
 const _origSwitchSettings=switchSettingsSection;
 switchSettingsSection=function(name){
   _origSwitchSettings(name);
-  if(name==='system'){loadMcpServers();loadMcpTools();loadGatewayStatus();}
+  if(name==='system'){loadMcpServers();loadMcpTools();loadGatewayStatus();loadSubagentStatus();}
 };
 
 // ── Checkpoints / Rollback ──────────────────────────────────────────────────

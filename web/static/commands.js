@@ -33,6 +33,7 @@ const COMMANDS=[
   {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
   {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
   {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools]', subArgs:['status','open','refresh','tools'], noEcho:true},
+  {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|refresh|pause|resume]', subArgs:['status','open','refresh','pause','resume'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
@@ -1257,6 +1258,76 @@ async function cmdMcp(args){
   return true;
 }
 
+async function cmdSubagents(args){
+  const raw=String(args||'').trim().toLowerCase();
+  const openSystemSettings=()=>{
+    if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
+    if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+  };
+  const summarize=(payload)=>{
+    const active=Array.isArray(payload&&payload.active)?payload.active:[];
+    const paused=!!(payload&&payload.spawn_paused);
+    const parts=['Subagents: '+active.length+' active',paused?'spawn paused':'spawn open'];
+    const first=active[0];
+    if(first){
+      const goal=String(first.goal||'').trim();
+      const sid=String(first.subagent_id||'').trim();
+      if(goal) parts.push(goal.slice(0,72));
+      else if(sid) parts.push(sid.slice(0,12));
+    }
+    return parts.join(' | ');
+  };
+  const fetchStatus=async()=>{
+    const data=await api('/api/subagents');
+    return {
+      active:Array.isArray(data&&data.active)?data.active:[],
+      spawn_paused:!!(data&&data.spawn_paused),
+    };
+  };
+  if(!raw||raw==='status'||raw==='show'||raw==='list'){
+    try{
+      const payload=await fetchStatus();
+      showToast(summarize(payload)+' | /subagents open');
+    }catch(e){
+      showToast('Subagent status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(raw==='open'||raw==='system'||raw==='settings'){
+    openSystemSettings();
+    try{
+      const payload=await fetchStatus();
+      if(typeof loadSubagentStatus==='function') loadSubagentStatus();
+      showToast(summarize(payload));
+    }catch(e){
+      showToast('Subagent settings opened');
+    }
+    return true;
+  }
+  if(raw==='refresh'){
+    openSystemSettings();
+    if(typeof loadSubagentStatus==='function') loadSubagentStatus();
+    showToast('Subagent status refreshed');
+    return true;
+  }
+  if(raw==='pause'||raw==='resume'){
+    try{
+      const targetPaused=(raw==='pause');
+      const payload=await api('/api/subagents',{
+        method:'POST',
+        body:JSON.stringify({spawn_paused:targetPaused}),
+      });
+      if(typeof loadSubagentStatus==='function') loadSubagentStatus();
+      showToast(summarize(payload)+' | '+(targetPaused?'paused':'resumed'));
+    }catch(e){
+      showToast('Failed to update subagent spawning: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  showToast('Use /subagents status|open|refresh|pause|resume');
+  return true;
+}
+
 async function cmdBrowser(args){
   const arg=String(args||'').trim().toLowerCase();
   const openDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(true, {force:true, keepViewport:true}); };
@@ -1806,6 +1877,7 @@ HANDLERS.skills = cmdSkills;
 HANDLERS.approval = cmdApproval;
 HANDLERS.web = cmdWeb;
 HANDLERS.mcp = cmdMcp;
+HANDLERS.subagents = cmdSubagents;
 HANDLERS.review = cmdReview;
 
 if(typeof window!=='undefined'){
