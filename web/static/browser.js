@@ -799,6 +799,12 @@ function _browserRefreshHeaderMenu() {
   const exploreBtn = _browserEl('browserHeaderExploreAction');
   const splitBtn = _browserEl('browserHeaderSplitAction');
   const fullscreenBtn = _browserEl('browserHeaderFullscreenAction');
+  const backBtn = _browserEl('browserHeaderBackAction');
+  const forwardBtn = _browserEl('browserHeaderForwardAction');
+  const reloadBtn = _browserEl('browserHeaderReloadAction');
+  const stopBtn = _browserEl('browserHeaderStopAction');
+  const navigateBtn = _browserEl('browserHeaderNavigateAction');
+  const newTabBtn = _browserEl('browserHeaderNewTabAction');
   const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
   const menuBtn = _browserEl('browserStatusMenuBtn');
 
@@ -817,6 +823,12 @@ function _browserRefreshHeaderMenu() {
   if (fullscreenBtn) {
     fullscreenBtn.textContent = _browserFullscreen ? 'Exit fullscreen' : 'Maximize browser';
   }
+  if (backBtn) backBtn.textContent = 'Go back';
+  if (forwardBtn) forwardBtn.textContent = 'Go forward';
+  if (reloadBtn) reloadBtn.textContent = 'Reload page';
+  if (stopBtn) stopBtn.textContent = 'Stop loading';
+  if (navigateBtn) navigateBtn.textContent = 'Navigate to URL...';
+  if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
   if (screenshotBtn) {
     screenshotBtn.textContent = 'Send screenshot to chat';
   }
@@ -894,6 +906,30 @@ function browserRunHeaderAction(action) {
       break;
     case 'screenshot':
       browserSendScreenshotToChat();
+      break;
+    case 'back':
+      browserGoBack();
+      break;
+    case 'forward':
+      browserGoForward();
+      break;
+    case 'reload':
+      browserReload();
+      break;
+    case 'stop':
+      browserStop();
+      break;
+    case 'navigate': {
+      const current = (_browserState && _browserState.url) ? String(_browserState.url) : String((_browserEl('browserUrlInput') || {}).value || '');
+      const next = typeof window !== 'undefined' && typeof window.prompt === 'function'
+        ? window.prompt('Navigate browser to URL', current || 'https://')
+        : current;
+      if (!next) break;
+      browserNavigateUrl(next);
+      break;
+    }
+    case 'newtab':
+      browserOpenInNewTab();
       break;
   }
   return false;
