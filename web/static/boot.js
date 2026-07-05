@@ -2012,6 +2012,9 @@ function _bootTimeout(promise, ms, label) {
       if (_bootMissingSession && urlSession && saved) {
         if (typeof newSession === 'function') {
           await newSession();
+          if (typeof showToast === 'function') {
+            showToast('Previous session was missing. Started a new one.', 3000, 'info');
+          }
           if (typeof renderSessionList === 'function') await renderSessionList();
           if (typeof startGatewaySSE === 'function') startGatewaySSE();
           return;
