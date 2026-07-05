@@ -1935,9 +1935,103 @@ function _workflowSubagentChipLabel(){
 function _workflowSubagentMenuLabel(){
   const state=_workflowSubagentSummaryState();
   if(!state.available) return 'Open subagents';
-  const suffix=state.count+' active'+(state.paused?', paused':'');
-  const preview=_workflowSubagentPreviewLabel(state);
-  return 'Open subagents ('+suffix+')'+(preview ? ' · '+preview : '');
+  return 'Open subagents ('+state.count+' active'+(state.paused?', paused':'')+')';
+}
+
+function _workflowHeaderMenuSearchEl(){
+  return $('workflowHeaderMenuSearch');
+}
+
+function _workflowHeaderMenuActionButtons(){
+  const menu=$('workflowStatusMenu');
+  if(!menu) return [];
+  return Array.from(menu.querySelectorAll('[role="menuitem"]'));
+}
+
+function _workflowHeaderMenuVisibleButtons(){
+  return _workflowHeaderMenuActionButtons().filter(btn=>btn && !btn.hidden);
+}
+
+function _workflowHeaderMenuFirstVisibleButton(){
+  return _workflowHeaderMenuVisibleButtons()[0]||null;
+}
+
+function _workflowHeaderMenuLastVisibleButton(){
+  const visible=_workflowHeaderMenuVisibleButtons();
+  return visible[visible.length-1]||null;
+}
+
+function workflowFilterHeaderMenu(query){
+  const menu=$('workflowStatusMenu');
+  if(!menu) return;
+  const q=String(query||'').trim().toLowerCase();
+  window._workflowHeaderMenuQuery=q;
+  const title=menu.querySelector('[data-workflow-menu-title]');
+  const empty=$('workflowHeaderMenuEmpty');
+  const separators=Array.from(menu.querySelectorAll('[data-workflow-separator="1"]'));
+  const buttons=_workflowHeaderMenuActionButtons();
+  let visibleCount=0;
+  buttons.forEach(btn=>{
+    const text=(btn.textContent||'').trim().toLowerCase();
+    const titleText=(btn.title||'').trim().toLowerCase();
+    const hit=!q || text.includes(q) || titleText.includes(q);
+    btn.hidden=!hit;
+    btn.setAttribute('aria-hidden',hit?'false':'true');
+    btn.tabIndex=hit?0:-1;
+    if(hit) visibleCount++;
+  });
+  const filtered=!!q;
+  if(title) title.hidden=filtered;
+  if(empty) empty.hidden=!(filtered && visibleCount===0);
+  separators.forEach(sep=>{ sep.hidden=filtered || visibleCount===0; });
+  if(!filtered){
+    buttons.forEach(btn=>{ if(btn) btn.hidden=false; });
+    separators.forEach(sep=>{ sep.hidden=false; });
+    if(title) title.hidden=false;
+    if(empty) empty.hidden=true;
+  }
+}
+
+function workflowFocusHeaderMenuSearch(){
+  const input=_workflowHeaderMenuSearchEl();
+  if(input && typeof input.focus==='function'){
+    input.focus();
+    if(typeof input.select==='function') input.select();
+  }
+}
+
+function workflowRunFirstVisibleHeaderAction(){
+  const btn=_workflowHeaderMenuFirstVisibleButton();
+  if(btn && typeof btn.click==='function'){
+    btn.click();
+    return true;
+  }
+  return false;
+}
+
+function workflowHeaderMenuSearchKeydown(event){
+  const key=String(event&&event.key||'').toLowerCase();
+  if(key==='escape'){
+    if(typeof event.preventDefault==='function') event.preventDefault();
+    workflowCloseHeaderMenu();
+    return;
+  }
+  if(key==='enter'){
+    if(typeof event.preventDefault==='function') event.preventDefault();
+    if(workflowRunFirstVisibleHeaderAction()) return;
+  }
+  if(key==='arrowdown' || key==='down'){
+    if(typeof event.preventDefault==='function') event.preventDefault();
+    const btn=_workflowHeaderMenuFirstVisibleButton();
+    if(btn && typeof btn.focus==='function') btn.focus();
+    return;
+  }
+  if(key==='arrowup' || key==='up'){
+    if(typeof event.preventDefault==='function') event.preventDefault();
+    const btn=_workflowHeaderMenuLastVisibleButton();
+    if(btn && typeof btn.focus==='function') btn.focus();
+    return;
+  }
 }
 
 function syncWorkflowChip(){
@@ -2001,6 +2095,7 @@ function workflowRefreshHeaderMenu(){
   const browserFullPageContext=$('workflowHeaderBrowserFullPageContextAction');
   if(browserFullPageContext) browserFullPageContext.textContent='Send full page context to chat';
   if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
+  workflowFilterHeaderMenu(window._workflowHeaderMenuQuery||(_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
 }
 
 function workflowCloseHeaderMenu(){
@@ -2047,6 +2142,7 @@ function workflowToggleHeaderMenu(event){
   workflowRefreshHeaderMenu();
   document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
   document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
+  setTimeout(workflowFocusHeaderMenuSearch,0);
   return false;
 }
 
