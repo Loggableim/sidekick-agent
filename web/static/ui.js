@@ -1,8 +1,8 @@
-const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',showHiddenWorkspaceFiles:false,mode:'chat'};
+var S=window.S||{session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',showHiddenWorkspaceFiles:false,mode:'chat'};
 window.S=S;
-const INFLIGHT={};  // keyed by session_id while request in-flight
+var INFLIGHT=window.INFLIGHT||{};  // keyed by session_id while request in-flight
 window.INFLIGHT=INFLIGHT;
-const SESSION_QUEUES={};  // keyed by session_id for queued follow-up turns
+var SESSION_QUEUES=window.SESSION_QUEUES||{};  // keyed by session_id for queued follow-up turns
 window.SESSION_QUEUES=SESSION_QUEUES;
 const MAX_UPLOAD_BYTES=20*1024*1024;
 const MAX_UPLOAD_MB=Math.round(MAX_UPLOAD_BYTES/1024/1024);
@@ -139,7 +139,7 @@ window._navigatePromptHistory=_navigatePromptHistory;
 // back-to-back stream completions would overwrite it, but HTTPServer is
 // single-threaded so only one done event fires at a time in practice.
 let _queueDrainSid=null;
-const $=id=>document.getElementById(id);
+var $=window.$||function(id){return document.getElementById(id);};
 window.$=$;
 const OFFLINE_RECHECK_MS=2500;
 let _offlineVisible=false;
@@ -1096,6 +1096,7 @@ async function populateModelDropdown(){
     if(typeof syncModelChip==='function') syncModelChip();
   }
 }
+if(typeof window!=='undefined') window.populateModelDropdown=populateModelDropdown;
 
 // Cache so we don't re-fetch on every page load
 const _liveModelCache={};
@@ -1385,6 +1386,7 @@ function syncModelChip(){
 }
 function _positionComposerDropdownWithinViewport(dd,anchor,footer){
   if(!dd||!anchor||!footer) return;
+  dd.style.position='absolute';
   const viewportMargin=8;
   const viewportWidth=window.innerWidth||document.documentElement.clientWidth||footer.clientWidth||320;
   const viewportHeight=window.innerHeight||document.documentElement.clientHeight||720;
@@ -1419,16 +1421,48 @@ function _positionComposerDropdownWithinViewport(dd,anchor,footer){
   dd.style.top=`${top}px`;
 }
 
+function _elementHasVisibleBox(el){
+  if(!el) return false;
+  const rect=el.getBoundingClientRect();
+  return !!(rect.width>0&&rect.height>0&&el.offsetParent!==null);
+}
+
+function _positionFixedDropdownWithinViewport(dd,anchor){
+  if(!dd||!anchor) return;
+  const viewportMargin=8;
+  const viewportWidth=window.innerWidth||document.documentElement.clientWidth||320;
+  const viewportHeight=window.innerHeight||document.documentElement.clientHeight||720;
+  const anchorRect=anchor.getBoundingClientRect();
+  const ddRect=dd.getBoundingClientRect();
+  const dropdownWidth=Math.min(ddRect.width||dd.offsetWidth||280,Math.max(1,viewportWidth-(viewportMargin*2)));
+  const dropdownHeight=Math.min(ddRect.height||dd.offsetHeight||320,Math.max(80,viewportHeight-(viewportMargin*2)));
+  let left=Math.max(viewportMargin,Math.min(anchorRect.left,viewportWidth-viewportMargin-dropdownWidth));
+  let top=anchorRect.bottom+6;
+  if(top+dropdownHeight>viewportHeight-viewportMargin&&anchorRect.top-dropdownHeight-6>=viewportMargin){
+    top=anchorRect.top-dropdownHeight-6;
+  }
+  top=Math.max(viewportMargin,Math.min(top,viewportHeight-viewportMargin-dropdownHeight));
+  dd.style.position='fixed';
+  dd.style.left=`${left}px`;
+  dd.style.top=`${top}px`;
+  dd.style.right='auto';
+  dd.style.bottom='auto';
+  dd.style.maxWidth=`${Math.max(1,viewportWidth-(viewportMargin*2))}px`;
+  dd.style.maxHeight=`${Math.min(320,Math.max(80,viewportHeight-(viewportMargin*2)))}px`;
+}
+
 function _positionModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
   const mobileAction=$('composerMobileModelAction');
+  const headerBadge=$('modelStatusBadge');
   const footer=document.querySelector('.composer-footer');
   if(!dd||!footer) return;
   const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(chip&&chip.offsetParent?chip:mobileAction);
+  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:mobileAction));
   if(!anchor) return;
-  _positionComposerDropdownWithinViewport(dd,anchor,footer);
+  if(anchor===headerBadge) _positionFixedDropdownWithinViewport(dd,anchor);
+  else _positionComposerDropdownWithinViewport(dd,anchor,footer);
 }
 
 function renderModelDropdown(){
@@ -1763,6 +1797,7 @@ function closeModelDropdown(){
 
 document.addEventListener('click',e=>{
   if(
+    !e.target.closest('#modelStatusBadge') &&
     !e.target.closest('#composerModelChip') &&
     !e.target.closest('#composerMobileModelAction') &&
     !e.target.closest('#composerModelDropdown')
@@ -2574,12 +2609,6 @@ function workflowRefreshHeaderMenu(){
       : 'Web backend controls unavailable';
     webBackendAction.setAttribute('aria-label',webBackendAction.title);
   }
-  const execAction=$('workflowHeaderExecAction');
-  if(execAction){
-    execAction.textContent='Run exec prompt';
-    execAction.title='Run Python code in the session sandbox';
-    execAction.setAttribute('aria-label',execAction.title);
-  }
   const mcpAction=$('workflowHeaderMcpAction');
   if(mcpAction){
     const mcpState=_workflowMcpSummaryState();
@@ -2748,6 +2777,11 @@ if(typeof window!=='undefined'){
   window.workflowRunHeaderAction=workflowRunHeaderAction;
   window.workflowCloseHeaderMenu=workflowCloseHeaderMenu;
   window.syncWorkflowChip=syncWorkflowChip;
+  window.syncModelChip=syncModelChip;
+  window.toggleModelDropdown=toggleModelDropdown;
+  window.closeModelDropdown=closeModelDropdown;
+  window.toggleReasoningDropdown=toggleReasoningDropdown;
+  window.closeReasoningDropdown=closeReasoningDropdown;
   window.workflowRefreshMcpBadge=workflowRefreshMcpBadge;
   window.workflowRefreshSubagentBadge=workflowRefreshSubagentBadge;
   window.workflowOpenMcpPanel=workflowOpenMcpPanel;
@@ -2797,12 +2831,15 @@ function toggleReasoningDropdown(){
 function _positionReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
+  const headerBadge=$('reasoningModeBadge');
   const mobileAction=$('composerMobileReasoningAction');
   const footer=document.querySelector('.composer-footer');
-  if(!dd||!chip||!footer) return;
+  if(!dd||!footer) return;
   const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:chip;
-  _positionComposerDropdownWithinViewport(dd,anchor,footer);
+  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:mobileAction));
+  if(!anchor) return;
+  if(anchor===headerBadge) _positionFixedDropdownWithinViewport(dd,anchor);
+  else _positionComposerDropdownWithinViewport(dd,anchor,footer);
 }
 
 function closeReasoningDropdown(){
@@ -2818,6 +2855,7 @@ function closeReasoningDropdown(){
 
 document.addEventListener('click',function(e){
   if(
+    !e.target.closest('#reasoningModeBadge') &&
     !e.target.closest('#composerReasoningChip') &&
     !e.target.closest('#composerMobileReasoningAction') &&
     !e.target.closest('#composerReasoningDropdown')
@@ -3193,6 +3231,28 @@ if (typeof window !== 'undefined') window._resetScrollDirectionTracker = _resetS
     });
   });
 })();
+
+// Final public bindings for inline HTML handlers and other deferred bundles.
+// Some controls are rendered before this file has finished evaluating, so the
+// HTML ships lightweight fallbacks. Rebind at the end to guarantee clicks use
+// the real implementations after all function declarations have been loaded.
+if (typeof window !== 'undefined') {
+  if (typeof syncModelChip === 'function') window.syncModelChip = syncModelChip;
+  if (typeof toggleModelDropdown === 'function') window.toggleModelDropdown = toggleModelDropdown;
+  if (typeof closeModelDropdown === 'function') window.closeModelDropdown = closeModelDropdown;
+  if (typeof toggleReasoningDropdown === 'function') window.toggleReasoningDropdown = toggleReasoningDropdown;
+  if (typeof closeReasoningDropdown === 'function') window.closeReasoningDropdown = closeReasoningDropdown;
+  if (typeof workflowToggleHeaderMenu === 'function') window.workflowToggleHeaderMenu = workflowToggleHeaderMenu;
+  if (typeof workflowRunHeaderAction === 'function') window.workflowRunHeaderAction = workflowRunHeaderAction;
+  if (typeof workflowCloseHeaderMenu === 'function') window.workflowCloseHeaderMenu = workflowCloseHeaderMenu;
+  if (typeof workflowOpenWorkspacePanel === 'function') window.workflowOpenWorkspacePanel = workflowOpenWorkspacePanel;
+  if (typeof workflowOpenMcpPanel === 'function') window.workflowOpenMcpPanel = workflowOpenMcpPanel;
+  if (typeof workflowOpenSubagentsPanel === 'function') window.workflowOpenSubagentsPanel = workflowOpenSubagentsPanel;
+  if (typeof workflowOpenExecPrompt === 'function') window.workflowOpenExecPrompt = workflowOpenExecPrompt;
+  if (typeof workflowRefreshMcpBadge === 'function') window.workflowRefreshMcpBadge = workflowRefreshMcpBadge;
+  if (typeof workflowRefreshSubagentBadge === 'function') window.workflowRefreshSubagentBadge = workflowRefreshSubagentBadge;
+  if (typeof populateModelDropdown === 'function') window.populateModelDropdown = populateModelDropdown;
+}
 
 // Keep settled activity disclosure labels honest and avoid stale mojibake labels.
 // This intentionally overrides the older summary helper above.

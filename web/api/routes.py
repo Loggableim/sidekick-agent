@@ -290,6 +290,9 @@ def _worktree_retained_payload_for_session_id(sid: str) -> dict:
         return _worktree_retained_payload(get_session(sid, metadata_only=True))
     except KeyError:
         return {}
+    except Exception:
+        logger.debug("Failed to read worktree metadata for deleted session %s", sid)
+        return {}
 
 
 def _review_repo_root(session_id: str | None = None) -> Path:
@@ -361,9 +364,6 @@ def _review_untracked_file_diff(repo_root: Path, rel_path: str, *, size_limit: i
         )
     )
     return diff, None, len(lines)
-    except Exception:
-        logger.debug("Failed to read worktree metadata for deleted session %s", sid)
-        return {}
 
 
 def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict:
@@ -1047,14 +1047,6 @@ from web.api.appstore import (
     submit_plugin,
 )
 
-from tools.mail_imap import (
-    get_space_config,
-    get_inbox_config,
-    get_imap,
-    release_imap,
-    parse_mail_summary,
-    send_mail,
-)
 from tools.mail_folders import _handler as _folders_handler
 from tools.mail_read import _handler as _read_handler
 from tools.mail_search import _handler as _search_handler
@@ -5027,16 +5019,6 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/mcp/servers":
         return _handle_mcp_servers_list(handler)
 
-    if parsed.path.startswith("/api/mcp/servers/"):
-        name = parsed.path[len("/api/mcp/servers/"):].strip()
-        if not name:
-            return bad(handler, "name is required")
-        if handler.command == "POST":
-            return _handle_mcp_server_update(handler, name, body or {})
-        if handler.command == "DELETE":
-            return _handle_mcp_server_delete(handler, name)
-        return bad(handler, "method not allowed", 405)
-
     # ── MCP Tools (GET) ──
     if parsed.path == "/api/mcp/tools":
         return _handle_mcp_tools_list(handler)
@@ -7462,6 +7444,12 @@ def handle_post(handler, parsed) -> bool:
         deleted = clear_errors(before=before)
         return j(handler, {"success": True, "deleted": deleted})
 
+    if parsed.path.startswith("/api/mcp/servers/"):
+        name = parsed.path[len("/api/mcp/servers/"):].strip()
+        if not name:
+            return bad(handler, "name is required")
+        return _handle_mcp_server_update(handler, name, body or {})
+
     # ── Discord Bot API (POST) ──
     if parsed.path.startswith("/api/discord/"):
         from web.api.discord_bot import handle_post
@@ -7637,6 +7625,12 @@ def handle_delete(handler, parsed) -> bool:
     # ── Agents API (DELETE) ──
     if parsed.path.startswith("/api/agents/"):
         return _handle_agents_delete(handler, parsed, body)
+
+    if parsed.path.startswith("/api/mcp/servers/"):
+        name = parsed.path[len("/api/mcp/servers/"):].strip()
+        if not name:
+            return bad(handler, "name is required")
+        return _handle_mcp_server_delete(handler, name)
 
     return False
 

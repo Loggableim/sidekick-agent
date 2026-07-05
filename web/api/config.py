@@ -4587,8 +4587,7 @@ def is_game_mode_enabled() -> bool:
     """
     try:
         # PRIMARY: Lock-Datei — ultimative Barriere
-        from pathlib import Path
-        lock_file = Path("C:/sidekick/home/state/game_mode.lock")
+        lock_file = SETTINGS_FILE.parent / "game_mode.lock"
         if lock_file.exists():
             return True
     except Exception:

@@ -665,6 +665,8 @@ class BrowserSession:
                   const el = document.activeElement;
                   const label = (node) => {
                     if (!node) return '';
+                    const tag = node.tagName ? node.tagName.toLowerCase() : '';
+                    if (tag === 'body' || tag === 'html') return '';
                     return String(
                       node.getAttribute('aria-label') ||
                       node.getAttribute('title') ||
@@ -673,7 +675,7 @@ class BrowserSession:
                       node.value ||
                       node.textContent ||
                       ''
-                    ).trim().replace(/\\s+/g, ' ');
+                    ).trim().replace(/\\s+/g, ' ').slice(0, 160);
                   };
                   const selectorFor = (node) => {
                     if (!node) return '';
@@ -735,6 +737,19 @@ class BrowserSession:
         )
         if capture_frame:
             try:
+                try:
+                    await self._page.wait_for_function(
+                        "() => document.body && document.body.innerText && document.body.innerText.trim().length > 0",
+                        timeout=2500,
+                    )
+                except Exception:
+                    pass
+                try:
+                    await self._page.evaluate(
+                        "() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+                    )
+                except Exception:
+                    await self._page.wait_for_timeout(250)
                 self._frame_bytes = await self._page.screenshot(
                     type="png",
                     animations="disabled",
@@ -743,6 +758,7 @@ class BrowserSession:
                     scale="device",
                 )
                 self._snapshot.frame_rev += 1
+                self._snapshot.frame_url = f"/api/browser/frame?session_id={self.session_id}&rev={self._snapshot.frame_rev}"
             except Exception as exc:
                 self._frame_bytes = _blank_png_bytes()
                 self._update_snapshot(status="error", error=str(exc), busy=False)
@@ -1041,10 +1057,14 @@ class BrowserSession:
                         const s = getComputedStyle(el);
                         return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
                       };
-                      const label = (el) => (
-                        el.getAttribute('aria-label') || el.getAttribute('title') ||
-                        el.getAttribute('placeholder') || el.innerText || el.value || el.textContent || ''
-                      ).trim().replace(/\\s+/g, ' ');
+                      const label = (el) => {
+                        const tag = el.tagName ? el.tagName.toLowerCase() : '';
+                        if (tag === 'body' || tag === 'html') return '';
+                        return String(
+                          el.getAttribute('aria-label') || el.getAttribute('title') ||
+                          el.getAttribute('placeholder') || el.innerText || el.value || el.textContent || ''
+                        ).trim().replace(/\\s+/g, ' ').slice(0, 160);
+                      };
                       const selectorFor = (el) => {
                         if (el.id) return '#' + CSS.escape(el.id);
                         const testId = el.getAttribute('data-testid');
@@ -1337,7 +1357,7 @@ class BrowserManager:
 
     def frame_bytes(self, session_id: str) -> tuple[bytes, str]:
         session = self._get_or_create_session(session_id)
-        self._submit(session.ensure())
+        self._submit(session.snapshot())
         return session._frame_bytes, session._frame_mime
 
     def subscribe(self, session_id: str) -> tuple[queue.Queue, dict[str, Any]]:

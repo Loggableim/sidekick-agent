@@ -127,6 +127,7 @@ function _invalidateSlashModelCache(){
 // define a window global ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â see tests/test_cli_only_slash_commands.py.
 if(typeof window!=='undefined'){
   window._invalidateSlashModelCache=_invalidateSlashModelCache;
+  window.executeCommand=executeCommand;
 }
 
 function _normalizeSlashSubArg(value){

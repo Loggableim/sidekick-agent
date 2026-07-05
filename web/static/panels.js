@@ -4704,6 +4704,9 @@ function workflowOpenWorkspacePanel(event){
   }
   return false;
 }
+if (typeof window !== 'undefined') {
+  window.workflowOpenWorkspacePanel = workflowOpenWorkspacePanel;
+}
 
 function closeWsDropdown(){
   const composerDd=$('composerWsDropdown');
@@ -9213,6 +9216,7 @@ function openSubagentsPanel(){
 window.ensureSubagentsPanel=ensureSubagentsPanel;
 window.loadSubagentsPanel=loadSubagentsPanel;
 window.openSubagentsPanel=openSubagentsPanel;
+window.workflowOpenWorkspacePanel=workflowOpenWorkspacePanel;
 // Load MCP servers when system settings tab opens
 const _origSwitchSettings=switchSettingsSection;
 switchSettingsSection=function(name){

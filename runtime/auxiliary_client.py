@@ -38,6 +38,7 @@ Payment / credit exhaustion fallback:
   their OpenRouter balance but has Codex OAuth or another provider available.
 """
 
+import inspect
 import json
 import logging
 import os
@@ -47,6 +48,8 @@ from pathlib import Path  # noqa: F401 — used by test mocks
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 from urllib.parse import urlparse, parse_qs, urlunparse
+
+from runtime.provider_response_state import record_provider_response
 
 # NOTE: `from openai import OpenAI` is deliberately NOT at module top — the
 # openai SDK pulls a large type tree (~240 ms cold, including responses/*,
@@ -2138,9 +2141,7 @@ def _retry_same_provider_sync(
     )
     if _is_anthropic_compat_endpoint(resolved_provider, retry_base):
         retry_kwargs["messages"] = _convert_openai_images_to_anthropic(retry_kwargs["messages"])
-    return _validate_llm_response(
-        retry_client.chat.completions.create(**retry_kwargs), task,
-    )
+    return _create_completion_with_metadata(retry_client, retry_kwargs, resolved_provider, task)
 
 
 async def _retry_same_provider_async(
@@ -2195,9 +2196,7 @@ async def _retry_same_provider_async(
     )
     if _is_anthropic_compat_endpoint(resolved_provider, retry_base):
         retry_kwargs["messages"] = _convert_openai_images_to_anthropic(retry_kwargs["messages"])
-    return _validate_llm_response(
-        await retry_client.chat.completions.create(**retry_kwargs), task,
-    )
+    return await _acreate_completion_with_metadata(retry_client, retry_kwargs, resolved_provider, task)
 
 
 def _refresh_provider_credentials(provider: str) -> bool:
@@ -3815,6 +3814,71 @@ def _validate_llm_response(response: Any, task: str = None) -> Any:
     return response
 
 
+def _response_headers(response: Any) -> Dict[str, str]:
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        nested = getattr(response, "response", None)
+        headers = getattr(nested, "headers", None)
+    if not headers:
+        return {}
+    try:
+        return dict(headers)
+    except Exception:
+        return {}
+
+
+def _parse_raw_response(raw_response: Any) -> Any:
+    parser = getattr(raw_response, "parse", None)
+    if callable(parser):
+        return parser()
+    return raw_response
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _record_completion_metadata(provider: str | None, response: Any, headers: Dict[str, str] | None = None) -> None:
+    try:
+        record_provider_response(
+            provider,
+            headers=headers or _response_headers(response),
+            usage=getattr(response, "usage", None),
+        )
+    except Exception:
+        logger.debug("Failed to record provider response metadata", exc_info=True)
+
+
+def _create_completion_with_metadata(client: Any, kwargs: Dict[str, Any], provider: str | None, task: str = None) -> Any:
+    completions = client.chat.completions
+    raw_completions = getattr(completions, "with_raw_response", None)
+    if raw_completions is not None and hasattr(raw_completions, "create"):
+        raw_response = raw_completions.create(**kwargs)
+        response = _parse_raw_response(raw_response)
+        _record_completion_metadata(provider, response, _response_headers(raw_response))
+        return _validate_llm_response(response, task)
+
+    response = completions.create(**kwargs)
+    _record_completion_metadata(provider, response)
+    return _validate_llm_response(response, task)
+
+
+async def _acreate_completion_with_metadata(client: Any, kwargs: Dict[str, Any], provider: str | None, task: str = None) -> Any:
+    completions = client.chat.completions
+    raw_completions = getattr(completions, "with_raw_response", None)
+    if raw_completions is not None and hasattr(raw_completions, "create"):
+        raw_response = await _maybe_await(raw_completions.create(**kwargs))
+        response = await _maybe_await(_parse_raw_response(raw_response))
+        _record_completion_metadata(provider, response, _response_headers(raw_response))
+        return _validate_llm_response(response, task)
+
+    response = await completions.create(**kwargs)
+    _record_completion_metadata(provider, response)
+    return _validate_llm_response(response, task)
+
+
 def call_llm(
     task: str = None,
     *,
@@ -3943,8 +4007,7 @@ def call_llm(
     # Handle unsupported temperature, max_tokens vs max_completion_tokens retry,
     # then payment fallback.
     try:
-        return _validate_llm_response(
-            client.chat.completions.create(**kwargs), task)
+        return _create_completion_with_metadata(client, kwargs, resolved_provider, task)
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
@@ -3954,8 +4017,7 @@ def call_llm(
                 task or "call",
             )
             try:
-                return _validate_llm_response(
-                    client.chat.completions.create(**retry_kwargs), task)
+                return _create_completion_with_metadata(client, retry_kwargs, resolved_provider, task)
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
                 # If retry still fails, fall through to the max_tokens /
@@ -3992,8 +4054,7 @@ def call_llm(
             kwargs.pop("max_tokens", None)
             kwargs.pop("max_completion_tokens", None)
             try:
-                return _validate_llm_response(
-                    client.chat.completions.create(**kwargs), task)
+                return _create_completion_with_metadata(client, kwargs, resolved_provider, task)
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
@@ -4032,8 +4093,7 @@ def call_llm(
             recovery_err = first_err
             if _is_rate_limit_error(first_err):
                 try:
-                    return _validate_llm_response(
-                        client.chat.completions.create(**kwargs), task)
+                    return _create_completion_with_metadata(client, kwargs, resolved_provider, task)
                 except Exception as retry_err:
                     if not (_is_auth_error(retry_err) or _is_payment_error(retry_err) or _is_rate_limit_error(retry_err)):
                         raise
@@ -4111,8 +4171,7 @@ def call_llm(
                     tools=tools, timeout=effective_timeout,
                     extra_body=effective_extra_body,
                     base_url=str(getattr(fb_client, "base_url", "") or ""))
-                return _validate_llm_response(
-                    fb_client.chat.completions.create(**fb_kwargs), task)
+                return _create_completion_with_metadata(fb_client, fb_kwargs, fb_label, task)
         # Connection/timeout errors leave the cached client poisoned (closed
         # httpx transport, half-read stream, dead async loop).  Drop it from
         # the cache regardless of whether we found a fallback above so the
@@ -4273,8 +4332,7 @@ async def async_call_llm(
         kwargs["messages"] = _convert_openai_images_to_anthropic(kwargs["messages"])
 
     try:
-        return _validate_llm_response(
-            await client.chat.completions.create(**kwargs), task)
+        return await _acreate_completion_with_metadata(client, kwargs, resolved_provider, task)
     except Exception as first_err:
         if "temperature" in kwargs and _is_unsupported_temperature_error(first_err):
             retry_kwargs = dict(kwargs)
@@ -4284,8 +4342,7 @@ async def async_call_llm(
                 task or "call",
             )
             try:
-                return _validate_llm_response(
-                    await client.chat.completions.create(**retry_kwargs), task)
+                return await _acreate_completion_with_metadata(client, retry_kwargs, resolved_provider, task)
             except Exception as retry_err:
                 retry_err_str = str(retry_err)
                 if not (
@@ -4318,8 +4375,7 @@ async def async_call_llm(
             kwargs.pop("max_tokens", None)
             kwargs.pop("max_completion_tokens", None)
             try:
-                return _validate_llm_response(
-                    await client.chat.completions.create(**kwargs), task)
+                return await _acreate_completion_with_metadata(client, kwargs, resolved_provider, task)
             except Exception as retry_err:
                 # If the max_tokens retry also hits a payment or connection
                 # error, fall through to the fallback chain below.
@@ -4357,8 +4413,7 @@ async def async_call_llm(
             recovery_err = first_err
             if _is_rate_limit_error(first_err):
                 try:
-                    return _validate_llm_response(
-                        await client.chat.completions.create(**kwargs), task)
+                    return await _acreate_completion_with_metadata(client, kwargs, resolved_provider, task)
                 except Exception as retry_err:
                     if not (_is_auth_error(retry_err) or _is_payment_error(retry_err) or _is_rate_limit_error(retry_err)):
                         raise
@@ -4418,8 +4473,7 @@ async def async_call_llm(
                 )
                 if async_fb_model and async_fb_model != fb_kwargs.get("model"):
                     fb_kwargs["model"] = async_fb_model
-                return _validate_llm_response(
-                    await async_fb.chat.completions.create(**fb_kwargs), task)
+                return await _acreate_completion_with_metadata(async_fb, fb_kwargs, fb_label, task)
         # Mirror the sync path: drop poisoned clients on connection/timeout
         # so the next aux call rebuilds.  See issue #23432.
         if _is_connection_error(first_err):

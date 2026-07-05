@@ -31,8 +31,12 @@ let _browserWebBackend = 'auto';
 let _browserWebBackendConfigured = '';
 let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
 let _browserSplitScreen = localStorage.getItem('sidekick-browser-split-open') === '1';
+let _browserLastSubmittedUrl = '';
+let _browserLastSubmittedAt = 0;
 let _browserDrawerHost = null;
 let _browserDrawerHostNext = null;
+let _browserDrawerDragState = null;
+const _browserDrawerFloatPositionKey = 'sidekick-browser-drawer-float-position';
 let _browserFrameObjectUrl = '';
 let _browserExploreMode = false;
 let _browserDiffActive = false;
@@ -41,9 +45,62 @@ let _browserTraceThumbnails = [];
 let _browserChatContextActive = false;
 let _browserPrevFrameRev = '';
 let _browserHeaderMenuOpen = false;
+let _browserUrlDraft = '';
+let _browserUrlDraftAt = 0;
+let _browserRuntimeInitialized = false;
 
 function _browserEl(id) {
   return document.getElementById(id);
+}
+
+function _browserRememberUrlDraft(value) {
+  _browserUrlDraft = String(value || '').trim();
+  _browserUrlDraftAt = Date.now();
+}
+
+function _browserClearUrlDraft() {
+  _browserUrlDraft = '';
+  _browserUrlDraftAt = 0;
+}
+
+function _browserNormalizeSubmittedUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const matches = raw.match(/https?:\/\/[^\s]+/gi);
+  if (matches && matches.length) return matches[matches.length - 1];
+  const cleaned = raw.replace(/^about:blank(?=https?:\/\/)/i, '');
+  if (/^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)(:\d+)?([/?#]|$)/i.test(cleaned)) {
+    return 'http://' + cleaned;
+  }
+  if (/^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?([/?#]|$)/i.test(cleaned)) {
+    return 'https://' + cleaned;
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(cleaned)) return cleaned;
+  return cleaned;
+}
+
+function _browserAttachUrlDraftHandlers() {
+  const input = _browserEl('browserUrlInput');
+  if (input && input.dataset.browserDraftBound !== '1') {
+    input.dataset.browserDraftBound = '1';
+    input.addEventListener('input', function() {
+      _browserRememberUrlDraft(input.value);
+    });
+    input.addEventListener('focus', function() {
+      _browserRememberUrlDraft(input.value);
+      try { input.select(); } catch (_) {}
+    });
+  }
+  const toolbar = document.querySelector('.browser-toolbar');
+  if (toolbar && toolbar.dataset.browserSubmitBound !== '1') {
+    toolbar.dataset.browserSubmitBound = '1';
+    toolbar.addEventListener('submit', browserSubmitUrl);
+  }
+  const goBtn = _browserEl('browserGoBtn') || document.querySelector('.browser-toolbar .browser-go-btn');
+  if (goBtn && goBtn.dataset.browserClickBound !== '1') {
+    goBtn.dataset.browserClickBound = '1';
+    goBtn.addEventListener('click', browserSubmitUrl);
+  }
 }
 
 function _browserEnsureSplitStyles() {
@@ -54,9 +111,6 @@ function _browserEnsureSplitStyles() {
 body.browser-split {
   --browser-split-width: min(48vw, 860px);
 }
-body.browser-split header.app-titlebar,
-body.browser-split nav.rail,
-body.browser-split aside.sidebar,
 body.browser-split aside.rightpanel,
 body.browser-split .split-resize-handle {
   display: none !important;
@@ -73,7 +127,7 @@ body.browser-split main.main > :not(#mainChat):not(#mainBrowser) {
   display: none !important;
 }
 body.browser-split main.main > #mainBrowser {
-  display: flex !important;
+  display: none !important;
   flex: 0 0 auto;
   min-width: 0;
   min-height: 0;
@@ -89,8 +143,10 @@ body.browser-split #mainChat > :not(#chatSplitLayout) {
   display: none !important;
 }
 body.browser-split #chatSplitLayout {
-  display: grid !important;
-  flex: 0 0 auto;
+  display: flex !important;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
 }
@@ -111,6 +167,10 @@ body.browser-split .browser-drawer {
   visibility: visible !important;
   pointer-events: auto;
   transform: none !important;
+}
+body.browser-split.browser-drawer-open:not(.browser-maximized) .browser-drawer {
+  height: calc(100vh - 38px) !important;
+  max-height: none !important;
 }
 body.browser-split .browser-drawer-shell {
   width: 100%;
@@ -320,6 +380,27 @@ function _browserSetButtonsDisabled(disabled, state) {
   if (input) input.disabled = !attached;
 }
 
+function _browserSetSessionControlsReady(sessionId, statusText) {
+  const sid = String(sessionId || '').trim();
+  if (!sid) return;
+  _browserActiveSessionId = sid;
+  _browserPendingSessionSwitch = false;
+  _browserSetSessionLabel({session_id: sid});
+  _browserSetPill('idle', 'Idle');
+  _browserSetStatusUrl(statusText || 'about:blank');
+  _browserSetButtonsDisabled(false, {
+    session_id: sid,
+    busy: false,
+    url: statusText || ((_browserEl('browserUrlInput') || {}).value || 'about:blank'),
+    can_go_back: false,
+    can_go_forward: false,
+  });
+  _browserSetEmptyVisible(false);
+  const stage = _browserEl('browserStage');
+  if (stage) stage.style.opacity = '1';
+  _browserUpdateHeaderBadge();
+}
+
 function _browserResearchDefaultQuestions(topic) {
   const t = String(topic || '').toLowerCase();
   if (/(preis|kosten|budget|budget|pricing|cost)/.test(t)) {
@@ -487,6 +568,88 @@ function _browserRestoreDrawerHost() {
   }
 }
 
+function _browserClearDrawerFloatPositionStyles() {
+  const browserDrawer = _browserEl('browserDrawer');
+  if (!browserDrawer) return;
+  browserDrawer.classList.remove('is-dragging');
+  browserDrawer.style.removeProperty('left');
+  browserDrawer.style.removeProperty('top');
+  browserDrawer.style.removeProperty('right');
+  browserDrawer.style.removeProperty('bottom');
+  browserDrawer.style.removeProperty('transform');
+}
+
+function _browserReadDrawerFloatPosition() {
+  try {
+    const raw = localStorage.getItem(_browserDrawerFloatPositionKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const left = Number(parsed && parsed.left);
+    const top = Number(parsed && parsed.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return {left, top};
+  } catch (_) {
+    return null;
+  }
+}
+
+function _browserWriteDrawerFloatPosition(left, top) {
+  try {
+    localStorage.setItem(_browserDrawerFloatPositionKey, JSON.stringify({
+      left: Math.round(left),
+      top: Math.round(top),
+    }));
+  } catch (_) {}
+}
+
+function _browserClampDrawerFloatPosition(left, top, width, height) {
+  const margin = 16;
+  const titlebar = 38;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  const maxTop = Math.max(titlebar + margin, window.innerHeight - height - margin);
+  return {
+    left: Math.max(margin, Math.min(left, maxLeft)),
+    top: Math.max(titlebar + margin, Math.min(top, maxTop)),
+  };
+}
+
+function _browserDefaultDrawerFloatPosition(width, height) {
+  const margin = 16;
+  const titlebar = 38;
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  const maxTop = Math.max(titlebar + margin, window.innerHeight - height - margin);
+  return {
+    left: maxLeft,
+    top: maxTop,
+  };
+}
+
+function _browserSyncDrawerFloatPosition() {
+  const browserDrawer = _browserEl('browserDrawer');
+  if (!browserDrawer) return;
+  if (!_browserDrawerOpen || _browserSplitScreen || _browserFullscreen) {
+    _browserClearDrawerFloatPositionStyles();
+    _browserDrawerDragState = null;
+    return;
+  }
+  const rect = browserDrawer.getBoundingClientRect();
+  const width = rect && rect.width > 0 ? rect.width : Math.min(760, Math.max(320, window.innerWidth - 32));
+  const height = rect && rect.height > 0 ? rect.height : Math.min(Math.round(window.innerHeight * 0.52), 560);
+  const saved = _browserReadDrawerFloatPosition();
+  const fallback = _browserDefaultDrawerFloatPosition(width, height);
+  const next = _browserClampDrawerFloatPosition(
+    saved && Number.isFinite(saved.left) ? saved.left : fallback.left,
+    saved && Number.isFinite(saved.top) ? saved.top : fallback.top,
+    width,
+    height,
+  );
+  browserDrawer.style.left = next.left + 'px';
+  browserDrawer.style.top = next.top + 'px';
+  browserDrawer.style.right = 'auto';
+  browserDrawer.style.bottom = 'auto';
+  browserDrawer.style.transform = 'none';
+}
+
 function _browserSyncFullscreenButton(active) {
   const btn = _browserEl('browserBtnOpenTab');
   if (!btn) return;
@@ -523,6 +686,7 @@ function _browserSetFullscreen(open) {
     _browserRestoreDrawerHost();
     _browserSetDrawerAccessibility(_browserDrawerOpen);
   }
+  _browserSyncDrawerFloatPosition();
 }
 
 function browserToggleFullscreen() {
@@ -548,6 +712,7 @@ function _browserSetSplitScreen(open) {
   } else {
     document.body.classList.remove('browser-split');
   }
+  _browserSyncDrawerFloatPosition();
 }
 
 function browserToggleExploreMode() {
@@ -582,7 +747,7 @@ function _browserTriggerDiffOverlay() {
   _browserDiffTimer = setTimeout(function() {
     overlay.classList.remove('visible');
     _browserDiffActive = false;
-  }, 600);
+  }, 260);
 }
 
 function _browserUpdateChatContext(state) {
@@ -1051,6 +1216,9 @@ function browserToggleHeaderMenu(event) {
     _browserCloseHeaderMenu();
     return false;
   }
+  if (typeof workflowCloseHeaderMenu === 'function') workflowCloseHeaderMenu();
+  if (typeof closeModelDropdown === 'function') closeModelDropdown();
+  if (typeof closeReasoningDropdown === 'function') closeReasoningDropdown();
   _browserRefreshHeaderMenu();
   menu.hidden = false;
   _browserHeaderMenuOpen = true;
@@ -1059,6 +1227,13 @@ function browserToggleHeaderMenu(event) {
   document.addEventListener('click', _browserHeaderMenuOutsideClick, true);
   document.addEventListener('keydown', _browserHeaderMenuKeydown, true);
   return false;
+}
+if (typeof window !== 'undefined') {
+  window.browserToggleDrawer = browserToggleDrawer;
+  window.browserToggleHeaderMenu = browserToggleHeaderMenu;
+  window.browserRunHeaderAction = browserRunHeaderAction;
+  window.browserTogglePermission = browserTogglePermission;
+  window.browserSetDrawerOpen = browserSetDrawerOpen;
 }
 
 function browserRunHeaderAction(action) {
@@ -1488,7 +1663,8 @@ function _browserRender(state, opts = {}) {
   _browserSetTarget(state);
   _browserSetButtonsDisabled(!state.session_id, state);
   const input = _browserEl('browserUrlInput');
-  if (input && document.activeElement !== input && state.url) {
+  const draftFresh = _browserUrlDraft && (Date.now() - _browserUrlDraftAt) < 4000;
+  if (input && document.activeElement !== input && !draftFresh && state.url) {
     input.value = state.url;
   }
   _browserSetEmptyVisible(!state.session_id || (!state.frame_rev && !state.url));
@@ -1602,6 +1778,7 @@ function browserSetDrawerOpen(open, opts = {}) {
     }
     return;
   }
+  _browserSyncDrawerFloatPosition();
   _browserScheduleSyncRetry(1200);
   if (!prevOpen || opts.force) {
     void browserSyncToCurrentSession({force: true, allowPending: true});
@@ -1635,19 +1812,19 @@ async function _browserFetchState(sessionId) {
   const rev = ++_browserRequestRev;
   try {
     const data = await api('/api/browser/state?session_id=' + encodeURIComponent(sid));
-    if (rev !== _browserRequestRev) return null;
+    if (_browserCurrentSessionId() !== sid) return null;
     const state = data && (data.state || data);
     if (state && state.session_id === sid) {
       _browserRender(state);
       return state;
     }
   } catch (e) {
-    if (rev !== _browserRequestRev) return null;
+    if (_browserCurrentSessionId() !== sid) return null;
     const text = e && e.error ? e.error : (e && e.message ? e.message : 'Failed to load browser state');
     _browserSetPill('error', 'Error');
     _browserSetStatusUrl(text);
     _browserSetActionSummary('');
-    _browserSetEmptyVisible(true);
+    _browserSetSessionControlsReady(sid, text);
   }
   return null;
 }
@@ -1737,6 +1914,9 @@ async function browserSyncToCurrentSession(opts = {}) {
     if (state && visible) {
       _browserStartStream(sessionId);
     } else if (visible) {
+      if (_browserCurrentSessionId() === sessionId) {
+        _browserSetSessionControlsReady(sessionId, ((_browserEl('browserUrlInput') || {}).value || 'about:blank'));
+      }
       _browserScheduleSyncRetry();
     }
     return state;
@@ -1796,17 +1976,27 @@ function browserOpenInNewTab() {
 function browserSubmitUrl(event) {
   if (event && typeof event.preventDefault === 'function') event.preventDefault();
   const input = _browserEl('browserUrlInput');
-  const url = input ? String(input.value || '').trim() : '';
+  const draftFresh = _browserUrlDraft && (Date.now() - _browserUrlDraftAt) < 6000;
+  const url = _browserNormalizeSubmittedUrl(draftFresh ? _browserUrlDraft : (input ? String(input.value || '').trim() : ''));
   if (!url) return false;
+  const now = Date.now();
+  if (url === _browserLastSubmittedUrl && (now - _browserLastSubmittedAt) < 700) {
+    return false;
+  }
+  _browserLastSubmittedUrl = url;
+  _browserLastSubmittedAt = now;
+  if (input) input.value = url;
+  _browserClearUrlDraft();
   void _browserSendControl('navigate', {url: url});
   return false;
 }
 
 function browserNavigateUrl(url) {
-  const next = String(url || '').trim();
+  const next = _browserNormalizeSubmittedUrl(url);
   if (!next) return false;
   const input = _browserEl('browserUrlInput');
   if (input) input.value = next;
+  _browserClearUrlDraft();
   void _browserSendControl('navigate', {url: next});
   return true;
 }
@@ -1861,9 +2051,80 @@ function _browserAttachPointerHandlers() {
   });
 }
 
+function _browserAttachDrawerDragHandlers() {
+  const browserDrawer = _browserEl('browserDrawer');
+  const header = browserDrawer ? browserDrawer.querySelector('.browser-drawer-header') : null;
+  if (!browserDrawer || !header || header.dataset.dragBound === '1') return;
+  header.dataset.dragBound = '1';
+  header.style.cursor = 'grab';
+  header.style.userSelect = 'none';
+  if (!header.title) header.title = 'Drag to move the browser drawer';
+
+  const dragMove = function(event) {
+    if (!_browserDrawerDragState) return;
+    if (_browserDrawerDragState.pointerId != null && event.pointerId != null && event.pointerId !== _browserDrawerDragState.pointerId) return;
+    const nextLeft = _browserDrawerDragState.startLeft + (event.clientX - _browserDrawerDragState.startX);
+    const nextTop = _browserDrawerDragState.startTop + (event.clientY - _browserDrawerDragState.startY);
+    const next = _browserClampDrawerFloatPosition(nextLeft, nextTop, _browserDrawerDragState.width, _browserDrawerDragState.height);
+    browserDrawer.style.left = next.left + 'px';
+    browserDrawer.style.top = next.top + 'px';
+    browserDrawer.style.right = 'auto';
+    browserDrawer.style.bottom = 'auto';
+    browserDrawer.style.transform = 'none';
+    if (event.cancelable) event.preventDefault();
+  };
+
+  const endDrag = function(event) {
+    if (!_browserDrawerDragState) return;
+    if (_browserDrawerDragState.pointerId != null && event.pointerId != null && event.pointerId !== _browserDrawerDragState.pointerId) return;
+    document.removeEventListener('pointermove', dragMove, true);
+    document.removeEventListener('pointerup', endDrag, true);
+    document.removeEventListener('pointercancel', endDrag, true);
+    document.removeEventListener('mousemove', dragMove, true);
+    document.removeEventListener('mouseup', endDrag, true);
+    const rect = browserDrawer.getBoundingClientRect();
+    const next = _browserClampDrawerFloatPosition(rect.left, rect.top, rect.width || _browserDrawerDragState.width, rect.height || _browserDrawerDragState.height);
+    _browserWriteDrawerFloatPosition(next.left, next.top);
+    _browserDrawerDragState = null;
+    browserDrawer.classList.remove('is-dragging');
+  };
+
+  const startDrag = function(event) {
+    if (_browserDrawerDragState) return;
+    if (event.button != null && event.button !== 0) return;
+    if (_browserFullscreen || _browserSplitScreen || !_browserDrawerOpen) return;
+    if (event.target && event.target.closest && event.target.closest('button, a, input, textarea, select, option, [role="button"], [data-no-drag]')) return;
+    const rect = browserDrawer.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    _browserDrawerDragState = {
+      pointerId: event.pointerId == null ? null : event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+    browserDrawer.classList.add('is-dragging');
+    if (typeof header.setPointerCapture === 'function') {
+      try { header.setPointerCapture(event.pointerId); } catch (_) {}
+    }
+    document.addEventListener('pointermove', dragMove, true);
+    document.addEventListener('pointerup', endDrag, true);
+    document.addEventListener('pointercancel', endDrag, true);
+    document.addEventListener('mousemove', dragMove, true);
+    document.addEventListener('mouseup', endDrag, true);
+    event.preventDefault();
+  };
+
+  header.addEventListener('pointerdown', startDrag);
+  header.addEventListener('mousedown', startDrag);
+}
+
 function browserPanelActivated() {
   browserSetDrawerOpen(true, {force: true});
   _browserAttachPointerHandlers();
+  _browserAttachDrawerDragHandlers();
 }
 
 function browserPanelDeactivated() {
@@ -2267,8 +2528,11 @@ window.browserSendScreenshotToChat = browserSendScreenshotToChat;
 window.browserSendPageContextToChat = browserSendPageContextToChat;
 window.browserSendFullPageContextToChat = browserSendFullPageContextToChat;
 
-window.addEventListener('load', function() {
+function _browserInitializeRuntime() {
+  if (_browserRuntimeInitialized) return;
+  _browserRuntimeInitialized = true;
   _browserEnsureSplitStyles();
+  _browserAttachUrlDraftHandlers();
   _browserSyncFullscreenButton(_browserFullscreen);
   _browserSyncSplitButton(_browserSplitScreen);
   if (_browserDrawerOpen) {
@@ -2283,6 +2547,7 @@ window.addEventListener('load', function() {
     if (_browserSplitScreen) {
       document.body.classList.add('browser-split');
     }
+    _browserSyncDrawerFloatPosition();
     void browserSyncToCurrentSession({force: true, allowPending: true});
     _browserScheduleSyncRetry(1200);
   } else {
@@ -2293,7 +2558,19 @@ window.addEventListener('load', function() {
   document.addEventListener('keydown', _browserHandleExportHotkeys, true);
   _browserUpdateHeaderBadge();
   _browserAttachPointerHandlers();
-});
+  _browserAttachDrawerDragHandlers();
+  window.addEventListener('resize', function() {
+    if (_browserDrawerOpen && !_browserSplitScreen && !_browserFullscreen) {
+      _browserSyncDrawerFloatPosition();
+    }
+  });
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+  setTimeout(_browserInitializeRuntime, 0);
+} else {
+  window.addEventListener('load', _browserInitializeRuntime);
+}
 
 /* ═══════════════════════════════════════════════════════════════
    WE BSEARCH PANEL — Quick Search, Mode Toggle, History, Split
@@ -2720,3 +2997,21 @@ window.websearchToggleMode = websearchToggleMode;
 window.websearchToggleSplit = websearchToggleSplit;
 window.websearchToggleHistory = websearchToggleHistory;
 window.websearchQuickSearch = websearchQuickSearch;
+
+// Final public bindings for header buttons, workflow actions, and inline HTML
+// handlers. The page ships early fallbacks so controls work during deferred
+// script loading; rebind here so split/drawer/fullscreen actions always use
+// the complete browser implementation after this bundle has finished.
+if (typeof window !== 'undefined') {
+  if (typeof browserToggleDrawer === 'function') window.browserToggleDrawer = browserToggleDrawer;
+  if (typeof browserSetDrawerOpen === 'function') window.browserSetDrawerOpen = browserSetDrawerOpen;
+  if (typeof browserToggleHeaderMenu === 'function') window.browserToggleHeaderMenu = browserToggleHeaderMenu;
+  if (typeof browserRunHeaderAction === 'function') window.browserRunHeaderAction = browserRunHeaderAction;
+  if (typeof browserToggleSplit === 'function') window.browserToggleSplit = browserToggleSplit;
+  if (typeof browserToggleFullscreen === 'function') window.browserToggleFullscreen = browserToggleFullscreen;
+  if (typeof browserTogglePermission === 'function') window.browserTogglePermission = browserTogglePermission;
+  if (typeof browserToggleExploreMode === 'function') window.browserToggleExploreMode = browserToggleExploreMode;
+  if (typeof browserSendScreenshotToChat === 'function') window.browserSendScreenshotToChat = browserSendScreenshotToChat;
+  if (typeof browserSendPageContextToChat === 'function') window.browserSendPageContextToChat = browserSendPageContextToChat;
+  if (typeof browserSendFullPageContextToChat === 'function') window.browserSendFullPageContextToChat = browserSendFullPageContextToChat;
+}
