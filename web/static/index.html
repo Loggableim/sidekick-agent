@@ -258,6 +258,14 @@
       </button>
       <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
         <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
+        <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
+          <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
+          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="approval" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('approval')">Approval</button>
+          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="model" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('model')">Model</button>
+          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="reasoning" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('reasoning')">Reasoning</button>
+          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="browser" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('browser')">Browser</button>
+          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="subagents" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('subagents')">Subagents</button>
+        </div>
         <input id="workflowHeaderMenuSearch" class="model-search-input" type="search" placeholder="Search workflow actions…" autocomplete="off" spellcheck="false" oninput="workflowFilterHeaderMenu(this.value)" onkeydown="workflowHeaderMenuSearchKeydown(event)" style="width:100%;margin:0 0 2px 0;box-sizing:border-box;">
         <div id="workflowHeaderMenuEmpty" hidden style="padding:6px 10px;font-size:12px;color:var(--muted);">No matching actions</div>
         <button class="titlebar-action-btn" id="workflowHeaderPrimarySubagentAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagent-primary')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open first subagent</button>

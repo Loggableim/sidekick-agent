@@ -1943,6 +1943,63 @@ function _workflowHeaderMenuSearchEl(){
   return $('workflowHeaderMenuSearch');
 }
 
+function _workflowHeaderMenuPresetButtons(){
+  const menu=$('workflowStatusMenu');
+  if(!menu) return [];
+  return Array.from(menu.querySelectorAll('[data-workflow-preset]'));
+}
+
+function _workflowHeaderMenuPresetQuery(preset){
+  switch(String(preset||'').trim().toLowerCase()){
+    case 'all':
+      return '';
+    case 'approval':
+      return 'approval';
+    case 'model':
+      return 'model';
+    case 'reasoning':
+      return 'reasoning';
+    case 'browser':
+      return 'browser';
+    case 'subagents':
+      return 'subagent';
+    default:
+      return '';
+  }
+}
+
+function _workflowHeaderMenuPresetFromQuery(query){
+  const q=String(query||'').trim().toLowerCase();
+  if(!q) return 'all';
+  const presets=['approval','model','reasoning','browser','subagents'];
+  for(const preset of presets){
+    if(_workflowHeaderMenuPresetQuery(preset)===q) return preset;
+  }
+  return null;
+}
+
+function workflowRefreshHeaderMenuPresets(query){
+  const preset=_workflowHeaderMenuPresetFromQuery(query);
+  const buttons=_workflowHeaderMenuPresetButtons();
+  buttons.forEach(btn=>{
+    if(!btn) return;
+    const key=String(btn.dataset&&btn.dataset.workflowPreset||'').trim().toLowerCase();
+    const active=!!preset && key===preset;
+    btn.classList.toggle('workflow-preset-active',active);
+    btn.setAttribute('aria-pressed',active?'true':'false');
+  });
+}
+
+function workflowApplyHeaderMenuPreset(preset){
+  const query=_workflowHeaderMenuPresetQuery(preset);
+  const input=_workflowHeaderMenuSearchEl();
+  if(input){
+    input.value=query;
+  }
+  workflowFilterHeaderMenu(query);
+  workflowFocusHeaderMenuSearch();
+}
+
 function _workflowHeaderMenuActionButtons(){
   const menu=$('workflowStatusMenu');
   if(!menu) return [];
@@ -2069,6 +2126,7 @@ function workflowFilterHeaderMenu(query){
   }else{
     _workflowHeaderMenuClearActiveButton();
   }
+  workflowRefreshHeaderMenuPresets(q);
   workflowRefreshHeaderMenuFooter();
 }
 
