@@ -9043,6 +9043,7 @@ function _renderSubagentStatus(active, paused){
     <div class="mcp-server-detail">${paused?'Spawn is paused.':'Spawn is open.'}</div>
   </div>` + entries.map(item=>{
     const sid=String(item&&item.subagent_id||'').trim();
+    const sessionId=String(item&&item.session_id||'').trim();
     const goal=String(item&&item.goal||'').trim()||'Untitled task';
     const model=String(item&&item.model||'').trim();
     const depth=typeof item?.depth==='number'?item.depth:null;
@@ -9053,6 +9054,9 @@ function _renderSubagentStatus(active, paused){
     if(depth!==null) metaParts.push('depth '+depth);
     if(toolCount!==null) metaParts.push(toolCount+' tools');
     const meta=metaParts.join(' · ');
+    const openSessionButton=sessionId
+      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation();if(typeof loadSession==='function')loadSession('${esc(sessionId)}')" aria-label="Open session for subagent ${esc(sid||sessionId)}" title="Open this subagent session">Open session</button>`
+      : '';
     const interruptButton=sid
       ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="interruptActiveSubagent('${esc(sid)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
       : '';
@@ -9062,7 +9066,10 @@ function _renderSubagentStatus(active, paused){
           <span class="mcp-server-name" title="${esc(goal)}">${esc(goal)}</span>
           <span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sid||'unknown')} · ${esc(status)}</span>
         </div>
-        ${interruptButton}
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${openSessionButton}
+          ${interruptButton}
+        </div>
       </div>
       <div class="mcp-server-detail">${meta?esc(meta):'No additional metadata'}</div>
     </div>`;
