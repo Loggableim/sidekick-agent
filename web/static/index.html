@@ -280,10 +280,6 @@
         <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>
       </div>
     </div>
-      <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
-        <span class="titlebar-approval-dot" aria-hidden="true"></span>
-        <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
-      </button>
       <div class="titlebar-lang-selector" id="titlebarLangSelector">
         <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
           <span id="currentLangFlag">🇬🇧</span>
