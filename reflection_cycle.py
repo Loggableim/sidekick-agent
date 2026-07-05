@@ -54,12 +54,23 @@ def save_daily_reflection(agenda: AgendaStore | None = None, bio: AutobiographyS
     return reflection
 
 
+def run_daily_reflection(dry_run: bool = False, agenda: AgendaStore | None = None, bio: AutobiographyStore | None = None) -> dict:
+    if dry_run:
+        reflection = build_daily_reflection(agenda, bio)
+        reflection["mode"] = "dry-run"
+        return reflection
+    reflection = save_daily_reflection(agenda, bio)
+    reflection["mode"] = "live"
+    return reflection
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Nova reflection cycle")
     parser.add_argument("command", choices=["daily"])
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.command == "daily":
-        print(json.dumps(save_daily_reflection(), ensure_ascii=False, indent=2))
+        print(json.dumps(run_daily_reflection(args.dry_run), ensure_ascii=False, indent=2))
     return 0
 
 

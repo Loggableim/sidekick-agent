@@ -9,7 +9,7 @@ from pathlib import Path
 
 from agenda import AgendaStore
 from autobiography import AutobiographyStore
-from reflection_cycle import build_daily_reflection
+from reflection_cycle import build_daily_reflection, run_daily_reflection
 
 
 class ReflectionCycleTests(unittest.TestCase):
@@ -29,6 +29,12 @@ class ReflectionCycleTests(unittest.TestCase):
         self.assertIn("Follow open thread", reflection["summary"])
         self.assertIn("Recorded action", reflection["summary"])
         self.assertEqual(reflection["type"], "reflection")
+
+    def test_daily_reflection_dry_run_does_not_record_event(self):
+        reflection = run_daily_reflection(True, self.agenda, self.bio)
+        self.assertEqual(reflection["mode"], "dry-run")
+        self.assertNotIn("event_id", reflection)
+        self.assertEqual(self.bio.recent(limit=1), [])
 
 
 if __name__ == "__main__":
