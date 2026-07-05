@@ -6655,6 +6655,13 @@ function renderMessages(options){
       inner.appendChild(_inlineApprovalState.element);
     }
   }
+  if (typeof _subagentPanelState !== 'undefined' && _subagentPanelState && _subagentPanelState.element && _subagentPanelState.visible) {
+    const existing = inner.querySelector('.subagent-panel-card');
+    if (!existing) {
+      inner.appendChild(_subagentPanelState.element);
+    }
+  }
+  if (typeof _ensureSubagentPolling === 'function') _ensureSubagentPolling();
   // Scan rendered messages for file paths to populate the open-files bar.
   if(typeof _scanMessagesForFiles==='function') _scanMessagesForFiles();
 }
@@ -8079,7 +8086,7 @@ function _thinkingMarkup(text=''){
   const openClass=isSimplifiedToolCalling()?'':' open';
   return (clean&&String(clean).trim())
     ? `<div class="reasoning-accordion${openClass}"><div class="reasoning-accordion-header" onclick="toggleReasoningAccordion(this)"><span>\u{1F9E0}</span><span class="reasoning-accordion-label">${t('reasoning_thought')}</span><span class="chevron">${li('chevron-right',12)}</span></div><div class="reasoning-accordion-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
-    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">🤔 Still thinking...</span><div class="thinking-indicator-tools"></div></div>`;
+    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">Thinking�</span><div class="thinking-indicator-tools"></div></div>`;
 }
 
 // ── Thinking-indicator delayed labels ──
@@ -8272,6 +8279,8 @@ function addStreamCursor(){
   if(body.querySelector('.stream-cursor')) return;
   const cursor=document.createElement('span');
   cursor.className='stream-cursor';
+  cursor.setAttribute('aria-hidden','true');
+  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">Thinking�</span>';
   body.appendChild(cursor);
 }
 function removeStreamCursor(){
@@ -9487,3 +9496,5 @@ window.syncComposerModeButtons=syncComposerModeButtons;
     return originalToolTimelineCategory ? originalToolTimelineCategory(name) : 'Tools';
   };
 })();
+
+

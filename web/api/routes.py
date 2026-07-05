@@ -2024,6 +2024,12 @@ try:
         disable_session_yolo,
         is_session_yolo_enabled,
     )
+    from tools.delegate_tool import (
+        list_active_subagents,
+        set_spawn_paused,
+        is_spawn_paused,
+        interrupt_subagent,
+    )
 except ImportError:
     _submit_pending_raw = lambda *a, **k: None
     approve_session = lambda *a, **k: None
@@ -2034,6 +2040,23 @@ except ImportError:
     enable_session_yolo = lambda *a, **k: None
     disable_session_yolo = lambda *a, **k: None
     is_session_yolo_enabled = lambda *a, **k: False
+    list_active_subagents = lambda *a, **k: []
+    set_spawn_paused = lambda *a, **k: False
+    is_spawn_paused = lambda *a, **k: False
+    interrupt_subagent = lambda *a, **k: False
+
+
+def _normalize_approval_mode_value(mode) -> str:
+    if isinstance(mode, bool):
+        return "off" if mode is False else "manual"
+    normalized = str(mode or "").strip().lower()
+    if normalized in {"ask", "manual"}:
+        return "manual"
+    if normalized in {"deny", "smart"}:
+        return "smart"
+    if normalized in {"yolo", "off"}:
+        return "off"
+    return normalized or "manual"
     _pending = {}
     _lock = threading.Lock()
     _permanent_approved = set()
@@ -3938,6 +3961,19 @@ def handle_get(handler, parsed) -> bool:
             pass
         return j(handler, settings)
 
+    if parsed.path == "/api/approval":
+        try:
+            from cli.config import load_config as _load_cli_config
+
+            cfg = _load_cli_config()
+            approvals = cfg.get("approvals", {})
+            if not isinstance(approvals, dict):
+                approvals = {}
+            mode = _normalize_approval_mode_value(approvals.get("mode", "manual"))
+            return j(handler, {"mode": mode, "modes": ["manual", "smart", "off"]})
+        except Exception as exc:
+            return bad(handler, f"Failed to read approval mode: {exc}", 500)
+
     if parsed.path == "/api/reasoning":
         # Current reasoning config (shared source of truth with the CLI —
         # reads display.show_reasoning and agent.reasoning_effort from
@@ -4248,6 +4284,15 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, "Missing session_id")
         return j(handler, {"yolo_enabled": is_session_yolo_enabled(sid)})
 
+    if parsed.path == "/api/subagents":
+        return j(
+            handler,
+            {
+                "spawn_paused": is_spawn_paused(),
+                "active": list_active_subagents(),
+            },
+        )
+
     if parsed.path == "/api/session/usage":
         sid = parse_qs(parsed.query).get("session_id", [""])[0]
         if not sid:
@@ -4302,9 +4347,13 @@ def handle_get(handler, parsed) -> bool:
             # Phase 2: If a workspace filter is active, also read sessions
             # from that workspace's own session directory (covers sessions
             # created within a workspace context, which live there).
+            # Import once for workspace lookup fallback during normalization.
+            _workspace_lookup = None
             if workspace_slug:
                 try:
                     from web.api.space_engine import get_workspace
+
+                    _workspace_lookup = get_workspace
                     ws = get_workspace(workspace_slug)
                     if ws:
                         set_session_dir(str(ws.sessions_dir))
@@ -4312,7 +4361,23 @@ def handle_get(handler, parsed) -> bool:
                         if workspace_slug != "default":
                             for _session in ws_sessions:
                                 if _session and not _session.get("workspace_slug"):
-                                    _session["workspace_slug"] = workspace_slug
+                                    raw_workspace = str(
+                                        _session.get("workspace", "") or _session.get("ws", "") or _session.get("space", "")
+                                    ).strip()
+                                    ws_slug = None
+                                    if raw_workspace:
+                                        try:
+                                            maybe_ws = Path(raw_workspace).name.strip().lower()
+                                            if maybe_ws and _workspace_lookup:
+                                                existing = _workspace_lookup(maybe_ws)
+                                                if existing:
+                                                    ws_slug = existing.slug
+                                        except Exception:
+                                            ws_slug = None
+                                    if not ws_slug and workspace_slug != "default":
+                                        ws_slug = workspace_slug
+                                    if ws_slug:
+                                        _session["workspace_slug"] = ws_slug
                         # Merge — avoid duplicates by session_id
                         existing_ids = {s['session_id'] for s in webui_sessions}
                         for s in ws_sessions:
@@ -4321,15 +4386,33 @@ def handle_get(handler, parsed) -> bool:
                 except Exception:
                     logger.debug("Failed to scan workspace dir for sessions", exc_info=True)
 
-            # Phase 3: Apply workspace_slug filter for non-default spaces.
-            # Sessions without workspace_slug (pre-isolation) are only shown
-            # in the default space (already loaded in Phase 1).
-            diag.stage("workspace_filter")
-            if workspace_slug and workspace_slug != "default":
-                webui_sessions = [
-                    s for s in webui_sessions
-                    if s.get("workspace_slug") == workspace_slug
-                ]
+                # Phase 3: Apply workspace_slug filter for non-default spaces.
+                # Sessions without workspace_slug (pre-isolation) are only shown
+                # in the default space (already loaded in Phase 1).
+                diag.stage("workspace_filter")
+                if workspace_slug and workspace_slug != "default":
+                    for _session in webui_sessions:
+                        if not isinstance(_session, dict) or _session.get("workspace_slug"):
+                            continue
+                        raw_workspace = str(
+                            _session.get("workspace", "") or _session.get("ws", "") or _session.get("space", "")
+                        ).strip()
+                        if raw_workspace:
+                            try:
+                                maybe_ws = Path(raw_workspace).name.strip().lower()
+                                if maybe_ws and _workspace_lookup:
+                                    existing = _workspace_lookup(maybe_ws)
+                                    if existing:
+                                        _session["workspace_slug"] = existing.slug
+                                        continue
+                            except Exception:
+                                pass
+                        _session["workspace_slug"] = workspace_slug
+                if workspace_slug and workspace_slug != "default":
+                    webui_sessions = [
+                        s for s in webui_sessions
+                        if s.get("workspace_slug") == workspace_slug
+                    ]
             diag.stage("load_settings")
             settings = load_settings()
             show_cli_sessions = bool(settings.get("show_cli_sessions"))
@@ -5791,7 +5874,7 @@ def handle_post(handler, parsed) -> bool:
         # preference set via WebUI is honoured in the terminal REPL and vice
         # versa.  Body is one of:
         #   {"display": "show"|"hide"|"on"|"off"}   → display.show_reasoning
-        #   {"effort":  "none"|"minimal"|"low"|"medium"|"high"|"xhigh"}
+        #   {"effort":  "none"|"minimal"|"low"|"medium"|"high"|"xhigh"|"max"}
         #                                            → agent.reasoning_effort
         try:
             display = body.get("display")
@@ -5810,6 +5893,33 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, str(e))
         except RuntimeError as e:
             return bad(handler, str(e), 500)
+
+    if parsed.path == "/api/approval":
+        raw_mode = str(body.get("mode", "") or "").strip()
+        if not raw_mode:
+            return bad(handler, "mode is required")
+        mode = _normalize_approval_mode_value(raw_mode)
+        if mode not in {"manual", "smart", "off"}:
+            return bad(handler, "mode must be manual|smart|off")
+        try:
+            from cli.config import load_config as _load_cli_config, save_config as _save_cli_config
+
+            cfg = _load_cli_config()
+            approvals = cfg.get("approvals", {})
+            if not isinstance(approvals, dict):
+                approvals = {}
+            previous = _normalize_approval_mode_value(approvals.get("mode", "manual"))
+            approvals["mode"] = mode
+            cfg["approvals"] = approvals
+            _save_cli_config(cfg)
+            return j(handler, {
+                "ok": True,
+                "mode": mode,
+                "previous_mode": previous,
+                "modes": ["manual", "smart", "off"],
+            })
+        except Exception as exc:
+            return bad(handler, f"Failed to save approval mode: {exc}", 500)
 
     if parsed.path == "/api/admin/reload":
         # Hot-reload api.models module to pick up code changes without restart.
@@ -6240,6 +6350,38 @@ def handle_post(handler, parsed) -> bool:
         else:
             disable_session_yolo(sid)
         return j(handler, {"ok": True, "yolo_enabled": enabled})
+
+    if parsed.path == "/api/subagents":
+        subagent_id = str(body.get("subagent_id", "") or "").strip()
+        if subagent_id:
+            interrupted = interrupt_subagent(subagent_id)
+            return j(
+                handler,
+                {
+                    "ok": True,
+                    "interrupted": bool(interrupted),
+                    "subagent_id": subagent_id,
+                    "spawn_paused": is_spawn_paused(),
+                    "active": list_active_subagents(),
+                },
+            )
+
+        paused_raw = body.get("spawn_paused", body.get("paused"))
+        if paused_raw is None:
+            return bad(handler, "Provide 'spawn_paused' or 'subagent_id'")
+        if isinstance(paused_raw, str):
+            paused = paused_raw.strip().lower() in {"1", "true", "yes", "on", "paused"}
+        else:
+            paused = bool(paused_raw)
+        set_spawn_paused(paused)
+        return j(
+            handler,
+            {
+                "ok": True,
+                "spawn_paused": is_spawn_paused(),
+                "active": list_active_subagents(),
+            },
+        )
 
     if parsed.path == "/api/btw":
         return _handle_btw(handler, body)
