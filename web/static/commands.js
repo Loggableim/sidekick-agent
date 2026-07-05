@@ -1210,7 +1210,7 @@ function cmdReasoning(args){
   return false;
 }
 
-function cmdApproval(args){
+async function cmdApproval(args){
   const arg=(args||'').trim().toLowerCase();
   const MODES=['manual','smart','off'];
   const normalizeMode=arg==='ask'?'manual':arg==='deny'?'smart':arg==='yolo'?'off':arg;
@@ -2019,8 +2019,21 @@ async function cmdReview(args){
       return true;
     }
     if(arg==='prompt'||arg==='draft'){
+      const ta=document.getElementById('msg');
+      if(ta){
+        ta.value=prompt;
+        if(typeof autoResize==='function') autoResize();
+        if(typeof updateSendBtn==='function') updateSendBtn();
+        ta.focus();
+      }
+      return true;
+    }
     await _reviewSendPrompt(prompt, {state: window._reviewChainState});
-  }catch(e){showToast(t('workspace_switch_failed')+e.message);}
+  }catch(e){
+    _clearReviewCard();
+    showToast('Review failed: '+(e&&e.message?e.message:e), 2600, 'error');
+  }
+  return true;
 }
 
 async function cmdTerminal(){
@@ -2847,54 +2860,6 @@ function cmdReasoning(args){
   return false;
 }
 
-function cmdApproval(args){
-  const arg=(args||'').trim().toLowerCase();
-  const MODES=['manual','smart','off'];
-  const normalizeMode=arg==='ask'?'manual':arg==='deny'?'smart':arg==='yolo'?'off':arg;
-  const normalizeApprovalMode=(mode)=>{
-    const value=(mode==null?'':String(mode)).trim().toLowerCase();
-    if(value==='ask') return 'manual';
-    if(value==='deny') return 'smart';
-    if(value==='yolo') return 'off';
-    if(value==='manual'||value==='smart'||value==='off') return value;
-    return 'manual';
-  };
-  const formatStatus=(mode)=>'Approval mode: '+mode+' | /approval manual|smart|off';
-  const applyApprovalMode=(mode)=>{
-    const normalized=normalizeApprovalMode(mode);
-    if(typeof window._setApprovalModeIndicator==='function'){
-      return window._setApprovalModeIndicator(normalized)||normalized;
-    }
-    window._approvalMode=normalized;
-    return normalized;
-  };
-  if(!arg||arg==='status'||arg==='show'){
-    try{
-      const st=await api('/api/approval');
-      const mode=applyApprovalMode((st&&st.mode)||'manual');
-      showToast(formatStatus(mode));
-    }catch(e){
-      showToast('Approval mode status unavailable: '+(e&&e.message?e.message:e));
-    }
-    return true;
-  }
-  if(!MODES.includes(normalizeMode)){
-    showToast('Unknown argument: '+arg+' \u2014 use manual|smart|off|status');
-    return true;
-  }
-  try{
-    const data=await api('/api/approval',{
-      method:'POST',
-      body:JSON.stringify({mode:normalizeMode}),
-    });
-    const mode=applyApprovalMode((data&&data.mode)||normalizeMode);
-    showToast('Approval mode: '+mode+' (saved)');
-  }catch(e){
-    showToast('Approval mode update failed: '+(e&&e.message?e.message:normalizeMode));
-  }
-  return true;
-}
-
 async function cmdWeb(args){
   const raw=String(args||'').trim().toLowerCase();
   const validModes=['auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'];
@@ -3250,7 +3215,6 @@ function _buildReviewPrompt(data){
   return lines.join('\n');
 }
 
-}
 function cmdVoice(){
   const mic=document.getElementById('btnMic');
   if(mic&&mic.style.display!=='none'&&!mic.disabled){try{mic.click();return;}catch(_){}}
