@@ -2130,6 +2130,22 @@ function workflowOpenMcpPanel(event){
   return false;
 }
 
+function workflowOpenExecPrompt(event){
+  if(event&&typeof event.preventDefault==='function') event.preventDefault();
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const code=typeof window!=='undefined' && typeof window.prompt==='function'
+    ? window.prompt('Python code for /exec','')
+    : '';
+  const cleaned=String(code||'').trim();
+  if(!cleaned) return false;
+  if(typeof executeCommand==='function'){
+    executeCommand('/exec '+cleaned);
+  }else if(typeof cmdExec==='function'){
+    cmdExec(cleaned);
+  }
+  return false;
+}
+
 function _workflowHeaderMenuSearchEl(){
   return $('workflowHeaderMenuSearch');
 }
@@ -2402,6 +2418,7 @@ function workflowRefreshHeaderMenu(){
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
   const imageAction=$('workflowHeaderImageAction');
+  const execAction=$('workflowHeaderExecAction');
   const researchAction=$('workflowHeaderResearchAction');
   const subagents=$('workflowHeaderSubagentsAction');
   const subagentState=_workflowSubagentSummaryState();
@@ -2456,6 +2473,11 @@ function workflowRefreshHeaderMenu(){
     imageAction.title='Prompt for local image generation';
     imageAction.setAttribute('aria-label',imageAction.title);
   }
+  if(execAction){
+    execAction.textContent='Run exec prompt';
+    execAction.title='Run Python code in the session sandbox';
+    execAction.setAttribute('aria-label',execAction.title);
+  }
   if(researchAction){
     researchAction.textContent='Open research panel';
     researchAction.title='Open the browser research panel';
@@ -2472,6 +2494,12 @@ function workflowRefreshHeaderMenu(){
       ? text
       : 'Web backend controls unavailable';
     webBackendAction.setAttribute('aria-label',webBackendAction.title);
+  }
+  const execAction=$('workflowHeaderExecAction');
+  if(execAction){
+    execAction.textContent='Run exec prompt';
+    execAction.title='Run Python code in the session sandbox';
+    execAction.setAttribute('aria-label',execAction.title);
   }
   const mcpAction=$('workflowHeaderMcpAction');
   if(mcpAction){
@@ -2609,6 +2637,10 @@ function workflowRunHeaderAction(action){
       if(typeof browserToggleWebBackend==='function') browserToggleWebBackend();
       else if(typeof executeCommand==='function') executeCommand('/web toggle');
       break;
+    case 'exec':
+      if(typeof workflowOpenExecPrompt==='function') workflowOpenExecPrompt();
+      else if(typeof executeCommand==='function') executeCommand('/exec');
+      break;
     case 'mcp':
       if(typeof workflowOpenMcpPanel==='function') workflowOpenMcpPanel();
       else if(typeof executeCommand==='function') executeCommand('/mcp open');
@@ -2638,6 +2670,7 @@ if(typeof window!=='undefined'){
   window.syncWorkflowChip=syncWorkflowChip;
   window.workflowRefreshMcpBadge=workflowRefreshMcpBadge;
   window.workflowOpenMcpPanel=workflowOpenMcpPanel;
+  window.workflowOpenExecPrompt=workflowOpenExecPrompt;
 }
 
 function _highlightReasoningOption(effort){

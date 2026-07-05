@@ -10,7 +10,7 @@ const COMMANDS=[
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
   {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
-  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, research, mcp, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|research ...|mcp ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','research','mcp','thinking'], noEcho:true},
+  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, exec, research, mcp, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|exec ...|research ...|mcp ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','exec','research','mcp','thinking'], noEcho:true},
   {name:'thinking',  desc:'Open or filter Ollama thinking models', fn:cmdThinking, arg:'[status|open|toggle|list|off|<query>]', subArgs:['status','open','toggle','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
@@ -1472,6 +1472,11 @@ async function cmdWorkflow(args){
     if(configured==='firecrawl' || backend==='firecrawl' || backend==='web firecrawl') return 'Web firecrawl';
     return 'Web auto';
   };
+  const currentSandboxLabel=()=>{
+    const toggle=document.getElementById('sandboxToggle');
+    if(!toggle) return 'Sandbox unknown';
+    return toggle.checked ? 'Sandbox restricted' : 'Sandbox open';
+  };
   const summarizeSubagents=(payload)=>{
     const active=Array.isArray(payload&&payload.active)?payload.active:[];
     const paused=!!(payload&&payload.spawn_paused);
@@ -1536,11 +1541,12 @@ async function cmdWorkflow(args){
       'Reasoning '+status.reasoningMode,
       'Model '+currentModelLabel(),
       currentBrowserLabel(),
+      currentSandboxLabel(),
       currentResearchLabel(),
       currentMcpLabel(),
       currentWebBackendLabel(),
       status.subagentSummary,
-      '/workflow approval|reasoning|browser|subagents|review|image|research|mcp|thinking',
+      '/workflow approval|reasoning|browser|subagents|review|image|exec|research|mcp|thinking',
     ];
       showToast(parts.filter(Boolean).join(' | '));
     }catch(e){
@@ -1599,6 +1605,16 @@ async function cmdWorkflow(args){
     const cleaned=String(promptText||'').trim();
     if(!cleaned) return true;
     return cmdImage(cleaned);
+  }
+  if(sub==='exec'){
+    const code=String(rest||'').trim();
+    if(code) return cmdExec(code);
+    const promptText=typeof window!=='undefined' && typeof window.prompt==='function'
+      ? window.prompt('Python code for /exec','')
+      : '';
+    const cleaned=String(promptText||'').trim();
+    if(!cleaned) return true;
+    return cmdExec(cleaned);
   }
   if(sub==='mcp') return cmdMcp(rest||'open');
   if(sub==='research'){
