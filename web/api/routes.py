@@ -5027,6 +5027,16 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/mcp/servers":
         return _handle_mcp_servers_list(handler)
 
+    if parsed.path.startswith("/api/mcp/servers/"):
+        name = parsed.path[len("/api/mcp/servers/"):].strip()
+        if not name:
+            return bad(handler, "name is required")
+        if handler.command == "POST":
+            return _handle_mcp_server_update(handler, name, body or {})
+        if handler.command == "DELETE":
+            return _handle_mcp_server_delete(handler, name)
+        return bad(handler, "method not allowed", 405)
+
     # ── MCP Tools (GET) ──
     if parsed.path == "/api/mcp/tools":
         return _handle_mcp_tools_list(handler)
@@ -13075,8 +13085,8 @@ def _handle_mcp_servers_list(handler):
     ]
     return j(handler, {
         "servers": result,
-        "toggle_supported": False,
-        "reload_required": True,
+        "toggle_supported": True,
+        "reload_required": False,
     })
 
 
@@ -13126,24 +13136,31 @@ def _handle_mcp_server_update(handler, name, body):
     if not name:
         return bad(handler, "name is required")
     # Validate: must have url (http) or command (stdio)
-    server_cfg = {}
     cfg = get_config()
     servers = cfg.get("mcp_servers", {})
     if not isinstance(servers, dict):
         servers = {}
     existing_cfg = servers.get(name, {})
+    server_cfg = dict(existing_cfg) if isinstance(existing_cfg, dict) else {}
     if body.get("url"):
         server_cfg["url"] = body["url"].strip()
+        server_cfg.pop("command", None)
+        server_cfg.pop("args", None)
+        server_cfg.pop("env", None)
         if body.get("headers"):
             server_cfg["headers"] = _strip_masked_values(body["headers"], existing_cfg.get("headers", {}))
     elif body.get("command"):
         server_cfg["command"] = body["command"].strip()
+        server_cfg.pop("url", None)
+        server_cfg.pop("headers", None)
         if body.get("args"):
             server_cfg["args"] = body["args"] if isinstance(body["args"], list) else [body["args"]]
         if body.get("env"):
             server_cfg["env"] = _strip_masked_values(body["env"], existing_cfg.get("env", {}))
-    else:
+    elif not existing_cfg:
         return bad(handler, "url or command is required")
+    if "enabled" in body:
+        server_cfg["enabled"] = _parse_mcp_enabled(body["enabled"])
     if body.get("timeout") is not None:
         try:
             server_cfg["timeout"] = int(body["timeout"])

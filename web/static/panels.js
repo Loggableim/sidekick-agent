@@ -8848,13 +8848,17 @@ function loadMcpServers(){
       list.innerHTML=`<div class="mcp-empty-state" style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('mcp_no_servers'))}</div>`;
       return;
     }
-    const toggleNote=r.toggle_supported?'':'<div class="mcp-readonly-note">'+esc(t('mcp_toggle_followup'))+'</div>';
+    const toggleSupported=!!r.toggle_supported;
+    const toggleNote=toggleSupported?'':'<div class="mcp-readonly-note">'+esc(t('mcp_toggle_followup'))+'</div>';
     list.innerHTML=r.servers.map(s=>{
       const transportLabel=s.transport==='http'?'HTTP':s.transport==='stdio'?'stdio':(''+(s.transport||'unknown'));
       const transportClass=s.transport==='http'?'mcp-http':s.transport==='stdio'?'mcp-stdio':'mcp-unknown';
       const transportBadge=`<span class="mcp-transport-badge ${transportClass}">${esc(transportLabel)}</span>`;
       const status=s.status||'configured';
       const statusBadge=`<span class="mcp-status-badge mcp-status-${esc(status)}">${esc(_mcpStatusLabel(status))}</span>`;
+      const toggleButton=toggleSupported
+        ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleMcpServerEnabled(${JSON.stringify(String(s.name||''))}, ${s.enabled===false ? 'true' : 'false'})" aria-label="${esc(s.enabled===false ? 'Enable MCP server' : 'Disable MCP server')}" title="${esc(s.enabled===false ? 'Enable MCP server' : 'Disable MCP server')}">${esc(s.enabled===false ? 'Enable' : 'Disable')}</button>`
+        : '';
       const toolCount=s.tool_count===null||typeof s.tool_count==='undefined'?'—':String(s.tool_count);
       const detail=s.transport==='http'
         ? (s.url||'')
@@ -8863,16 +8867,38 @@ function loadMcpServers(){
       const headersInfo=s.headers?Object.entries(s.headers).map(([k,v])=>`${k}=${v}`).join(', '):'';
       const secretInfo=[envInfo,headersInfo].filter(Boolean).join(' | ');
       return `<div class="mcp-server-row">
-        <div class="mcp-server-row-head">
-          <span class="mcp-server-name">${esc(s.name)}</span>
-          ${transportBadge}
-          ${statusBadge}
+        <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px;align-items:flex-start">
+          <span class="mcp-server-name" title="${esc(s.name)}">${esc(s.name)}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            ${transportBadge}
+            ${statusBadge}
+            ${toggleButton}
+          </div>
         </div>
         <div class="mcp-server-detail">${esc(detail)}${secretInfo?' | '+esc(secretInfo):''}</div>
         <div class="mcp-server-meta"><span class="mcp-tool-count">${esc(t('mcp_tool_count',toolCount))}</span><span>${esc(t(s.enabled===false?'mcp_enabled_no':'mcp_enabled_yes'))}</span></div>
       </div>`;
     }).join('')+toggleNote;
   }).catch(()=>{list.innerHTML=`<div class="mcp-error-state" style="color:#ef4444;font-size:12px;padding:6px 0">${esc(t('mcp_load_failed'))}</div>`});
+}
+async function toggleMcpServerEnabled(name, enabled){
+  const serverName=String(name||'').trim();
+  if(!serverName) return;
+  const nextEnabled=!!enabled;
+  try{
+    const saved=await api('/api/mcp/servers/'+encodeURIComponent(serverName),{
+      method:'POST',
+      body:JSON.stringify({enabled:nextEnabled}),
+    });
+    if(typeof loadMcpServers==='function') loadMcpServers();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    if(typeof showToast==='function'){
+      const summary=saved&&saved.server&&saved.server.enabled===false ? 'disabled' : 'enabled';
+      showToast('MCP server '+summary+': '+serverName,2200,'info');
+    }
+  }catch(e){
+    if(typeof showToast==='function') showToast('Failed to update MCP server: '+(e&&e.message?e.message:e),2400,'error');
+  }
 }
 let _mcpToolsCache=[];
 function _filterMcpToolsForSearch(tools, query){
