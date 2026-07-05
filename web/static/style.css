@@ -1,4 +1,4 @@
-﻿  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   /* â”€â”€ Light mode (default) â€” warm gold-tinted palette from Sidekick brand â”€â”€ */
   :root {
     --bg:#FEFCF7;--sidebar:#FAF7F0;--border:#E0D8C8;--border2:rgba(0,0,0,0.15);
@@ -2754,23 +2754,24 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   margin-bottom:2px;
 }
 .workflow-header-menu .model-search-input{
-  height:34px;
-  border-radius:10px;
+  height:38px;
+  border-radius:12px;
   padding:0 12px;
-  background:rgba(255,255,255,.04);
-  border-color:rgba(255,255,255,.1);
+  background:rgba(255,255,255,.05);
+  border-color:rgba(255,255,255,.12);
+  font-size:13px;
 }
 .workflow-header-menu .model-search-input:focus{
-  border-color:rgba(59,130,246,.82);
-  box-shadow:0 0 0 3px rgba(59,130,246,.16);
+  border-color:rgba(59,130,246,.92);
+  box-shadow:0 0 0 4px rgba(59,130,246,.16);
 }
 .workflow-header-menu .model-search-input::placeholder{color:var(--muted);}
 .workflow-header-menu .titlebar-action-btn{
   width:100% !important;
   justify-content:flex-start !important;
-  min-height:34px;
-  border-radius:10px !important;
-  padding:8px 10px !important;
+  min-height:36px;
+  border-radius:12px !important;
+  padding:8px 12px !important;
   background:transparent !important;
   color:var(--text) !important;
 }
@@ -2778,14 +2779,17 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   background:rgba(255,255,255,.06) !important;
 }
 .workflow-header-menu .titlebar-action-btn.workflow-menu-active{
+  transform:translateX(2px);
   background:linear-gradient(90deg,rgba(59,130,246,.22),rgba(59,130,246,.12)) !important;
   color:var(--accent-text) !important;
   box-shadow:0 0 0 1px rgba(59,130,246,.24) inset,0 8px 24px rgba(59,130,246,.08);
+  position:relative;
 }
 .workflow-header-menu .titlebar-action-btn.workflow-menu-active:hover:not(:disabled){
   background:linear-gradient(90deg,rgba(59,130,246,.28),rgba(59,130,246,.16)) !important;
 }
 .workflow-header-menu .titlebar-action-btn:focus-visible{
+  background:rgba(59,130,246,.08) !important;
   outline:2px solid var(--accent);
   outline-offset:1px;
 }
@@ -8824,4 +8828,5 @@ body.focus-mode aside.rightpanel {
   opacity: 0.78;
   cursor: progress;
 }
+
 
