@@ -1515,6 +1515,7 @@ function browserPrepareSessionSwitch() {
   _browserSetButtonsDisabled(true, null);
   browserRenderPermission({mode: 'none'});
   _browserUpdateHeaderBadge();
+  _browserScheduleSyncRetry(1200);
 }
 
 function browserSetDrawerOpen(open, opts = {}) {
@@ -1655,6 +1656,7 @@ async function browserSyncToCurrentSession(opts = {}) {
       _browserSetEmptyVisible(true);
       _browserSetButtonsDisabled(true, null);
     }
+    _browserScheduleSyncRetry();
     return null;
   }
   if (!sessionId) {
