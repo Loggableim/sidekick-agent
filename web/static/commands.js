@@ -37,7 +37,7 @@ const COMMANDS=[
   {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable|delete]', subArgs:['status','open','refresh','tools','toggle','enable','disable','delete'], noEcho:true},
   {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|open <id>|refresh|pause|resume|stop <id>|interrupt <id>]', subArgs:['status','open','refresh','pause','resume','stop','interrupt'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext|extract', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot','pagecontext','extract'], noEcho:true},
-  {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
+  {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt|chain|single]', subArgs:['show','status','prompt','chain','single'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
 ];
@@ -1787,6 +1787,60 @@ function _buildReviewPrompt(data){
   return lines.join('\n');
 }
 
+function _buildReviewVerificationPrompt(data, primaryResult){
+  const info=data&&data.summary?data.summary:{};
+  const fileEntries=Array.isArray(data&&data.files)?data.files:[];
+  const files=Number(info.files||0)||0;
+  const staged=Number(info.staged||0)||0;
+  const unstaged=Number(info.unstaged||0)||0;
+  const untracked=Number(info.untracked||0)||0;
+  const additions=Number(info.additions||0)||0;
+  const deletions=Number(info.deletions||0)||0;
+  const truncated=!!info.truncated;
+  const diff=String((data&&data.diff)||'').trim()||'(empty diff)';
+  const primaryRaw=String(primaryResult&&primaryResult.raw||'').trim();
+  const primaryFindings=_reviewSerializeResult(primaryResult).trim();
+  const lines=[
+    'You are doing a second-pass verification of a local code review.',
+    'Re-check the diff from scratch and verify the previously reported findings.',
+    'Keep only issues that are directly supported by the diff; drop false positives.',
+    'Also add any important issues missed by the first pass.',
+    `Repository: ${String((data&&data.repo_root)||'(unknown)')}`,
+    `Branch: ${String((data&&data.branch)||'detached')}`,
+    `Commit: ${String((data&&data.commit)||'unknown')}`,
+    `Files changed: ${files} (staged ${staged}, unstaged ${unstaged}, untracked ${untracked})`,
+    `Additions / deletions: +${additions} / -${deletions}${truncated ? ' (diff truncated)' : ''}`,
+  ];
+  if(fileEntries.length){
+    const fileLines=fileEntries.slice(0,40).map(entry=>{
+      const status=String(entry&&entry.status||'').trim()||'?';
+      const stagedMark=entry&&entry.staged?'staged':'unstaged';
+      return `- ${status} [${stagedMark}] ${String(entry&&entry.path||'').trim()}`;
+    });
+    lines.push('', 'Changed files:', ...fileLines);
+    if(fileEntries.length>40){
+      lines.push(`- ... ${fileEntries.length-40} more file(s)`);
+    }
+  }
+  if(primaryFindings){
+    lines.push('', 'First-pass findings (structured):', '```text', primaryFindings, '```');
+  }
+  if(primaryRaw && primaryRaw !== primaryFindings){
+    lines.push('', 'First-pass response (raw):', '```text', primaryRaw, '```');
+  }
+  lines.push(
+    '',
+    'Return only the final verified findings, ordered by severity.',
+    'For each finding, include severity, file path or line reference if possible, the concrete issue, and a fix suggestion.',
+    'If nothing is wrong after verification, say "No issues found." explicitly.',
+    '',
+    '```diff',
+    diff,
+    '```',
+  );
+  return lines.join('\n');
+}
+
 function _reviewParseAssistantResponse(text){
   const raw=String(text||'').trim();
   const normalized=raw.replace(/\r/g,'');
@@ -1888,8 +1942,11 @@ function _reviewBuildResultSection(state){
   status.style.background='rgba(255,255,255,.03)';
 
   const result=state&&state.result||null;
-  if(state&&state.awaitingResult){
-    status.textContent='Review running Ãƒâ€šÃ‚Â· waiting for the assistant response.';
+  const awaiting=!!(state&&state.awaitingResult);
+  if(awaiting){
+    status.textContent=(state&&state.reviewPhase==='verify')
+      ? 'Review running · verifying findings.'
+      : 'Review running · waiting for the assistant response.';
   }else if(result&&result.clean&&!result.findings.length){
     status.style.background='rgba(16,185,129,.12)';
     status.style.borderColor='rgba(16,185,129,.35)';
@@ -2091,8 +2148,24 @@ function _reviewFinalizeFromAssistant(activeSid, assistantMessage){
   if(!state.session_id||String(state.session_id)!==String(activeSid||'')) return false;
   const text=String((assistantMessage&&assistantMessage.content)||assistantMessage||'').trim();
   if(!text) return false;
+  const parsed=_reviewParseAssistantResponse(text);
+  const phase=String(state.reviewPhase||'primary').trim().toLowerCase();
+  const mode=String(state.reviewMode||'chain').trim().toLowerCase();
+  if(phase!=='verify'&&mode!=='single'){
+    state.primaryResult=parsed;
+    state.primaryResultText=text;
+    state.reviewPhase='verify';
+    state.awaitingResult=true;
+    state.result=null;
+    state.resultText='';
+    _reviewSyncCard(state);
+    const verificationPrompt=_buildReviewVerificationPrompt(state.data||null, parsed);
+    void _reviewSendPrompt(verificationPrompt, {state, mode:'single', phase:'verify'});
+    return true;
+  }
   state.awaitingResult=false;
-  state.result=_reviewParseAssistantResponse(text);
+  state.reviewPhase='done';
+  state.result=parsed;
   state.resultText=text;
   state.lastCompletedAt=Date.now();
   _reviewSyncCard(state);
@@ -2101,6 +2174,8 @@ function _reviewFinalizeFromAssistant(activeSid, assistantMessage){
 
 async function _reviewSendPrompt(prompt, opts={}){
   const state=opts&&opts.state ? opts.state : (window._reviewChainState||(window._reviewChainState={}));
+  const mode=String((opts&&opts.mode)||state.reviewMode||'chain').trim().toLowerCase()||'chain';
+  const phase=String((opts&&opts.phase)||'primary').trim().toLowerCase()||'primary';
   const ta=document.getElementById('msg');
   if(!ta){
     if(typeof showToast==='function') showToast('Composer unavailable', 2200, 'error');
@@ -2108,6 +2183,8 @@ async function _reviewSendPrompt(prompt, opts={}){
     _reviewSyncCard(state);
     return;
   }
+  state.reviewMode=mode;
+  state.reviewPhase=phase;
   state.awaitingResult=true;
   state.result=null;
   _reviewSyncCard(state);
@@ -2138,8 +2215,12 @@ function _renderReviewCard(data, prompt){
   state.data=data||null;
   state.prompt=String(prompt||'');
   state.session_id=String((S&&S.session&&S.session.session_id)||'');
+  state.reviewMode='chain';
+  state.reviewPhase='idle';
   state.awaitingResult=false;
   state.result=null;
+  state.primaryResult=null;
+  state.primaryResultText='';
   state.resultText='';
   state.lastCompletedAt=0;
   state.element=null;
@@ -2202,7 +2283,9 @@ async function cmdReview(args){
       }
       return true;
     }
-    await _reviewSendPrompt(prompt, {state: window._reviewChainState});
+    const state=window._reviewChainState||(window._reviewChainState={});
+    const mode=(arg==='single'||arg==='quick'||arg==='fast') ? 'single' : 'chain';
+    await _reviewSendPrompt(prompt, {state, mode, phase:'primary'});
   }catch(e){
     _clearReviewCard();
     showToast('Review failed: '+(e&&e.message?e.message:e), 2600, 'error');
