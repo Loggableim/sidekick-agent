@@ -1,4 +1,4 @@
-﻿let _currentPanel = 'chat';
+let _currentPanel = 'chat';
 let _renamingAppTitlebar = false;  // guard against re-entrant rename
 let _kanbanBoard = null;
 let _kanbanLatestEventId = 0;
@@ -9083,6 +9083,7 @@ function _updateWorkflowSubagentSummary(active, paused){
     goal:String(first.goal||'').trim(),
     subagent_id:String(first.subagent_id||first.session_id||'').trim(),
     session_id:String(first.session_id||'').trim(),
+    preview:String(first.goal||first.session_id||first.subagent_id||'').trim(),
   };
   if(typeof syncWorkflowChip==='function') syncWorkflowChip();
 }

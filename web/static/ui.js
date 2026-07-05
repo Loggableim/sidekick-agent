@@ -1918,7 +1918,7 @@ function _workflowSubagentSummaryState(){
 }
 
 function _workflowSubagentPreviewLabel(state){
-  const preview=String(state&&((state.goal||state.subagentId)||'')).trim();
+  const preview=String(state&&((state.preview||state.goal||state.subagentId)||'')).trim();
   if(!preview) return '';
   return preview.length>42 ? preview.slice(0,42)+'…' : preview;
 }
