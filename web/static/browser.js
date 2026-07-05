@@ -599,8 +599,53 @@ function _browserUpdateChatContext(state) {
     (actionCount > 0 ? ' — <span class="browser-ctx-actions">' + actionCount + ' action' + (actionCount !== 1 ? 's' : '') + '</span>' : '');
 }
 
-function browserSendScreenshotToChat() {
+async function _browserEnsureCurrentState() {
+  const sessionId = _browserCurrentSessionId();
+  if (!sessionId) return null;
   const state = _browserState;
+  if (state && state.session_id === sessionId && (state.url || state.frame_rev)) {
+    return state;
+  }
+  try {
+    const synced = await browserSyncToCurrentSession({force: true, allowPending: true});
+    if (synced && synced.session_id === sessionId) return synced;
+  } catch (_) {}
+  return (_browserState && _browserState.session_id === sessionId) ? _browserState : null;
+}
+
+function _browserComposerTextarea() {
+  return _browserEl('msg')
+    || _browserEl('composerTextarea')
+    || _browserEl('messageInput')
+    || document.querySelector('textarea');
+}
+
+function _browserFallbackReadableText() {
+  const drawer = _browserEl('browserDrawer');
+  const raw = String(drawer && drawer.innerText ? drawer.innerText : '').trim();
+  if (!raw) return '';
+  const lines = raw
+    .split('\n')
+    .map(function(line) { return String(line || '').trim(); })
+    .filter(Boolean);
+  if (!lines.length) return '';
+  const startIndex = lines.findIndex(function(line) {
+    return /^https?:\/\//i.test(line) || /^about:/i.test(line);
+  });
+  const relevant = (startIndex >= 0 ? lines.slice(startIndex) : lines.slice()).filter(function(line) {
+    if (!line) return false;
+    if (/^session [A-Za-z0-9]+$/i.test(line)) return false;
+    if (/^#\d+$/.test(line)) return false;
+    if (line === 'WEBSEARCH' || line === 'Web auto' || line === 'IDLE' || line === 'LOADING') return false;
+    if (line === 'AGENT CONTROL' || line === 'AGENT LOCKED') return false;
+    if (line === 'Go' || line === 'Change detected' || line === 'snapshot') return false;
+    return true;
+  });
+  return relevant.slice(0, 40).join('\n').trim();
+}
+
+async function browserSendScreenshotToChat() {
+  const state = await _browserEnsureCurrentState();
   if (!state || !state.url) {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
@@ -608,7 +653,7 @@ function browserSendScreenshotToChat() {
   const url = state.url;
   const frameUrl = _browserFrameObjectUrl || '';
   const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
-  const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
+  const textarea = _browserComposerTextarea();
   if (textarea && typeof insertAtCursor === 'function') {
     insertAtCursor(textarea, text);
   } else if (textarea) {
@@ -618,8 +663,8 @@ function browserSendScreenshotToChat() {
   if (typeof showToast === 'function') showToast('Screenshot added to chat', 2000, 'success');
 }
 
-function browserCopyCurrentUrl() {
-  const state = _browserState;
+async function browserCopyCurrentUrl() {
+  const state = await _browserEnsureCurrentState();
   const url = state && state.url ? String(state.url).trim() : '';
   if (!url) {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
@@ -637,8 +682,8 @@ function browserCopyCurrentUrl() {
   });
 }
 
-function browserSendPageContextToChat() {
-  const state = _browserState;
+async function browserSendPageContextToChat() {
+  const state = await _browserEnsureCurrentState();
   if (!state || !state.url) {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
@@ -656,7 +701,7 @@ function browserSendPageContextToChat() {
       action: 'snapshot',
     }),
   }).then(function(data) {
-    const snapshotText = String(data && data.text || '').trim();
+    const snapshotText = String(data && data.text || '').trim() || _browserFallbackReadableText();
     const snapshotState = data && data.state ? data.state : state;
     const pageTitle = String((snapshotState && snapshotState.title) || '').trim();
     const pageUrl = String((snapshotState && snapshotState.url) || state.url || '').trim();
@@ -668,7 +713,7 @@ function browserSendPageContextToChat() {
     ];
     if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
     const text = lines.join('\n');
-    const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
+    const textarea = _browserComposerTextarea();
     if (textarea && typeof insertAtCursor === 'function') {
       insertAtCursor(textarea, text);
     } else if (textarea) {
