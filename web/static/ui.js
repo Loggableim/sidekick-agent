@@ -1999,6 +1999,7 @@ function workflowRefreshResearchBadge(){
     badge.disabled=!state.available;
     badge.classList.toggle('research-mode-deep',mode==='deep');
     badge.classList.toggle('research-mode-quick',mode!=='deep');
+    badge.setAttribute('aria-pressed',mode==='deep'?'true':'false');
     const nextMode=mode==='deep'?'quick':'deep';
     const label='Research mode '+mode+'. Click to switch to '+(nextMode==='deep'?'deep research':'quick search')+'.';
     badge.title=label;
@@ -2290,7 +2291,7 @@ function syncWorkflowChip(){
   const review=_workflowReviewState();
   const research=_workflowResearchModeState();
   const subagents=_workflowSubagentChipLabel();
-  value.textContent=approval+' · '+reasoning+(review.visible ? ' · review' : '')+' · '+subagents;
+  value.textContent=approval+' · '+reasoning+' · '+(research.mode==='deep'?'deep':'quick')+(review.visible ? ' · review' : '')+' · '+subagents;
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
   const reviewLabel=review.visible ? _workflowReviewLabel() : 'local review ready';
   const researchLabel=research.mode==='deep' ? 'deep research' : 'quick search';

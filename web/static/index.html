@@ -209,61 +209,62 @@
     })();
   </script>
   <div class="titlebar-actions" id="titlebarActions">
-    <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle." title="Approval mode: manual. Click to cycle.">
-      <span class="titlebar-approval-dot" aria-hidden="true"></span>
-      <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
-    </button>
-    <div class="titlebar-browser-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-      <button class="titlebar-approval-badge titlebar-browser-badge browser-state-closed browser-state-locked" id="browserStatusBadge" type="button" aria-live="polite" aria-label="Browser drawer closed, agent locked. Click to toggle." title="Browser drawer closed, agent locked. Click to toggle." onclick="browserToggleDrawer()">
+    <div class="titlebar-status-cluster">
+      <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle." title="Approval mode: manual. Click to cycle.">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
-        <span class="titlebar-approval-value" id="browserStatusValue">browser closed · locked</span>
+        <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
       </button>
-      <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="browserStatusMenuBtn" type="button" data-tooltip="Browser actions" aria-label="Browser actions" aria-haspopup="menu" aria-controls="browserStatusMenu" aria-expanded="false" onclick="browserToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
-      </button>
-      <div class="browser-header-menu" id="browserStatusMenu" role="menu" aria-label="Browser actions" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:240px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
-        <div style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Browser actions</div>
-        <button class="titlebar-action-btn" id="browserHeaderDrawerAction" type="button" role="menuitem" onclick="browserRunHeaderAction('drawer-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle drawer</button>
-        <button class="titlebar-action-btn" id="browserHeaderPermissionAction" type="button" role="menuitem" onclick="browserRunHeaderAction('permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Enable agent control</button>
-        <button class="titlebar-action-btn" id="browserHeaderExploreAction" type="button" role="menuitem" onclick="browserRunHeaderAction('explore')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Switch to Explore mode</button>
-        <button class="titlebar-action-btn" id="browserHeaderSplitAction" type="button" role="menuitem" onclick="browserRunHeaderAction('split')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Split browser and chat</button>
-        <button class="titlebar-action-btn" id="browserHeaderFullscreenAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullscreen')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Maximize browser</button>
-        <div role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-        <button class="titlebar-action-btn" id="browserHeaderBackAction" type="button" role="menuitem" onclick="browserRunHeaderAction('back')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go back</button>
-        <button class="titlebar-action-btn" id="browserHeaderForwardAction" type="button" role="menuitem" onclick="browserRunHeaderAction('forward')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go forward</button>
-        <button class="titlebar-action-btn" id="browserHeaderReloadAction" type="button" role="menuitem" onclick="browserRunHeaderAction('reload')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Reload page</button>
-        <button class="titlebar-action-btn" id="browserHeaderStopAction" type="button" role="menuitem" onclick="browserRunHeaderAction('stop')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Stop loading</button>
-        <button class="titlebar-action-btn" id="browserHeaderNavigateAction" type="button" role="menuitem" onclick="browserRunHeaderAction('navigate')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Navigate to URL...</button>
-        <button class="titlebar-action-btn" id="browserHeaderNewTabAction" type="button" role="menuitem" onclick="browserRunHeaderAction('newtab')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open current in new tab</button>
-        <button class="titlebar-action-btn" id="browserHeaderCopyUrlAction" type="button" role="menuitem" onclick="browserRunHeaderAction('copyurl')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy current URL</button>
-        <button class="titlebar-action-btn" id="browserHeaderPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
-        <button class="titlebar-action-btn" id="browserHeaderFullPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
-        <button class="titlebar-action-btn" id="browserHeaderScreenshotAction" type="button" role="menuitem" onclick="browserRunHeaderAction('screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
+      <div class="titlebar-browser-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
+        <button class="titlebar-approval-badge titlebar-browser-badge browser-state-closed browser-state-locked" id="browserStatusBadge" type="button" aria-live="polite" aria-label="Browser drawer closed, agent locked. Click to toggle." title="Browser drawer closed, agent locked. Click to toggle." onclick="browserToggleDrawer()">
+          <span class="titlebar-approval-dot" aria-hidden="true"></span>
+          <span class="titlebar-approval-value" id="browserStatusValue">browser closed · locked</span>
+        </button>
+        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="browserStatusMenuBtn" type="button" data-tooltip="Browser actions" aria-label="Browser actions" aria-haspopup="menu" aria-controls="browserStatusMenu" aria-expanded="false" onclick="browserToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+        </button>
+        <div class="browser-header-menu" id="browserStatusMenu" role="menu" aria-label="Browser actions" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:240px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+          <div style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Browser actions</div>
+          <button class="titlebar-action-btn" id="browserHeaderDrawerAction" type="button" role="menuitem" onclick="browserRunHeaderAction('drawer-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle drawer</button>
+          <button class="titlebar-action-btn" id="browserHeaderPermissionAction" type="button" role="menuitem" onclick="browserRunHeaderAction('permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Enable agent control</button>
+          <button class="titlebar-action-btn" id="browserHeaderExploreAction" type="button" role="menuitem" onclick="browserRunHeaderAction('explore')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Switch to Explore mode</button>
+          <button class="titlebar-action-btn" id="browserHeaderSplitAction" type="button" role="menuitem" onclick="browserRunHeaderAction('split')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Split browser and chat</button>
+          <button class="titlebar-action-btn" id="browserHeaderFullscreenAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullscreen')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Maximize browser</button>
+          <div role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
+          <button class="titlebar-action-btn" id="browserHeaderBackAction" type="button" role="menuitem" onclick="browserRunHeaderAction('back')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go back</button>
+          <button class="titlebar-action-btn" id="browserHeaderForwardAction" type="button" role="menuitem" onclick="browserRunHeaderAction('forward')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go forward</button>
+          <button class="titlebar-action-btn" id="browserHeaderReloadAction" type="button" role="menuitem" onclick="browserRunHeaderAction('reload')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Reload page</button>
+          <button class="titlebar-action-btn" id="browserHeaderStopAction" type="button" role="menuitem" onclick="browserRunHeaderAction('stop')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Stop loading</button>
+          <button class="titlebar-action-btn" id="browserHeaderNavigateAction" type="button" role="menuitem" onclick="browserRunHeaderAction('navigate')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Navigate to URL...</button>
+          <button class="titlebar-action-btn" id="browserHeaderNewTabAction" type="button" role="menuitem" onclick="browserRunHeaderAction('newtab')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open current in new tab</button>
+          <button class="titlebar-action-btn" id="browserHeaderCopyUrlAction" type="button" role="menuitem" onclick="browserRunHeaderAction('copyurl')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy current URL</button>
+          <button class="titlebar-action-btn" id="browserHeaderPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
+          <button class="titlebar-action-btn" id="browserHeaderFullPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
+          <button class="titlebar-action-btn" id="browserHeaderScreenshotAction" type="button" role="menuitem" onclick="browserRunHeaderAction('screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
+        </div>
       </div>
-    </div>
-    <button class="titlebar-approval-badge titlebar-research-badge research-mode-quick" id="researchModeBadge" type="button" aria-live="polite" aria-label="Research mode quick. Click to switch to deep research." title="Research mode: quick. Click to switch to deep research." onclick="workflowToggleResearchMode(event)">
-      <span class="titlebar-approval-dot" aria-hidden="true"></span>
-      <span class="titlebar-approval-value" id="researchModeValue">quick</span>
-    </button>
-    <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." title="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
-      <span id="modelStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">model</span>
-    </button>
-    <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." title="Reasoning effort: default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
-      <span class="titlebar-approval-dot" aria-hidden="true"></span>
-      <span class="titlebar-approval-value" id="reasoningModeValue">default</span>
-    </button>
-    <div class="titlebar-workflow-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-      <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
+      <button class="titlebar-approval-badge titlebar-research-badge research-mode-quick" id="researchModeBadge" type="button" aria-live="polite" aria-label="Research mode quick. Click to switch to deep research." title="Research mode: quick. Click to switch to deep research." onclick="workflowToggleResearchMode(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
-        <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
+        <span class="titlebar-approval-value" id="researchModeValue">quick</span>
       </button>
-      <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="workflowStatusMenuBtn" type="button" data-tooltip="Workflow palette (Cmd/Ctrl+Shift+K)" aria-label="Workflow palette. Shortcut Cmd/Ctrl+Shift+K." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+      <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." title="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
+        <span id="modelStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">model</span>
       </button>
-      <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
-        <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
-        <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
-          <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
+      <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." title="Reasoning effort: default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
+        <span class="titlebar-approval-dot" aria-hidden="true"></span>
+        <span class="titlebar-approval-value" id="reasoningModeValue">default</span>
+      </button>
+      <div class="titlebar-workflow-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
+        <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
+          <span class="titlebar-approval-dot" aria-hidden="true"></span>
+          <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
+        </button>
+        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="workflowStatusMenuBtn" type="button" data-tooltip="Workflow palette (Cmd/Ctrl+Shift+K)" aria-label="Workflow palette. Shortcut Cmd/Ctrl+Shift+K." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+        </button>
+        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+          <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
+          <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
+            <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="approval" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('approval')">Approval</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="model" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('model')">Model</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="reasoning" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('reasoning')">Reasoning</button>
@@ -300,6 +301,7 @@
           <span id="workflowHeaderMenuShortcuts">Esc to close · ↑↓ to move</span>
         </div>
       </div>
+    </div>
     </div>
       <div class="titlebar-lang-selector" id="titlebarLangSelector">
         <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
