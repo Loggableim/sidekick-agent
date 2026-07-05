@@ -8854,6 +8854,39 @@ body.focus-mode aside.rightpanel {
   box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
 }
 
+.titlebar-workspace-badge.workspace-state-loading {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+  color: #cbd5e1;
+}
+
+.titlebar-workspace-badge.workspace-state-loading .titlebar-approval-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
+.titlebar-workspace-badge.workspace-state-active {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
+}
+
+.titlebar-workspace-badge.workspace-state-active .titlebar-approval-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
+.titlebar-workspace-badge.workspace-state-empty {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(148, 163, 184, 0.06);
+  color: #cbd5e1;
+}
+
+.titlebar-workspace-badge.workspace-state-empty .titlebar-approval-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
 .titlebar-browser-badge.browser-state-open {
   border-color: rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.08);

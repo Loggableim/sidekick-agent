@@ -1439,6 +1439,13 @@ async function cmdWorkflow(args){
     const text=String((opt&&opt.textContent)||value).trim();
     return isThinkingModel(value) ? `${text} (thinking)` : text;
   };
+  const currentWorkspaceLabel=()=>{
+    const headerValue=document.getElementById('workspaceStatusValue');
+    const composerValue=document.getElementById('composerWorkspaceLabel');
+    const label=String((headerValue&&headerValue.textContent)||(composerValue&&composerValue.textContent)||'no workspace').trim();
+    const normalized=label.replace(/^workspace\s+/i,'').trim();
+    return 'Workspace '+(normalized||'no workspace');
+  };
   const currentBrowserLabel=()=>{
     const body=document.body;
     const drawerOpen=!!(body&&body.classList.contains('browser-drawer-open'));
@@ -1540,6 +1547,7 @@ async function cmdWorkflow(args){
       'Workflow: Approval '+status.approvalMode,
       'Reasoning '+status.reasoningMode,
       'Model '+currentModelLabel(),
+      currentWorkspaceLabel(),
       currentBrowserLabel(),
       currentSandboxLabel(),
       currentResearchLabel(),

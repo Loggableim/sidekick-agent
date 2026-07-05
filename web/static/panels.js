@@ -4440,18 +4440,30 @@ function syncWorkspaceDisplays(){
   const ws=hasSession?S.session.workspace:(defaultWs||'');
   const hasWorkspace=!!(ws);
   const label=hasWorkspace?getWorkspaceFriendlyName(ws):t('no_workspace');
+  const activeSpaceDir=String(window._activeSpaceConfig&&window._activeSpaceConfig.project_dir||'').trim();
+  const displayLabel=hasWorkspace
+    ? (label + (S._bootReady && activeSpaceDir && ws===activeSpaceDir ? ' *' : ''))
+    : t('no_workspace');
+  const headerLabel=hasWorkspace
+    ? displayLabel
+    : (S._bootReady ? t('no_workspace') : 'workspace loading');
+  const headerTitle=hasWorkspace
+    ? ('Workspace: '+ws+(label&&label!==ws?' ('+label+')':'')+'. Click to open workspaces.')
+    : (S._bootReady ? 'No workspace selected. Click to open workspaces.' : 'Workspace loading. Click to open workspaces.');
 
   const composerChip=$('composerWorkspaceChip');
   const composerLabel=$('composerWorkspaceLabel');
   const mobileAction=$('composerMobileWorkspaceAction');
   const mobileLabel=$('composerMobileWorkspaceLabel');
   const composerDropdown=$('composerWsDropdown');
+  const headerBadge=$('workspaceStatusBadge');
+  const headerValue=$('workspaceStatusValue');
   const canChooseWorkspace = hasWorkspace || ((Array.isArray(_workspaceList) ? _workspaceList.length : 0) > 0);
   if(!hasWorkspace && composerDropdown) composerDropdown.classList.remove('open');
   // Only show workspace label once boot has finished to prevent
   // flash of "No workspace" before the saved session finishes loading.
-  if(composerLabel) composerLabel.textContent=((S._bootReady?label:'') + (hasWorkspace && window._activeSpaceConfig?.project_dir && ws === window._activeSpaceConfig.project_dir ? ' ★' : ''));
-  if(mobileLabel) mobileLabel.textContent=S._bootReady?label:'';
+  if(composerLabel) composerLabel.textContent=(S._bootReady?displayLabel:'');
+  if(mobileLabel) mobileLabel.textContent=S._bootReady?displayLabel:'';
   if(composerChip){
     composerChip.disabled=!canChooseWorkspace;
     composerChip.title=hasWorkspace ? ws : ((S._bootReady && canChooseWorkspace) ? 'Choose workspace' : t('no_workspace'));
@@ -4460,6 +4472,18 @@ function syncWorkspaceDisplays(){
   if(mobileAction){
     mobileAction.title=hasWorkspace?ws:t('no_workspace');
     mobileAction.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
+  }
+  if(headerBadge){
+    ['workspace-state-loading','workspace-state-active','workspace-state-empty'].forEach(cls=>headerBadge.classList.remove(cls));
+    const headerState=hasWorkspace ? 'workspace-state-active' : (S._bootReady ? 'workspace-state-empty' : 'workspace-state-loading');
+    headerBadge.classList.add(headerState);
+    headerBadge.hidden=false;
+    headerBadge.disabled=false;
+    headerBadge.title=headerTitle;
+    headerBadge.setAttribute('aria-label',headerTitle);
+  }
+  if(headerValue){
+    headerValue.textContent=headerLabel;
   }
 }
 
@@ -4663,6 +4687,21 @@ function toggleComposerWsDropdown(){
       if(mobileAction) mobileAction.classList.add('active');
     });
   }
+}
+
+function workflowOpenWorkspacePanel(event){
+  if(event&&event.preventDefault) event.preventDefault();
+  if(event&&event.stopPropagation) event.stopPropagation();
+  const chip=$('composerWorkspaceChip');
+  if(chip && !chip.disabled && typeof toggleComposerWsDropdown==='function'){
+    toggleComposerWsDropdown();
+    return false;
+  }
+  if(typeof switchPanel==='function'){
+    switchPanel('workspaces',{fromRailClick:true});
+    return false;
+  }
+  return false;
 }
 
 function closeWsDropdown(){
