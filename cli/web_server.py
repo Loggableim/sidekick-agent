@@ -5588,6 +5588,18 @@ def _is_old_frontend() -> bool:
         return False
 
 
+def _stdlib_python_executable() -> str:
+    repo_root = Path(__file__).resolve().parents[1]
+    candidates = [
+        repo_root / ".venv" / "Scripts" / "python.exe",
+        repo_root / ".venv" / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return sys.executable
+
+
 def _cleanup_stale_stdlib_backends() -> None:
     """Best-effort cleanup for orphaned legacy ``web.server`` proxy children.
 
@@ -5644,13 +5656,14 @@ def _ensure_stdlib_backend() -> int:
         env["SIDEKICK_WEBUI_PORT"] = str(port)
         env["SIDEKICK_WEBUI_SKIP_ONBOARDING"] = "1"
         _STDLIB_PROC = subprocess.Popen(
-            [sys.executable, "-m", "web.server"],
+            [_stdlib_python_executable(), "-m", "web.server"],
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        # Wait for readiness (up to 10 seconds)
-        for _ in range(30):
+        # Wait for readiness. On Windows the legacy backend can spend several
+        # seconds importing the large route module before binding the port.
+        for _ in range(70):
             try:
                 req = urllib.request.Request(
                     f"http://127.0.0.1:{port}/health", method="GET"
@@ -5665,7 +5678,7 @@ def _ensure_stdlib_backend() -> int:
         _STDLIB_PROC.kill()
         _STDLIB_PROC = None
         raise RuntimeError(
-            f"Stdlib API backend did not start on port {port} within 10s"
+            f"Stdlib API backend did not start on port {port} within 20s"
         )
 
 

@@ -290,6 +290,9 @@ def _worktree_retained_payload_for_session_id(sid: str) -> dict:
         return _worktree_retained_payload(get_session(sid, metadata_only=True))
     except KeyError:
         return {}
+    except Exception:
+        logger.debug("Failed to read worktree metadata for deleted session %s", sid)
+        return {}
 
 
 def _review_repo_root(session_id: str | None = None) -> Path:
@@ -361,9 +364,6 @@ def _review_untracked_file_diff(repo_root: Path, rel_path: str, *, size_limit: i
         )
     )
     return diff, None, len(lines)
-    except Exception:
-        logger.debug("Failed to read worktree metadata for deleted session %s", sid)
-        return {}
 
 
 def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict:
