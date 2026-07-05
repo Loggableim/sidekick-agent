@@ -34,7 +34,7 @@ const COMMANDS=[
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
   {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
   {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
-  {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools]', subArgs:['status','open','refresh','tools'], noEcho:true},
+  {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable]', subArgs:['status','open','refresh','tools','toggle','enable','disable'], noEcho:true},
   {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|refresh|pause|resume]', subArgs:['status','open','refresh','pause','resume'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
@@ -1312,6 +1312,22 @@ async function cmdMcp(args){
     if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
     if(typeof switchSettingsSection==='function') switchSettingsSection('system');
   };
+  const loadServers=async()=>{
+    const data=await api('/api/mcp/servers');
+    return Array.isArray(data&&data.servers)?data.servers:[];
+  };
+  const findServer=async(query)=>{
+    const needle=String(query||'').trim().toLowerCase();
+    if(!needle) return null;
+    const servers=await loadServers();
+    if(!servers.length) return null;
+    const exact=servers.find(server=>String(server&&server.name||'').trim().toLowerCase()===needle);
+    if(exact) return exact;
+    const prefix=servers.find(server=>String(server&&server.name||'').trim().toLowerCase().startsWith(needle));
+    if(prefix) return prefix;
+    const contains=servers.find(server=>String(server&&server.name||'').trim().toLowerCase().includes(needle));
+    return contains||null;
+  };
   const summarizeServers=(servers)=>{
     const list=Array.isArray(servers)?servers:[];
     const total=list.length;
@@ -1355,6 +1371,38 @@ async function cmdMcp(args){
     showToast('MCP system section refreshed');
     return true;
   }
+  if(raw.startsWith('toggle ') || raw.startsWith('enable ') || raw.startsWith('disable ')){
+    const parts=raw.split(/\s+/).filter(Boolean);
+    const action=parts[0];
+    const name=parts.slice(1).join(' ').trim();
+    if(!name){
+      showToast('Use /mcp toggle <name>|enable <name>|disable <name>');
+      return true;
+    }
+    try{
+      const server=await findServer(name);
+      if(!server){
+        showToast('MCP server not found: '+name);
+        return true;
+      }
+      const nextEnabled=action==='toggle' ? !(server.enabled!==false) : action==='enable';
+      if(typeof toggleMcpServerEnabled==='function'){
+        await toggleMcpServerEnabled(server.name||name, nextEnabled);
+      }else{
+        const saved=await api('/api/mcp/servers/'+encodeURIComponent(server.name||name),{
+          method:'POST',
+          body:JSON.stringify({enabled:nextEnabled}),
+        });
+        if(typeof loadMcpServers==='function') loadMcpServers();
+        if(typeof loadMcpTools==='function') loadMcpTools();
+        showToast('MCP server '+(nextEnabled?'enabled':'disabled')+': '+String((saved&&saved.server&&saved.server.name)||server.name||name));
+      }
+      openSystemSettings();
+    }catch(e){
+      showToast('Failed to update MCP server: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
   if(raw==='tools'){
     openSystemSettings();
     if(typeof loadMcpTools==='function') loadMcpTools();
@@ -1363,7 +1411,7 @@ async function cmdMcp(args){
     showToast('MCP tools view opened');
     return true;
   }
-  showToast('Use /mcp status|open|refresh|tools');
+  showToast('Use /mcp status|open|refresh|tools|toggle <name>|enable <name>|disable <name>');
   return true;
 }
 

@@ -8900,6 +8900,7 @@ async function toggleMcpServerEnabled(name, enabled){
     if(typeof showToast==='function') showToast('Failed to update MCP server: '+(e&&e.message?e.message:e),2400,'error');
   }
 }
+window.toggleMcpServerEnabled = toggleMcpServerEnabled;
 let _mcpToolsCache=[];
 function _filterMcpToolsForSearch(tools, query){
   const q=(query||'').trim().toLowerCase();
