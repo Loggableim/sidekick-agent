@@ -1961,6 +1961,65 @@ function _workflowHeaderMenuLastVisibleButton(){
   return visible[visible.length-1]||null;
 }
 
+function _workflowHeaderMenuClearActiveButton(){
+  const buttons=_workflowHeaderMenuActionButtons();
+  buttons.forEach(btn=>{
+    if(!btn) return;
+    btn.classList.remove('workflow-menu-active');
+    btn.removeAttribute('aria-selected');
+    btn.style.removeProperty('background');
+    btn.style.removeProperty('color');
+    btn.style.removeProperty('box-shadow');
+  });
+  window._workflowHeaderMenuActiveButton=null;
+}
+
+function _workflowHeaderMenuSetActiveButton(btn){
+  const buttons=_workflowHeaderMenuActionButtons();
+  let activeBtn=null;
+  buttons.forEach(item=>{
+    if(!item) return;
+    const active=item===btn;
+    item.classList.toggle('workflow-menu-active',active);
+    item.setAttribute('aria-selected',active?'true':'false');
+    if(active){
+      item.style.setProperty('background','rgba(59,130,246,.18)','important');
+      item.style.setProperty('color','var(--accent-text)','important');
+      item.style.setProperty('box-shadow','0 0 0 1px rgba(59,130,246,.18) inset','important');
+      activeBtn=item;
+    }else{
+      item.style.removeProperty('background');
+      item.style.removeProperty('color');
+      item.style.removeProperty('box-shadow');
+    }
+  });
+  window._workflowHeaderMenuActiveButton=activeBtn;
+  if(activeBtn && typeof activeBtn.scrollIntoView==='function'){
+    try{ activeBtn.scrollIntoView({block:'nearest'}); }catch(_){}
+  }
+  return activeBtn;
+}
+
+function _workflowHeaderMenuEnsureActiveButton(){
+  const visible=_workflowHeaderMenuVisibleButtons();
+  if(!visible.length){
+    _workflowHeaderMenuClearActiveButton();
+    return null;
+  }
+  const current=window._workflowHeaderMenuActiveButton;
+  if(current && !current.hidden && visible.includes(current)) return current;
+  return _workflowHeaderMenuSetActiveButton(visible[0]);
+}
+
+function _workflowHeaderMenuMoveSelection(delta){
+  const visible=_workflowHeaderMenuVisibleButtons();
+  if(!visible.length) return null;
+  let idx=visible.indexOf(window._workflowHeaderMenuActiveButton);
+  if(idx<0) idx=0;
+  else idx=(idx+delta+visible.length)%visible.length;
+  return _workflowHeaderMenuSetActiveButton(visible[idx]);
+}
+
 function workflowFilterHeaderMenu(query){
   const menu=$('workflowStatusMenu');
   if(!menu) return;
@@ -1990,6 +2049,15 @@ function workflowFilterHeaderMenu(query){
     if(title) title.hidden=false;
     if(empty) empty.hidden=true;
   }
+  if(visibleCount){
+    const active=window._workflowHeaderMenuActiveButton;
+    const activeText=(active&&((active.textContent||'').trim().toLowerCase()||(active.title||'').trim().toLowerCase()))||'';
+    if(!active || active.hidden || !buttons.includes(active) || (q && !activeText.includes(q))){
+      _workflowHeaderMenuEnsureActiveButton();
+    }
+  }else{
+    _workflowHeaderMenuClearActiveButton();
+  }
 }
 
 function workflowFocusHeaderMenuSearch(){
@@ -2001,7 +2069,7 @@ function workflowFocusHeaderMenuSearch(){
 }
 
 function workflowRunFirstVisibleHeaderAction(){
-  const btn=_workflowHeaderMenuFirstVisibleButton();
+  const btn=window._workflowHeaderMenuActiveButton||_workflowHeaderMenuFirstVisibleButton();
   if(btn && typeof btn.click==='function'){
     btn.click();
     return true;
@@ -2022,14 +2090,12 @@ function workflowHeaderMenuSearchKeydown(event){
   }
   if(key==='arrowdown' || key==='down'){
     if(typeof event.preventDefault==='function') event.preventDefault();
-    const btn=_workflowHeaderMenuFirstVisibleButton();
-    if(btn && typeof btn.focus==='function') btn.focus();
+    _workflowHeaderMenuMoveSelection(1);
     return;
   }
   if(key==='arrowup' || key==='up'){
     if(typeof event.preventDefault==='function') event.preventDefault();
-    const btn=_workflowHeaderMenuLastVisibleButton();
-    if(btn && typeof btn.focus==='function') btn.focus();
+    _workflowHeaderMenuMoveSelection(-1);
     return;
   }
 }
@@ -2104,6 +2170,7 @@ function workflowCloseHeaderMenu(){
   _workflowHeaderMenuOpen=false;
   if(menu) menu.hidden=true;
   window._workflowHeaderMenuQuery='';
+  _workflowHeaderMenuClearActiveButton();
   const search=_workflowHeaderMenuSearchEl();
   if(search){
     search.value='';
@@ -2147,6 +2214,7 @@ function workflowToggleHeaderMenu(event){
   workflowRefreshHeaderMenu();
   document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
   document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
+  workflowFilterHeaderMenu((_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
   setTimeout(workflowFocusHeaderMenuSearch,0);
   return false;
 }
