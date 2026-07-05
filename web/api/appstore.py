@@ -62,6 +62,13 @@ _INSTALLED_FILE = _APPS_DIR / ".installed.json"
 _ENV_FILE = _SIDEKICK_HOME / ".env"
 _CONFIG_FILE = _SIDEKICK_HOME / "config.yaml"
 
+# Space-specific app activation: each space can enable apps via space.yaml
+_SPACES_ROOT = Path(
+    os.environ.get("SIDEKICK_WEBUI_SPACES_DIR")
+    or os.environ.get("HERMES_WEBUI_SPACES_DIR")
+    or str(_HOME_DIR / "spaces")
+)
+
 _VENV_PYTHON = _REPO_ROOT / ".venv" / "Scripts" / "python.exe"
 if not _VENV_PYTHON.exists():
     _VENV_PYTHON = _REPO_ROOT / "venv" / "Scripts" / "python.exe"
@@ -383,8 +390,11 @@ def get_install_status(manifest_key: str) -> dict:
     }
 
 
-def get_all_status() -> dict:
+def get_all_status(space_slug: str | None = None) -> dict:
     """Return status for every available app.
+
+    If *space_slug* is given, per-space activation is checked via
+    ``space.yaml#apps`` in addition to global install status.
 
     Returns::
 
@@ -397,6 +407,7 @@ def get_all_status() -> dict:
                     "version": "...",
                     ...manifest fields...
                     "status": {...install status...},
+                    "space_active": bool,  # only set when space_slug is given
                 },
                 ...
             ],
@@ -406,6 +417,9 @@ def get_all_status() -> dict:
     """
     manifests = discover_manifests()
     installed_records = _load_installed()
+    space_apps: set[str] = set()
+    if space_slug:
+        space_apps = _get_space_active_apps(space_slug)
     apps: list[dict] = []
     installed_count = 0
 
@@ -421,6 +435,8 @@ def get_all_status() -> dict:
             "version_installed": version_installed,
             "version_available": m.get("version", "unknown"),
         }
+        if space_slug:
+            app_entry["space_active"] = key in space_apps
         apps.append(app_entry)
         if installed:
             installed_count += 1
@@ -430,6 +446,57 @@ def get_all_status() -> dict:
         "installed_count": installed_count,
         "available_count": len(manifests),
     }
+
+
+def _get_space_active_apps(space_slug: str) -> set[str]:
+    """Return the set of app keys that are active for a given space.
+
+    Reads from ``<spaces_root>/<slug>/space.yaml#apps``.
+    """
+    space_dir = _SPACES_ROOT / space_slug
+    space_yaml = space_dir / "space.yaml"
+    if not space_yaml.exists():
+        return set()
+    try:
+        import yaml
+        raw = yaml.safe_load(space_yaml.read_text("utf-8")) or {}
+        apps_cfg = raw.get("apps", {})
+        if isinstance(apps_cfg, dict):
+            return {k for k, v in apps_cfg.items() if v}
+        if isinstance(apps_cfg, list):
+            return set(apps_cfg)
+    except Exception as exc:
+        logger.warning("Failed to read space apps for %s: %s", space_slug, exc)
+    return set()
+
+
+def _set_space_app_active(space_slug: str, app_key: str, active: bool) -> bool:
+    """Enable or disable an app for a specific space in ``space.yaml#apps``.
+
+    Returns True if the file was changed.
+    """
+    space_dir = _SPACES_ROOT / space_slug
+    space_yaml = space_dir / "space.yaml"
+    space_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        import yaml
+        if space_yaml.exists():
+            raw = yaml.safe_load(space_yaml.read_text("utf-8")) or {}
+        else:
+            raw = {}
+        apps_cfg = raw.get("apps", {})
+        if not isinstance(apps_cfg, dict):
+            apps_cfg = {}
+        if active:
+            apps_cfg[app_key] = True
+        else:
+            apps_cfg.pop(app_key, None)
+        raw["apps"] = apps_cfg
+        space_yaml.write_text(yaml.dump(raw, default_flow_style=False, allow_unicode=True), encoding="utf-8")
+        return True
+    except Exception as exc:
+        logger.warning("Failed to update space apps for %s: %s", space_slug, exc)
+        return False
 
 
 def install_app(manifest_key: str, values: dict) -> dict:

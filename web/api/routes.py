@@ -3355,7 +3355,8 @@ def _handle_plugins(handler, parsed) -> bool:
 def _handle_appstore(handler, parsed) -> bool:
     """GET /api/appstore — return status for all apps."""
     try:
-        return j(handler, get_all_status())
+        space_slug = _workspace_slug_from_request(handler, parsed)
+        return j(handler, get_all_status(space_slug=space_slug))
     except Exception as exc:
         logger.warning("Appstore status failed: %s", exc)
         return j(
@@ -4308,6 +4309,10 @@ def handle_get(handler, parsed) -> bool:
                     if ws:
                         set_session_dir(str(ws.sessions_dir))
                         ws_sessions = all_sessions(diag=diag)
+                        if workspace_slug != "default":
+                            for _session in ws_sessions:
+                                if _session and not _session.get("workspace_slug"):
+                                    _session["workspace_slug"] = workspace_slug
                         # Merge — avoid duplicates by session_id
                         existing_ids = {s['session_id'] for s in webui_sessions}
                         for s in ws_sessions:
@@ -7097,6 +7102,21 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, result, status=status)
         except Exception as exc:
             logger.exception("Appstore submit failed")
+            return error_response(handler, exc, status=500)
+
+    # ── Appstore: Space activation toggle ──
+    if parsed.path == "/api/appstore/space-toggle":
+        try:
+            from web.api.appstore import _set_space_app_active
+            key = body.get("key", "")
+            active = body.get("active", False)
+            space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+            if not key:
+                return bad(handler, "Missing required field: key")
+            changed = _set_space_app_active(space_slug, key, bool(active))
+            return j(handler, {"success": True, "changed": changed, "space_slug": space_slug, "app_key": key, "active": bool(active)})
+        except Exception as exc:
+            logger.exception("Appstore space-toggle failed")
             return error_response(handler, exc, status=500)
 
     return False  # 404

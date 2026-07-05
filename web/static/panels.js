@@ -6941,6 +6941,7 @@ function _renderAppstoreMyApps(container) {
 function _renderAppstoreAppPage(container, app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
+  const isSpaceActive = app.space_active === true;
   let installLabel, installDisabled, installAction, uninstallAction;
 
   if (isInstalled) {
@@ -6971,6 +6972,20 @@ function _renderAppstoreAppPage(container, app) {
 
   const versionStr = app.version || app.ver || '?';
   const sizeStr = app.size || '—';
+
+  // Space activation toggle (only for apps that support per-space activation)
+  const spaceToggleHtml = (app.key === 'imap-mail')
+    ? '<div style="margin-top:12px;padding:12px;background:var(--code-bg);border-radius:8px;border:1px solid var(--border2);">' +
+        '<div style="display:flex;align-items:center;gap:10px;">' +
+          '<label class="appstore-toggle-label" style="flex:1;font-size:13px;font-weight:500;">In diesem Space aktivieren</label>' +
+          '<button class="appstore-card-btn ' + (isSpaceActive ? 'appstore-card-btn-success' : 'appstore-card-btn-outline') + '" style="padding:6px 14px;font-size:12px;width:auto;" ' +
+            'onclick="_appstoreToggleSpace(\'' + esc(app.key) + '\', ' + (isSpaceActive ? 'false' : 'true') + ')">' +
+            (isSpaceActive ? '✓ Aktiv' : 'Aktivieren') +
+          '</button>' +
+        '</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px;">Nur in diesem Space sichtbar. Jeder Space kann Apps unabhängig aktivieren.</div>' +
+      '</div>'
+    : '';
 
   let html =
     // Back button + app header
@@ -7004,6 +7019,7 @@ function _renderAppstoreAppPage(container, app) {
             : '') +
         '</div>' +
         (isInstalled ? '<div style="margin-top:8px;font-size:11px;color:var(--success);"><span>✓ Installiert (Version ' + esc(app.status.version_installed || versionStr) + ')</span></div>' : '') +
+        spaceToggleHtml +
       '</div>' +
     '</div>' +
 
@@ -9890,6 +9906,50 @@ function _initMemoryToolsSearch() {
     });
   };
 }
+
+// ── Appstore: Space activation toggle ──────────────────────────────────────
+
+async function _appstoreToggleSpace(appKey, active) {
+  try {
+    const res = await fetch('/api/appstore/space-toggle', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({key: appKey, active: active})
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(active ? 'App für diesen Space aktiviert' : 'App für diesen Space deaktiviert', 'success');
+      // Reload appstore panel to reflect changes
+      loadAppstorePanel();
+      _appstoreSyncMailButtons();
+    } else {
+      showToast('Fehler: ' + (data.error || 'Unbekannter Fehler'), 'error');
+    }
+  } catch (err) {
+    showToast('Fehler: ' + err.message, 'error');
+  }
+}
+
+// ── Mail button visibility (per-space app activation) ─────────────────────
+
+function _appstoreSyncMailButtons() {
+  // Check if imap-mail is active for the current space
+  const imapApp = _appstoreAppsCache.find(a => a.key === 'imap-mail');
+  const isActive = imapApp && imapApp.space_active === true;
+
+  const railBtn = document.getElementById('mailRailBtn');
+  const sidebarBtn = document.getElementById('mailSidebarBtn');
+
+  if (railBtn) railBtn.style.display = isActive ? '' : 'none';
+  if (sidebarBtn) sidebarBtn.style.display = isActive ? '' : 'none';
+}
+
+// Hook into loadAppstorePanel to sync mail buttons after loading
+const _origLoadAppstorePanel = loadAppstorePanel;
+loadAppstorePanel = async function() {
+  await _origLoadAppstorePanel.apply(this, arguments);
+  _appstoreSyncMailButtons();
+};
 
 
 

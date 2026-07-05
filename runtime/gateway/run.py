@@ -4523,7 +4523,7 @@ class GatewayRunner:
         except Exception:
             logger.warning("kanban dispatcher: config loader unavailable; disabled")
             return
-        env_override = (os.environ.get("SIDEKICK_KANBAN_DISPATCH_IN_GATEWAY")).strip().lower()
+        env_override = (os.environ.get("SIDEKICK_KANBAN_DISPATCH_IN_GATEWAY", "")).strip().lower()
         if env_override in {"0", "false", "no", "off"}:
             logger.info("kanban dispatcher: disabled via HERMES_KANBAN_DISPATCH_IN_GATEWAY env")
             return
