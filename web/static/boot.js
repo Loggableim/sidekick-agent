@@ -1968,7 +1968,7 @@ function _bootTimeout(promise, ms, label) {
   if (urlSession && saved && !_bootRestoreCanceled()) {
     // Direct session URLs should start loading immediately instead of waiting
     // for sidebar/session-list rendering to finish.
-    _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '' }).catch((e) => {
+    _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
       if (!_bootRestoreCanceled()) throw e;
     });
   }
@@ -1999,7 +1999,7 @@ function _bootTimeout(promise, ms, label) {
       else if(!_bootRestoreCanceled()) await loadSession(saved);
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
       if (saved && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
-        await loadSession(saved, { expectedSpace: urlWorkspace || '' }).catch(() => {});
+        await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
       }
       // If the restored session has no messages it is an ephemeral scratch pad —
       // treat the page as a fresh start rather than resuming a blank conversation.

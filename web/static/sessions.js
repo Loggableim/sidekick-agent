@@ -666,6 +666,7 @@ if (document.readyState === 'loading') {
 
 async function loadSession(sid, options){
   options = options || {};
+  const suppressMissingSessionMessage = !!options.suppressMissingSessionMessage;
   let spaceLoadKey = (typeof _activeSpaceLoadKey === 'function') ? _activeSpaceLoadKey() : '';
   const currentSid = S.session ? S.session.session_id : null;
   const currentHasMessages = Array.isArray(S.messages) && S.messages.some(m => m && m.role);
@@ -736,6 +737,16 @@ async function loadSession(sid, options){
     const _msgInner = $('msgInner');
     if(_msgInner){
       if(e.status===404){
+        if (suppressMissingSessionMessage) {
+          _msgInner.innerHTML='';
+          const emptyState = $('emptyState');
+          if (emptyState) emptyState.style.display='';
+          if(!currentSid&&localStorage.getItem('sidekick-webui-session')===sid){
+            localStorage.removeItem('sidekick-webui-session');
+          }
+          if (_loadingSessionId === sid) _loadingSessionId = null;
+          return;
+        }
         _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Session not available in web UI.</div>';
         // If this 404 was for the saved active-session ID (not a click-into request),
         // wipe the stale localStorage value and rethrow so boot can fall through to
