@@ -1984,6 +1984,12 @@ function workflowRefreshHeaderMenu(){
       ? 'Pause browser control'
       : (mode==='read' ? 'Resume browser control' : 'Enable browser control');
   }
+  const browserScreenshot=$('workflowHeaderBrowserScreenshotAction');
+  if(browserScreenshot) browserScreenshot.textContent='Send screenshot to chat';
+  const browserPageContext=$('workflowHeaderBrowserPageContextAction');
+  if(browserPageContext) browserPageContext.textContent='Send readable page text to chat';
+  const browserFullPageContext=$('workflowHeaderBrowserFullPageContextAction');
+  if(browserFullPageContext) browserFullPageContext.textContent='Send full page context to chat';
   if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
 }
 
@@ -2073,6 +2079,19 @@ function workflowRunHeaderAction(action){
         const browserMenu=$('browserStatusMenu');
         if(browserMenu && browserMenu.hidden) browserToggleHeaderMenu();
       }
+      break;
+    case 'browser-screenshot':
+      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('screenshot');
+      else if(typeof browserSendScreenshotToChat==='function') browserSendScreenshotToChat();
+      break;
+    case 'browser-pagecontext':
+      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('pagecontext');
+      else if(typeof browserSendPageContextToChat==='function') browserSendPageContextToChat();
+      break;
+    case 'browser-fullpagecontext':
+      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('fullpagecontext');
+      else if(typeof browserSendFullPageContextToChat==='function') browserSendFullPageContextToChat();
+      else if(typeof browserSendPageContextToChat==='function') browserSendPageContextToChat({full:true});
       break;
     case 'subagents':
       if(typeof executeCommand==='function') executeCommand('/subagents open');
