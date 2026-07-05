@@ -189,8 +189,22 @@ class ChatCompletionsTransport:
 
         if supports_reasoning:
             if reasoning_config and isinstance(reasoning_config, dict):
-                effort = reasoning_config.get("effort")
-                if effort:
+                effort = str(reasoning_config.get("effort") or "").strip().lower()
+                provider_key = (provider_name or getattr(provider_profile, "name", "") or "").strip().lower()
+                if provider_key == "ollama-cloud":
+                    # Ollama Cloud accepts the OpenAI-compatible reasoning
+                    # payload. Keep Sidekick's internal xhigh alias stable and
+                    # translate it to Ollama's wire-level "max".
+                    if not reasoning_config.get("enabled", True):
+                        extra_body["reasoning"] = {"effort": "none"}
+                    else:
+                        if effort == "minimal":
+                            effort = "low"
+                        elif effort in {"xhigh", "max"}:
+                            effort = "max"
+                        if effort:
+                            extra_body["reasoning"] = {"effort": effort}
+                elif effort:
                     extra_body["reasoning"] = {"effort": effort}
 
         if github_reasoning_extra:

@@ -202,6 +202,8 @@ def parse_reasoning_effort(effort: str) -> dict | None:
     if not effort or not effort.strip():
         return None
     effort = effort.strip().lower()
+    if effort == "max":
+        effort = "xhigh"
     if effort == "none":
         return {"enabled": False}
     if effort in VALID_REASONING_EFFORTS:

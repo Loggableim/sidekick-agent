@@ -3746,7 +3746,10 @@ from cli.models import _PROVIDER_MODELS
 def _current_reasoning_effort(config) -> str:
     agent_cfg = config.get("agent")
     if isinstance(agent_cfg, dict):
-        return str(agent_cfg.get("reasoning_effort") or "").strip().lower()
+        effort = str(agent_cfg.get("reasoning_effort") or "").strip().lower()
+        if effort == "max":
+            return "xhigh"
+        return effort
     return ""
 
 
@@ -4742,6 +4745,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         fetch_api_models,
         opencode_model_api_mode,
         normalize_opencode_model_id,
+        ollama_cloud_model_reasoning_efforts,
     )
 
     pconfig = PROVIDER_REGISTRY[provider_id]
@@ -4951,8 +4955,18 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             selected = None
 
     if selected:
+        selected_effort = None
+        reasoning_efforts: list[str] = []
         if provider_id in {"opencode-zen", "opencode-go"}:
             selected = normalize_opencode_model_id(provider_id, selected)
+        elif provider_id == "ollama-cloud":
+            reasoning_efforts = ollama_cloud_model_reasoning_efforts(selected)
+            if reasoning_efforts:
+                current_effort = _current_reasoning_effort(load_config())
+                print(f"  {selected} supports reasoning controls.")
+                selected_effort = _prompt_reasoning_effort_selection(
+                    reasoning_efforts, current_effort=current_effort
+                )
 
         _save_model_choice(selected)
 
@@ -4968,10 +4982,17 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
             model["api_mode"] = opencode_model_api_mode(provider_id, selected)
         else:
             model.pop("api_mode", None)
+        if selected_effort is not None:
+            _set_reasoning_effort(cfg, selected_effort)
         save_config(cfg)
         deactivate_provider()
 
         print(f"Default model set to: {selected} (via {pconfig.name})")
+        if reasoning_efforts:
+            if selected_effort == "none":
+                print("Reasoning disabled for this model.")
+            elif selected_effort:
+                print(f"Reasoning effort set to: {selected_effort}")
     else:
         print("No change.")
 

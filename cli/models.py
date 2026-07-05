@@ -2279,6 +2279,20 @@ def github_model_reasoning_efforts(
     return _github_reasoning_efforts_for_model_id(str(model_id or normalized))
 
 
+def ollama_cloud_model_reasoning_efforts(model_id: Optional[str]) -> list[str]:
+    """Return reasoning-effort levels exposed for an Ollama Cloud model.
+
+    Sidekick keeps ``xhigh`` as the canonical top tier, then maps it to
+    Ollama's wire-level ``max`` in the transport layer.
+    """
+    normalized = str(model_id or "").strip().lower()
+    if not normalized:
+        return []
+    if "gpt-oss" in normalized:
+        return ["low", "medium", "high"]
+    return ["low", "medium", "high", "xhigh"]
+
+
 def probe_api_models(
     api_key: Optional[str],
     base_url: Optional[str],
@@ -2409,16 +2423,26 @@ def fetch_api_models(
 # Cache TTL: 1 hour
 _OLLAMA_CLOUD_CACHE_TTL = 3600
 
-# Curated subset of Ollama Cloud models shown in the WebUI picker.
-# Models not in this list are filtered out of the live catalog.
+# Curated subset of Ollama Cloud thinking models shown in the WebUI picker.
+# Keep this aligned with the official thinking catalog and only include
+# models that are actually served by the Ollama Cloud endpoint.
 OLLAMA_CLOUD_CURATED_MODELS: list[str] = [
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "gemma4",
     "gemma4:31b",
+    "glm-5",
+    "glm-5.1",
     "glm-5.2",
+    "kimi-k2.5",
+    "kimi-k2.6",
+    "kimi-k2.7-code",
+    "minimax-m2.5",
+    "minimax-m2.7",
     "minimax-m3",
     "nemotron-3-super",
     "nemotron-3-ultra",
+    "qwen3.5",
 ]
 
 

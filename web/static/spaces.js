@@ -343,7 +343,12 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
     const hasCurrentInSpace = !!(currentSid && activeSessionInTargetSpace && (sessionsInSpace || []).some(s => s && s.session_id === currentSid));
     if (!currentSid || !hasCurrentInSpace) {
       if ((sessionsInSpace || []).length && typeof loadSession === 'function') {
-        await _withSpaceTimeout(Promise.resolve(loadSession(sessionsInSpace[0].session_id, {expectedSpace: slug})), 12000, 'load session');
+        const targetSid = sessionsInSpace[0].session_id;
+        await _withSpaceTimeout(Promise.resolve(loadSession(targetSid, {expectedSpace: slug})), 12000, 'load session');
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        if ((!S || !S.session || S.session.session_id !== targetSid || !Array.isArray(S.messages) || !S.messages.length) && typeof loadSession === 'function') {
+          await _withSpaceTimeout(Promise.resolve(loadSession(targetSid, {expectedSpace: slug})), 12000, 'reload session');
+        }
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
         _markSpaceSwitchTiming(slug, switchRev, 'session-loaded');
       } else if (typeof newSession === 'function') {
@@ -356,6 +361,16 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
         _markSpaceSwitchTiming(slug, switchRev, 'sessions-rerendered-after-create');
       }
+    }
+    if (typeof S !== 'undefined' && S && S.session && S.session.session_id && _spaceSessionMatchesSlug(S.session, slug)) {
+      try {
+        if (typeof syncTopbar === 'function') syncTopbar();
+        if (typeof renderMessages === 'function') renderMessages({preserveScroll:true});
+        if (typeof browserSyncToCurrentSession === 'function') browserSyncToCurrentSession({force:true, allowPending:true});
+        if ((!Array.isArray(S.messages) || !S.messages.length) && typeof _ensureMessagesLoaded === 'function') {
+          void _ensureMessagesLoaded(S.session.session_id).catch(() => {});
+        }
+      } catch (_) {}
     }
     if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
     void _syncSpaceProjectDirForActiveSession(slug);
