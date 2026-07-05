@@ -261,6 +261,10 @@
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="workspaceStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">workspace</span>
       </button>
+      <button class="titlebar-approval-badge titlebar-subagents-badge subagents-state-loading" id="subagentsStatusBadge" type="button" aria-live="polite" aria-label="Subagents loading. Click to open subagents." title="Subagents loading. Click to open subagents." onclick="workflowOpenSubagentsPanel(event)">
+        <span class="titlebar-approval-dot" aria-hidden="true"></span>
+        <span class="titlebar-approval-value" id="subagentsStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">subagents loading</span>
+      </button>
       <div class="titlebar-workflow-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
         <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
           <span class="titlebar-approval-dot" aria-hidden="true"></span>

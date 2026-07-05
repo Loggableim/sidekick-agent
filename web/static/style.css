@@ -8895,6 +8895,61 @@ body.focus-mode aside.rightpanel {
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
 }
 
+.titlebar-subagents-badge.subagents-state-loading {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+  color: #cbd5e1;
+}
+
+.titlebar-subagents-badge.subagents-state-loading .titlebar-approval-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
+.titlebar-subagents-badge.subagents-state-active {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+  color: #86efac;
+}
+
+.titlebar-subagents-badge.subagents-state-active .titlebar-approval-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.14);
+}
+
+.titlebar-subagents-badge.subagents-state-paused {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+}
+
+.titlebar-subagents-badge.subagents-state-paused .titlebar-approval-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.titlebar-subagents-badge.subagents-state-empty {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(148, 163, 184, 0.06);
+  color: #cbd5e1;
+}
+
+.titlebar-subagents-badge.subagents-state-empty .titlebar-approval-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
+.titlebar-subagents-badge.subagents-state-offline {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.06);
+  color: #fca5a5;
+}
+
+.titlebar-subagents-badge.subagents-state-offline .titlebar-approval-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
 .titlebar-browser-badge.browser-state-open {
   border-color: rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.08);
