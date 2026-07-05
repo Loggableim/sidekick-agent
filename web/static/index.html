@@ -2959,6 +2959,7 @@
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnForward" data-tooltip="Forward" aria-label="Forward" onclick="browserGoForward()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnReload" data-tooltip="Reload" aria-label="Reload" onclick="browserReload()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnStop" data-tooltip="Stop" aria-label="Stop" onclick="browserStop()"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" stroke="none"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg></button>
+              <button class="panel-icon-btn browser-split-btn has-tooltip has-tooltip--bottom" id="browserBtnSplit" data-tooltip="Split browser and chat" aria-label="Split browser and chat" aria-pressed="false" onclick="browserToggleSplit()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/><path d="M8 9h2"/><path d="M14 15h2"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnOpenTab" data-tooltip="Maximize browser" aria-label="Maximize browser" aria-pressed="false" onclick="browserToggleFullscreen()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendToChatBtn" data-tooltip="Send screenshot to chat" aria-label="Send screenshot to chat" onclick="browserSendScreenshotToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom browser-drawer-close-btn" id="browserBtnCloseDrawer" data-tooltip="Close browser drawer" aria-label="Close browser drawer" onclick="browserPanelDeactivated()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
@@ -6602,7 +6603,44 @@
 <script src="static/sessions.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/browser.js?v=__WEBUI_VERSION__" defer></script>
+<script>
+  (function() {
+    function _setBodyBrowserSplit(open) {
+      document.body.classList.toggle('browser-split', !!open);
+      const splitBtn = document.getElementById('browserBtnSplit');
+      if (splitBtn) splitBtn.setAttribute('aria-pressed', open ? 'true' : 'false');
+    }
+    window.browserToggleFullscreen = window.browserToggleFullscreen || function() {
+      document.body.classList.toggle('browser-maximized');
+      const btn = document.getElementById('browserBtnOpenTab');
+      if (btn) {
+        const active = document.body.classList.contains('browser-maximized');
+        btn.classList.toggle('is-active', active);
+        btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        btn.setAttribute('data-tooltip', active ? 'Restore browser' : 'Maximize browser');
+        btn.setAttribute('aria-label', active ? 'Restore browser' : 'Maximize browser');
+      }
+    };
+    window.browserToggleSplit = window.browserToggleSplit || function() {
+      const next = !document.body.classList.contains('browser-split');
+      document.body.classList.toggle('browser-maximized', false);
+      _setBodyBrowserSplit(next);
+      const btn = document.getElementById('browserBtnSplit');
+      if (btn) {
+        btn.classList.toggle('is-active', next);
+        btn.setAttribute('data-tooltip', next ? 'Exit split screen' : 'Split browser and chat');
+        btn.setAttribute('aria-label', next ? 'Exit split screen' : 'Split browser and chat');
+      }
+      const drawer = document.getElementById('browserDrawer');
+      if (next && drawer) {
+        document.body.classList.add('browser-drawer-open');
+        drawer.setAttribute('aria-hidden', 'false');
+        drawer.removeAttribute('inert');
+      }
+    };
+  })();
+</script>
+<script src="static/browser.js?v=__WEBUI_VERSION__&split=5" defer></script>
 <script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/spaces.js?v=__WEBUI_VERSION__" defer></script>

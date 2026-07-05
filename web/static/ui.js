@@ -6662,6 +6662,17 @@ function renderMessages(options){
     }
   }
   if (typeof _ensureSubagentPolling === 'function') _ensureSubagentPolling();
+  if (typeof _reviewChainState !== 'undefined' && _reviewChainState && _reviewChainState.element && _reviewChainState.visible) {
+    const activeSid = S && S.session && S.session.session_id ? String(S.session.session_id) : '';
+    if (!activeSid || !_reviewChainState.session_id || String(_reviewChainState.session_id) !== activeSid) {
+      _reviewChainState.visible = false;
+    } else {
+      const existing = inner.querySelector('.review-card');
+      if (!existing) {
+        inner.appendChild(_reviewChainState.element);
+      }
+    }
+  }
   // Scan rendered messages for file paths to populate the open-files bar.
   if(typeof _scanMessagesForFiles==='function') _scanMessagesForFiles();
 }

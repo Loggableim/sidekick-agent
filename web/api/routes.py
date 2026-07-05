@@ -3,6 +3,7 @@ Sidekick -- Route handlers for GET and POST endpoints.
 Extracted from server.py (Sprint 11) so server.py is a thin shell.
 """
 
+import difflib
 import html as _html
 import copy
 import importlib.util
@@ -289,6 +290,77 @@ def _worktree_retained_payload_for_session_id(sid: str) -> dict:
         return _worktree_retained_payload(get_session(sid, metadata_only=True))
     except KeyError:
         return {}
+
+
+def _review_repo_root(session_id: str | None = None) -> Path:
+    if session_id:
+        try:
+            session = get_session(session_id, metadata_only=True)
+            repo_root = getattr(session, "worktree_repo_root", None)
+            if repo_root:
+                return Path(str(repo_root)).expanduser().resolve()
+        except Exception:
+            pass
+    return Path(__file__).resolve().parents[2]
+
+
+def _run_git_command(repo_root: Path, *args: str, timeout: int = 20) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout or ""
+
+
+def _git_status_label(staged: str, worktree: str, raw: str) -> str:
+    if raw == "??":
+        return "?"
+    code = staged or worktree
+    mapping = {
+        "M": "M",
+        "A": "A",
+        "D": "D",
+        "R": "R",
+        "C": "C",
+        "U": "U",
+        "?": "?",
+    }
+    return mapping.get(code, code)
+
+
+def _review_untracked_file_diff(repo_root: Path, rel_path: str, *, size_limit: int = 256_000) -> tuple[str | None, str | None, int]:
+    file_path = (repo_root / rel_path)
+    try:
+        if not file_path.is_file():
+            return None, "missing", 0
+        data = file_path.read_bytes()
+    except Exception as exc:
+        return None, f"read failed: {exc}", 0
+    if len(data) > size_limit:
+        return None, "too large", 0
+    if b"\x00" in data:
+        return None, "binary", 0
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    diff = "\n".join(
+        difflib.unified_diff(
+            [],
+            lines,
+            fromfile="/dev/null",
+            tofile=f"b/{rel_path}",
+            lineterm="",
+        )
+    )
+    return diff, None, len(lines)
     except Exception:
         logger.debug("Failed to read worktree metadata for deleted session %s", sid)
         return {}
@@ -4978,6 +5050,145 @@ def handle_get(handler, parsed) -> bool:
         except Exception as e:
             logger.exception("rollback/diff failed")
             return bad(handler, e, status=500)
+
+    if parsed.path == "/api/review/diff":
+        qs = parse_qs(parsed.query)
+        session_id = qs.get("session_id", [""])[0].strip()
+        repo_root = _review_repo_root(session_id or None)
+        git_dir = _run_git_command(repo_root, "rev-parse", "--git-dir")
+        if git_dir is None:
+            return j(handler, {
+                "ok": True,
+                "is_git_repo": False,
+                "repo_root": str(repo_root),
+                "branch": None,
+                "commit": None,
+                "files": [],
+                "diff": "",
+                "summary": {
+                    "files": 0,
+                    "staged": 0,
+                    "unstaged": 0,
+                    "untracked": 0,
+                    "binary_untracked": 0,
+                    "skipped_untracked": 0,
+                    "additions": 0,
+                    "deletions": 0,
+                    "truncated": False,
+                },
+            })
+
+        branch = _run_git_command(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+        commit = _run_git_command(repo_root, "rev-parse", "--short", "HEAD")
+        porcelain = _run_git_command(repo_root, "status", "--porcelain")
+        files: list[dict[str, object]] = []
+        untracked_paths: list[str] = []
+        staged_count = 0
+        unstaged_count = 0
+        untracked_count = 0
+        if porcelain:
+            for line in porcelain.splitlines():
+                line = line.rstrip("\r\n")
+                if not line:
+                    continue
+                xy = line[:2]
+                path_part = line[3:]
+                if "->" in path_part and (xy[0] == "R" or xy[1] == "R" or xy[0] == "C" or xy[1] == "C"):
+                    path_part = path_part.split(" -> ", 1)[-1].strip() or path_part
+                staged = xy[0] if xy[0] != " " else ""
+                worktree = xy[1] if xy[1] != " " else ""
+                status = _git_status_label(staged, worktree, xy)
+                files.append({
+                    "path": path_part,
+                    "status": status,
+                    "staged": staged != "",
+                })
+                if staged:
+                    staged_count += 1
+                if worktree:
+                    unstaged_count += 1
+                if xy == "??":
+                    untracked_count += 1
+                    untracked_paths.append(path_part)
+
+        def _sum_numstat(output: str | None) -> tuple[int, int]:
+            added = 0
+            deleted = 0
+            if not output:
+                return added, deleted
+            for line in output.splitlines():
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                add_raw, del_raw = parts[0].strip(), parts[1].strip()
+                if add_raw.isdigit():
+                    added += int(add_raw)
+                if del_raw.isdigit():
+                    deleted += int(del_raw)
+            return added, deleted
+
+        additions, deletions = _sum_numstat(_run_git_command(repo_root, "diff", "--cached", "--numstat", "--"))
+        add2, del2 = _sum_numstat(_run_git_command(repo_root, "diff", "--numstat", "--"))
+        additions += add2
+        deletions += del2
+
+        diff_parts: list[str] = []
+        staged_diff = _run_git_command(repo_root, "diff", "--cached", "--no-color", "--no-ext-diff", "--binary", "--unified=3", "--")
+        unstaged_diff = _run_git_command(repo_root, "diff", "--no-color", "--no-ext-diff", "--binary", "--unified=3", "--")
+        if staged_diff and staged_diff.strip():
+            diff_parts.append(staged_diff.strip())
+        if unstaged_diff and unstaged_diff.strip():
+            diff_parts.append(unstaged_diff.strip())
+
+        binary_untracked: list[str] = []
+        skipped_untracked: list[str] = []
+        for rel_path in untracked_paths:
+            file_diff, skip_reason, added_lines = _review_untracked_file_diff(repo_root, rel_path)
+            if not file_diff:
+                if skip_reason == "binary":
+                    binary_untracked.append(rel_path)
+                elif skip_reason:
+                    skipped_untracked.append(f"{rel_path} ({skip_reason})")
+                continue
+            diff_parts.append(file_diff)
+            additions += added_lines
+
+        diff_text = "\n\n".join(part for part in diff_parts if part.strip())
+        truncated = False
+        max_chars = 180_000
+        if len(diff_text) > max_chars:
+            truncated = True
+            diff_text = diff_text[:max_chars]
+            last_nl = diff_text.rfind("\n")
+            if last_nl > 0:
+                diff_text = diff_text[:last_nl]
+            diff_text += "\n\n... truncated ...\n"
+
+        summary = {
+            "files": len(files),
+            "staged": staged_count,
+            "unstaged": unstaged_count,
+            "untracked": untracked_count,
+            "binary_untracked": len(binary_untracked),
+            "skipped_untracked": len(skipped_untracked),
+            "additions": additions,
+            "deletions": deletions,
+            "truncated": truncated,
+        }
+        if binary_untracked:
+            summary["binary_untracked_paths"] = binary_untracked
+        if skipped_untracked:
+            summary["skipped_untracked_paths"] = skipped_untracked
+        return j(handler, {
+            "ok": True,
+            "is_git_repo": True,
+            "repo_root": str(repo_root),
+            "branch": (branch or "").strip() or None,
+            "commit": (commit or "").strip() or None,
+            "files": files,
+            "diff": diff_text,
+            "summary": summary,
+        })
 
     # ── Terminal stream (SSE) ──
     if parsed.path == "/api/terminal/stream":

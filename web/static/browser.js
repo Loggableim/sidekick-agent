@@ -27,6 +27,7 @@ let _browserResearchResearchPromptBySession = {};
 let _browserResearchModeBySession = {};
 let _browserPermissionMode = 'none';
 let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
+let _browserSplitScreen = localStorage.getItem('sidekick-browser-split-open') === '1';
 let _browserDrawerHost = null;
 let _browserDrawerHostNext = null;
 let _browserFrameObjectUrl = '';
@@ -39,6 +40,120 @@ let _browserPrevFrameRev = '';
 
 function _browserEl(id) {
   return document.getElementById(id);
+}
+
+function _browserEnsureSplitStyles() {
+  if (document.getElementById('browserSplitStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'browserSplitStyles';
+  style.textContent = `
+body.browser-split {
+  --browser-split-width: min(48vw, 860px);
+}
+body.browser-split header.app-titlebar,
+body.browser-split nav.rail,
+body.browser-split aside.sidebar,
+body.browser-split aside.rightpanel,
+body.browser-split .split-resize-handle {
+  display: none !important;
+}
+body.browser-split .app-main,
+body.browser-split main.main {
+  min-height: 0;
+}
+body.browser-split main.main {
+  padding-right: var(--browser-split-width) !important;
+  box-sizing: border-box;
+}
+body.browser-split main.main > :not(#mainChat):not(#mainBrowser) {
+  display: none !important;
+}
+body.browser-split main.main > #mainBrowser {
+  display: flex !important;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+body.browser-split main.main > #mainChat {
+  display: flex !important;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+body.browser-split #mainChat > :not(#chatSplitLayout) {
+  display: none !important;
+}
+body.browser-split #chatSplitLayout {
+  display: grid !important;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+body.browser-split .browser-drawer {
+  position: fixed;
+  top: 38px !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: auto !important;
+  width: var(--browser-split-width) !important;
+  height: calc(100vh - 38px) !important;
+  display: flex;
+  flex-direction: column;
+  z-index: 260;
+  margin: 0;
+  max-height: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto;
+  transform: none !important;
+}
+body.browser-split .browser-drawer-shell {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.browser-split .browser-drawer .browser-stage-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+body.browser-split .browser-drawer .browser-stage {
+  height: 100%;
+  min-height: 0;
+}
+.browser-split-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+@media (max-width: 1100px) {
+  .browser-split-btn {
+    display: none !important;
+  }
+  body.browser-split {
+    --browser-split-width: min(760px, calc(100vw - 32px));
+  }
+  body.browser-split main.main {
+    padding-right: 0;
+  }
+  body.browser-split .browser-drawer {
+    left: 50% !important;
+    right: auto !important;
+    width: min(760px, calc(100vw - 32px)) !important;
+    transform: translateX(-50%) !important;
+    border-radius: 12px;
+    top: auto !important;
+    bottom: calc(12px + env(safe-area-inset-bottom,0px)) !important;
+    height: min(52vh, 560px) !important;
+  }
+  body.browser-split .browser-drawer-shell {
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.16);
+  }
+}
+  `;
+  document.head.appendChild(style);
 }
 
 function _browserCurrentSessionId() {
@@ -377,10 +492,22 @@ function _browserSyncFullscreenButton(active) {
   btn.setAttribute('aria-label', active ? 'Restore browser' : 'Maximize browser');
 }
 
+function _browserSyncSplitButton(active) {
+  const btn = _browserEl('browserBtnSplit');
+  if (!btn) return;
+  btn.classList.toggle('is-active', !!active);
+  btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  btn.setAttribute('data-tooltip', active ? 'Exit split screen' : 'Split browser and chat');
+  btn.setAttribute('aria-label', active ? 'Exit split screen' : 'Split browser and chat');
+}
+
 function _browserSetFullscreen(open) {
   const next = !!open;
   _browserFullscreen = next;
   try { localStorage.setItem('sidekick-browser-fullscreen', next ? '1' : '0'); } catch (_) {}
+  if (next && _browserSplitScreen) {
+    _browserSetSplitScreen(false);
+  }
   document.body.classList.toggle('browser-maximized', next);
   _browserSyncFullscreenButton(next);
   if (next) {
@@ -390,6 +517,30 @@ function _browserSetFullscreen(open) {
   } else {
     _browserRestoreDrawerHost();
     _browserSetDrawerAccessibility(_browserDrawerOpen);
+  }
+}
+
+function browserToggleFullscreen() {
+  _browserSetFullscreen(!_browserFullscreen);
+}
+
+function _browserSetSplitScreen(open) {
+  const next = !!open;
+  _browserSplitScreen = next;
+  try { localStorage.setItem('sidekick-browser-split-open', next ? '1' : '0'); } catch (_) {}
+  if (next && _browserFullscreen) {
+    _browserSetFullscreen(false);
+  }
+  document.body.classList.toggle('browser-split', next);
+  _browserSyncSplitButton(next);
+  if (next) {
+    if (!_browserDrawerOpen) {
+      browserSetDrawerOpen(true, {force: true, keepViewport: true});
+    } else {
+      void browserSyncToCurrentSession({allowPending: true});
+    }
+  } else {
+    document.body.classList.remove('browser-split');
   }
 }
 
@@ -974,6 +1125,9 @@ function browserSetDrawerOpen(open, opts = {}) {
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
   if (!nextOpen) {
+    if (_browserSplitScreen) {
+      _browserSetSplitScreen(false);
+    }
     if (_browserFullscreen) {
       _browserSetFullscreen(false);
     }
@@ -997,6 +1151,20 @@ function browserSetDrawerOpen(open, opts = {}) {
 
 function browserToggleDrawer() {
   browserSetDrawerOpen(!_browserDrawerOpen, {force: true});
+}
+
+function browserToggleSplit() {
+  if (!_browserSplitScreen) {
+    if (_browserFullscreen) _browserSetFullscreen(false);
+    _browserSetSplitScreen(true);
+    return;
+  }
+  _browserSetSplitScreen(false);
+}
+
+if (typeof window !== 'undefined') {
+  window.browserToggleFullscreen = browserToggleFullscreen;
+  window.browserToggleSplit = browserToggleSplit;
 }
 
 async function _browserFetchState(sessionId) {
@@ -1167,6 +1335,15 @@ function browserSubmitUrl(event) {
   if (!url) return false;
   void _browserSendControl('navigate', {url: url});
   return false;
+}
+
+function browserNavigateUrl(url) {
+  const next = String(url || '').trim();
+  if (!next) return false;
+  const input = _browserEl('browserUrlInput');
+  if (input) input.value = next;
+  void _browserSendControl('navigate', {url: next});
+  return true;
 }
 
 function _browserCoordsFromEvent(event) {
@@ -1613,13 +1790,15 @@ window.browserGoBack = browserGoBack;
 window.browserGoForward = browserGoForward;
 window.browserReload = browserReload;
 window.browserStop = browserStop;
-window.browserToggleFullscreen = browserToggleFullscreen;
 window.browserSubmitUrl = browserSubmitUrl;
+window.browserNavigateUrl = browserNavigateUrl;
 window.browserToggleExploreMode = browserToggleExploreMode;
 window.browserSendScreenshotToChat = browserSendScreenshotToChat;
 
 window.addEventListener('load', function() {
+  _browserEnsureSplitStyles();
   _browserSyncFullscreenButton(_browserFullscreen);
+  _browserSyncSplitButton(_browserSplitScreen);
   if (_browserDrawerOpen) {
     document.body.classList.add('browser-drawer-open');
     _browserSyncDrawerButton(true);
@@ -1628,10 +1807,14 @@ window.addEventListener('load', function() {
       document.body.classList.add('browser-maximized');
       _browserHoistDrawer();
     }
+    if (_browserSplitScreen) {
+      document.body.classList.add('browser-split');
+    }
     void browserSyncToCurrentSession({force: true, allowPending: true});
   } else {
     _browserSetDrawerAccessibility(false);
     _browserSyncFullscreenButton(false);
+    _browserSyncSplitButton(false);
   }
   _browserAttachPointerHandlers();
 });

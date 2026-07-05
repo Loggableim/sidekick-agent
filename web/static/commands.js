@@ -31,6 +31,8 @@ const COMMANDS=[
   {name:'voice',     desc:t('cmd_voice'),    fn:cmdVoice,     noEcho:true},
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
   {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
+  {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
+  {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
 ];
@@ -239,7 +241,7 @@ function cliOnlyCommandResponse(cmdName, meta){
   const detail=desc?`\n\n${desc}`:'';
   let extra='';
   if(name==='browser'){
-    extra='\n\nWebsearch tools in WebUI must be configured server-side with the agent/browser environment. Once configured, ask the model to use browser tools directly; `/browser` itself only works in Sidekick chat.';
+    return `\`/browser\` is available in the WebUI for the embedded browser drawer.${detail}\n\nUse \`/browser open|close|toggle|status|permission|explore|split|fullscreen\` there. Live Chrome connect/disconnect stays CLI-only.`;
   }
   return `\`/${name}\` is a Sidekick CLI-only command and cannot run inside the WebUI.${detail}${extra}`;
 }
@@ -1068,6 +1070,350 @@ async function cmdApproval(args){
   }
   return true;
 }
+
+async function cmdBrowser(args){
+  const arg=String(args||'').trim().toLowerCase();
+  const openDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(true, {force:true, keepViewport:true}); };
+  const closeDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(false, {force:true}); };
+  const toggleDrawer=()=>{ if(typeof window.browserToggleDrawer==='function') window.browserToggleDrawer(); else if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(!(document.body&&document.body.classList.contains('browser-drawer-open')), {force:true}); };
+  const togglePermission=()=>{ if(typeof window.browserTogglePermission==='function') window.browserTogglePermission(); };
+  const toggleExplore=()=>{ if(typeof window.browserToggleExploreMode==='function') window.browserToggleExploreMode(); };
+  const toggleSplit=()=>{ if(typeof window.browserToggleSplit==='function') window.browserToggleSplit(); };
+  const toggleFullscreen=()=>{ if(typeof window.browserToggleFullscreen==='function') window.browserToggleFullscreen(); };
+  const goBack=()=>{ if(typeof window.browserGoBack==='function') window.browserGoBack(); };
+  const goForward=()=>{ if(typeof window.browserGoForward==='function') window.browserGoForward(); };
+  const reload=()=>{ if(typeof window.browserReload==='function') window.browserReload(); };
+  const stop=()=>{ if(typeof window.browserStop==='function') window.browserStop(); };
+  const screenshot=()=>{ if(typeof window.browserSendScreenshotToChat==='function') window.browserSendScreenshotToChat(); };
+  const currentSessionId=()=>String((S&&S.session&&S.session.session_id)||'').trim();
+  const currentDrawerOpen=()=>!!(document.body&&document.body.classList.contains('browser-drawer-open'));
+  const currentSplit=()=>!!(document.body&&document.body.classList.contains('browser-split'));
+  const currentFullscreen=()=>!!(document.body&&document.body.classList.contains('browser-maximized'));
+  const currentExplore=()=>{
+    const btn=document.getElementById('browserExploreBtn');
+    if(btn) return btn.getAttribute('aria-pressed')==='true' || btn.classList.contains('is-active');
+    return false;
+  };
+  const currentPermission=async()=>{
+    const sid=currentSessionId();
+    if(!sid) return null;
+    try{
+      return await api('/api/browser/permission?session_id='+encodeURIComponent(sid));
+    }catch(_){
+      return null;
+    }
+  };
+  const currentState=async()=>{
+    const sid=currentSessionId();
+    if(!sid) return null;
+    try{
+      return await api('/api/browser/state?session_id='+encodeURIComponent(sid));
+    }catch(_){
+      return null;
+    }
+  };
+  const looksLikeUrl=(value)=>{
+    const text=String(value||'').trim();
+    if(!text) return false;
+    if(/^(https?:\/\/|file:|about:|chrome:|edge:|localhost(?::\d+)?(?:\/|$)|www\.)/i.test(text)) return true;
+    if(/\s/.test(text)) return false;
+    return /^[^\s]+\.[^\s]+(?:\/.*)?$/.test(text);
+  };
+  const navigateTo=(rawUrl)=>{
+    const url=String(rawUrl||'').trim();
+    if(!url){
+      showToast('Use /browser navigate <url>', 2200, 'info');
+      return true;
+    }
+    const input=document.getElementById('browserUrlInput');
+    if(input) input.value=url;
+    openDrawer();
+    if(typeof window.browserNavigateUrl==='function'){
+      window.browserNavigateUrl(url);
+      return true;
+    }
+    if(typeof window.browserSubmitUrl==='function'){
+      window.browserSubmitUrl({preventDefault:function(){}});
+      return true;
+    }
+    showToast('Browser navigation unavailable', 2200, 'error');
+    return true;
+  };
+  const showStatus=async()=>{
+    const [state,perm]=await Promise.all([currentState(),currentPermission()]);
+    const open=currentDrawerOpen()?'open':'closed';
+    const split=currentSplit()?'split':'stacked';
+    const fullscreen=currentFullscreen()?'fullscreen':'drawer';
+    const explore=currentExplore()?'explore':'follow';
+    const back=(state&&state.can_go_back)?'back':'no-back';
+    const forward=(state&&state.can_go_forward)?'forward':'no-forward';
+    const url=(state&&state.url&&state.url!=='about:blank')?state.url:'(no page)';
+    const title=(state&&state.title)?state.title:'';
+    const status=(state&&state.status)?state.status:'idle';
+    const permission=(perm&&perm.mode)?perm.mode:'none';
+    const parts=['Browser: '+open+', '+split+', '+fullscreen+', '+explore,'Permission: '+permission,'State: '+status,'Nav: '+back+', '+forward,'URL: '+url];
+    if(title) parts.push('Title: '+title);
+    showToast(parts.join(' | '), 4000, 'info');
+  };
+  if(!arg||arg==='help'||arg==='status'){
+    await showStatus();
+    if(!arg||arg==='help') showToast('/browser open|open <url>|navigate <url>|back|forward|reload|stop|screenshot|status|permission|explore|split|fullscreen', 3200, 'info');
+    return true;
+  }
+  if(arg.startsWith('open ')){
+    const target=arg.slice(5).trim();
+    if(looksLikeUrl(target)){
+      navigateTo(target);
+      return true;
+    }
+  }
+  if(arg==='open'){ openDrawer(); return true; }
+  if(arg==='close'){ closeDrawer(); return true; }
+  if(arg==='toggle'){ toggleDrawer(); return true; }
+  if(arg==='permission'){ openDrawer(); togglePermission(); return true; }
+  if(arg==='explore'){ openDrawer(); toggleExplore(); return true; }
+  if(arg==='split'){ openDrawer(); toggleSplit(); return true; }
+  if(arg==='fullscreen'){ openDrawer(); toggleFullscreen(); return true; }
+  if(arg==='back'){ openDrawer(); goBack(); return true; }
+  if(arg==='forward'){ openDrawer(); goForward(); return true; }
+  if(arg==='reload'){ openDrawer(); reload(); return true; }
+  if(arg==='stop'){ openDrawer(); stop(); return true; }
+  if(arg==='screenshot'||arg==='shot'||arg==='capture'){ openDrawer(); screenshot(); return true; }
+  if(arg.startsWith('navigate ')){
+    navigateTo(arg.slice('navigate '.length));
+    return true;
+  }
+  if(arg.startsWith('go ')){
+    navigateTo(arg.slice(3));
+    return true;
+  }
+  if(looksLikeUrl(arg)){
+    navigateTo(arg);
+    return true;
+  }
+  showToast('Unknown argument: '+arg+' \u2014 use open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot');
+  return true;
+}
+
+function _buildReviewPrompt(data){
+  const info=data&&data.summary?data.summary:{};
+  const fileEntries=Array.isArray(data&&data.files)?data.files:[];
+  const files=Number(info.files||0)||0;
+  const staged=Number(info.staged||0)||0;
+  const unstaged=Number(info.unstaged||0)||0;
+  const untracked=Number(info.untracked||0)||0;
+  const additions=Number(info.additions||0)||0;
+  const deletions=Number(info.deletions||0)||0;
+  const truncated=!!info.truncated;
+  const binaryPaths=Array.isArray(info.binary_untracked_paths)?info.binary_untracked_paths:[];
+  const skippedPaths=Array.isArray(info.skipped_untracked_paths)?info.skipped_untracked_paths:[];
+  const diff=String((data&&data.diff)||'').trim()||'(empty diff)';
+  const lines=[
+    'Review the following local changes.',
+    'Focus on correctness bugs, regressions, missing tests, API or UX breakage, security, and performance.',
+    `Repository: ${String((data&&data.repo_root)||'(unknown)')}`,
+    `Branch: ${String((data&&data.branch)||'detached')}`,
+    `Commit: ${String((data&&data.commit)||'unknown')}`,
+    `Files changed: ${files} (staged ${staged}, unstaged ${unstaged}, untracked ${untracked})`,
+    `Additions / deletions: +${additions} / -${deletions}${truncated ? ' (diff truncated)' : ''}`,
+  ];
+  if(binaryPaths.length){
+    lines.push(`Binary untracked files: ${binaryPaths.join(', ')}`);
+  }
+  if(skippedPaths.length){
+    lines.push(`Skipped untracked files: ${skippedPaths.join(', ')}`);
+  }
+  if(fileEntries.length){
+    const fileLines=fileEntries.slice(0,40).map(entry=>{
+      const status=String(entry&&entry.status||'').trim()||'?';
+      const stagedMark=entry&&entry.staged?'staged':'unstaged';
+      return `- ${status} [${stagedMark}] ${String(entry&&entry.path||'').trim()}`;
+    });
+    lines.push('', 'Changed files:', ...fileLines);
+    if(fileEntries.length>40){
+      lines.push(`- ... ${fileEntries.length-40} more file(s)`);
+    }
+  }
+  lines.push(
+    '',
+    'Return findings first, ordered by severity.',
+    'For each finding, include severity, file path or line reference if possible, the concrete issue, and a fix suggestion.',
+    'If nothing looks wrong, say "No issues found." explicitly.',
+    '',
+    '```diff',
+    diff,
+    '```',
+  );
+  return lines.join('\n');
+}
+
+function _renderReviewCard(data, prompt){
+  _clearReviewCard();
+  const msgInner=document.getElementById('msgInner');
+  if(!msgInner) return null;
+  const summary=data&&data.summary&&typeof data.summary==='object'?data.summary:{};
+  const viewer=typeof renderDiffViewer==='function'
+    ? renderDiffViewer(String((data&&data.diff)||''), {maxHeight:'420px'})
+    : null;
+  if(viewer) viewer.style.margin='8px 0';
+
+  const state=window._reviewChainState||(window._reviewChainState={});
+  state.visible=true;
+  state.data=data||null;
+  state.prompt=String(prompt||'');
+  state.session_id=String((S&&S.session&&S.session.session_id)||'');
+  state.element=null;
+
+  const card=document.createElement('div');
+  card.className='msg-row assistant-turn proposed-patch-card review-card';
+  card.style.margin='8px 0';
+
+  const role=document.createElement('div');
+  role.className='msg-role assistant';
+  role.style.fontSize='11px';
+  role.style.padding='4px 10px';
+  role.style.opacity='0.7';
+  role.textContent='🔎 Local review';
+  card.appendChild(role);
+
+  const meta=document.createElement('div');
+  meta.style.fontSize='12px';
+  meta.style.lineHeight='1.5';
+  meta.style.color='var(--muted)';
+  meta.style.padding='0 10px 8px';
+  meta.textContent=[
+    `Repo: ${String((data&&data.repo_root)||'(unknown)')}`,
+    `Branch: ${String((data&&data.branch)||'detached')}`,
+    `Files: ${Number(summary.files||0)||0}`,
+    `+${Number(summary.additions||0)||0}/-${Number(summary.deletions||0)||0}${summary.truncated ? ' (truncated)' : ''}`,
+  ].join(' · ');
+  card.appendChild(meta);
+
+  const actions=document.createElement('div');
+  actions.style.display='flex';
+  actions.style.flexWrap='wrap';
+  actions.style.gap='8px';
+  actions.style.padding='0 10px 10px';
+
+  const makeBtn=(label, handler, primary)=>{
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.textContent=label;
+    btn.style.border='1px solid var(--border2)';
+    btn.style.borderRadius='8px';
+    btn.style.background=primary ? 'var(--accent-bg)' : 'rgba(255,255,255,.04)';
+    btn.style.color=primary ? 'var(--accent-text)' : 'var(--text)';
+    btn.style.cursor='pointer';
+    btn.style.padding='6px 10px';
+    btn.style.fontSize='12px';
+    btn.style.fontWeight='600';
+    btn.onclick=handler;
+    return btn;
+  };
+
+  actions.appendChild(makeBtn('Copy prompt', async()=>{
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){
+        await navigator.clipboard.writeText(String(prompt||''));
+        showToast('Review prompt copied', 1800, 'success');
+      }else{
+        throw new Error('clipboard unavailable');
+      }
+    }catch(e){
+      showToast('Copy failed: '+(e&&e.message?e.message:e), 2200, 'error');
+    }
+  }, false));
+
+  actions.appendChild(makeBtn('Review in chat', async()=>{
+    const ta=document.getElementById('msg');
+    if(!ta){
+      showToast('Composer unavailable', 2200, 'error');
+      return;
+    }
+    ta.value=String(prompt||'');
+    if(typeof autoResize==='function') autoResize();
+    if(typeof updateSendBtn==='function') updateSendBtn();
+    if(typeof send==='function'){
+      await send();
+    }else{
+      showToast('Review prompt prepared', 2000, 'info');
+    }
+  }, true));
+
+  card.appendChild(actions);
+  if(viewer) card.appendChild(viewer);
+  msgInner.appendChild(card);
+  if(typeof scrollIfPinned==='function') scrollIfPinned();
+  state.element=card;
+  return card;
+}
+
+function _clearReviewCard(){
+  const state=window._reviewChainState;
+  if(!state) return;
+  state.visible=false;
+  state.data=null;
+  state.prompt='';
+  if(state.element&&typeof state.element.remove==='function'){
+    try{ state.element.remove(); }catch(_){}
+  }
+  state.element=null;
+}
+
+async function cmdReview(args){
+  const arg=String(args||'').trim().toLowerCase();
+  const sid=S.session&&S.session.session_id;
+  if(!sid){
+    _clearReviewCard();
+    showToast('Open a chat session before running review', 2400, 'error');
+    return true;
+  }
+  try{
+    const data=await api('/api/review/diff?session_id='+encodeURIComponent(sid));
+    if(!data||data.is_git_repo===false){
+      _clearReviewCard();
+      showToast('Current workspace is not a git repository', 2400, 'error');
+      return true;
+    }
+    const summary=data&&data.summary&&typeof data.summary==='object'?data.summary:{};
+    const diffText=String((data&&data.diff)||'').trim();
+    if(!diffText && Number(summary.files||0)<=0){
+      _clearReviewCard();
+      showToast('No local changes to review', 2200, 'info');
+      return true;
+    }
+    const prompt=_buildReviewPrompt(data);
+    _renderReviewCard(data, prompt);
+    if(arg==='show'||arg==='status'){
+      return true;
+    }
+    if(arg==='prompt'||arg==='draft'){
+      const ta=document.getElementById('msg');
+      if(ta){
+        ta.value=prompt;
+        if(typeof autoResize==='function') autoResize();
+        if(typeof updateSendBtn==='function') updateSendBtn();
+        ta.focus();
+      }
+      return true;
+    }
+    const ta=document.getElementById('msg');
+    if(ta){
+      ta.value=prompt;
+      if(typeof autoResize==='function') autoResize();
+      if(typeof updateSendBtn==='function') updateSendBtn();
+    }
+    if(typeof send==='function'){
+      await send();
+    }else{
+      showToast('Review prompt prepared', 2000, 'info');
+    }
+  }catch(e){
+    _clearReviewCard();
+    showToast('Review failed: '+(e&&e.message?e.message:e), 2600, 'error');
+  }
+  return true;
+}
 function cmdVoice(){
   const mic=document.getElementById('btnMic');
   if(mic&&mic.style.display!=='none'&&!mic.disabled){try{mic.click();return;}catch(_){}}
@@ -1272,3 +1618,22 @@ function selectCmdDropdownItem(){
 const HANDLERS = {};
 HANDLERS.skills = cmdSkills;
 HANDLERS.approval = cmdApproval;
+HANDLERS.review = cmdReview;
+
+if(typeof window!=='undefined'){
+  const _origActionChipClick=window.actionChipClick;
+  window.actionChipClick=function(cmd){
+    const command=String(cmd||'').trim();
+    if(command==='/review'){
+      void cmdReview('');
+      return;
+    }
+    if(command.startsWith('/browser')){
+      void cmdBrowser(command.slice('/browser'.length).trim());
+      return;
+    }
+    if(typeof _origActionChipClick==='function'){
+      return _origActionChipClick(cmd);
+    }
+  };
+}
