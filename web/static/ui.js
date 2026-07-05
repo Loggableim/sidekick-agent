@@ -2103,6 +2103,11 @@ function workflowCloseHeaderMenu(){
   if(!_workflowHeaderMenuOpen && (!menu || menu.hidden)) return;
   _workflowHeaderMenuOpen=false;
   if(menu) menu.hidden=true;
+  window._workflowHeaderMenuQuery='';
+  const search=_workflowHeaderMenuSearchEl();
+  if(search){
+    search.value='';
+  }
   const menuBtn=$('workflowStatusMenuBtn');
   if(menuBtn) menuBtn.setAttribute('aria-expanded','false');
   document.removeEventListener('click', _workflowHeaderMenuOutsideClick, true);

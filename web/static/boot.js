@@ -1291,6 +1291,12 @@ document.addEventListener('keydown',async e=>{
     // stream running on its own session; the user just gets a fresh blank one.
     await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
   }
+  // Cmd/Ctrl+Shift+K opens the workflow palette from anywhere.
+  if((e.metaKey||e.ctrlKey)&&e.shiftKey&&!e.altKey&&(e.key==='k'||e.key==='K')){
+    e.preventDefault();
+    if(typeof workflowToggleHeaderMenu==='function') workflowToggleHeaderMenu(e);
+    return;
+  }
   // Ctrl+Shift+F: toggle Focus Mode (hide all panels, only chat full-width)
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='f'||e.key==='F')){
     e.preventDefault();
