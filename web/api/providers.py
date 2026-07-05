@@ -22,6 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from runtime.provider_response_state import get_provider_response_state
 from web.api.config import (
     _PROVIDER_DISPLAY,
     _PROVIDER_MODELS,
@@ -60,6 +61,7 @@ _OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 _PROVIDER_QUOTA_TIMEOUT_SECONDS = 3.0
 _ACCOUNT_USAGE_SUBPROCESS_TIMEOUT_SECONDS = 35.0
 _ACCOUNT_USAGE_PROVIDERS = frozenset({"openai-codex", "anthropic"})
+_RESPONSE_METADATA_MAX_AGE_SECONDS = 15 * 60
 
 # Upper bound on simultaneous profile-isolated quota probe subprocesses.
 # Each probe runs a Python child for up to 35 s; capping concurrency prevents
@@ -910,6 +912,48 @@ def _provider_account_usage_status(provider: str, display_name: str) -> dict[str
     }
 
 
+def _serialize_rate_limit_bucket(bucket: Any) -> dict[str, int | float]:
+    return {
+        "limit": int(getattr(bucket, "limit", 0) or 0),
+        "remaining": int(getattr(bucket, "remaining", 0) or 0),
+        "reset_seconds": float(getattr(bucket, "remaining_seconds_now", 0.0) or 0.0),
+    }
+
+
+def _provider_response_metadata_status(provider: str, display_name: str) -> dict[str, Any] | None:
+    state = get_provider_response_state(provider)
+    if state is None or state.age_seconds > _RESPONSE_METADATA_MAX_AGE_SECONDS:
+        return None
+
+    rate_limit = state.rate_limit
+    rate_limits = None
+    if rate_limit is not None and rate_limit.has_data:
+        rate_limits = {
+            "requests": _serialize_rate_limit_bucket(rate_limit.requests_min),
+            "requests_hour": _serialize_rate_limit_bucket(rate_limit.requests_hour),
+            "tokens": _serialize_rate_limit_bucket(rate_limit.tokens_min),
+            "tokens_hour": _serialize_rate_limit_bucket(rate_limit.tokens_hour),
+        }
+
+    if rate_limits is None and not state.usage:
+        return None
+
+    return {
+        "ok": True,
+        "provider": provider,
+        "display_name": display_name,
+        "supported": True,
+        "status": "ok",
+        "label": f"{display_name} live response metadata",
+        "quota": None,
+        "rate_limits": rate_limits,
+        "usage": dict(state.usage),
+        "captured_at": datetime.fromtimestamp(state.captured_at, timezone.utc).isoformat(),
+        "age_seconds": state.age_seconds,
+        "message": f"{display_name} live response metadata loaded.",
+    }
+
+
 def get_provider_quota(provider_id: str | None = None) -> dict[str, Any]:
     """Return sanitized quota/rate-limit status for the active provider.
 
@@ -936,6 +980,10 @@ def get_provider_quota(provider_id: str | None = None) -> dict[str, Any]:
         return _provider_account_usage_status(provider, display_name)
 
     if provider != "openrouter":
+        metadata_status = _provider_response_metadata_status(provider, display_name)
+        if metadata_status is not None:
+            return metadata_status
+
         detail = "OpenAI/Anthropic rate-limit headers are a follow-up once WebUI captures provider response metadata."
         return {
             "ok": False,
