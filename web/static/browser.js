@@ -643,31 +643,42 @@ function browserSendPageContextToChat() {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
   }
-  const url = String(state.url || '').trim();
-  const status = String(state.status || 'idle').trim();
-  const permission = String(_browserPermissionMode || 'none');
-  const actionCount = _browserActionTrace.length;
-  const frameUrl = _browserFrameObjectUrl || '';
-  const lines = [
-    '🌐 **Browser page context**',
-    '',
-    `- URL: ${url}`,
-    `- Status: ${status}`,
-    `- Permission: ${permission}`,
-    `- Actions: ${actionCount}`,
-  ];
-  if (state.last_action_detail) lines.push(`- Last action: ${String(state.last_action_detail)}`);
-  if (state.ready_state) lines.push(`- Ready state: ${String(state.ready_state)}`);
-  if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
-  const text = lines.join('\n');
-  const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
-  if (textarea && typeof insertAtCursor === 'function') {
-    insertAtCursor(textarea, text);
-  } else if (textarea) {
-    textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
-    textarea.dispatchEvent(new Event('input', {bubbles: true}));
+  const sid = _browserCurrentSessionId();
+  if (!sid) {
+    if (typeof showToast === 'function') showToast('No chat session selected', 2000, 'error');
+    return;
   }
-  if (typeof showToast === 'function') showToast('Page context added to chat', 2000, 'success');
+  const frameUrl = _browserFrameObjectUrl || '';
+  api('/api/browser/action', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: sid,
+      action: 'snapshot',
+    }),
+  }).then(function(data) {
+    const snapshotText = String(data && data.text || '').trim();
+    const snapshotState = data && data.state ? data.state : state;
+    const pageTitle = String((snapshotState && snapshotState.title) || '').trim();
+    const pageUrl = String((snapshotState && snapshotState.url) || state.url || '').trim();
+    const heading = pageTitle || pageUrl || 'Browser page';
+    const lines = [
+      '🌐 **' + heading + '**',
+      '',
+      snapshotText || 'No readable text returned by the browser snapshot.',
+    ];
+    if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
+    const text = lines.join('\n');
+    const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
+    if (textarea && typeof insertAtCursor === 'function') {
+      insertAtCursor(textarea, text);
+    } else if (textarea) {
+      textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
+      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+    if (typeof showToast === 'function') showToast('Readable page text added to chat', 2000, 'success');
+  }).catch(function() {
+    if (typeof showToast === 'function') showToast('Page text export failed', 2200, 'error');
+  });
 }
 
 function _browserResearchRenderQuickAnswer(text, meta = {}) {
@@ -884,7 +895,7 @@ function _browserRefreshHeaderMenu() {
   if (navigateBtn) navigateBtn.textContent = 'Navigate to URL...';
   if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
   if (copyUrlBtn) copyUrlBtn.textContent = 'Copy current URL';
-  if (pageContextBtn) pageContextBtn.textContent = 'Send page context to chat';
+  if (pageContextBtn) pageContextBtn.textContent = 'Send readable page text to chat';
   if (screenshotBtn) {
     screenshotBtn.textContent = 'Send screenshot to chat';
   }
