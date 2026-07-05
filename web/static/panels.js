@@ -402,7 +402,7 @@ async function switchPanel(name, opts = {}) {
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
   if (mainEl) {
-    ['settings','skills','memory','tasks','kanban','workspaces','review','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
+    ['settings','skills','memory','tasks','kanban','workspaces','review','subagents','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }
@@ -9058,13 +9058,13 @@ function _subagentStatusLabel(status){
   if(normalized==='paused') return 'Paused';
   return normalized.charAt(0).toUpperCase()+normalized.slice(1);
 }
-function _renderSubagentStatus(active, paused){
-  const list=$('subagentStatusCard');
+function _renderSubagentStatus(active, paused, targetId='subagentStatusCard'){
+  const list=$(targetId);
   if(!list) return;
   const entries=Array.isArray(active)?active:[];
   const pauseLabel=paused?'Resume spawning':'Pause spawning';
   const pauseTitle=paused?'Allow new subagents to spawn again':'Temporarily block new subagent spawns';
-  const toggleButton=`<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleSubagentSpawnPause()" aria-label="${esc(pauseTitle)}" title="${esc(pauseTitle)}">${paused?'▶':'⏸'} ${esc(pauseLabel)}</button>`;
+  const toggleButton=`<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleSubagentSpawnPause('${esc(targetId)}')" aria-label="${esc(pauseTitle)}" title="${esc(pauseTitle)}">${paused?'▶':'⏸'} ${esc(pauseLabel)}</button>`;
   if(!entries.length){
     list.innerHTML=`<div class="mcp-server-row">
       <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
@@ -9095,7 +9095,7 @@ function _renderSubagentStatus(active, paused){
     if(toolCount!==null) metaParts.push(toolCount+' tools');
     const meta=metaParts.join(' · ');
     const interruptButton=sid
-      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation();interruptActiveSubagent('${esc(sid)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
+      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation();interruptActiveSubagent('${esc(sid)}','${esc(targetId)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
       : '';
     const rowClick=sessionId && typeof loadSession==='function'
       ? `onclick="loadSession('${esc(sessionId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadSession('${esc(sessionId)}')}" tabindex="0" role="button" aria-label="Open subagent session ${esc(sid||sessionId)}"`
@@ -9127,18 +9127,18 @@ function _updateWorkflowSubagentSummary(active, paused){
   };
   if(typeof syncWorkflowChip==='function') syncWorkflowChip();
 }
-function loadSubagentStatus(){
-  const card=$('subagentStatusCard');
+function loadSubagentStatus(targetId='subagentStatusCard'){
+  const card=$(targetId);
   if(!card) return;
   card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
   api('/api/subagents').then(r=>{
     const active=(r&&r.active)||[];
     const paused=!!(r&&r.spawn_paused);
-    _renderSubagentStatus(active, paused);
+    _renderSubagentStatus(active, paused, targetId);
     _updateWorkflowSubagentSummary(active, paused);
   }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:6px 0">Failed to load subagent status</div>`});
 }
-async function toggleSubagentSpawnPause(){
+async function toggleSubagentSpawnPause(targetId='subagentStatusCard'){
   try{
     const current=await api('/api/subagents');
     const nextPaused=!Boolean(current&&current.spawn_paused);
@@ -9148,14 +9148,14 @@ async function toggleSubagentSpawnPause(){
     });
     const active=(saved&&saved.active)||[];
     const paused=!!(saved&&saved.spawn_paused);
-    _renderSubagentStatus(active, paused);
+    _renderSubagentStatus(active, paused, targetId);
     _updateWorkflowSubagentSummary(active, paused);
     if(typeof showToast==='function') showToast(nextPaused?'Subagent spawning paused':'Subagent spawning resumed',2200,nextPaused?'info':'success');
   }catch(e){
     if(typeof showToast==='function') showToast('Failed to update subagent spawning: '+(e&&e.message?e.message:e),2400,'error');
   }
 }
-async function interruptActiveSubagent(subagentId){
+async function interruptActiveSubagent(subagentId, targetId='subagentStatusCard'){
   const sid=String(subagentId||'').trim();
   if(!sid) return;
   try{
@@ -9165,13 +9165,54 @@ async function interruptActiveSubagent(subagentId){
     });
     const active=(saved&&saved.active)||[];
     const paused=!!(saved&&saved.spawn_paused);
-    _renderSubagentStatus(active, paused);
+    _renderSubagentStatus(active, paused, targetId);
     _updateWorkflowSubagentSummary(active, paused);
     if(typeof showToast==='function') showToast('Subagent interrupted: '+sid.slice(0,8),2200,'info');
   }catch(e){
     if(typeof showToast==='function') showToast('Failed to interrupt subagent: '+(e&&e.message?e.message:e),2400,'error');
   }
 }
+function ensureSubagentsPanel(){
+  const main=document.querySelector('main.main');
+  if(!main) return null;
+  let panel=$('panelSubagents');
+  if(!panel){
+    panel=document.createElement('div');
+    panel.className='panel-view';
+    panel.id='panelSubagents';
+    panel.innerHTML=`
+      <div class="panel-head">
+        <span>Subagents</span>
+        <div class="panel-head-actions">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom" type="button" data-tooltip="Refresh" aria-label="Refresh" onclick="loadSubagentsPanel(true)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="subagents-panel-shell">
+        <div class="subagents-panel-note">Active delegate_task workers and the spawn pause switch.</div>
+        <div id="subagentStatusCardPanel"></div>
+      </div>
+    `;
+    const ref=$('panelProfiles')||$('panelLogs')||$('panelSettings')||$('panelAppstore')||null;
+    if(ref && ref.parentNode===main) main.insertBefore(panel, ref);
+    else main.appendChild(panel);
+  }
+  return panel;
+}
+function loadSubagentsPanel(force){
+  ensureSubagentsPanel();
+  loadSubagentStatus('subagentStatusCardPanel');
+  return !!force;
+}
+function openSubagentsPanel(){
+  ensureSubagentsPanel();
+  if(typeof switchPanel==='function') switchPanel('subagents',{bypassSettingsGuard:true});
+  loadSubagentsPanel(true);
+}
+window.ensureSubagentsPanel=ensureSubagentsPanel;
+window.loadSubagentsPanel=loadSubagentsPanel;
+window.openSubagentsPanel=openSubagentsPanel;
 // Load MCP servers when system settings tab opens
 const _origSwitchSettings=switchSettingsSection;
 switchSettingsSection=function(name){

@@ -1937,6 +1937,7 @@ async function cmdSubagents(args){
   if(!raw||raw==='status'||raw==='show'||raw==='list'){
     try{
       const payload=await fetchStatus();
+      if(typeof openSubagentsPanel==='function') openSubagentsPanel();
       showToast(summarize(payload)+' | /subagents open');
     }catch(e){
       showToast('Subagent status unavailable: '+(e&&e.message?e.message:e));
@@ -1951,7 +1952,24 @@ async function cmdSubagents(args){
     }
     return true;
   }
-  if(raw==='open'||raw==='system'||raw==='settings'){
+  if(raw==='open'){
+    if(typeof openSubagentsPanel==='function') openSubagentsPanel();
+    try{
+      const payload=await fetchStatus();
+      if(typeof loadSubagentsPanel==='function') loadSubagentsPanel(true);
+      showToast(summarize(payload));
+    }catch(e){
+      showToast('Subagents panel opened');
+    }
+    return true;
+  }
+  if(raw==='refresh'){
+    if(typeof openSubagentsPanel==='function') openSubagentsPanel();
+    if(typeof loadSubagentsPanel==='function') loadSubagentsPanel(true);
+    showToast('Subagent status refreshed');
+    return true;
+  }
+  if(raw==='system'||raw==='settings'){
     openSystemSettings();
     try{
       const payload=await fetchStatus();
@@ -1960,12 +1978,6 @@ async function cmdSubagents(args){
     }catch(e){
       showToast('Subagent settings opened');
     }
-    return true;
-  }
-  if(raw==='refresh'){
-    openSystemSettings();
-    if(typeof loadSubagentStatus==='function') loadSubagentStatus();
-    showToast('Subagent status refreshed');
     return true;
   }
   if(raw==='pause'||raw==='resume'){
