@@ -1,0 +1,25 @@
+{
+  "timezone": "Europe/Vienna",
+  "quiet_hours": {"start": "22:00", "end": "08:00"},
+  "tiers": {
+    "silent": {"allowed": true},
+    "internal": {"allowed": true},
+    "notify": {"allowed": true, "daily_limit": 3, "cooldown_minutes": 120},
+    "external": {"allowed": false, "allowed_actions": ["blog_draft", "local_note"]},
+    "risky": {"allowed": false, "requires_approval": true}
+  },
+  "actions": {
+    "agenda_update": {"tier": "silent"},
+    "prioritize_thread": {"tier": "silent"},
+    "goal_check": {"tier": "silent"},
+    "reflection": {"tier": "internal"},
+    "inner_voice": {"tier": "internal"},
+    "dream": {"tier": "internal"},
+    "telegram_message": {"tier": "notify"},
+    "hub_speak": {"tier": "notify"},
+    "blog_draft": {"tier": "external"},
+    "code_change": {"tier": "risky"},
+    "cron_change": {"tier": "risky"},
+    "secret_access": {"tier": "risky"}
+  }
+}
