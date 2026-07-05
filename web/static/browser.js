@@ -512,6 +512,7 @@ function _browserSetFullscreen(open) {
   }
   document.body.classList.toggle('browser-maximized', next);
   _browserSyncFullscreenButton(next);
+  _browserUpdateHeaderBadge();
   if (next) {
     _browserHoistDrawer();
     browserSetDrawerOpen(true, {force: true, keepViewport: true});
@@ -535,6 +536,7 @@ function _browserSetSplitScreen(open) {
   }
   document.body.classList.toggle('browser-split', next);
   _browserSyncSplitButton(next);
+  _browserUpdateHeaderBadge();
   if (next) {
     if (!_browserDrawerOpen) {
       browserSetDrawerOpen(true, {force: true, keepViewport: true});
@@ -566,6 +568,7 @@ function browserToggleExploreMode() {
   if (typeof showToast === 'function') {
     showToast(_browserExploreMode ? 'Explore mode: you can click the viewport' : 'Follow mode: agent controls the browser', 2000, 'info');
   }
+  _browserUpdateHeaderBadge();
 }
 
 function _browserTriggerDiffOverlay() {
@@ -754,6 +757,40 @@ function _browserSetSessionLabel(state) {
   el.textContent = _browserSessionLabel(state);
 }
 
+function _browserUpdateHeaderBadge() {
+  const badge = _browserEl('browserStatusBadge');
+  const value = _browserEl('browserStatusValue');
+  if (!badge || !value) return;
+
+  const open = !!_browserDrawerOpen;
+  const mode = String(_browserPermissionMode || 'none');
+  const openState = open ? 'open' : 'closed';
+  const modeState = mode === 'control' ? 'control' : (mode === 'read' ? 'read' : 'locked');
+  const extraStates = [];
+  if (_browserExploreMode) extraStates.push('explore');
+  if (_browserSplitScreen) extraStates.push('split');
+  if (_browserFullscreen) extraStates.push('fullscreen');
+
+  badge.classList.remove('browser-state-open', 'browser-state-closed', 'browser-state-control', 'browser-state-read', 'browser-state-locked', 'browser-state-explore', 'browser-state-split', 'browser-state-fullscreen');
+  badge.classList.add('browser-state-' + openState);
+  badge.classList.add('browser-state-' + modeState);
+  extraStates.forEach(stateName => badge.classList.add('browser-state-' + stateName));
+
+  value.textContent = 'browser ' + openState;
+
+  const parts = [
+    'Browser drawer ' + openState,
+    modeState === 'control' ? 'agent control enabled' : (modeState === 'read' ? 'agent watch mode' : 'agent locked')
+  ];
+  if (_browserState && _browserState.status) parts.push(String(_browserState.status));
+  if (_browserExploreMode) parts.push('explore mode');
+  if (_browserSplitScreen) parts.push('split view');
+  if (_browserFullscreen) parts.push('fullscreen');
+  const label = parts.join(' · ') + '. Click to toggle the drawer.';
+  badge.setAttribute('title', label);
+  badge.setAttribute('aria-label', label);
+}
+
 function browserRenderPermission(permission) {
   const mode = permission && permission.mode ? String(permission.mode) : 'none';
   _browserPermissionMode = mode;
@@ -786,6 +823,7 @@ function browserRenderPermission(permission) {
     stopBtn.setAttribute('aria-label', mode === 'none' ? 'Stop Nova agent browser handoff' : 'Stop Nova agent browser handoff');
     stopBtn.dataset.tooltip = mode === 'none' ? 'Stop Nova agent browser handoff' : 'Stop Nova agent browser handoff';
   }
+  _browserUpdateHeaderBadge();
 }
 
 function browserRenderWebBackend(status) {
@@ -808,6 +846,7 @@ function browserRenderWebBackend(status) {
   el.dataset.backend = _browserWebBackend;
   el.dataset.configuredBackend = configuredBackend || 'auto';
   el.dataset.nextMode = nextMode;
+  _browserUpdateHeaderBadge();
 }
 
 async function browserRefreshWebBackend() {
@@ -1095,6 +1134,7 @@ function _browserRender(state, opts = {}) {
   _browserSetCursor(state);
   if (state.click_ts != null) _browserFlashClick(state);
   _browserSetSessionLabel(state);
+  _browserUpdateHeaderBadge();
   const isBlocked = state.status === 'blocked';
   const isError = state.status === 'error';
   const isRunning = state.status === 'running' || state.busy;
@@ -1166,6 +1206,7 @@ function browserPrepareSessionSwitch() {
   _browserSetEmptyVisible(true);
   _browserSetButtonsDisabled(true, null);
   browserRenderPermission({mode: 'none'});
+  _browserUpdateHeaderBadge();
 }
 
 function browserSetDrawerOpen(open, opts = {}) {
@@ -1176,6 +1217,7 @@ function browserSetDrawerOpen(open, opts = {}) {
   document.body.classList.toggle('browser-drawer-open', nextOpen);
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
+  _browserUpdateHeaderBadge();
   if (nextOpen) {
     void browserRefreshWebBackend();
   }
@@ -1875,6 +1917,7 @@ window.addEventListener('load', function() {
     _browserSyncFullscreenButton(false);
     _browserSyncSplitButton(false);
   }
+  _browserUpdateHeaderBadge();
   _browserAttachPointerHandlers();
 });
 

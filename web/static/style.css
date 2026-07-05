@@ -8670,6 +8670,64 @@ body.focus-mode aside.rightpanel {
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
 }
 
+.titlebar-browser-badge.browser-state-open {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
+}
+
+.titlebar-browser-badge.browser-state-closed {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(148, 163, 184, 0.06);
+  color: #cbd5e1;
+}
+
+.titlebar-browser-badge.browser-state-control {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.08);
+  color: #86efac;
+}
+
+.titlebar-browser-badge.browser-state-read {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.08);
+  color: #7dd3fc;
+}
+
+.titlebar-browser-badge.browser-state-locked {
+  border-color: rgba(148, 163, 184, 0.30);
+  background: rgba(148, 163, 184, 0.05);
+  color: #cbd5e1;
+}
+
+.titlebar-browser-badge.browser-state-open.browser-state-control .titlebar-approval-dot {
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.14);
+}
+
+.titlebar-browser-badge.browser-state-open.browser-state-read .titlebar-approval-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
+.titlebar-browser-badge.browser-state-open.browser-state-locked .titlebar-approval-dot,
+.titlebar-browser-badge.browser-state-closed .titlebar-approval-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
+.titlebar-browser-badge.browser-state-explore {
+  border-style: dashed;
+}
+
+.titlebar-browser-badge.browser-state-split {
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.14);
+}
+
+.titlebar-browser-badge.browser-state-fullscreen {
+  box-shadow: inset 0 0 0 1px rgba(168, 85, 247, 0.14);
+}
+
 @media (max-width: 760px) {
   .titlebar-approval-badge {
     padding: 3px 7px;
