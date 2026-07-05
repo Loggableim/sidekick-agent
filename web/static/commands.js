@@ -29,7 +29,8 @@ const COMMANDS=[
   {name:'background',desc:t('cmd_background'),fn:cmdBackground,arg:'prompt',  noEcho:true},
   {name:'status',    desc:t('cmd_status'),   fn:cmdStatus},
   {name:'voice',     desc:t('cmd_voice'),    fn:cmdVoice,     noEcho:true},
-  {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh', subArgs:['show','hide','none','minimal','low','medium','high','xhigh'], noEcho:true},
+  {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
+  {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
 ];
@@ -1020,6 +1021,53 @@ function cmdReasoning(args){
   showToast('Unknown argument: '+arg+' \u2014 use show|hide|'+EFFORTS.join('|'));
   return true;
 }
+async function cmdApproval(args){
+  const arg=(args||'').trim().toLowerCase();
+  const MODES=['manual','smart','off'];
+  const normalizeMode=arg==='ask'?'manual':arg==='deny'?'smart':arg==='yolo'?'off':arg;
+  const normalizeApprovalMode=(mode)=>{
+    const value=(mode==null?'':String(mode)).trim().toLowerCase();
+    if(value==='ask') return 'manual';
+    if(value==='deny') return 'smart';
+    if(value==='yolo') return 'off';
+    if(value==='manual'||value==='smart'||value==='off') return value;
+    return 'manual';
+  };
+  const formatStatus=(mode)=>'Approval mode: '+mode+' | /approval manual|smart|off';
+  const applyApprovalMode=(mode)=>{
+    const normalized=normalizeApprovalMode(mode);
+    if(typeof window._setApprovalModeIndicator==='function'){
+      return window._setApprovalModeIndicator(normalized)||normalized;
+    }
+    window._approvalMode=normalized;
+    return normalized;
+  };
+  if(!arg||arg==='status'||arg==='show'){
+    try{
+      const st=await api('/api/approval');
+      const mode=applyApprovalMode((st&&st.mode)||'manual');
+      showToast(formatStatus(mode));
+    }catch(e){
+      showToast('Approval mode status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(!MODES.includes(normalizeMode)){
+    showToast('Unknown argument: '+arg+' \u2014 use manual|smart|off|status');
+    return true;
+  }
+  try{
+    const data=await api('/api/approval',{
+      method:'POST',
+      body:JSON.stringify({mode:normalizeMode}),
+    });
+    const mode=applyApprovalMode((data&&data.mode)||normalizeMode);
+    showToast('Approval mode: '+mode+' (saved)');
+  }catch(e){
+    showToast('Approval mode update failed: '+(e&&e.message?e.message:normalizeMode));
+  }
+  return true;
+}
 function cmdVoice(){
   const mic=document.getElementById('btnMic');
   if(mic&&mic.style.display!=='none'&&!mic.disabled){try{mic.click();return;}catch(_){}}
@@ -1223,3 +1271,4 @@ function selectCmdDropdownItem(){
 // allow tooling and tests to discover command handlers by name independently.
 const HANDLERS = {};
 HANDLERS.skills = cmdSkills;
+HANDLERS.approval = cmdApproval;

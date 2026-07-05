@@ -1,5 +1,5 @@
-﻿  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  /* â”€â”€ Light mode (default) â€” warm gold-tinted palette from Sidekick brand â”€â”€ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  /* ── Light mode (default) — warm gold-tinted palette from Sidekick brand ── */
   :root {
     --bg:#FEFCF7;--sidebar:#FAF7F0;--border:#E0D8C8;--border2:rgba(0,0,0,0.15);
     --text:#1A1610;--muted:#5C5344;--accent:#B8860B;--blue:#0288A8;--gold:#8B6508;--code-bg:#F5F0E5;
@@ -17,11 +17,11 @@
     --border-subtle:rgba(0,0,0,.08);--border-muted:rgba(0,0,0,.12);
     font-family:var(--font-ui);font-size:14px;line-height:1.6;
   }
-  /* â”€â”€ Font size modifiers â”€â”€ */
-  /* â”€â”€ Font size preference: scale key UI text elements â”€â”€ */
+  /* ── Font size modifiers ── */
+  /* ── Font size preference: scale key UI text elements ── */
   /* Default is 14px (no attribute needed). Small=12px, Large=16px.            */
   /* We override the px values directly on key containers since most of the     */
-  /* stylesheet uses hardcoded px â€” changing :root font-size alone only affects */
+  /* stylesheet uses hardcoded px — changing :root font-size alone only affects */
   /* the small number of em/rem values.                                         */
 
   /* Sidebar session list */
@@ -93,10 +93,10 @@
   :root[data-font-size="small"] .file-item { font-size: 11px; }
   :root[data-font-size="large"] .file-item { font-size: 14px; }
 
-  /* App-level base â€” keeps em/rem values scaling correctly */
+  /* App-level base — keeps em/rem values scaling correctly */
   :root[data-font-size="small"] { font-size: 12px; }
   :root[data-font-size="large"] { font-size: 16px; }
-  /* â”€â”€ Dark mode â€” navy-black + gold accent matching Sidekick terminal â”€â”€ */
+  /* ── Dark mode — navy-black + gold accent matching Sidekick terminal ── */
   :root.dark {
     --bg:#0D0D1A;--sidebar:#141425;--border:#2A2A45;--border2:rgba(255,255,255,0.14);
     --text:#FFF8DC;--muted:#C0C0C0;--accent:#FFD700;--blue:#4DD0E1;--gold:#FFBF00;--code-bg:#1A1A2E;
@@ -109,32 +109,32 @@
     --surface-subtle:rgba(255,255,255,.025);--surface-subtle-hover:rgba(255,255,255,.045);
     --border-subtle:rgba(255,255,255,.075);--border-muted:rgba(255,255,255,.12);
   }
-  /* â”€â”€ Skin: Default (gold â€” matches base) â”€â”€ */
-  /* No overrides needed â€” :root and .dark already use gold accent */
-  /* â”€â”€ Skin: Ares (red) â”€â”€ */
+  /* ── Skin: Default (gold — matches base) ── */
+  /* No overrides needed — :root and .dark already use gold accent */
+  /* ── Skin: Ares (red) ── */
   :root[data-skin="ares"]{--accent:#C0392B;--accent-hover:#A93226;--accent-bg:rgba(192,57,43,0.08);--accent-bg-strong:rgba(192,57,43,0.15);--accent-text:#922B21;}
   :root.dark[data-skin="ares"]{--accent:#FF4444;--accent-hover:#CC3333;--accent-bg:rgba(255,68,68,0.08);--accent-bg-strong:rgba(255,68,68,0.15);--accent-text:#FF4444;}
-  /* â”€â”€ Skin: Mono (gray) â”€â”€ */
+  /* ── Skin: Mono (gray) ── */
   :root[data-skin="mono"]{--accent:#666666;--accent-hover:#555555;--accent-bg:rgba(102,102,102,0.08);--accent-bg-strong:rgba(102,102,102,0.15);--accent-text:#555555;}
   :root.dark[data-skin="mono"]{--accent:#CCCCCC;--accent-hover:#999999;--accent-bg:rgba(204,204,204,0.08);--accent-bg-strong:rgba(204,204,204,0.15);--accent-text:#CCCCCC;}
-  /* â”€â”€ Skin: Slate (blue-gray) â”€â”€ */
+  /* ── Skin: Slate (blue-gray) ── */
   :root[data-skin="slate"]{--accent:#475569;--accent-hover:#334155;--accent-bg:rgba(71,85,105,0.08);--accent-bg-strong:rgba(71,85,105,0.15);--accent-text:#334155;}
   :root.dark[data-skin="slate"]{--accent:#94A3B8;--accent-hover:#64748B;--accent-bg:rgba(148,163,184,0.08);--accent-bg-strong:rgba(148,163,184,0.15);--accent-text:#94A3B8;}
-  /* â”€â”€ Skin: Poseidon (ocean blue) â”€â”€ */
+  /* ── Skin: Poseidon (ocean blue) ── */
   :root[data-skin="poseidon"]{--accent:#0369A1;--accent-hover:#025080;--accent-bg:rgba(3,105,161,0.08);--accent-bg-strong:rgba(3,105,161,0.15);--accent-text:#025080;}
   :root.dark[data-skin="poseidon"]{--accent:#0EA5E9;--accent-hover:#0284C7;--accent-bg:rgba(14,165,233,0.08);--accent-bg-strong:rgba(14,165,233,0.15);--accent-text:#0EA5E9;}
-  /* â”€â”€ Skin: Sisyphus (purple) â”€â”€ */
+  /* ── Skin: Sisyphus (purple) ── */
   :root[data-skin="sisyphus"]{--accent:#7C3AED;--accent-hover:#6D28D9;--accent-bg:rgba(124,58,237,0.08);--accent-bg-strong:rgba(124,58,237,0.15);--accent-text:#6D28D9;}
   :root.dark[data-skin="sisyphus"]{--accent:#A78BFA;--accent-hover:#8B5CF6;--accent-bg:rgba(167,139,250,0.08);--accent-bg-strong:rgba(167,139,250,0.15);--accent-text:#A78BFA;}
-  /* â”€â”€ Skin: Charizard (orange) â”€â”€ */
+  /* ── Skin: Charizard (orange) ── */
   :root[data-skin="charizard"]{--accent:#EA580C;--accent-hover:#C2410C;--accent-bg:rgba(234,88,12,0.08);--accent-bg-strong:rgba(234,88,12,0.15);--accent-text:#C2410C;}
   :root.dark[data-skin="charizard"]{--accent:#FB923C;--accent-hover:#F97316;--accent-bg:rgba(251,146,60,0.08);--accent-bg-strong:rgba(251,146,60,0.15);--accent-text:#FB923C;}
-  /* â”€â”€ Skin: Sienna (warm clay & sand earth palette) â”€â”€
+  /* ── Skin: Sienna (warm clay & sand earth palette) ──
      Full palette rewrite (not just --accent): warm off-white surface,
      soft sand sidebar, clay accent. Sets --user-bubble-* for the redesigned
      user bubble block, mutes tool-card chrome to neutral, and bumps the
      reading column to a serif body for long-form prose. Opt-in via the
-     Settings â†’ Skin picker; default skin stays "default" (gold). */
+     Settings → Skin picker; default skin stays "default" (gold). */
   :root[data-skin="sienna"]{
     --bg:#FAF9F5;--sidebar:#F0EEE6;--surface:#FFFFFF;
     --border:#E7E4DB;--border2:#D7D3C7;
@@ -166,7 +166,7 @@
     --user-selection-bg:rgba(224,137,109,0.3);--user-selection-text:#F7F5ED;
   }
   /* Specificity boosted to beat the :root:not(.dark) .new-chat-btn rule that
-     sets color:var(--accent-text) â€” without this, the solid-accent background
+     sets color:var(--accent-text) — without this, the solid-accent background
      would collide with the inherited text color, producing clay-on-clay text. */
   :root[data-skin="sienna"]:not(.dark) .new-chat-btn,
   :root.dark[data-skin="sienna"] .new-chat-btn{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(20,19,17,0.08);}
@@ -190,11 +190,11 @@
   :root[data-skin="sienna"] .session-item.active{border-left:2px solid var(--accent);}
   :root[data-skin="sienna"] .composer-box{border-radius:18px;}
 
-/* â”€â”€ Skin: Matrix (neon green on black, CRT scanlines) â”€â”€
-   Inspired by the Matrix film series â€” deep black backgrounds,
+/* ── Skin: Matrix (neon green on black, CRT scanlines) ──
+   Inspired by the Matrix film series — deep black backgrounds,
    phosphor-green accent, subtle CRT scanlines, and neon glow.
    Dark-only: the Matrix is always dark.
-   v2 â€” accessibility pass: brighter text, higher contrast, clearer fonts. */
+   v2 — accessibility pass: brighter text, higher contrast, clearer fonts. */
 :root.dark[data-skin="matrix"] {
   --bg: #0A140A;
   --sidebar: #0F1C0F;
@@ -236,11 +236,11 @@
   --user-bubble-placeholder: #55CC55;
   --user-selection-bg: rgba(0,255,65,0.3);
   --user-selection-text: #FFFFFF;
-  /* Simpler, highly readable font stack â€” Tahoma/Verdana are especially clear
+  /* Simpler, highly readable font stack — Tahoma/Verdana are especially clear
      at small sizes for users with visual impairments */
   --font-ui: Tahoma, Verdana, "Segoe UI", Arial, Helvetica, sans-serif;
 }
-/* CRT scanline overlay â€” very subtle to preserve readability.
+/* CRT scanline overlay — very subtle to preserve readability.
    Reduced opacity so scanlines don't interfere with text contrast. */
 :root.dark[data-skin="matrix"] body {
   background:
@@ -360,7 +360,7 @@
   color: #00FF41;
 }
 
-/* â”€â”€ Matrix Skin: Extended chat & UI overrides (code blocks, messages, UI chrome) â”€â”€ */
+/* ── Matrix Skin: Extended chat & UI overrides (code blocks, messages, UI chrome) ── */
 /* Code blocks: phosphor green on deep black with crisp monospace */
 :root.dark[data-skin="matrix"] .msg-body code {
   font-family: "Courier New","Share Tech Mono","Fira Code",ui-monospace,monospace;
@@ -850,7 +850,7 @@
   border-left-color: rgba(0,255,65,0.08);
 }
 
-  /* #594: app-dialog light mode overrides â€” base styles use hardcoded dark gradients */
+  /* #594: app-dialog light mode overrides — base styles use hardcoded dark gradients */
   :root:not(.dark) .app-dialog{
     background:linear-gradient(180deg,rgba(240,237,232,.99),rgba(228,224,216,.99));
     border-color:rgba(0,0,0,.12);
@@ -878,7 +878,7 @@
   :root:not(.dark) ::-webkit-scrollbar-thumb{background:rgba(0,0,0,.15);transition:background .2s;}
   :root:not(.dark) ::selection{background:var(--accent-bg-strong);}
   :root:not(.dark) *{scrollbar-color:rgba(0,0,0,.15) transparent;}
-  /* â”€â”€ Light mode: sidebar, roles, chips, active states â”€â”€ */
+  /* ── Light mode: sidebar, roles, chips, active states ── */
   :root:not(.dark) .session-item{color:var(--muted);}
   :root:not(.dark) .session-item:hover{background:var(--hover-bg);color:var(--text);}
   :root:not(.dark) .session-item.active{background:var(--accent-bg);color:var(--accent-text);}
@@ -930,7 +930,7 @@
   :root:not(.dark) .profile-opt:hover{background:rgba(0,0,0,.05);}
   :root:not(.dark) .profile-opt.active{background:var(--accent-bg);}
   :root:not(.dark) .profile-chip{color:var(--accent-text)!important;}
-  /* â”€â”€ Light mode: Prism syntax token overrides (prism-tomorrow is dark-only) â”€â”€ */
+  /* ── Light mode: Prism syntax token overrides (prism-tomorrow is dark-only) ── */
   :root:not(.dark) .token.comment,
   :root:not(.dark) .token.prolog,
   :root:not(.dark) .token.doctype,
@@ -971,7 +971,7 @@
   :root:not(.dark) .cron-status.attention{background:rgba(217,119,6,.14);color:#b45309;}
   :root:not(.dark) .cron-btn{background:rgba(0,0,0,.04);}
   :root:not(.dark) .cron-btn:hover{background:rgba(0,0,0,.08);}
-  /* â”€â”€ Smooth dark mode transitions â”€â”€ */
+  /* ── Smooth dark mode transitions ── */
   body,header,footer,aside,nav,main,div,button,input,textarea,select{transition-property:background-color,border-color,color;transition-duration:.15s;transition-timing-function:ease;}
   :root{--app-titlebar-safe-top:0px;--titlebar-area-width:0px;--window-controls-width:138px;}
   @supports (padding-top: env(safe-area-inset-top)){
@@ -1019,7 +1019,7 @@
   .cast-off{color:#555!important;filter:none;}
   .cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.88;}
   .cast-unavailable:hover{opacity:1;color:#f59e0b!important;}
-  /* ── Language Selector (titlebar) ── */
+  /* -- Language Selector (titlebar) -- */
   .titlebar-lang-selector{position:relative;display:inline-flex;align-items:center;}
   .lang-selector-btn{font-size:16px;line-height:1;}
   .lang-dropdown{display:block;position:absolute;top:100%;right:0;min-width:36px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:9999;padding:4px;}
@@ -1117,7 +1117,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
      row's right edge naturally, so no reservation is needed at rest. The
      action button (.session-actions, position:absolute, 26x26 at right:6px)
      and attention indicator (26x26 at right:6px) still need 40px reserved
-     when they're visible â€” covered by the hover / streaming / unread /
+     when they're visible — covered by the hover / streaming / unread /
      menu-open / focus-within rule below. */
   .session-item{padding:8px 8px;margin-bottom:2px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);transition:background .15s,color .15s;display:flex;align-items:flex-start;gap:8px;min-width:0;position:relative;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
   .session-item.streaming,.session-item.unread,.session-item:focus-within,.session-item.menu-open{padding-right:40px;}
@@ -1125,7 +1125,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   /* Suppress hover highlight during drag to avoid visual noise mid-scroll */
   .session-item.dragging:hover{background:transparent;color:var(--muted);}
   /* Restore hover padding-right only for mouse (hover:hover) devices.
-     Touch/iPad (hover:none) must NOT expand padding-right on :hover â€”
+     Touch/iPad (hover:none) must NOT expand padding-right on :hover —
      the expansion causes a layout-reflow mid-tap that moves session-actions
      under the finger, triggering stopPropagation and swallowing navigation. */
   @media (hover:hover){.session-item:hover{padding-right:40px;}}
@@ -1184,7 +1184,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   }
   .session-time.is-hidden{display:none;}
   .session-item:hover .session-time,.session-item:focus-within .session-time,.session-item.menu-open .session-time{display:none;}
-  /* â”€â”€ Session action trigger + dropdown â”€â”€ */
+  /* ── Session action trigger + dropdown ── */
   .session-actions{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .15s ease;}
   .session-item:hover .session-actions,.session-item:focus-within .session-actions,.session-item.menu-open .session-actions{opacity:1;pointer-events:auto;}
   .session-item.streaming:not(:hover):not(:focus-within):not(.menu-open) .session-actions,.session-item.unread:not(:hover):not(:focus-within):not(.menu-open) .session-actions{opacity:0;pointer-events:none;}
@@ -1215,7 +1215,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .session-date-header.cli-group-header{color:var(--accent);opacity:.9;}
   .session-date-header.cli-group-header:hover{opacity:1;}
 
-  /* â”€â”€ Batch select mode â”€â”€ */
+  /* ── Batch select mode ── */
   .session-select-toggle{font-size:11px;padding:6px 10px;color:var(--muted);cursor:pointer;text-align:center;opacity:.6;transition:opacity .15s;user-select:none;margin-top:4px;border-radius:6px;}
   .session-select-toggle:hover{opacity:1;background:var(--hover-bg);}
   .session-select-bar{display:flex;align-items:center;gap:6px;padding:6px 10px;margin-bottom:4px;flex-shrink:0;}
@@ -1293,7 +1293,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .onboarding-field span{font-size:12px;font-weight:700;color:var(--text);}
   .onboarding-field input,.onboarding-field select{margin-bottom:0;padding:10px 12px;border-radius:10px;font-size:13px;background:var(--input-bg);border:1px solid var(--border2);color:var(--text);}
   .onboarding-copy{font-size:12px;color:var(--muted);line-height:1.7;}
-  /* Onboarding probe (#1499) â€” Test connection button + status banner */
+  /* Onboarding probe (#1499) — Test connection button + status banner */
   .onboarding-probe-row{display:flex;justify-content:flex-end;margin-top:-2px;}
   .onboarding-probe-btn{padding:6px 12px;font-size:12px;font-weight:600;border-radius:8px;background:var(--input-bg);border:1px solid var(--border2);color:var(--text);cursor:pointer;}
   .onboarding-probe-btn:hover:not(:disabled){border-color:var(--accent);}
@@ -1302,7 +1302,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .onboarding-probe-banner.onboarding-probe-ok{border-color:#1f8a4f;color:#9ce0b4;background:rgba(31,138,79,.12);}
   .onboarding-probe-banner.onboarding-probe-probing{color:var(--muted);}
   .onboarding-probe-banner.onboarding-probe-error{border-color:#9c3a3a;color:#f5a3a3;background:rgba(156,58,58,.12);}
-  /* Onboarding api-key keyless hint (#1499 third sub-bug) â€” subtle muted text */
+  /* Onboarding api-key keyless hint (#1499 third sub-bug) — subtle muted text */
   /* sized below the input so it reads as inline help, not a banner. */
   .onboarding-api-key-help{margin:4px 0 0;font-size:11px;color:var(--muted);font-style:italic;}
   .onboarding-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
@@ -1339,17 +1339,17 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .agent-health-copy span{color:var(--muted);}
   .agent-health-dismiss{flex-shrink:0;padding:6px 12px;border-radius:8px;border:1px solid color-mix(in srgb,var(--error) 45%,var(--surface));background:color-mix(in srgb,var(--error) 10%,var(--surface));color:var(--error);font-size:12px;font-weight:600;cursor:pointer;}
   .agent-health-dismiss:hover{background:color-mix(in srgb,var(--error) 18%,var(--surface));}
-  /* â”€â”€ Update banner â”€â”€ */
+  /* ── Update banner ── */
   .update-banner{display:none;background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:10px 16px;margin:10px auto;max-width:780px;font-size:13px;color:var(--accent-text);align-items:center;justify-content:space-between;gap:12px;}
   .update-banner.visible{display:flex;}
   .update-btn{padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;background:var(--accent-bg);border:1px solid var(--accent-bg-strong);color:var(--accent-text);cursor:pointer;transition:background .15s;}
   .update-btn:hover{background:var(--accent-bg-strong);}
   .update-primary{background:var(--accent-bg-strong);border-color:var(--accent);}
   .update-btn:disabled{opacity:0.5;cursor:not-allowed;}
-  /* â”€â”€ Composer flyout (approval/clarify slide up from behind composer) â”€â”€ */
+  /* ── Composer flyout (approval/clarify slide up from behind composer) ── */
   .composer-flyout{position:relative;height:0;z-index:1;}
   .composer-wrap.terminal-dock-visible .composer-flyout{z-index:4;}
-  /* â”€â”€ Inline Approval Card (im Chat-Verlauf, kein Popup) â”€â”€ */
+  /* ── Inline Approval Card (im Chat-Verlauf, kein Popup) ── */
   .inline-approval-card{margin:8px 48px;border-radius:12px;border:1px solid var(--border);background:var(--surface);overflow:hidden;transition:opacity .25s;}
   .inline-approval-card.resolved{opacity:.7;}
   .inline-approval-card.timed-out{opacity:.5;}
@@ -1375,13 +1375,13 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .inline-approval-btn.yolo{background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.3);color:#f59e0b;}
   .inline-approval-btn.yolo:hover{background:rgba(245,158,11,0.22);border-color:rgba(245,158,11,0.5);color:#fbbf24;}
   .inline-approval-resolution{font-size:11px;color:var(--muted);padding:0 16px 12px;font-style:italic;}
-  /* â”€â”€ YOLO pill in composer footer â”€â”€ */
+  /* ── YOLO pill in composer footer ── */
   .yolo-pill{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.35);cursor:pointer;transition:all .15s;line-height:1.4;white-space:nowrap;}
   .yolo-pill:hover{background:rgba(245,158,11,0.25);border-color:rgba(245,158,11,0.5);transform:translateY(-1px);}
   .yolo-pill:active{transform:translateY(0);}
   .yolo-pill-icon{font-size:12px;}
   .yolo-pill-label{font-size:10px;}
-  /* â”€â”€ Queue flyout (same slide-up pattern as approval-card) â”€â”€ */
+  /* ── Queue flyout (same slide-up pattern as approval-card) ── */
   .queue-card{position:absolute;left:0;right:0;bottom:0;max-width:var(--msg-max);margin:0 auto;padding:0 20px;box-sizing:border-box;width:100%;overflow:hidden;pointer-events:none;z-index:2;}
   .queue-card.visible{pointer-events:auto;}
   /* When queue is visible, add bottom padding to messages so last bubble isn't covered */
@@ -1408,6 +1408,27 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .queue-card-text:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
   .queue-card-badges{display:flex;align-items:center;gap:5px;flex-shrink:0;font-size:10px;color:var(--muted);opacity:.6;}
   .queue-card-file-badge{display:flex;align-items:center;gap:2px;}
+  /* -- Active subagent panel (inline transcript card) -- */
+  .subagent-panel-card{margin:8px 48px;border:1px solid var(--border);border-left:2px solid var(--accent-bg);border-radius:12px;background:var(--surface);overflow:hidden;box-shadow:0 1px 0 rgba(255,255,255,.02) inset;}
+  .subagent-panel-header{display:flex;align-items:center;gap:8px;padding:12px 16px 8px;font-size:12px;font-weight:700;letter-spacing:.01em;color:var(--text);}
+  .subagent-panel-title{flex-shrink:0;}
+  .subagent-panel-status{margin-left:auto;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .subagent-panel-status.paused{color:#f59e0b;}
+  .subagent-panel-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+  .subagent-panel-btn{appearance:none;border:1px solid var(--border);background:none;color:var(--muted);padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:background .12s,color .12s,border-color .12s;}
+  .subagent-panel-btn:hover{background:var(--hover-bg);color:var(--text);}
+  .subagent-panel-list{display:flex;flex-direction:column;gap:8px;padding:0 16px 14px;}
+  .subagent-panel-empty{padding:0 16px 14px;font-size:11px;color:var(--muted);}
+  .subagent-panel-row{display:flex;gap:8px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--hover-bg) 35%,transparent);}
+  .subagent-panel-row.clickable{cursor:pointer;}
+  .subagent-panel-row-main{flex:1;min-width:0;}
+  .subagent-panel-goal{font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .subagent-panel-sub{margin-top:3px;font-size:11px;line-height:1.45;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .subagent-panel-row-actions{display:flex;align-items:flex-start;gap:6px;flex-shrink:0;}
+  .subagent-panel-row-btn{appearance:none;border:1px solid var(--border);background:none;color:var(--text);padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer;transition:background .12s,border-color .12s;}
+  .subagent-panel-row-btn:hover{background:var(--hover-bg);border-color:var(--accent-bg);}
+  .subagent-panel-row-btn.danger{color:var(--error);}
+  .subagent-panel-row-btn.danger:hover{background:rgba(239,83,80,.12);border-color:var(--error);}
   .inline-approval-btn-icon{font-size:13px;line-height:1;}
   .inline-approval-btn-label{line-height:1;}
   .inline-approval-btn-kbd{display:inline-flex;align-items:center;justify-content:center;padding:1px 5px;border-radius:4px;font-size:10px;font-family:inherit;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:var(--muted);line-height:1.4;margin-left:2px;}
@@ -1420,7 +1441,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .inline-approval-btn.deny{border-color:var(--error);color:var(--error);}
   .inline-approval-btn.deny:hover{background:rgba(239,83,80,.12);border-color:var(--error);}
   .inline-approval-btn.loading{opacity:.7;cursor:wait;}
-  /* â”€â”€ Clarify card â”€â”€ */
+  /* ── Clarify card ── */
   .clarify-card{position:absolute;left:0;right:0;bottom:-24px;max-width:var(--msg-max);margin:0 auto;padding:0 20px;box-sizing:border-box;width:100%;overflow:hidden;pointer-events:none;visibility:hidden;max-height:min(calc(100vh - 280px),420px);}
   .clarify-card.visible{pointer-events:auto;visibility:visible;}
   .clarify-card .clarify-inner{max-height:min(calc(100vh - 280px),420px);overflow-y:auto;transform:translateY(100%);opacity:0;transition:transform .4s cubic-bezier(.32,.72,.16,1),opacity .25s ease;}
@@ -1456,7 +1477,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .rail-btn:hover{color:var(--text);background:var(--hover-bg);}
   .rail-btn.active{color:var(--accent-text);background:var(--accent-bg);}
 .rail-btn.active::before{content:'';position:absolute;left:-6px;top:50%;transform:translateY(-50%);width:3px;height:16px;background:var(--accent);border-radius:0 2px 2px 0;}
-  /* Custom tooltip â€” replaces native title="" for faster, more polished display.
+  /* Custom tooltip — replaces native title="" for faster, more polished display.
      Native browser tooltips have a ~1.5s hover delay that reads as "no tooltip
      exists" (#1775). Our custom tooltip appears at ~150ms hover, dismisses
      instantly, and renders above all sidebar/panel stacking contexts. */
@@ -1464,7 +1485,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
      with data-i18n-title; static/i18n.js will sync the localized value into
      data-tooltip and clear any stale native title attribute. */
   /* Design choice: no arrow/caret. At 11px text size and 5px arrow size the
-     triangle reads as visual noise rather than a connector â€” VS Code, Slack,
+     triangle reads as visual noise rather than a connector — VS Code, Slack,
      and Linear's rail tooltips also skip the arrow. Spatial proximity (8px
      gap) is enough to associate the tooltip with the trigger. */
   .has-tooltip{position:relative;}
@@ -1474,12 +1495,12 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   /* For bottom-positioned tooltips (panel header buttons, non-rail elements) */
   .has-tooltip--bottom::after{left:50%;top:auto;bottom:auto;transform:translateX(-50%);top:calc(100% + 8px);}
   /* For bottom-positioned tooltips on a trigger that sits flush with its
-     container's right edge â€” anchors the tooltip's RIGHT edge to the trigger
+     container's right edge — anchors the tooltip's RIGHT edge to the trigger
      so the label extends inward (to the left) instead of overflowing past the
      panel edge. Used for the `+` New conversation button at the right of the
      chat panel header. Pairs with `--bottom`; do not apply both. */
   .has-tooltip--bottom-right::after{left:auto;right:0;top:calc(100% + 8px);bottom:auto;transform:none;}
-  /* For right-edge elements (e.g. send button) â€” tooltip flips to the LEFT
+  /* For right-edge elements (e.g. send button) — tooltip flips to the LEFT
      of the trigger so it doesn't extend past the viewport edge. */
   .has-tooltip--left::after{left:auto;right:calc(100% + 8px);top:50%;transform:translateY(-50%);}
   @media(prefers-reduced-motion:reduce){.has-tooltip::after{transition:none;transition-delay:0s;}}
@@ -1509,7 +1530,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .sidebar-nav{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;padding:6px 8px 0;gap:2px;}
   .nav-tab{flex:1;padding:10px 4px 8px;font-size:20px;text-align:center;cursor:pointer;color:var(--muted);border:none;background:none;transition:color .15s;border-bottom:2px solid transparent;white-space:nowrap;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;}
   .nav-tab:hover{color:var(--text);}
-  /* Legacy hover-tooltip â€” kept for the mobile `.sidebar-nav` only, where it
+  /* Legacy hover-tooltip — kept for the mobile `.sidebar-nav` only, where it
      positions ABOVE the trigger (the bar is at the top of the sidebar so a
      bottom-positioned tooltip would sink into the panel content). The desktop
      `.rail` buttons opt out of this rule so the `.has-tooltip` system can run
@@ -1649,9 +1670,9 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .provider-error-details{margin:12px 0 0;border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden;}
   .provider-error-details>summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:600;padding:8px 12px;}
   .provider-error-details>pre{margin:0;border:0;border-top:1px solid var(--border);border-radius:0;max-height:220px;}
-  /* Keep original theme background â€” prevent prism-tomorrow from overriding --code-bg */
+  /* Keep original theme background — prevent prism-tomorrow from overriding --code-bg */
   .msg-body pre[class*="language-"],.msg-body pre code[class*="language-"]{background:var(--code-bg) !important;}
-  /* Fix #1463: Prism YAML grammar collapses newlines inside token spans â€” force pre */
+  /* Fix #1463: Prism YAML grammar collapses newlines inside token spans — force pre */
   .msg-body pre code.language-yaml .token{white-space:pre !important;}
   @media(max-width:700px){
     .msg-body pre,.preview-md pre{white-space:pre-wrap !important;overflow-x:hidden !important;overflow-wrap:anywhere !important;}
@@ -1772,11 +1793,11 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .msg-media-link{display:inline-flex;align-items:center;gap:5px;background:var(--accent-bg);border:1px solid var(--accent-bg-strong);border-radius:6px;padding:4px 10px;font-size:13px;color:var(--accent-text);text-decoration:none;}
   .msg-media-link:hover{background:var(--accent-bg-strong);}
 
-  /* â”€â”€ Inline SVG rendering â”€â”€ */
+  /* ── Inline SVG rendering ── */
   .msg-media-svg{display:block;max-width:100%;height:auto;border-radius:6px;margin:6px 0;border:1px solid var(--border);background:var(--surface);}
   .msg-media-label{display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:4px;user-select:none;}
 
-  /* â”€â”€ Inline audio/video media editor with speed controls â”€â”€ */
+  /* ── Inline audio/video media editor with speed controls ── */
   .msg-media-editor{display:flex;flex-direction:column;gap:8px;width:min(520px,100%);max-width:100%;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);margin:6px 0;}
   .msg-media-editor--audio{min-width:min(360px,100%);}
   .msg-media-player{width:100%;display:block;border-radius:8px;}
@@ -1789,13 +1810,13 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .media-speed-btn:hover{background:var(--hover-bg);color:var(--text);}
   .media-speed-btn.active{background:var(--accent-bg);border-color:var(--accent-bg-strong);color:var(--accent-text);}
 
-  /* â”€â”€ Composer attachment chips for media â”€â”€ */
+  /* ── Composer attachment chips for media ── */
   .attach-thumb--svg{background:var(--surface);padding:2px;border-radius:4px;}
   .attach-chip--audio,.attach-chip--video{flex-direction:column;gap:4px;align-items:flex-start;padding:8px 10px;}
   .attach-chip--audio audio,.attach-chip--video video{width:100%;max-width:320px;border-radius:4px;}
   .attach-chip-media{font-size:12px;font-weight:600;color:var(--muted);}
 
-  /* â”€â”€ CSV table rendering â”€â”€ */
+  /* ── CSV table rendering ── */
   .csv-table-wrap{margin:6px 0;overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--surface);}
   .csv-table{width:100%;border-collapse:collapse;font-size:13px;}
   .csv-table thead{position:sticky;top:0;z-index:1;}
@@ -1804,7 +1825,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .csv-table tbody tr:last-child td{border-bottom:none;}
   .csv-table tbody tr:hover{background:var(--hover-bg);}
 
-  /* â”€â”€ Excalidraw inline embed â”€â”€ */
+  /* ── Excalidraw inline embed ── */
   .excalidraw-embed-wrap{margin:6px 0;border:1px solid var(--border);border-radius:8px;background:var(--surface);overflow:hidden;}
   .excalidraw-canvas{padding:12px;overflow:auto;max-height:500px;}
   .excalidraw-svg{display:block;width:100%;height:auto;max-height:460px;}
@@ -1817,7 +1838,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
 @keyframes pulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:.8;transform:scale(1)}}
 @keyframes title-pulse{0%,100%{opacity:.4}50%{opacity:1}}
 
-  /* â”€â”€ Thinking indicator (animated dots inside the message, not busy-state) â”€â”€ */
+  /* ── Thinking indicator (animated dots inside the message, not busy-state) ── */
   .thinking-indicator{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 12px;user-select:none;}
   .thinking-indicator-dots{display:flex;align-items:center;gap:4px;}
   .thinking-dot{width:7px;height:7px;background:var(--accent);border-radius:50%;animation:thinkBounce 1.4s ease-in-out infinite;opacity:.85;}
@@ -1839,7 +1860,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .suggestion-grid{display:flex;flex-direction:column;gap:8px;margin-top:12px;width:100%;max-width:380px;}
 .suggestion{padding:12px 14px;background:var(--input-bg);border:1px solid var(--border);border-radius:10px;font-size:13px;color:var(--muted);cursor:pointer;transition:all .15s;text-align:left;}
   .suggestion:hover{background:var(--accent-bg);color:var(--text);border-color:var(--accent-bg);transform:translateX(2px);}
-  /* ── Goal Banner (zwischen Messages und Composer) ── */
+  /* -- Goal Banner (zwischen Messages und Composer) -- */
   .goal-banner{max-width:820px;margin:0 auto 4px;padding:8px 14px;border-radius:10px;display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.4;transition:all .2s;border:1px solid var(--border);background:var(--surface);}
   .goal-banner.active{border-color:var(--accent);background:var(--accent-bg);}
   .goal-banner.paused{border-color:var(--warning);background:rgba(230,138,0,.08);}
@@ -1857,7 +1878,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .goal-btn-pause:hover{color:var(--warning);}
   .goal-btn-resume:hover{color:var(--success);}
   .goal-btn-clear:hover{color:var(--error);}
-  /* ── Plan Mode ── */
+  /* -- Plan Mode -- */
   .plan-mode-toggle.active{background:var(--accent-bg-strong)!important;border-color:var(--accent)!important;color:var(--accent)!important;}
   .plan-banner{max-width:820px;margin:0 auto 4px;padding:6px 12px;border-radius:8px;display:flex;align-items:center;gap:8px;font-size:12px;line-height:1.4;border:1px solid var(--accent);background:var(--accent-bg);color:var(--text);}
   .plan-banner-icon{flex-shrink:0;font-size:14px;}
@@ -1866,7 +1887,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .plan-banner-exit{flex-shrink:0;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px;border-radius:4px;}
   .plan-banner-exit:hover{color:var(--text);background:rgba(0,0,0,.1);}
   .composer-box.plan-mode .action-chips{display:none;}
-  /* ── Goal Input ── */
+  /* -- Goal Input -- */
   .goal-input-row{display:none;align-items:center;gap:8px;padding:6px 12px;}
   .composer-box.goal-mode .goal-input-row{display:flex;}
   .composer-box.goal-mode textarea#msg{display:none;}
@@ -1885,7 +1906,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .goal-exit-btn:hover{background:var(--hover-bg);color:var(--text);}
   /* Goal-mode toggle button active state */
   .goal-mode-toggle.active{color:var(--accent);background:var(--accent-bg);}
-  /* ── Composer ── */
+  /* -- Composer -- */
   .composer-wrap{padding:10px 18px 14px;background:var(--bg);flex-shrink:0;}
   .composer-box{max-width:820px;margin:0 auto;background:linear-gradient(var(--input-bg),var(--input-bg)),var(--bg);border:1px solid var(--border2);border-radius:20px;display:flex;flex-direction:column;transition:border-color .2s,box-shadow .2s;position:relative;z-index:2;}
   .composer-box:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-bg);}
@@ -1907,7 +1928,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   @media (hover: hover) {
     .attach-thumb:hover{filter:brightness(1.05);transform:scale(1.04);}
   }
-  /* â”€â”€ Action chips: quick-command pills above the textarea â”€â”€ */
+  /* ── Action chips: quick-command pills above the textarea ── */
   .action-chips{display:flex;gap:5px;padding:5px 14px 0;flex-wrap:wrap;}
   .action-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-pill);font-size:10.5px;cursor:pointer;color:var(--muted);transition:background .15s,border-color .15s,color .15s;white-space:nowrap;}
   .action-chip:hover{background:var(--accent-bg);border-color:var(--accent);color:var(--accent-text);}
@@ -1981,7 +2002,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .reasoning-option{padding:8px 14px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--text);white-space:nowrap;transition:background-color .12s;}
   .reasoning-option:hover{background:rgba(255,255,255,.07);}
   .reasoning-option.selected{background:var(--accent-bg);}
-  /* Toolsets chip â€” session-level toolset override (#493) */
+  /* Toolsets chip — session-level toolset override (#493) */
   .composer-toolsets-wrap{position:relative;flex:0 1 auto;min-width:0;display:none;}
   .composer-toolsets-chip{display:inline-flex;align-items:center;gap:8px;max-width:180px;padding:8px 10px 8px 12px;border-radius:999px;border:1px solid transparent;background-color:transparent;color:var(--muted);font-weight:500;cursor:pointer;transition:color .15s,background-color .15s,border-color .15s;}
   .composer-toolsets-chip:hover{color:var(--text);background-color:var(--hover-bg);}
@@ -2003,7 +2024,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .toolsets-apply-btn:hover{opacity:.9;}
   .toolsets-clear-btn{background:transparent;color:var(--muted);border:1px solid var(--border2);}
   .toolsets-clear-btn:hover{background:var(--hover-bg);color:var(--text);}
-  /* Mode selector chips â€” queue / steer / bg quick-toggle in composer */
+  /* Mode selector chips — queue / steer / bg quick-toggle in composer */
   .composer-mode-wrap{position:relative;display:inline-flex;align-items:center;gap:3px;flex:0 0 auto;padding:0 2px;}
   .composer-mode-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;border:1px solid transparent;background-color:transparent;color:var(--muted);font-size:11px;font-weight:500;cursor:pointer;transition:color .15s,background-color .15s,border-color .15s;white-space:nowrap;line-height:1;}
   .composer-mode-chip:hover{color:var(--text);background-color:var(--hover-bg);}
@@ -2016,7 +2037,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .composer-model-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .composer-model-icon,.composer-model-chevron{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1;}
   .composer-model-select{position:absolute!important;left:-9999px!important;width:1px!important;height:1px!important;opacity:0!important;pointer-events:none!important;}
-  /* â”€â”€ Prominent model-switcher: provider line + speed dot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Prominent model-switcher: provider line + speed dot ────────────── */
   .composer-model-body{display:flex;flex-direction:column;min-width:0;gap:0;line-height:1.15;}
   .composer-model-name{display:inline-flex;align-items:center;gap:5px;min-width:0;}
   .composer-model-provider{display:block;font-size:9px;font-weight:400;color:var(--muted);letter-spacing:.02em;padding-left:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;opacity:.75;}
@@ -2033,7 +2054,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .model-speed-dot--unknown{background-color:var(--border2);}
   /* Increased specificity (.icon-btn.composer-mobile-config-btn) to win the cascade
      against the later-in-source `.icon-btn { display:flex }` rule that this element
-     also matches. Without this, the button shows at desktop width â€” see #1381 review. */
+     also matches. Without this, the button shows at desktop width — see #1381 review. */
   .icon-btn.composer-mobile-config-btn{display:inline-flex;width:34px;height:34px;min-width:34px;min-height:34px;border-radius:999px;}
   .composer-mobile-config-btn.active{background:var(--accent-bg);border-color:var(--accent-bg-strong);color:var(--text);opacity:1;}
   .composer-mobile-ctx-badge{position:absolute;right:2px;bottom:2px;display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 3px;border-radius:999px;background:var(--surface);border:1px solid var(--border2);color:var(--muted);font-size:8px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;box-shadow:0 1px 4px rgba(0,0,0,.28);pointer-events:none;}
@@ -2046,7 +2067,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .composer-mobile-config-copy{display:flex;flex-direction:column;gap:1px;min-width:0;line-height:1.2;}
   /* The kicker labels (WORKSPACE / MODEL / REASONING / CONTEXT) duplicate the
      meaning the row icon already conveys, and at iPhone 14 width (390px) the
-     ~60px copy column truncates them. Hide them inside the open panel â€” the
+     ~60px copy column truncates them. Hide them inside the open panel — the
      icon + value gives a cleaner two-row layout per pill. The .context row
      keeps its kicker because it stretches to 100% width and has more value
      content (usage / tokens / threshold). See #1381 review feedback. */
@@ -2122,7 +2143,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .mic-status{font-size:11px;color:var(--error);padding:4px 12px;display:flex;align-items:center;gap:6px;}
   .mic-dot{width:6px;height:6px;border-radius:50%;background:var(--error);animation:mic-pulse 1.2s ease-in-out infinite;flex-shrink:0;}
 
-  /* â”€â”€ Turn-based voice mode (#1333) â”€â”€ */
+  /* ── Turn-based voice mode (#1333) ── */
   .voice-mode-btn{transition:color .15s,background .15s;}
   .voice-mode-btn.active{color:var(--accent);background:rgba(var(--accent-rgb,99,102,241),.15);}
   .voice-mode-btn.active svg{filter:drop-shadow(0 0 3px rgba(var(--accent-rgb,99,102,241),.5));}
@@ -2158,7 +2179,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .composer-terminal-dock-title{min-width:0;display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}
   .composer-terminal-dock-dot{width:7px;height:7px;border-radius:999px;background:var(--success);box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 16%,transparent);flex:0 0 auto;}
 
-  /* â”€â”€ Handoff hint bar â”€â”€ */
+  /* ── Handoff hint bar ── */
   .handoff-hint-container{position:absolute;left:0;right:0;bottom:-2px;width:min(calc(100% - 112px),560px);margin:0 auto;box-sizing:border-box;overflow:visible;pointer-events:none;z-index:3;}
   .handoff-hint-container.is-visible{pointer-events:auto;}
   .handoff-hint-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;border:1px solid var(--border);border-bottom:none;border-radius:13px 13px 0 0;background:color-mix(in srgb,var(--surface) 86%,transparent);box-shadow:0 8px 22px rgba(0,0,0,.16);backdrop-filter:blur(10px);padding:7px 12px 9px;cursor:pointer;transform:translateY(100%);opacity:0;transition:transform .32s cubic-bezier(.32,.72,.16,1),opacity .2s ease,background .15s ease,border-color .15s ease;}
@@ -2169,7 +2190,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .handoff-hint-dot{width:7px;height:7px;border-radius:999px;background:var(--success);box-shadow:0 0 0 3px color-mix(in srgb,var(--success) 16%,transparent);flex:0 0 auto;}
   .handoff-hint-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-transform:none;letter-spacing:0;font-weight:700;font-size:12px;}
 
-  /* â”€â”€ Context info panel â”€â”€ */
+  /* ── Context info panel ── */
   .ctx-info-btn{width:30px;height:30px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;transition:color .15s,background .15s,border-color .15s,transform .15s;}
   .ctx-info-btn:hover{color:var(--text);background:var(--hover-bg);border-color:var(--accent);transform:translateY(-1px);}
   .ctx-info-btn svg{width:15px;height:15px;}
@@ -2254,7 +2275,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .panel-actions{display:flex;gap:4px;flex-shrink:0;margin-left:auto;}
 
   /* Crisp display:none at narrow widths so the header doesn't show a sliver
-     of an ellipsised label or git badge â€” icons survive longest. */
+     of an ellipsised label or git badge — icons survive longest. */
   @container rightpanel (max-width: 220px){
     .git-badge{display:none !important;}
   }
@@ -2273,7 +2294,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .close-preview{cursor:pointer;opacity:.6;}.close-preview:hover{opacity:1;}
   /* Breadcrumb navigation */
   .breadcrumb-bar{display:flex;align-items:center;gap:2px;padding:6px 12px;font-size:12px;border-bottom:1px solid var(--border);flex-shrink:0;overflow:hidden;white-space:nowrap;}
-  /* â”€â”€ Workspace prefs kebab menu (#1793) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+  /* ── Workspace prefs kebab menu (#1793) ─────────────────────────── */
   /* Replaces the always-visible "Show hidden files" inline row that used
      to sit below the breadcrumb. The toggle now lives behind the kebab
      button in the panel-actions row; the small indicator next to the
@@ -2283,7 +2304,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .workspace-hidden-indicator[hidden]{display:none;}
   .workspace-hidden-indicator svg{flex-shrink:0;opacity:.85;}
   /* On narrow workspace panels (the default 300px width), hide the chip
-     entirely â€” the kebab dot (rendered absolute over the kebab icon) is
+     entirely — the kebab dot (rendered absolute over the kebab icon) is
      enough of a "non-default state" signal and costs zero horizontal
      space. The tooltip on the kebab itself still labels what's going on.
      On wider panels (resized by the user, or some future layout that
@@ -2298,7 +2319,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   #btnWorkspacePrefs .workspace-prefs-dot{position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:var(--accent-text);box-shadow:0 0 0 1.5px var(--surface);pointer-events:none;}
   #btnWorkspacePrefs .workspace-prefs-dot[hidden]{display:none;}
   #btnWorkspacePrefs.active{background:var(--accent-bg);color:var(--text);}
-  /* Floating menu â€” pattern shared with .session-action-menu but scoped */
+  /* Floating menu — pattern shared with .session-action-menu but scoped */
   .workspace-prefs-menu{display:block;position:fixed;left:0;top:0;min-width:240px;max-width:min(280px,calc(100vw - 16px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.32);z-index:999;overflow:hidden;}
   .workspace-prefs-item{display:flex;align-items:flex-start;gap:10px;padding:10px 14px;color:var(--text);cursor:pointer;font-size:13px;line-height:1.35;user-select:none;transition:background .12s;}
   .workspace-prefs-item:hover{background:var(--hover-bg);}
@@ -2315,7 +2336,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .file-item{display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--muted);transition:all .12s;min-width:0;position:relative;}
   .file-item:hover{background:var(--hover-bg);color:var(--text);}
   .file-item.active{background:var(--accent-bg);color:var(--accent-text);}
-  /* Current/referenced file highlight â€” stronger than .active (preview) */
+  /* Current/referenced file highlight — stronger than .active (preview) */
   .file-item.current{background:var(--accent-bg-strong);color:var(--accent-text);font-weight:600;}
   .file-item.current::before{content:'';position:absolute;left:0;top:2px;bottom:2px;width:3px;border-radius:0 3px 3px 0;background:var(--accent);}
   .file-item.current:hover{background:var(--accent-bg-strong);}
@@ -2348,9 +2369,9 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .preview-md code{font-family:"SF Mono",ui-monospace,monospace;font-size:11.5px;background:var(--code-inline-bg);padding:1px 5px;border-radius:4px;color:var(--code-text);}
   .preview-md pre{background:var(--code-bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;overflow-x:auto;margin:8px 0;}
   .preview-md pre code{background:none;padding:0;color:var(--pre-text);font-size:11.5px;line-height:1.55;}
-  /* Keep original theme background â€” prevent prism-tomorrow from overriding --code-bg */
+  /* Keep original theme background — prevent prism-tomorrow from overriding --code-bg */
   .preview-md pre[class*="language-"],.preview-md pre code[class*="language-"]{background:var(--code-bg) !important;}
-  /* Fix #1463: Prism YAML grammar collapses newlines inside token spans â€” force pre */
+  /* Fix #1463: Prism YAML grammar collapses newlines inside token spans — force pre */
   .preview-md pre code.language-yaml .token{white-space:pre !important;}
   .preview-md blockquote{border-left:3px solid var(--blue);padding-left:12px;color:var(--muted);font-style:italic;margin:8px 0;}
   .preview-md blockquote p{margin:0;}
@@ -2372,8 +2393,8 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   ::-webkit-scrollbar{width:4px;height:4px}
   ::-webkit-scrollbar-track{background:transparent}
   ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:99px;transition:background .2s}
-  /* :hover entfÃ¤llt â€“ `transition:background .2s` auf dem thumb reicht */
-  /* â”€â”€ Desktop: hide mobile-only elements â”€â”€ */
+  /* :hover entfällt – `transition:background .2s` auf dem thumb reicht */
+  /* ── Desktop: hide mobile-only elements ── */
   .mobile-hamburger{display:none;}
   .mobile-files-btn{display:none!important;}
   .mobile-overlay{display:none;}
@@ -2383,7 +2404,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   }
 
   /* Sidebar collapse breakpoint matches `_isDesktopWidth()` (min-width:641px) so
-     clicking the active rail icon in the tablet-portrait band (641â€“900px) actually
+     clicking the active rail icon in the tablet-portrait band (641–900px) actually
      produces a visual change rather than silently flipping a class while CSS sits
      out at @901. The rail itself becomes visible at min-width:641px, so any width
      where the user can click the rail should also be a width where the collapse
@@ -2522,11 +2543,11 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   /* Show session-toolsets chip ONLY when the composer-footer container is wide
      enough to comfortably accommodate it (workspace+model+reasoning+profile+
      toolsets+context-ring+send all need room to breathe, see #1431). At
-     narrower container widths the chip is hidden by the base rule above â€”
+     narrower container widths the chip is hidden by the base rule above —
      the underlying state and /api/session/toolsets endpoint continue to work
      for scripted callers regardless of UI visibility. Uses display:block to
      match sibling wraps (.composer-profile-wrap, .composer-model-wrap, etc.)
-     rather than display:flex â€” the chip child has its own inline-flex layout. */
+     rather than display:flex — the chip child has its own inline-flex layout. */
   @container composer-footer (min-width: 1100px) {
     .composer-toolsets-wrap{display:block;}
   }
@@ -2535,7 +2556,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .composer-toolsets-wrap{display:none!important;}
     /* Viewport-phone rules handle app chrome and touch sizing; they intentionally
        overlap the container compact rules for actual phones. */
-    /* â”€â”€ Sidebar: slide-in overlay instead of hidden â”€â”€ */
+    /* ── Sidebar: slide-in overlay instead of hidden ── */
     .sidebar{position:fixed;left:-300px;top:0;bottom:0;width:280px;z-index:200;
       transition:left .25s ease;}
     .sidebar.mobile-open{left:0;}
@@ -2632,7 +2653,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .composer-terminal-action{padding:5px 7px;font-size:10px;white-space:nowrap;}
     #terminalWorkspaceLabel{max-width:110px;}
     #terminalDockWorkspaceLabel{max-width:96px;}
-    /* Touch targets â€” minimum 44px */
+    /* Touch targets — minimum 44px */
     .icon-btn,.mic-btn,.voice-mode-btn{min-width:44px;min-height:44px;}
     .session-item{min-height:44px;padding:10px 40px 10px 12px;}
     .session-item.streaming,.session-item.unread{padding-right:40px;}
@@ -2661,6 +2682,10 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .inline-approval-btns{gap:6px;}
     .inline-approval-btn{padding:8px 12px;font-size:12px;min-height:44px;}
     .inline-approval-btn-kbd{display:none;}
+    .subagent-panel-card{margin:8px 10px;}
+    .subagent-panel-header{padding:11px 12px 8px;}
+    .subagent-panel-list{padding:0 12px 12px;}
+    .subagent-panel-row{padding:9px 10px;}
     /* Clarify card */
     .clarify-card{padding-left:10px;padding-right:10px;}
     .clarify-inner{padding:12px 12px 13px;}
@@ -2685,7 +2710,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   }
 
 
-/* â”€â”€ Workspace dropdown (topbar) â”€â”€ */
+/* ── Workspace dropdown (topbar) ── */
 .ws-chip{user-select:none;}
 .ws-dropdown{display:none;position:absolute;bottom:calc(100% + 4px);left:0;right:0;min-width:200px;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -4px 24px rgba(0,0,0,.4);z-index:200;overflow:hidden;max-height:320px;overflow-y:auto;}
 .ws-dropdown.open{display:block;}
@@ -2732,7 +2757,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
 .ws-no-results{padding:12px 14px;text-align:center;color:var(--muted);font-size:12px;}
 .ws-opt-icon{display:inline-flex;align-items:center;justify-content:center;opacity:.82;flex-shrink:0;}
 .ws-opt-meta{font-size:11px;color:var(--muted);}
-/* â”€â”€ Workspace management panel â”€â”€ */
+/* ── Workspace management panel ── */
 .ws-row{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:2px;border:1px solid transparent;border-radius:8px;cursor:pointer;color:var(--muted);transition:background .15s,border-color .15s,color .15s,opacity .15s;}
 .ws-row:hover{background:var(--surface);color:var(--text);}
 .ws-row.active{background:var(--accent-bg);border-color:var(--accent-bg-strong);color:var(--accent-text);}
@@ -2748,7 +2773,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
 .ws-row.drag-over{border-color:var(--accent-text);background:var(--accent-bg);}
 .ws-action-btn{padding:4px 8px;border-radius:6px;font-size:11px;font-weight:600;border:1px solid var(--border2);background:rgba(255,255,255,.05);color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap;}
 .ws-action-btn:hover{background:rgba(255,255,255,.1);color:var(--text);}
-/* â”€â”€ Profile dropdown + management panel â”€â”€ */
+/* ── Profile dropdown + management panel ── */
 .profile-chip{user-select:none;color:var(--accent-text)!important;}
 .profile-dropdown{display:none;position:absolute;bottom:calc(100% + 4px);left:0;min-width:260px;max-width:min(260px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -4px 24px rgba(0,0,0,.4);z-index:200;overflow:hidden;max-height:380px;overflow-y:auto;}
 .profile-dropdown.open{display:block;}
@@ -2769,7 +2794,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
 .profile-card-meta{font-size:11px;color:var(--muted);margin-top:3px;padding-left:12px;}
 .profile-card.active .profile-card-meta{color:var(--accent-text);opacity:.8;}
 .profile-card-actions{display:flex;gap:4px;flex-shrink:0;}
-/* â”€â”€ Slash command autocomplete dropdown â”€â”€ */
+/* ── Slash command autocomplete dropdown ── */
 .cmd-dropdown{display:none;position:absolute;left:0;right:0;bottom:calc(100% + 4px);width:auto;max-width:100%;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -8px 24px rgba(0,0,0,.4);z-index:200;max-height:240px;overflow-y:auto;}
 .cmd-dropdown.open{display:block;}
 .cmd-item{padding:8px 14px;cursor:pointer;transition:background .12s;}
@@ -2794,7 +2819,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
 .ws-suggest-parent{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .ws-suggest-item.active .ws-suggest-leaf{color:var(--accent-text);}
 .ws-suggest-item.active .ws-suggest-parent{color:var(--text);}
-/* â”€â”€ Message action buttons (copy, edit, retry) â”€â”€ */
+/* ── Message action buttons (copy, edit, retry) ── */
 .msg-actions{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity .15s;margin-left:auto;}
 .msg-row:hover .msg-actions{opacity:1;}
 .msg-action-btn{background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 5px;border-radius:5px;transition:color .12s,background .12s;line-height:1;}
@@ -2809,7 +2834,7 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
 .msg-tts-btn[data-speaking="1"]{color:var(--accent);animation:tts-pulse 1s ease-in-out infinite;}
 @keyframes tts-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 
-/* â”€â”€ Edit message inline â”€â”€ */
+/* ── Edit message inline ── */
 .msg-edit-area{width:100%;background:rgba(255,255,255,.05);border:1px solid var(--accent-bg);border-radius:8px;color:var(--text);padding:10px 12px;font-size:14px;font-family:inherit;line-height:1.6;resize:none;outline:none;min-height:60px;box-sizing:border-box;box-shadow:0 0 0 3px var(--accent-bg);margin-top:4px;}
 .msg-edit-bar{display:flex;gap:8px;margin-top:8px;margin-bottom:4px;}
 .msg-edit-send{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:opacity .15s;}
@@ -2817,7 +2842,7 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
 .msg-edit-cancel{background:var(--hover-bg);color:var(--muted);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;font-size:13px;cursor:pointer;transition:background .15s;}
 .msg-edit-cancel:hover{background:rgba(255,255,255,.1);}
 
-/* â”€â”€ Composer Edit & Resend: collapse animation â”€â”€ */
+/* ── Composer Edit & Resend: collapse animation ── */
 @keyframes msgCollapse {
   to { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; overflow: hidden; }
 }
@@ -2825,20 +2850,20 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
   animation: msgCollapse 0.3s ease-out forwards;
   pointer-events: none;
 }
-/* â”€â”€ Edit button: slightly brighter on hover â”€â”€ */
+/* ── Edit button: slightly brighter on hover ── */
 .msg-edit-btn:hover svg { stroke: var(--accent-text); transform: scale(1.1); }
 .msg-edit-btn svg { transition: transform .15s, stroke .15s; }
 
-/* â”€â”€ Clear conversation chip â”€â”€ */
+/* ── Clear conversation chip ── */
 .clear-btn{background:var(--accent-bg);border:1px solid var(--accent-bg-strong);color:var(--accent-text);font-size:11px;padding:4px 10px;cursor:pointer;transition:background .15s;}
 .clear-btn:hover{background:var(--accent-bg-strong);}
 
-/* â”€â”€ Copy button on messages â”€â”€ */
+/* ── Copy button on messages ── */
 /* msg-copy-btn styles moved to msg-action-btn */
-/* â”€â”€ Nav tab nowrap â”€â”€ */
+/* ── Nav tab nowrap ── */
 /* nav-tab-nowrap-handled-above */
 
-/* â”€â”€ Final polish additions â”€â”€ */
+/* ── Final polish additions ── */
 
 /* Smooth hover on file items */
 
@@ -2861,7 +2886,7 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
 /* Preview badge typography */
 .preview-badge{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
 
-/* â”€â”€ Preview code: line-numbers plugin integration â”€â”€ */
+/* ── Preview code: line-numbers plugin integration ── */
 .preview-area .line-numbers-rows{border-right:1px solid var(--border);}
 .preview-area .line-numbers-rows > span::before{color:var(--muted);}
 .preview-code.line-numbers{padding-left:3.8em;min-height:60px;background:transparent;}
@@ -2912,7 +2937,7 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
 /* Composer footer: even spacing */
 .composer-footer { padding: 4px 10px 8px; }
 
-/* â”€â”€ File tree: clean delete button via CSS hover â”€â”€ */
+/* ── File tree: clean delete button via CSS hover ── */
 .file-del-btn{
   flex-shrink:0;
   width:0;height:16px;
@@ -2956,7 +2981,7 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
   line-height:1;
 }
 
-/* â”€â”€ Resizable panels â”€â”€ */
+/* ── Resizable panels ── */
 .resize-handle{
   position:absolute;
   top:0;bottom:0;
@@ -2980,7 +3005,7 @@ body.tts-enabled .msg-tts-btn{display:inline-flex;align-items:center;}
 body.resizing{user-select:none;cursor:col-resize;}
 body.resizing .sidebar{transition:none!important;}
 
-/* â”€â”€ Codex Split Pane Layout â”€â”€ */
+/* ── Codex Split Pane Layout ── */
 .codex-split-layout{display:flex;flex:1;overflow:hidden;}
 .codex-split-pane{flex:1;min-width:300px;overflow:hidden;display:flex;}
 /* Rightpanel uses flex:0 0 auto so its existing width:300px applies by default,
@@ -2997,7 +3022,7 @@ body.resizing .codex-split-layout .rightpanel{transition:none!important;}
   .split-resize-handle{display:none;}
 }
 
-/* â”€â”€ Tool call cards â”€â”€ */
+/* ── Tool call cards ── */
 .chat-split-layout{
   flex:1;min-height:0;display:grid;
   grid-template-rows:1fr 5px var(--terminal-pane-height,280px);
@@ -3105,14 +3130,14 @@ body.resizing-vertical{user-select:none;cursor:row-resize;}
 .msg-row.msg-search-hidden{display:none !important;}
 .msg-row.msg-search-current-match{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px;}
 
-/* Mode: Chat â€” terminal collapsed, full UI */
+/* Mode: Chat — terminal collapsed, full UI */
 .chat-split-layout.mode-chat{
   grid-template-rows:1fr;
 }
 .chat-split-layout.mode-chat .resize-handle#chatResizeHandle,
 .chat-split-layout.mode-chat .terminal-pane{display:none!important;}
 
-/* Mode: Code â€” terminal expanded, minimal UI */
+/* Mode: Code — terminal expanded, minimal UI */
 
 .chat-split-layout.mode-code .empty-state .empty-logo,
 .chat-split-layout.mode-code .empty-state .suggestion-grid{display:none!important;}
@@ -3187,7 +3212,7 @@ body.resizing-vertical{user-select:none;cursor:row-resize;}
 .tool-arg-val{color:var(--muted);font-family:'SF Mono',ui-monospace,monospace;font-size:var(--font-size-xs);white-space:pre-wrap;word-break:break-word;display:block;overflow-x:auto;}
 .tool-card-result pre{font-size:var(--font-size-xs);color:var(--muted);font-family:'SF Mono',ui-monospace,monospace;white-space:pre-wrap;word-break:break-word;max-height:240px;overflow-y:auto;margin:0;line-height:1.55;}
 
-/* â”€â”€ Terminal error: red border + Fix this? button â”€â”€ */
+/* ── Terminal error: red border + Fix this? button ── */
 .tool-card-error{border-color:var(--error, #EF5350) !important;background:color-mix(in srgb,var(--error, #EF5350) 6%,transparent);}
 .tool-card-error:hover{border-color:var(--error, #EF5350) !important;}
 .tool-card-error .tool-card-preview{color:var(--error, #EF5350);opacity:.85;}
@@ -3200,7 +3225,7 @@ body.resizing-vertical{user-select:none;cursor:row-resize;}
 .tool-card-child-link{padding:0 var(--space-3) var(--space-2) var(--space-3);}
 .tool-card-child-link .tool-card-fix-btn{background:var(--accent,#5B6AF0);}
 
-/* â”€â”€ Task progress bar (streamed from agent) â”€â”€ */
+/* ── Task progress bar (streamed from agent) ── */
 .task-progress{margin:4px 12px 4px 42px;padding:0;}
 .progress-bar{height:4px;background:var(--border);border-radius:3px;overflow:hidden;position:relative;}
 .progress-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s ease;min-width:0;}
@@ -3219,10 +3244,10 @@ body.resizing-vertical{user-select:none;cursor:row-resize;}
 /* Done state: green bar + checkmark label */
 .task-progress.progress-done .progress-fill{background:var(--success);}
 .task-progress.progress-done .progress-label{color:var(--success);}
-.task-progress.progress-done .progress-label::before{content:'✓ ';}
+.task-progress.progress-done .progress-label::before{content:'? ';}
 .progress-label{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
-/* â”€â”€ Manual compression cards (transient transcript-local feedback) â”€â”€ */
+/* ── Manual compression cards (transient transcript-local feedback) ── */
 .live-compression-cards{
   display:none;
   max-width:800px;
@@ -3601,18 +3626,18 @@ body.resizing-vertical{user-select:none;cursor:row-resize;}
   border-top-color:rgba(78,201,132,.12);
 }
 
-/* â”€â”€ Scrollbar polish â”€â”€ */
+/* ── Scrollbar polish ── */
 ::-webkit-scrollbar{width:5px;height:5px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px;transition:background .2s;}
 * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.12) transparent; }
 
-/* â”€â”€ Settings view (rail cog â†’ sidebar menu + main pane) â”€â”€ */
+/* ── Settings view (rail cog → sidebar menu + main pane) ── */
 /* --border-subtle: used inside cards for softer dividers than the
    outer --border; resolves cleanly in both light+dark via color-mix. */
 :root{--border-subtle:color-mix(in srgb, var(--border) 60%, transparent);}
 :root.dark{--border-subtle:color-mix(in srgb, var(--border) 60%, transparent);}
-/* â”€â”€ Generalized main-view switching â”€â”€
+/* ── Generalized main-view switching ──
    <main class="main"> holds multiple sibling #main* containers (one per view).
    Exactly one is visible at a time; chat is the default when no showing-*
    class is set. Adding a new view needs: a #main<Name> sibling with
@@ -3653,11 +3678,11 @@ main.main.showing-agents > #mainAgents{display:flex;}
 main.main.showing-appstore > #mainAppstore{display:flex;}
 #mainSettings{overflow-y:auto;}
 
-/* â”€â”€ Chat split-pane layout (messages + terminal left, file tree right) â”€â”€ */
+/* ── Chat split-pane layout (messages + terminal left, file tree right) ── */
 .chat-split-layout{flex:1;display:flex;flex-direction:row;min-height:0;min-width:0;}
 .chat-main-column{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;flex:1;}
 .chat-pane{display:flex;flex-direction:column;min-height:0;overflow:hidden;flex:1;}
-/* â”€â”€ Open Files Bar (VS Code-style tabs over chat) â”€â”€ */
+/* ── Open Files Bar (VS Code-style tabs over chat) ── */
 .open-files-bar{display:flex;align-items:stretch;overflow-x:auto;overflow-y:hidden;flex-shrink:0;height:34px;background:var(--surface-subtle);border-bottom:1px solid var(--border-subtle);gap:0;scrollbar-width:thin;scrollbar-color:var(--border) transparent;}
 .open-files-bar::-webkit-scrollbar{height:3px;}
 .open-files-bar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
@@ -3682,7 +3707,7 @@ main.main.showing-appstore > #mainAppstore{display:flex;}
 .terminal-pane-action{border:1px solid transparent;background:transparent;color:var(--muted);border-radius:6px;padding:4px 8px;font:inherit;font-size:11px;font-weight:600;cursor:pointer;transition:color .15s ease,background .15s ease;}
 .terminal-pane-action:hover{color:var(--text);background:var(--hover-bg);}
 
-/* â”€â”€ File Tree Panel (right side of chat layout) â”€â”€ */
+/* ── File Tree Panel (right side of chat layout) ── */
 .file-tree-panel{width:var(--file-tree-width,260px);min-width:0;background:var(--sidebar);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0;container-type:inline-size;container-name:rightpanel;transition:width .24s cubic-bezier(.22,1,.36,1),opacity .18s ease;opacity:1;}
 .file-tree-panel.file-tree-panel--minimized{width:0!important;opacity:0;overflow:hidden;border-left-color:transparent;pointer-events:none;}
 .file-tree-panel.file-tree-panel--minimized + #fileTreeTabIcon{display:flex;}
@@ -3740,12 +3765,12 @@ body.discord-mode .split-resize-handle{display:none !important;}
 #mainSettings .settings-field{margin-bottom:12px;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--sidebar);}
 #mainSettings .settings-field:last-of-type{margin-bottom:16px;}
 #mainSettings .settings-field > label{display:block;font-size:12px;font-weight:500;letter-spacing:.01em;color:var(--muted);margin-bottom:6px;}
-/* Checkbox rows use inline flex labels â€” don't turn them into stacked caps */
+/* Checkbox rows use inline flex labels — don't turn them into stacked caps */
 #mainSettings .settings-field > label[style*="display:flex"]{color:var(--text);font-size:13px;font-weight:500;margin-bottom:0;}
 #mainSettings .settings-field > div[style*="color:var(--muted)"],
 #mainSettings .settings-field > div[style*="color: var(--muted)"]{font-size:12px;color:var(--muted);line-height:1.5;}
 
-/* Selects & text/password inputs â€” uniform. Uses !important to win
+/* Selects & text/password inputs — uniform. Uses !important to win
    over legacy inline styles that were written for the modal era. */
 #mainSettings select,
 #mainSettings input[type="text"],
@@ -3765,7 +3790,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 #mainSettings input:disabled,
 #mainSettings select:disabled{opacity:.6;cursor:not-allowed;}
 
-/* Quick-action grid in Conversation pane â€” outlined card buttons. */
+/* Quick-action grid in Conversation pane — outlined card buttons. */
 .sidekick-action-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:18px;}
 .settings-action-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--sidebar);color:var(--text);font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;}
 .settings-action-btn:hover{background:var(--accent-bg);border-color:var(--accent-bg-strong);color:var(--accent-text);}
@@ -3808,7 +3833,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   background:var(--accent-hover);
 }
 
-/* Secondary sm-btn fallback (Sign out / Disable auth) â€” neutral outline. */
+/* Secondary sm-btn fallback (Sign out / Disable auth) — neutral outline. */
 #mainSettings .sm-btn{border-radius:8px;padding:9px 16px;font-weight:600;font-size:13px;background:var(--surface);border:1px solid var(--border);color:var(--text);cursor:pointer;transition:background .15s,border-color .15s;}
 #mainSettings .sm-btn:hover{background:var(--accent-bg);border-color:var(--accent-bg-strong);}
 /* Neutralise legacy inline accent tints so secondary buttons stay theme-safe */
@@ -3851,7 +3876,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 #mainSettings .skin-pick-btn:hover,
 #mainSettings .font-size-pick-btn:hover,
 #mainSettings .syntax-theme-pick-btn:hover{border-color:var(--accent-bg-strong)!important;background:var(--surface)!important;}
-/* Active/selected state for picker cards â€” must use !important to beat the base border-color:var(--border)!important rule above */
+/* Active/selected state for picker cards — must use !important to beat the base border-color:var(--border)!important rule above */
 #mainSettings .theme-pick-btn.active,
 #mainSettings .skin-pick-btn.active,
 #mainSettings .font-size-pick-btn.active,
@@ -3866,7 +3891,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   #mainSettings .settings-field{padding:14px;}
 }
 
-/* â”€â”€ Provider cards (Settings â†’ Providers) â”€â”€
+/* ── Provider cards (Settings → Providers) ──
    Matches hermes-desktop LLM Providers panel. Card uses --sidebar (surface-1),
    hover rows use --surface (surface-2). Body divider uses a subtle tint. */
 #providersList{gap:12px;}
@@ -3993,7 +4018,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 }
 
 
-/* â”€â”€ Plugin visibility cards â”€â”€ */
+/* ── Plugin visibility cards ── */
 #pluginsList{gap:12px;}
 .plugin-card .provider-card-body{display:block;}
 .plugin-card-header{cursor:default;}
@@ -4003,9 +4028,9 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .plugin-hook-badge{display:inline-flex;align-items:center;border:1px solid var(--border2);background:var(--code-bg);color:var(--text);border-radius:999px;padding:3px 8px;font-size:11px;font-family:var(--font-mono);}
 .plugin-hook-empty{font-size:12px;color:var(--muted);font-style:italic;}
 
-/* ── Appstore 75/25 split ── */
+/* -- Appstore 75/25 split -- */
 
-/* ── Mail Panel ── */
+/* -- Mail Panel -- */
 .mail-main {
   display:none;flex-direction:column;overflow:hidden;
   background:var(--bg);color:var(--text);
@@ -4281,7 +4306,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .appstore-cat-header-title{font-size:17px;font-weight:700;color:var(--text);margin:0;}
 .appstore-cat-header-count{font-size:11px;color:var(--muted);}
 
-/* Right Panel – App Detail (25%) */
+/* Right Panel � App Detail (25%) */
 .appstore-detail{
   padding:24px;display:flex;flex-direction:column;gap:20px;
   height:100%;overflow-y:auto;
@@ -4392,7 +4417,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 }
 .appstore-featured-btn:hover{background:var(--appstore-accent-bg);color:var(--appstore-accent-text);border-color:var(--appstore-strong);}
 
-/* ── Provider model tags ── */
+/* -- Provider model tags -- */
 
 /* Appstore Sidebar Nav */
 .appstore-sb-search{
@@ -4508,8 +4533,8 @@ body.discord-mode .split-resize-handle{display:none !important;}
   line-height:1.5;
   user-select:all;
 }
-/* "+N more" disclosure pill â€” appended when a provider's catalog is trimmed
-   for UI scannability (#1567 â€” Nous Portal large-tier accounts ship 100s of
+/* "+N more" disclosure pill — appended when a provider's catalog is trimmed
+   for UI scannability (#1567 — Nous Portal large-tier accounts ship 100s of
    models). Visually distinct from a real model tag so users don't think it's
    a model id; muted dashed border, italic, no user-select. */
 .provider-card-model-tag-more{
@@ -4519,7 +4544,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   cursor:help;
 }
 
-/* â”€â”€ Session pin indicator (inline, only when pinned) â”€â”€ */
+/* ── Session pin indicator (inline, only when pinned) ── */
 .session-pin-indicator{
   flex-shrink:0;
   width:10px;
@@ -4532,7 +4557,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 }
 .session-pin-indicator svg{width:10px;height:10px;}
 
-/* â”€â”€ Fork lineage indicator (inline, subtle until row focus/hover) â”€â”€ */
+/* ── Fork lineage indicator (inline, subtle until row focus/hover) ── */
 .session-branch-indicator,
 .session-worktree-indicator{
   flex-shrink:0;
@@ -4564,18 +4589,18 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .session-item.active .session-branch-indicator,
 .session-item.active .session-worktree-indicator{color:var(--accent-text);}
 
-/* â”€â”€ Cron alert badge â”€â”€ */
+/* ── Cron alert badge ── */
 .cron-badge{position:absolute;top:2px;right:2px;background:#e53e3e;color:#fff;font-size:9px;font-weight:700;min-width:14px;height:14px;line-height:14px;text-align:center;border-radius:7px;padding:0 3px;}
 .cron-new-dot{width:7px;height:7px;border-radius:50%;background:var(--success,#22c55e);flex-shrink:0;animation:cron-dot-pulse 2s ease-in-out infinite;}
 @keyframes cron-dot-pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
 .has-new-run{border-color:var(--success,#22c55e)!important;box-shadow:0 0 0 1px var(--success,#22c55e);}
 
-/* â”€â”€ Background error banner â”€â”€ */
-/* â”€â”€ Archived sessions â”€â”€ */
+/* ── Background error banner ── */
+/* ── Archived sessions ── */
 .session-item.archived{opacity:.5;}
 .session-item.archived .session-title{font-style:italic;}
 
-/* ── Cross-session approval badge ── */
+/* -- Cross-session approval badge -- */
 .session-item.has-pending-approval::after {
   content: "";
   position: absolute;
@@ -4594,7 +4619,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   display: none;
 }
 
-/* â”€â”€ Subagent session tree (#494) â”€â”€ */
+/* ── Subagent session tree (#494) ── */
 .session-lineage-count{display:inline-flex;align-items:center;justify-content:center;height:16px;font-size:10px;font-weight:600;padding:0 6px;border-radius:999px;background:rgba(148,163,184,.14);color:var(--muted);margin-left:6px;flex-shrink:0;user-select:none;cursor:default;}
 .session-lineage-count.expandable{cursor:pointer;}
 .session-lineage-count.expandable:hover{background:rgba(148,163,184,.24);color:var(--text);}
@@ -4620,28 +4645,28 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .session-tree-caret.collapsed{transform:none;}
 .session-tree-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;font-size:9px;font-weight:700;padding:0 4px;border-radius:8px;background:rgba(99,179,237,.2);color:#63b3ed;margin-left:auto;flex-shrink:0;user-select:none;}
 
-/* â”€â”€ Session tags â”€â”€ */
+/* ── Session tags ── */
 .session-tag{display:inline-block;font-size:9px;font-weight:600;padding:1px 5px;margin-left:4px;border-radius:3px;background:rgba(99,179,237,.2);color:#63b3ed;cursor:pointer;vertical-align:middle;}
 .session-tag:hover{background:rgba(99,179,237,.35);}
 
-/* â”€â”€ File rename input â”€â”€ */
+/* ── File rename input ── */
 .file-rename-input{background:rgba(255,255,255,.08);border:1px solid var(--accent);border-radius:4px;color:var(--text);font-size:12px;padding:1px 4px;width:100%;outline:none;min-width:0;}
 
-/* â”€â”€ Message timestamps â”€â”€ */
+/* ── Message timestamps ── */
 .msg-time{font-size:10px;color:var(--muted);opacity:.6;margin-left:6px;}
 .msg-role:hover .msg-time{opacity:1;}
 
-/* â”€â”€ Mermaid diagrams â”€â”€ */
+/* ── Mermaid diagrams ── */
 .mermaid-block{background:var(--code-bg);border-radius:8px;padding:16px;margin:8px 0;overflow-x:auto;}
 .mermaid-rendered{background:transparent;padding:8px 0;}
 .mermaid-rendered svg{max-width:100%;height:auto;}
 
-/* â”€â”€ Session projects â”€â”€ */
+/* ── Session projects ── */
 .project-bar{display:flex;gap:4px;padding:4px 10px 8px;flex-wrap:wrap;align-items:center;flex-shrink:0;}
 .project-chip{font-size:10px;font-weight:600;padding:3px 8px;border-radius:12px;cursor:pointer;border:1px solid var(--border2);background:var(--input-bg);color:var(--muted);transition:all .15s;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;}
 .project-chip:hover{background:rgba(255,255,255,.08);color:var(--text);}
 .project-chip.active{background:var(--accent-bg);color:var(--accent-text);border-color:var(--accent-bg);}
-/* "Unassigned" filter chip â€” dashed border distinguishes it from real
+/* "Unassigned" filter chip — dashed border distinguishes it from real
    project chips so it reads as a meta-filter ("things without a project")
    rather than another project. Keeps full color treatment in the active
    state so it's still obviously selected. */
@@ -4661,7 +4686,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
    the row's gap:6px handles spacing, no margin/vertical-align needed. */
 .session-project-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;display:inline-block;}
 
-/* â”€â”€ Code toolbar (copy, save, run buttons) â”€â”€ */
+/* ── Code toolbar (copy, save, run buttons) ── */
 .code-toolbar{display:flex;align-items:center;gap:4px;flex-shrink:0;}
 .code-toolbar-btn{background:var(--hover-bg);border:1px solid var(--border2);border-radius:4px;color:var(--muted);font-size:11px;cursor:pointer;padding:2px 6px;transition:all .15s;line-height:1.3;display:inline-flex;align-items:center;gap:3px;white-space:nowrap;}
 .code-toolbar-btn:hover{background:rgba(255,255,255,.12);color:var(--text);}
@@ -4670,32 +4695,32 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .code-toolbar-btn .toolbar-icon{font-size:12px;line-height:1;}
 .code-toolbar-btn .toolbar-label{font-size:10px;letter-spacing:.02em;}
 
-/* â”€â”€ Code apply button â”€â”€ */
+/* ── Code apply button ── */
 .code-apply-btn{background:var(--accent-bg);border:1px solid var(--accent-bg-strong);border-radius:4px;color:var(--accent-text);font-size:11px;cursor:pointer;padding:2px 6px;transition:all .15s;line-height:1.3;margin-left:4px;}
 .code-apply-btn:hover{background:var(--accent-bg-strong);color:var(--text);}
 
-/* â”€â”€ Code action group (copy + apply buttons) â”€â”€ */
+/* ── Code action group (copy + apply buttons) ── */
 .code-action-group{display:inline-flex;align-items:center;gap:0;flex-shrink:0;}
 .code-action-group-abs{position:absolute;top:6px;right:6px;}
 .code-action-group-abs .code-apply-btn{margin-left:4px;}
 
-/* â”€â”€ Tool card expand/collapse toggle â”€â”€ */
+/* ── Tool card expand/collapse toggle ── */
 .tool-cards-toggle{margin:4px 0 2px 40px;display:flex;gap:8px;}
 .tool-cards-toggle button{background:none;border:none;color:var(--blue);font-size:10px;cursor:pointer;opacity:.6;padding:0;}
 .tool-cards-toggle button:hover{opacity:1;text-decoration:underline;}
 
-/* â”€â”€ Thinking/reasoning card: structural sub-selectors. â”€â”€
+/* ── Thinking/reasoning card: structural sub-selectors. ──
    The canonical visual rules (background, border, padding, max-height,
    etc.) live in the consolidated block further down (around line 1320).
    Only sub-element selectors that the consolidated block doesn't cover
-   (label, toggle, rotate animation) are kept here. â”€â”€ */
+   (label, toggle, rotate animation) are kept here. ── */
 .thinking-card-label{font-weight:600;letter-spacing:.02em;}
 .thinking-card-toggle{margin-left:auto;font-size:10px;display:inline-flex;align-items:center;justify-content:center;transform-origin:center;transition:transform .18s ease;will-change:transform;}
 .thinking-card.open .thinking-card-toggle{transform:rotate(90deg);}
 
 .bg-error-banner{background:rgba(229,62,62,.15);border:1px solid rgba(229,62,62,.3);color:#fca5a5;padding:8px 16px;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:0;}
 
-/* â”€â”€ CLI / Agent session items in sidebar â”€â”€ */
+/* ── CLI / Agent session items in sidebar ── */
 .session-item.cli-session {
   padding-right: 40px; /* make room for the session actions trigger */
 }
@@ -4730,20 +4755,20 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .session-item.cli-session[data-source-key="claude_code"] { border-left-color: rgba(217, 119, 6, 0.65); }
 .session-item.cli-session[data-source-key="claude_code"]::after { color: rgba(217, 119, 6, 0.85); }
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-   Messages redesign â€” additive overrides for the transcript area.
+/* ═══════════════════════════════════════════════════════════════════
+   Messages redesign — additive overrides for the transcript area.
    Fixes the issues catalogued in docs/ui-ux/index.html:
-     â€¢ single indent rail (one var, one column)
-     â€¢ quieter thinking card (was louder than the answer)
-     â€¢ user-message bubble so user vs. assistant reads at a glance
-     â€¢ persistent affordances (timestamps, actions, usage always visible)
-     â€¢ unified widths (body + tool cards share one max)
-     â€¢ tamed inline-code colour (no longer outshouts links)
-     â€¢ streaming cursor at end of live assistant body
-     â€¢ [data-error="1"] marker for error bubbles
-     â€¢ .msg-date-sep for day-change separators
-     â€¢ tighter type scale (11/12/13/14/16 â€” no more 10/10.5/12.5)
-   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+     • single indent rail (one var, one column)
+     • quieter thinking card (was louder than the answer)
+     • user-message bubble so user vs. assistant reads at a glance
+     • persistent affordances (timestamps, actions, usage always visible)
+     • unified widths (body + tool cards share one max)
+     • tamed inline-code colour (no longer outshouts links)
+     • streaming cursor at end of live assistant body
+     • [data-error="1"] marker for error bubbles
+     • .msg-date-sep for day-change separators
+     • tighter type scale (11/12/13/14/16 — no more 10/10.5/12.5)
+   ═══════════════════════════════════════════════════════════════════ */
 :root {
   --msg-rail: 0;
   --msg-max: 780px;
@@ -4767,7 +4792,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 /* Inline code: stop shouting orange; inherit strong text colour instead */
 .msg-body code { color: var(--strong); background: var(--code-inline-bg); font-size: 12.5px; }
 
-/* Clickable file paths in messages â€” underline, accent, custom cursor */
+/* Clickable file paths in messages — underline, accent, custom cursor */
 .clickable-file-path {
   color: var(--accent);
   text-decoration: underline;
@@ -4791,7 +4816,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   font-weight: 600;
 }
 
-/* â”€â”€ Unified indent rail â€” every child of a turn lines up on --msg-rail â”€â”€ */
+/* ── Unified indent rail — every child of a turn lines up on --msg-rail ── */
 .msg-row { padding: 12px 0; }
 .msg-body { padding-left: var(--msg-rail); padding-top: 8px; max-width: var(--msg-max); }
 .msg-body code,
@@ -4817,14 +4842,14 @@ body.discord-mode .split-resize-handle{display:none !important;}
 @media (max-width:700px){.status-card{margin-left:0;}.status-card-head{flex-direction:column;}.status-card-session-copy{max-width:100%;}.status-card-grid{grid-template-columns:1fr;}.status-card-label{padding-bottom:2px;border-top:1px solid var(--border-subtle);}.status-card-value{padding-top:2px;border-top:0;}}
 .assistant-segment-anchor { display: none; }
 
-/* â”€â”€ Classic conversation layout: user right, half-width; assistant left â”€â”€ */
+/* ── Classic conversation layout: user right, half-width; assistant left ── */
 .msg-row[data-role="user"] { align-self: flex-end; max-width: 60%; }
 @media (max-width: 900px) { .msg-row[data-role="user"] { max-width: 78%; } }
 @media (max-width: 600px) { .msg-row[data-role="user"] { max-width: 90%; } }
 /* Hide the entire "empty tool-anchor" assistant row (content='' with
    tool_calls). renderMessages keeps it in the DOM so tool cards can anchor
    to it, but visually it adds a ghost "Nova" header above the tool cards.
-   With the row hidden the transition from live â†’ settled on 'done' is
+   With the row hidden the transition from live → settled on 'done' is
    seamless. */
 .msg-row[data-role="assistant"]:has(.msg-body:empty) { padding: 0; margin: 0; }
 .msg-row[data-role="assistant"]:has(.msg-body:empty) .msg-role,
@@ -4875,7 +4900,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .msg-row:hover .msg-actions { opacity: 1; }
 .assistant-turn:hover .msg-actions { opacity: 1; }
 
-/* â”€â”€ User message: right-aligned bubble; no avatar/label â€” position identifies sender â”€â”€ */
+/* ── User message: right-aligned bubble; no avatar/label — position identifies sender ── */
 .msg-row[data-role="user"] .msg-body {
   background: var(--user-bubble-bg);
   border: 1px solid var(--user-bubble-border);
@@ -4903,14 +4928,14 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .msg-row[data-role="user"][data-editing="1"] .msg-edit-area { background: var(--user-bubble-bg); border-color: var(--user-bubble-border); color: var(--user-bubble-text); box-shadow: 0 0 0 3px var(--focus-ring); }
 .msg-row[data-role="user"][data-editing="1"] .msg-edit-area::placeholder { color: var(--user-bubble-placeholder); }
 
-/* Turn boundary: right alignment already separates user turns â€” keep only vertical spacing */
+/* Turn boundary: right alignment already separates user turns — keep only vertical spacing */
 .msg-row + .msg-row[data-role="user"] {
   border-top: none;
   margin-top: 10px;
   padding-top: 12px;
 }
 
-/* â”€â”€ Message footer: actions (and user timestamp) sit below the bubble â”€â”€ */
+/* ── Message footer: actions (and user timestamp) sit below the bubble ── */
 .msg-foot {
   display: flex;
   align-items: center;
@@ -4992,7 +5017,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   opacity: 1;
 }
 
-/* â”€â”€ Execution Timeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Execution Timeline ──────────────────────────────────────────── */
 .msg-timeline {
   display: flex;
   gap: 4px;
@@ -5051,7 +5076,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 /* Empty tool-anchor rows: hide footer alongside role/files so the row stays invisible */
 .msg-row[data-role="assistant"]:has(.msg-body:empty) .msg-foot { display: none; }
 
-/* â”€â”€ Stop button on live assistant messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Stop button on live assistant messages ────────────────────────────── */
 .msg-stop-btn {
   display: inline-flex;
   align-items: center;
@@ -5087,7 +5112,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   opacity: 1 !important;
 }
 
-/* â”€â”€ Stopped badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Stopped badge ──────────────────────────────────────────────────────── */
 .msg-stopped-badge {
   display: inline-flex;
   align-items: center;
@@ -5103,8 +5128,8 @@ body.discord-mode .split-resize-handle{display:none !important;}
   user-select: none;
 }
 
-/* â”€â”€ Thinking card: quieter than before (no background panel) but still
-   clearly a gold-accented affordance so users know it's collapsible. â”€â”€ */
+/* ── Thinking card: quieter than before (no background panel) but still
+   clearly a gold-accented affordance so users know it's collapsible. ── */
 .thinking-card {
   background: var(--accent-bg);
   border: 1px solid var(--accent-bg-strong);
@@ -5131,13 +5156,13 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .thinking-card.open .thinking-card-body { max-height: 260px; overflow-y: auto; opacity: 1; padding: 8px 12px; border-top-color: var(--accent-bg-strong); }
 .thinking-card-body pre { font-family: 'SF Mono', ui-monospace, monospace; font-size: 11px; line-height: 1.6; color: var(--muted); white-space: pre-wrap; word-break: break-word; margin: 0; }
 
-/* â”€â”€ Tool cards: tighter chrome to match quieter thinking card â”€â”€ */
+/* ── Tool cards: tighter chrome to match quieter thinking card ── */
 .tool-card { border-radius: 8px; margin-top: 3px; margin-bottom: 3px; }
 .tool-card-header { padding: 5px 10px; }
 .tool-card-name { font-size: 11px; }
 .tool-card-preview { font-size: 11px; }
 
-/* â”€â”€ Streaming cursor at the end of the live assistant body â”€â”€ */
+/* ── Streaming cursor at the end of the live assistant body ── */
 @keyframes hermes-cursor-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
 #toolRunningRow { margin-top: 10px; }
 [data-live-assistant="1"]:last-child .msg-body > :last-child::after,
@@ -5153,7 +5178,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   animation: hermes-cursor-blink 1.05s steps(2, start) infinite;
 }
 
-/* â”€â”€ Error state: distinct red-accent card, not italic emphasis â”€â”€ */
+/* ── Error state: distinct red-accent card, not italic emphasis ── */
 .msg-row[data-error="1"] .msg-body,
 .assistant-segment[data-error="1"] .msg-body {
   background: rgba(239,83,80,.06);
@@ -5174,7 +5199,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .msg-row[data-error="1"] .role-icon,
 .assistant-segment[data-error="1"] .role-icon { background: rgba(239,83,80,.12); color: var(--error); border-color: var(--error); }
 
-/* â”€â”€ Day-change separator â”€â”€ */
+/* ── Day-change separator ── */
 .load-older-indicator{cursor:pointer;color:var(--accent-text,var(--blue));font-size:13px;padding:10px 0;text-align:center;user-select:none;}
 .load-older-indicator:hover{opacity:.75;}
 .message-window-load-earlier{align-self:center;margin:4px auto 14px;padding:7px 14px;border:1px solid var(--border);border-radius:999px;background:var(--surface);box-shadow:var(--shadow-sm);}
@@ -5187,7 +5212,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 }
 .msg-date-sep::before, .msg-date-sep::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-/* â”€â”€ Widths: collapse messages-inner to match content column â”€â”€ */
+/* ── Widths: collapse messages-inner to match content column ── */
 .messages-inner { max-width: var(--msg-max); }
 @media (min-width: 1400px) { .messages-inner { max-width: calc(var(--msg-max) + 40px); } }
 @media (min-width: 1800px) { .messages-inner { max-width: calc(var(--msg-max) + 80px); } }
@@ -5198,7 +5223,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   .msg-row[data-error="1"] .msg-body { padding: 8px 12px; }
 }
 
-/* â”€â”€ Shared main-view tokens (used by #mainSkills, #mainTasks, #mainWorkspaces, #mainProfiles) â”€â”€ */
+/* ── Shared main-view tokens (used by #mainSkills, #mainTasks, #mainWorkspaces, #mainProfiles) ── */
 .main-view-header{
   display:flex;align-items:center;justify-content:space-between;gap:16px;
   min-height:41px;padding:8px 32px;border-bottom:1px solid var(--border);
@@ -5233,7 +5258,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
   .main-view-body{padding:16px;}
 }
 
-/* â”€â”€ Shared detail-card styling (cron / workspace / profile detail pages) â”€â”€ */
+/* ── Shared detail-card styling (cron / workspace / profile detail pages) ── */
 .detail-card{border:1px solid var(--border);border-radius:12px;background:var(--surface);padding:16px 18px;margin-bottom:16px;}
 .detail-card-title{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;}
 .detail-row{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;align-items:flex-start;}
@@ -5269,7 +5294,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
 .cron-item.active,.ws-row.active,.profile-card.active{background:var(--accent-bg);}
 .cron-item.active .cron-name,.ws-row.active .ws-row-name,.profile-card.active .profile-card-name{color:var(--accent-text);}
 
-/* â”€â”€ Shared in-main form (create/edit) for skills/tasks/workspaces/profiles â”€â”€ */
+/* ── Shared in-main form (create/edit) for skills/tasks/workspaces/profiles ── */
 .detail-form{display:flex;flex-direction:column;gap:14px;}
 .detail-form-row{display:flex;flex-direction:column;gap:6px;}
 .detail-form-row > label{font-size:12px;font-weight:500;color:var(--muted);letter-spacing:.01em;}
@@ -5312,7 +5337,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
   .msg-actions{opacity:1;}
 }
 
-/* â”€â”€ /btw ephemeral side-question bubble â”€â”€ */
+/* ── /btw ephemeral side-question bubble ── */
 .msg-row-btw {
   border-left: 3px solid var(--accent-bg-strong);
   border-radius: 8px;
@@ -5334,7 +5359,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
   padding-top: 6px;
 }
 
-/* â”€â”€ /background badge in composer footer â”€â”€ */
+/* ── /background badge in composer footer ── */
 .bg-badge {
   display: inline-flex;
   align-items: center;
@@ -5349,7 +5374,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
   font-weight: 600;
 }
 
-  /* Queue pill outer: identical wrapper to .queue-card â€” max-width+padding positions the pill at card-inner width */
+  /* Queue pill outer: identical wrapper to .queue-card — max-width+padding positions the pill at card-inner width */
   .queue-pill-outer{display:none;max-width:var(--msg-max);margin:0 auto;padding:0 20px;box-sizing:border-box;width:100%;}
   .queue-pill-outer.show{display:block;animation:queuePillIn .18s ease;}
   @keyframes queuePillIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
@@ -5359,18 +5384,18 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
   .queue-pill-count{color:var(--text);}
   .queue-pill-chevron{margin-left:auto;opacity:.5;}
 
-/* â”€â”€ Mobile: prevent iOS auto-zoom on input focus â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+/* ── Mobile: prevent iOS auto-zoom on input focus ─────────────────────────
    iOS Safari zooms in when a focused input/select has font-size < 16px.
    This media query targets touch-primary devices (phones and tablets) and
    bumps all interactive inputs to the minimum non-zoom threshold.
    The textarea#msg composer is already 16px; the sidebar search, rename
    inputs, settings selects, and dialog inputs are not.  (#1167)
-â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+──────────────────────────────────────────────────────────────────────── */
 @media (hover:none) and (pointer:coarse){
   input,textarea,select{font-size:max(16px,1em)!important;}
 }
 
-/* â”€â”€ PDF preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── PDF preview ─────────────────────────────────────────────────────────── */
 .pdf-preview-wrap{border:1px solid var(--border);border-radius:6px;overflow:hidden;margin:4px 0;background:var(--surface);}
 .pdf-preview-header{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface-2);font-size:12px;font-weight:600;}
 .pdf-preview-header a{color:var(--accent);text-decoration:none;font-weight:500;}
@@ -5381,7 +5406,7 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
 .pdf-preview-spinner{animation:pulse 1.5s ease-in-out infinite;}
 @keyframes pulse{0%,100%{opacity:0.4;}50%{opacity:1;}}
 
-/* â”€â”€ HTML sandbox preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── HTML sandbox preview ────────────────────────────────────────────────── */
 .html-preview-wrap{border:1px solid var(--border);border-radius:6px;overflow:hidden;margin:4px 0;background:var(--surface);}
 .html-preview-header{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface-2);font-size:12px;font-weight:600;}
 .html-preview-header a{color:var(--accent);text-decoration:none;font-weight:500;}
@@ -5390,15 +5415,15 @@ main.main > .main-view:not([id="mainChat"]):not([id="mainSettings"]) .main-view-
 .html-preview-fallback{padding:8px;font-size:13px;}
 .html-preview-spinner{animation:pulse 1.5s ease-in-out infinite;}
 
-/* ── Insights panel (#464) ──────────────────────────────────────────────── */
+/* -- Insights panel (#464) ------------------------------------------------ */
 main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 
-/* ── 3-Column Shell ── */
+/* -- 3-Column Shell -- */
 .insights-shell{display:grid;grid-template-columns:200px minmax(0,1fr) 220px;gap:16px;align-items:start;min-height:100%;max-width:100%;overflow:hidden;}
 .insights-controls,.insights-main-column,.insights-inspector{min-width:0;}
 .insights-controls{position:sticky;top:0;display:flex;flex-direction:column;gap:10px;}
 
-/* ── Control Panel ── */
+/* -- Control Panel -- */
 .insights-control-section{
   background:var(--surface-2);
   border:1px solid var(--border);
@@ -5441,7 +5466,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-quickfact-label{color:var(--muted);}
 .insights-quickfact-value{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;}
 
-/* ── Main content area ── */
+/* -- Main content area -- */
 .insights-main-column{display:flex;flex-direction:column;gap:14px;max-width:100%;overflow:hidden;}
 .insights-header{
   display:flex;
@@ -5453,7 +5478,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-header-title{font-size:16px;font-weight:700;color:var(--text);}
 .insights-header-meta{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted);}
 
-/* ── KPI Row ── */
+/* -- KPI Row -- */
 .insights-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;min-width:0;}
 .insights-kpi-card{
   background:var(--surface-2);
@@ -5465,7 +5490,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-kpi-value{font-size:18px;font-weight:700;color:var(--text);line-height:1.2;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
 .insights-kpi-label{font-size:10px;color:var(--muted);margin-top:2px;}
 
-/* ── Cards in Main ── */
+/* -- Cards in Main -- */
 .insights-card{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:14px;min-width:0;max-width:100%;overflow:hidden;}
 .insights-card-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;}
 .insights-table{width:100%;font-size:12px;display:block;max-width:100%;overflow-x:auto;}
@@ -5476,7 +5501,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-model-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .insights-empty{font-size:12px;color:var(--muted);padding:12px 0;}
 
-/* ── Daily Chart ── */
+/* -- Daily Chart -- */
 .insights-daily-token-chart{height:200px;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(28px,1fr);gap:4px;align-items:end;padding:6px 0 2px;border-bottom:1px solid var(--border);overflow-x:auto;}
 .insights-daily-bar{min-width:0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;gap:4px;}
 .insights-daily-stack{height:170px;display:flex;flex-direction:column;justify-content:flex-end;background:var(--border,.15);border-radius:4px;overflow:hidden;}
@@ -5489,11 +5514,11 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-daily-legend-input{background:var(--accent);}
 .insights-daily-legend-output{background:color-mix(in srgb,var(--accent) 55%,var(--text));}
 
-/* ── Main row grid (models + activity side-by-side) ── */
+/* -- Main row grid (models + activity side-by-side) -- */
 .insights-main-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
 @media(max-width:1100px){.insights-main-grid{grid-template-columns:1fr;}}
 
-/* ── Token & Activity ── */
+/* -- Token & Activity -- */
 .insights-token-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid var(--border,.05);}
 .insights-token-label{color:var(--muted);}
 .insights-token-value{font-weight:600;}
@@ -5505,7 +5530,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-bar-fill.insights-bar-peak{background:#f6ad55;}
 .insights-bar-value{font-size:11px;color:var(--text);}
 
-/* ── Inspector ── */
+/* -- Inspector -- */
 .insights-inspector{position:sticky;top:0;display:flex;flex-direction:column;gap:10px;}
 .insights-inspector-compact{
   background:var(--surface-2);
@@ -5521,7 +5546,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-inspector-row .label{color:var(--muted);}
 .insights-inspector-row .value{color:var(--text);font-weight:600;text-align:right;font-variant-numeric:tabular-nums;}
 
-/* ── Warnings ── */
+/* -- Warnings -- */
 .insights-warning-box{
   background:color-mix(in srgb,var(--accent) 8%,transparent);
   border:1px solid color-mix(in srgb,var(--accent) 25%,transparent);
@@ -5532,7 +5557,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
   line-height:1.4;
 }
 
-/* ── Wiki status compact ── */
+/* -- Wiki status compact -- */
 .insights-inspector-compact .wiki-status-grid{grid-template-columns:1fr 1fr;gap:4px;margin-bottom:0;}
 .insights-inspector-compact .wiki-status-grid div{padding:5px 6px;border-radius:4px;gap:1px;}
 .insights-inspector-compact .wiki-status-grid strong{font-size:11px;}
@@ -5542,7 +5567,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-inspector-compact .wiki-status-note{display:none;}
 .insights-inspector-compact .wiki-status-footer{padding-top:6px;font-size:10px;}
 
-/* ── Source badge ── */
+/* -- Source badge -- */
 .insights-source-badge{
   display:inline-flex;align-items:center;gap:4px;
   border-radius:999px;padding:2px 6px;
@@ -5554,7 +5579,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .insights-source-badge.ok{color:var(--accent-text);background:var(--accent-bg);border-color:var(--accent-bg-strong);}
 .insights-source-badge.warn{color:#e8a030;background:rgba(232,160,48,.12);border-color:rgba(232,160,48,.28);}
 
-/* ── Responsive ── */
+/* -- Responsive -- */
 @media(max-width:1200px){.insights-shell{grid-template-columns:160px minmax(0,1fr) 180px;}}
 @media(max-width:900px){
   .insights-shell{grid-template-columns:1fr;overflow:visible;}
@@ -5581,7 +5606,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
   .insights-kpi-row{grid-template-columns:1fr;}
 }
 
-/* â”€â”€ Checkpoints / Rollback UI (#466) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Checkpoints / Rollback UI (#466) ─────────────────────────────────────── */
 .checkpoint-list{display:flex;flex-direction:column;gap:8px;}
 .checkpoint-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;font-size:12px;}
 .checkpoint-item-actions{display:flex;gap:6px;}
@@ -5594,7 +5619,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .checkpoint-diff-body{padding:12px 16px;overflow-y:auto;flex:1;}
 .checkpoint-diff-body pre{font-size:11px;line-height:1.4;white-space:pre-wrap;word-break:break-all;}
 
-/* â”€â”€ Kanban status colours â”€â”€ */
+/* ── Kanban status colours ── */
 :root {
   --kanban-todo: #4FC3F7;
   --kanban-ready: #81C784;
@@ -5604,7 +5629,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
   --kanban-archived: #90A4AE;
 }
 
-/* â”€â”€ Kanban native board (read-only MVP) â”€â”€ */
+/* ── Kanban native board (read-only MVP) ── */
 .kanban-filter-stack{display:flex;flex-direction:column;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);}
 .kanban-filter-stack select{width:100%;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;}
 .kanban-check{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;}
@@ -5620,7 +5645,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-column-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;color:var(--text);}
 .kanban-count{font-size:11px;color:var(--muted);background:var(--input-bg);border:1px solid var(--border);border-radius:999px;padding:1px 7px;}
 .kanban-column-body{display:flex;flex-direction:column;gap:8px;padding:10px;min-height:0;overflow-y:auto;}
-/* â”€â”€ Kanban column header status colours â”€â”€ */
+/* ── Kanban column header status colours ── */
 .kanban-column[data-status="todo"] .kanban-column-head { border-bottom-color: var(--kanban-todo); }
 .kanban-column[data-status="todo"] .kanban-column-head span:first-child { color: var(--kanban-todo); }
 .kanban-column[data-status="ready"] .kanban-column-head { border-bottom-color: var(--kanban-ready); }
@@ -5633,7 +5658,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-column[data-status="done"] .kanban-column-head span:first-child { color: var(--kanban-done); }
 .kanban-column[data-status="archived"] .kanban-column-head { border-bottom-color: var(--kanban-archived); }
 .kanban-column[data-status="archived"] .kanban-column-head span:first-child { color: var(--kanban-archived); }
-/* â”€â”€ Kanban card base â”€â”€ */
+/* ── Kanban card base ── */
 .kanban-card{border:1px solid var(--border);border-radius:9px;background:var(--bg);padding:10px;cursor:pointer;box-shadow:var(--shadow-sm);}
 .kanban-card:hover,.kanban-card.selected{border-color:var(--accent);}
 .kanban-card-title{font-size:13px;font-weight:650;color:var(--text);line-height:1.35;margin-bottom:6px;}
@@ -5642,7 +5667,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-readonly{font-size:11px;color:var(--muted);margin-top:6px;}
 
 /* Multi-board switcher in the main panel header.
-   Renders next to the "Board" title as `Default â–¾` when at least one
+   Renders next to the "Board" title as `Default ▾` when at least one
    non-default board exists, opens a click-anchored menu listing all
    boards, current first, with per-status total badges. */
 .main-view-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -5709,7 +5734,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-board-switcher-action.danger:hover{background:rgba(255,95,95,.12);color:var(--danger);}
 .kanban-board-switcher-action svg{width:14px;height:14px;flex-shrink:0;}
 
-/* Modal forms for create/rename board â€” use the same visual language as
+/* Modal forms for create/rename board — use the same visual language as
    the app-dialog overlay (linear-gradient panel, accent border) so it
    feels native to the WebUI rather than a one-off bridge UI. */
 .kanban-modal-overlay{
@@ -5743,7 +5768,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
   width:100%;background:var(--input-bg);border:1px solid var(--border);border-radius:8px;
   color:var(--text);padding:8px 10px;font:inherit;font-size:13px;box-sizing:border-box;
 }
-/* Native select chevron â€” make sure the dropdown reads as a dropdown, not as
+/* Native select chevron — make sure the dropdown reads as a dropdown, not as
    a flat text input. Custom SVG arrow + appearance:none for cross-browser
    consistency in dark theme. */
 .kanban-modal-row select{
@@ -5794,7 +5819,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-back-btn{flex-shrink:0;font-size:11px;padding:4px 8px;}
 .kanban-edit-btn{flex-shrink:0;font-size:11px;padding:4px 10px;margin-left:auto;}
 .kanban-task-preview-title{flex:1;font-size:14px;font-weight:650;color:var(--text);margin-bottom:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-/* Run dispatcher button: visually distinct from the dry-run preview â–¶ button
+/* Run dispatcher button: visually distinct from the dry-run preview ▶ button
    sitting next to it so users can tell at a glance which one actually spawns
    workers.  Uses the accent border + tinted background but keeps the
    panel-head sizing so it doesn't stand out as inconsistent.  See PR for
@@ -5856,7 +5881,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-pane .btn.danger:hover,
 .kanban-task-preview .btn.danger:hover,
 .kanban-modal .btn.danger:hover{background:rgba(255,95,95,.1);color:var(--danger);}
-/* Primary CTA inside the kanban modal â€” accent-tinted to make Save vs.
+/* Primary CTA inside the kanban modal — accent-tinted to make Save vs.
    Cancel visually distinct (was nearly identical before). */
 .kanban-modal .btn.primary{
   border-color:var(--accent, #FFD700);
@@ -5908,7 +5933,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .mode-btn:hover:not(.active){color:var(--text);}
 
 @keyframes streamCursorBlink{0%,100%{opacity:1}50%{opacity:0}}
-.stream-cursor{display:inline-block;width:8px;height:16px;background:var(--accent);animation:streamCursorBlink .8s step-end infinite;vertical-align:text-bottom;margin-left:1px;border-radius:1px;}
+.stream-cursor{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;margin-left:4px;border-radius:999px;background:rgba(255,215,0,.12);color:var(--accent);font-size:11px;line-height:1.2;vertical-align:middle;white-space:nowrap;border:1px solid rgba(255,215,0,.22);} .stream-cursor-dot{width:8px;height:8px;border-radius:999px;background:var(--accent);animation:streamCursorBlink .8s step-end infinite;display:inline-block;flex:0 0 auto;} .stream-cursor-text{font-size:11px;font-weight:600;letter-spacing:.02em;}
 
 .reasoning-accordion{margin:4px 0;border-radius:8px;background:var(--code-bg);overflow:hidden;border:1px solid var(--border2);}
 .reasoning-accordion-header{display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer;user-select:none;font-size:11px;color:var(--muted);background:var(--hover-bg);transition:background .15s;}
@@ -5918,7 +5943,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .reasoning-accordion-body{display:none;padding:8px 12px;font-size:12px;line-height:1.5;color:var(--muted);white-space:pre-wrap;max-height:300px;overflow-y:auto;}
 .reasoning-accordion.open .reasoning-accordion-body{display:block;}
 
-/* â”€â”€ Split-Pane Layout (Codex-style resizable panels) â”€â”€ */
+/* ── Split-Pane Layout (Codex-style resizable panels) ── */
 /* The rightpanel is a flex child of .codex-split-layout. Its default width
    is 320px (flex-basis) and can be resized via the #chatSplitResize handle.
    The initSplitPane() JS function adjusts panel.style.flex during drag. */
@@ -5939,7 +5964,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-card-actions{display:flex;gap:4px;margin-top:8px;opacity:.85;flex-wrap:wrap}
 .kanban-card-action{border:1px solid var(--border);background:var(--input-bg);color:var(--text);border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer}
 .kanban-card-action.danger{color:var(--danger)}
-/* â”€â”€ Kanban card status border colours â”€â”€ */
+/* ── Kanban card status border colours ── */
 .kanban-card--todo { border-left: 4px solid var(--kanban-todo); }
 .kanban-card--ready { border-left: 4px solid var(--kanban-ready); }
 .kanban-card--running { border-left: 4px solid var(--kanban-running); }
@@ -5951,7 +5976,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-column.drop-target{outline:2px solid var(--accent);outline-offset:-2px}
 .hermes-kanban-md p{margin:0 0 4px}.hermes-kanban-md code{font-family:var(--mono);font-size:.95em}
 
-/* â”€â”€ Rightpanel Kanban view â”€â”€ */
+/* ── Rightpanel Kanban view ── */
 .rightpanel-content--kanban {
   display: none;
   flex-direction: column;
@@ -5965,7 +5990,7 @@ body.showing-kanban .rightpanel-content--kanban {
   display: flex;
 }
 
-/* â”€â”€ Rightpanel Gmail view â”€â”€ */
+/* ── Rightpanel Gmail view ── */
 .rightpanel-content--gmail {
   display: none;
   flex-direction: column;
@@ -5980,7 +6005,7 @@ body.gmail-mode .rightpanel-content--gmail {
   display: flex;
 }
 
-/* â”€â”€ Rightpanel Browser view â”€â”€ */
+/* ── Rightpanel Browser view ── */
 .rightpanel-content--browser {
   display: none;
   flex-direction: column;
@@ -6408,7 +6433,7 @@ body.browser-maximized .browser-drawer .browser-stage {
   max-width: 280px;
 }
 
-/* â”€â”€ Chat Browser Drawer â”€â”€ */
+/* ── Chat Browser Drawer ── */
 .browser-drawer {
   width: 100%;
   max-height: 0;
@@ -6470,7 +6495,7 @@ body.browser-drawer-open:not(.browser-maximized) .browser-drawer {
   padding-bottom: 12px;
 }
 
-/* â”€â”€ Browser Research Tab â”€â”€ */
+/* ── Browser Research Tab ── */
 .browser-research-panel {
   display: flex;
   flex-direction: column;
@@ -6760,16 +6785,16 @@ body.browser-drawer-open:not(.browser-maximized) .browser-drawer {
   }
 }
 
-/* â”€â”€ Rightpanel: Agents Dashboard â”€â”€ */
+/* ── Rightpanel: Agents Dashboard ── */
 body.showing-agents .rightpanel{display:none !important;}
 body.showing-agents .split-resize-handle{display:none !important;}
 body.showing-agents .sidebar{width:360px;}
 
-/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+/* ═══════════════════════════════════════
    Memory Cockpit (Rightpanel + Tools)
-   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+   ═══════════════════════════════════════ */
 
-/* â”€â”€ Rightpanel Memory Tools â”€â”€ */
+/* ── Rightpanel Memory Tools ── */
 .rightpanel-content--memory {
   display: none;
   flex-direction: column;
@@ -6783,7 +6808,7 @@ body.showing-memory .rightpanel-content--memory {
   display: flex;
 }
 
-/* â”€â”€ Memory Tools Panel â”€â”€ */
+/* ── Memory Tools Panel ── */
 .memory-tools-panel {
   flex: 1;
   overflow-y: auto;
@@ -6862,7 +6887,7 @@ body.showing-memory .rightpanel-content--memory {
 }
 .mem-context-item { padding: 2px 0; }
 
-/* â”€â”€ Memory Sidebar Upgrades â”€â”€ */
+/* ── Memory Sidebar Upgrades ── */
 #memoryPanel .side-menu-item {
   position: relative;
   padding-left: 24px;
@@ -6901,7 +6926,7 @@ body.showing-memory .rightpanel-content--memory {
   margin-top: 1px;
 }
 
-/* â”€â”€ Memory Editor Toolbar â”€â”€ */
+/* ── Memory Editor Toolbar ── */
 .mem-editor-toolbar {
   display: flex;
   align-items: center;
@@ -6944,13 +6969,13 @@ body.showing-memory .rightpanel-content--memory {
   padding: 0;
 }
 
-/* â”€â”€ Kanban task preview visibility â”€â”€ */
+/* ── Kanban task preview visibility ── */
 /* The main Kanban view uses #kanbanTaskPreview as the primary detail surface. */
 #mainKanban .kanban-task-preview { display: block; }
 /* Keep rightpanel legacy variants from accidentally duplicating the banner. */
 .rightpanel-content--kanban .kanban-task-preview { display: none !important; }
 
-/* â”€â”€ Compact detail view for rightpanel â”€â”€ */
+/* ── Compact detail view for rightpanel ── */
 .kanban-detail-panel .kanban-task-preview-header {
   flex-wrap: wrap;
   gap: 6px;
@@ -7006,7 +7031,7 @@ body.showing-memory .rightpanel-content--memory {
   .kanban-modal-row-inline{flex-direction:column;gap:0;}
 }
 
-/* â”€â”€ Logs panel (#1455) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Logs panel (#1455) ───────────────────────────────────────────────────── */
 main.main.showing-logs > #mainLogs{display:flex;}
 .logs-control-panel{display:flex;flex-direction:column;gap:8px;padding:12px;overflow-y:auto;}
 .logs-control-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);}
@@ -7030,7 +7055,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
 .log-line-debug{color:var(--muted);opacity:.75;}
 .logs-empty,.logs-hint{margin:8px 14px;padding:12px;border:1px solid var(--border);border-radius:8px;color:var(--muted);background:var(--surface);white-space:normal;font-family:var(--font-ui,system-ui,sans-serif);font-size:12px;}
 
-/* â”€â”€ Plan-Then-Code Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Plan-Then-Code Card ─────────────────────────────────────────────── */
 .plan-code-segment { border-left: 3px solid var(--accent, #FFD700); padding-left: 12px; margin: 8px 0; }
 .plan-card {
   background: var(--surface, rgba(255,255,255,.04));
@@ -7152,7 +7177,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
 .plan-card-collapsed .plan-revise-form { display: none; }
 .plan-card-collapsed .plan-card-minimize-btn { transform: rotate(-90deg); }
 
-/* â”€â”€ Collapsible Output per Message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Collapsible Output per Message ────────────────────────── */
 .msg-body.msg-collapsible {
   overflow: hidden;
   position: relative;
@@ -7173,7 +7198,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
   z-index: 1;
 }
 
-/* â”€â”€ Compact Chat Layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Compact Chat Layout ─────────────────────────────────────── */
 /* Applied via `.chat-compact` on #mainChat. Reduces padding,
    font sizes, and element spacing for a denser message view. */
 #mainChat.chat-compact .msg-row {
@@ -7271,7 +7296,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
   gap: 1px;
 }
 
-/* â”€â”€ Compact mode: Empty state & surrounding chrome â”€â”€ */
+/* ── Compact mode: Empty state & surrounding chrome ── */
 #mainChat.chat-compact .empty-state {
   gap: 6px;
   padding: 20px 40px;
@@ -7385,7 +7410,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
   min-width: 0;
 }
 
-/* â”€â”€ Compact toggle button â”€â”€ */
+/* ── Compact toggle button ── */
 .compact-toggle-btn {
   display: inline-flex;
   align-items: center;
@@ -7437,7 +7462,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
 }
 .logs-hint.warn{color:#f59e0b;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.08);}
 
-/* â”€â”€ Live Tool Progress Cards (in #liveToolCards) â”€â”€ */
+/* ── Live Tool Progress Cards (in #liveToolCards) ── */
 #liveToolCards{padding:0 24px;max-width:800px;margin:0 auto;width:100%;display:flex;flex-direction:column;gap:4px;}
 .tool-live-card{display:flex;align-items:center;padding:3px 10px;background:var(--surface-subtle);border:1px solid var(--border-subtle);border-radius:var(--radius-card,6px);transition:all .25s ease;animation:toolLiveIn .2s ease-out;}
 .tool-live-card.tool-live-done{opacity:.55;background:color-mix(in srgb,var(--green,#22c55e) 6%,transparent);border-color:color-mix(in srgb,var(--green,#22c55e) 30%,transparent);}
@@ -7457,7 +7482,7 @@ main.main.showing-logs > #mainLogs{display:flex;}
 @keyframes tool-live-spin{100%{transform:rotate(360deg);}}
 @keyframes toolLiveIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
 
-/* â”€â”€ Focus Mode: Ctrl+Shift+F toggles full-width chat (only chat visible) â”€â”€ */
+/* ── Focus Mode: Ctrl+Shift+F toggles full-width chat (only chat visible) ── */
 body.focus-mode header.app-titlebar,
 body.focus-mode nav.rail,
 body.focus-mode aside.sidebar,
@@ -7465,7 +7490,7 @@ body.focus-mode aside.rightpanel {
   display: none !important;
 }
 
-/* â”€â”€ Per-panel sidebar nav icon colors (Phosphor SVGs use fill=currentColor) â”€â”€ */
+/* ── Per-panel sidebar nav icon colors (Phosphor SVGs use fill=currentColor) ── */
 .rail-btn[data-panel="chat"]       svg { color: #4FC3F7; }
 .rail-btn[data-panel="tasks"]      svg { color: #FFB74D; }
 .rail-btn[data-panel="kanban"]     svg { color: #CE93D8; }
@@ -7484,7 +7509,7 @@ body.focus-mode aside.rightpanel {
 .rail-btn[data-panel="settings"]   svg { color: #B0BEC5; }
 .rail-btn.active svg, .rail-btn:hover svg { color: inherit; }
 
-/* â”€â”€ Sidebar-nav (mobile) icon colors â”€â”€ */
+/* ── Sidebar-nav (mobile) icon colors ── */
 .sidebar-nav .nav-tab[data-panel="chat"]       svg { color: #4FC3F7; }
 .sidebar-nav .nav-tab[data-panel="tasks"]      svg { color: #FFB74D; }
 .sidebar-nav .nav-tab[data-panel="kanban"]     svg { color: #CE93D8; }
@@ -7503,7 +7528,7 @@ body.focus-mode aside.rightpanel {
 .sidebar-nav .nav-tab[data-panel="settings"]   svg { color: #B0BEC5; }
 .sidebar-nav .nav-tab.active svg, .sidebar-nav .nav-tab:hover svg { color: inherit; }
 
-/* â”€â”€ Title bar space selector â”€â”€ */
+/* ── Title bar space selector ── */
 .titlebar-space {
   position: relative;
   display: flex;
@@ -7628,7 +7653,7 @@ body.focus-mode aside.rightpanel {
   margin: 4px 8px;
 }
 
-/* ─── Sidebar Space Selector ─── */
+/* --- Sidebar Space Selector --- */
 .nav-tab-space {
   flex: 1;
   padding: 6px 2px;
@@ -7685,7 +7710,7 @@ body.focus-mode aside.rightpanel {
   background: var(--accent-bg, rgba(124,92,252,0.15)) !important;
 }
 
-/* ── Sandbox Toggle ── */
+/* -- Sandbox Toggle -- */
 .sandbox-toggle {
   display: inline-flex;
   align-items: center;
@@ -7713,7 +7738,7 @@ body.focus-mode aside.rightpanel {
   line-height: 1;
 }
 
-/* ── Space Default Pin-Buttons ── */
+/* -- Space Default Pin-Buttons -- */
 .model-pin-btn {
   position: absolute;
   right: 4px;
@@ -7744,7 +7769,7 @@ body.focus-mode aside.rightpanel {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
-/* ── Space Default Workspace Pin-Buttons ── */
+/* -- Space Default Workspace Pin-Buttons -- */
 .ws-pin-btn {
   position: absolute;
   left: 4px;
@@ -7776,9 +7801,9 @@ body.focus-mode aside.rightpanel {
 }
 
 
-/* ── Appstore plugin CSS recovered from truncated working tree ── */
+/* -- Appstore plugin CSS recovered from truncated working tree -- */
 
-/* â”€â”€ Appstore success/error button variants â”€â”€ */
+/* ── Appstore success/error button variants ── */
 .appstore-card-btn-success{
   background:rgba(76,175,80,0.1);border-color:var(--success);color:var(--success);
   cursor:default;font-weight:500;
@@ -7805,7 +7830,7 @@ body.focus-mode aside.rightpanel {
 }
 .appstore-detail-uninstall-btn:hover{background:rgba(239,83,80,0.1);}
 
-/* â”€â”€ Appstore Setup-Assistent Overlay â”€â”€ */
+/* ── Appstore Setup-Assistent Overlay ── */
 .appstore-overlay{
   position:fixed;inset:0;z-index:10000;
   display:flex;align-items:center;justify-content:center;
@@ -7820,7 +7845,7 @@ body.focus-mode aside.rightpanel {
   to{opacity:1}
 }
 
-/* ── Appstore Loading / Skeleton States ── */
+/* -- Appstore Loading / Skeleton States -- */
 @keyframes appstoreShimmer{
   0%{background-position:-200px 0}
   100%{background-position:200px 0}
@@ -7847,7 +7872,7 @@ body.focus-mode aside.rightpanel {
   padding:48px;gap:12px;color:var(--muted);font-size:13px;
 }
 .appstore-skeleton-loading .appstore-setup-spinner{width:20px;height:20px;}
-/* ── Appstore Error State ── */
+/* -- Appstore Error State -- */
 .appstore-error-state{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:48px 24px;gap:16px;text-align:center;
@@ -8114,9 +8139,9 @@ body.focus-mode aside.rightpanel {
 
 /* Mobile layout guard: late split-pane rules must not consume the chat canvas. */
 
-/* ═══════════════════════════════════════════════════════════════
-   WE BSEARCH PANEL — Quick Search + Deep Research + History
-   ═══════════════════════════════════════════════════════════════ */
+/* ---------------------------------------------------------------
+   WE BSEARCH PANEL � Quick Search + Deep Research + History
+   --------------------------------------------------------------- */
 
 /* Outer panel */
 .websearch-panel{display:flex;flex-direction:column;height:100%;overflow:hidden;}
@@ -8290,7 +8315,7 @@ body.focus-mode aside.rightpanel {
 .websearch-chip.is-active{border-color:var(--accent);background:var(--accent-bg,rgba(184,134,11,.1));color:var(--accent)}
 .websearch-meta-summary{font-size:12px;color:var(--muted,#999);margin-bottom:8px;padding:4px 0}
 
-/* Result cards — professional Google-style search results */
+/* Result cards � professional Google-style search results */
 .websearch-result-card{
   background:var(--bg-2,#1A1A2E);
   border:1px solid var(--border,rgba(255,255,255,.06));
@@ -8551,4 +8576,108 @@ body.focus-mode aside.rightpanel {
   }
   .composer-wrap:has(.composer-mobile-config-panel.open){z-index:240!important;}
   main.main{width:100%!important;flex:1 1 auto!important;}
+}
+
+
+.titlebar-approval-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.titlebar-approval-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+  flex: 0 0 auto;
+}
+
+.titlebar-approval-value {
+  text-transform: lowercase;
+}
+
+.titlebar-approval-badge.approval-mode-manual {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+}
+
+.titlebar-approval-badge.approval-mode-manual .titlebar-approval-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.titlebar-approval-badge.approval-mode-smart {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.08);
+  color: #38bdf8;
+}
+
+.titlebar-approval-badge.approval-mode-smart .titlebar-approval-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
+.titlebar-approval-badge.approval-mode-off {
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(148, 163, 184, 0.08);
+  color: #cbd5e1;
+}
+
+.titlebar-approval-badge.approval-mode-off .titlebar-approval-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+}
+
+@media (max-width: 760px) {
+  .titlebar-approval-badge {
+    padding: 3px 7px;
+    font-size: 10px;
+    gap: 5px;
+  }
+
+  .titlebar-approval-dot {
+    width: 7px;
+    height: 7px;
+  }
+}
+
+.titlebar-approval-badge {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+
+.titlebar-approval-badge:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.titlebar-approval-badge:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.titlebar-approval-badge:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.55);
+  outline-offset: 2px;
+}
+
+.titlebar-approval-badge:disabled {
+  opacity: 0.78;
+  cursor: progress;
 }

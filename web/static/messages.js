@@ -281,6 +281,7 @@ async function send(){
   }
   if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
   startApprovalPolling(activeSid);
+  if(typeof _ensureSubagentPolling==='function') _ensureSubagentPolling();
   startClarifyPolling(activeSid);
   _fetchYoloState(activeSid);  // sync YOLO pill with backend state
   S.activeStreamId = null;  // will be set after stream starts
@@ -1529,6 +1530,7 @@ let _latestGoalStatus=null;
             source:'webui',
           });
           if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
+          if(typeof _refreshSubagentPanel==='function') void _refreshSubagentPanel();
         }
       }
     });
@@ -2850,6 +2852,293 @@ function stopApprovalPolling() {
   if (_approvalEventSource) { try { _approvalEventSource.close(); } catch(_){} _approvalEventSource = null; }
   if (_approvalSSEHealthTimer) { clearInterval(_approvalSSEHealthTimer); _approvalSSEHealthTimer = null; }
   _approvalPollingSessionId = null;
+}
+
+// ── Active subagents panel ────────────────────────────────────────────────
+let _subagentPollTimer = null;
+let _subagentPollSessionId = null;
+let _subagentPanelState = null;
+
+function _subagentCurrentSessionId() {
+  return (S && S.session && S.session.session_id) || null;
+}
+
+function _subagentElapsed(startedAt) {
+  const started = Number(startedAt || 0);
+  if (!Number.isFinite(started) || started <= 0) return '';
+  const elapsed = Math.max(0, (Date.now() / 1000) - started);
+  if (elapsed < 60) return Math.max(1, Math.round(elapsed)) + 's';
+  const mins = Math.floor(elapsed / 60);
+  const secs = Math.round(elapsed % 60);
+  return secs ? `${mins}m ${secs}s` : `${mins}m`;
+}
+
+function _subagentRemovePanel() {
+  if (_subagentPanelState && _subagentPanelState.element && _subagentPanelState.element.parentNode) {
+    _subagentPanelState.element.parentNode.removeChild(_subagentPanelState.element);
+  }
+  if (_subagentPanelState) {
+    _subagentPanelState.visible = false;
+    _subagentPanelState.active = [];
+  }
+}
+
+function _subagentEnsurePanelState() {
+  if (_subagentPanelState && _subagentPanelState.element) return _subagentPanelState;
+
+  const element = document.createElement('div');
+  element.className = 'subagent-panel-card';
+  element.setAttribute('role', 'region');
+  element.setAttribute('aria-label', 'Active subagents');
+  element.setAttribute('aria-live', 'polite');
+
+  const header = document.createElement('div');
+  header.className = 'subagent-panel-header';
+
+  const title = document.createElement('span');
+  title.className = 'subagent-panel-title';
+  title.textContent = (typeof t === 'function' ? (t('subagent_children') || 'Subagent sessions') : 'Subagent sessions');
+  header.appendChild(title);
+
+  const status = document.createElement('span');
+  status.className = 'subagent-panel-status';
+  header.appendChild(status);
+
+  const actions = document.createElement('div');
+  actions.className = 'subagent-panel-actions';
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'subagent-panel-btn';
+  toggleBtn.textContent = 'Pause spawning';
+  actions.appendChild(toggleBtn);
+  header.appendChild(actions);
+
+  const list = document.createElement('div');
+  list.className = 'subagent-panel-list';
+
+  element.appendChild(header);
+  element.appendChild(list);
+
+  _subagentPanelState = {
+    element,
+    header,
+    title,
+    status,
+    actions,
+    toggleBtn,
+    list,
+    visible: false,
+    sessionId: null,
+    spawnPaused: false,
+    active: [],
+  };
+
+  toggleBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const next = !(_subagentPanelState && _subagentPanelState.spawnPaused);
+    try {
+      const data = await api('/api/subagents', {
+        method: 'POST',
+        body: JSON.stringify({spawn_paused: next}),
+      });
+      _subagentRenderPanel(data || {});
+      showToast(next ? 'Subagent spawning paused' : 'Subagent spawning resumed');
+    } catch (err) {
+      showToast('Subagents: ' + (err && err.message ? err.message : 'update failed'));
+    }
+  });
+
+  return _subagentPanelState;
+}
+
+function _subagentBuildRow(entry) {
+  const row = document.createElement('div');
+  const childSid = String(entry && entry.session_id || '').trim();
+  row.className = 'subagent-panel-row' + (childSid ? ' clickable' : '');
+  if (childSid) row.title = 'Open subagent session';
+
+  const main = document.createElement('div');
+  main.className = 'subagent-panel-row-main';
+
+  const goal = document.createElement('div');
+  goal.className = 'subagent-panel-goal';
+  goal.textContent = String(entry && entry.goal || 'Subagent');
+  main.appendChild(goal);
+
+  const meta = document.createElement('div');
+  meta.className = 'subagent-panel-sub';
+  const bits = [];
+  const subId = String(entry && entry.subagent_id || '').trim();
+  const model = String(entry && entry.model || '').trim();
+  const depth = Number(entry && entry.depth);
+  const toolCount = Number(entry && entry.tool_count);
+  const age = _subagentElapsed(entry && entry.started_at);
+  const status = String(entry && entry.status || '').trim();
+  if (subId) bits.push(subId.slice(0, 8));
+  if (model) bits.push(model);
+  if (Number.isFinite(depth)) bits.push('depth ' + depth);
+  if (Number.isFinite(toolCount)) bits.push(toolCount + ' tool' + (toolCount === 1 ? '' : 's'));
+  if (age) bits.push(age);
+  if (status) bits.push(status);
+  meta.textContent = bits.join(' · ');
+  main.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'subagent-panel-row-actions';
+
+  if (childSid) {
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.className = 'subagent-panel-row-btn';
+    openBtn.textContent = 'Open';
+    openBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (typeof loadSession !== 'function') return;
+      try {
+        await loadSession(childSid);
+        if (typeof renderSessionListFromCache === 'function') renderSessionListFromCache();
+      } catch (_) {}
+    });
+    actions.appendChild(openBtn);
+  }
+
+  if (subId) {
+    const interruptBtn = document.createElement('button');
+    interruptBtn.type = 'button';
+    interruptBtn.className = 'subagent-panel-row-btn danger';
+    interruptBtn.textContent = 'Interrupt';
+    interruptBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const data = await api('/api/subagents', {
+          method: 'POST',
+          body: JSON.stringify({subagent_id: subId}),
+        });
+        _subagentRenderPanel(data || {});
+        showToast((data && data.interrupted) ? 'Subagent interrupt requested' : 'Subagent already finished');
+      } catch (err) {
+        showToast('Subagent interrupt failed: ' + (err && err.message ? err.message : subId));
+      }
+    });
+    actions.appendChild(interruptBtn);
+  }
+
+  row.appendChild(main);
+  row.appendChild(actions);
+
+  if (childSid) {
+    row.addEventListener('click', async (e) => {
+      if (e.target && e.target.closest && e.target.closest('button')) return;
+      if (typeof loadSession !== 'function') return;
+      try {
+        await loadSession(childSid);
+        if (typeof renderSessionListFromCache === 'function') renderSessionListFromCache();
+      } catch (_) {}
+    });
+  }
+
+  return row;
+}
+
+function _subagentRenderPanel(payload) {
+  const sid = _subagentCurrentSessionId();
+  if (!sid) {
+    stopSubagentPolling();
+    return;
+  }
+
+  const active = Array.isArray(payload && payload.active)
+    ? payload.active.filter(entry => String(entry && entry.session_id || '') === sid)
+    : [];
+  const spawnPaused = !!(payload && payload.spawn_paused);
+  const streamActive = !!(S && (S.busy || S.activeStreamId || (S.session && S.session.active_stream_id)));
+  if (!spawnPaused && !active.length) {
+    _subagentRemovePanel();
+    if (_subagentPanelState) _subagentPanelState.visible = false;
+    if (!streamActive) stopSubagentPolling();
+    return;
+  }
+
+  const state = _subagentEnsurePanelState();
+  state.visible = true;
+  state.sessionId = sid;
+  state.spawnPaused = spawnPaused;
+  state.active = active;
+  state.status.className = 'subagent-panel-status' + (spawnPaused ? ' paused' : '');
+
+  const statusBits = [];
+  if (active.length) statusBits.push(active.length + (active.length === 1 ? ' active subagent' : ' active subagents'));
+  if (spawnPaused) statusBits.push('spawning paused');
+  state.status.textContent = statusBits.join(' · ') || 'Subagents';
+  state.toggleBtn.textContent = spawnPaused ? 'Resume spawning' : 'Pause spawning';
+
+  state.list.innerHTML = '';
+  if (active.length) {
+    active
+      .slice()
+      .sort((a, b) => Number(b && b.started_at || 0) - Number(a && a.started_at || 0))
+      .forEach(entry => state.list.appendChild(_subagentBuildRow(entry)));
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'subagent-panel-empty';
+    empty.textContent = 'Subagent spawning is paused.';
+    state.list.appendChild(empty);
+  }
+}
+
+async function _refreshSubagentPanel() {
+  const sid = _subagentCurrentSessionId();
+  if (!sid) {
+    stopSubagentPolling();
+    return;
+  }
+  try {
+    const data = await api('/api/subagents');
+    if (sid !== _subagentCurrentSessionId()) return;
+    _subagentRenderPanel(data || {});
+  } catch (_) {
+    // ignore transient polling errors
+  }
+}
+
+function _ensureSubagentPolling() {
+  const sid = _subagentCurrentSessionId();
+  if (!sid) {
+    stopSubagentPolling();
+    return;
+  }
+  const state = _subagentPanelState;
+  const streamActive = !!(S && (S.busy || S.activeStreamId || (S.session && S.session.active_stream_id)));
+  if (!streamActive && !(state && (state.visible || state.spawnPaused))) {
+    stopSubagentPolling();
+    return;
+  }
+  if (_subagentPollSessionId !== sid || !_subagentPollTimer) {
+    startSubagentPolling(sid);
+  }
+}
+
+function startSubagentPolling(sid) {
+  stopSubagentPolling();
+  if (!sid) return;
+  _subagentPollSessionId = sid;
+  _subagentPollTimer = setInterval(async () => {
+    if (!S || !S.session || S.session.session_id !== sid) {
+      stopSubagentPolling();
+      return;
+    }
+    await _refreshSubagentPanel();
+  }, 2500);
+  void _refreshSubagentPanel();
+}
+
+function stopSubagentPolling() {
+  if (_subagentPollTimer) {
+    clearInterval(_subagentPollTimer);
+    _subagentPollTimer = null;
+  }
+  _subagentPollSessionId = null;
+  _subagentRemovePanel();
 }
 
 // ── Clarify polling ──

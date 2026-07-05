@@ -113,7 +113,105 @@
       if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
     })();
   </script>
+  <script>
+    (function initApprovalModeBadge(){
+      function normalizeApprovalMode(mode) {
+        var value = (mode == null ? '' : String(mode)).trim().toLowerCase();
+        if (value === 'ask') return 'manual';
+        if (value === 'deny') return 'smart';
+        if (value === 'yolo') return 'off';
+        if (value === 'manual' || value === 'smart' || value === 'off') return value;
+        return 'manual';
+      }
+
+      var approvalModes = ['manual', 'smart', 'off'];
+      var approvalSaving = false;
+
+      function applyApprovalMode(mode) {
+        var normalized = normalizeApprovalMode(mode);
+        var badge = document.getElementById('approvalModeBadge');
+        var value = document.getElementById('approvalModeValue');
+        if (badge) {
+          badge.classList.remove('approval-mode-manual', 'approval-mode-smart', 'approval-mode-off');
+          badge.classList.add('approval-mode-' + normalized);
+          badge.setAttribute('title', 'Approval mode: ' + normalized + '. Click to cycle.');
+          badge.setAttribute('aria-label', 'Approval mode ' + normalized + '. Click to cycle.');
+        }
+        if (value) value.textContent = normalized;
+        window._approvalMode = normalized;
+        return normalized;
+      }
+
+      window._setApprovalModeIndicator = applyApprovalMode;
+      applyApprovalMode(window._approvalMode || 'manual');
+
+      async function saveApprovalMode(nextMode) {
+        var normalized = normalizeApprovalMode(nextMode);
+        var badge = document.getElementById('approvalModeBadge');
+        var previous = normalizeApprovalMode(window._approvalMode || 'manual');
+        if (approvalSaving) return normalized;
+        approvalSaving = true;
+        if (badge) badge.disabled = true;
+        applyApprovalMode(normalized);
+        try {
+          var resp = await fetch('/api/approval', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: normalized })
+          });
+          var data = null;
+          try { data = await resp.json(); } catch (_) {}
+          if (!resp.ok) throw new Error((data && data.error) || resp.statusText || 'Approval mode update failed');
+          return applyApprovalMode((data && data.mode) || normalized);
+        } catch (err) {
+          applyApprovalMode(previous);
+          refreshApprovalMode();
+          throw err;
+        } finally {
+          approvalSaving = false;
+          if (badge) badge.disabled = false;
+        }
+      }
+
+      async function cycleApprovalMode() {
+        var current = normalizeApprovalMode(window._approvalMode || 'manual');
+        var index = approvalModes.indexOf(current);
+        var next = approvalModes[(index < 0 ? 0 : index + 1) % approvalModes.length];
+        try {
+          await saveApprovalMode(next);
+        } catch (err) {
+          if (typeof showToast === 'function') {
+            showToast('Approval mode update failed: ' + (err && err.message ? err.message : err));
+          }
+        }
+      }
+
+      function refreshApprovalMode() {
+        try {
+          fetch('/api/approval', { cache: 'no-store' })
+            .then(function(resp) { return resp && resp.ok ? resp.json() : null; })
+            .then(function(data) {
+              if (data && data.mode) applyApprovalMode(data.mode);
+            })
+            .catch(function() {});
+        } catch (_) {}
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', refreshApprovalMode, { once: true });
+      } else {
+        refreshApprovalMode();
+      }
+
+      var badgeEl = document.getElementById('approvalModeBadge');
+      if (badgeEl) badgeEl.addEventListener('click', cycleApprovalMode);
+    })();
+  </script>
   <div class="titlebar-actions" id="titlebarActions">
+    <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle." title="Approval mode: manual. Click to cycle.">
+      <span class="titlebar-approval-dot" aria-hidden="true"></span>
+      <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
+    </button>
     <div class="titlebar-lang-selector" id="titlebarLangSelector">
       <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
         <span id="currentLangFlag">🇬🇧</span>
