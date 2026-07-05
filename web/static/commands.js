@@ -1455,6 +1455,11 @@ async function cmdWorkflow(args){
     parts.push(fullscreen?'fullscreen on':'fullscreen off');
     return parts.join(', ');
   };
+  const currentResearchLabel=()=>{
+    const activeBtn=document.querySelector('.websearch-mode-btn.is-active[data-mode]');
+    const mode=String((activeBtn&&activeBtn.dataset&&activeBtn.dataset.mode)||'quick').trim().toLowerCase()||'quick';
+    return 'Research '+(mode==='deep'?'deep':'quick');
+  };
   const currentWebBackendLabel=()=>{
     const btn=document.getElementById('browserBackendStatus');
     const configured=String((btn&&btn.dataset&&btn.dataset.configuredBackend)||'').trim().toLowerCase();
@@ -1514,9 +1519,10 @@ async function cmdWorkflow(args){
       'Reasoning '+status.reasoningMode,
       'Model '+currentModelLabel(),
       currentBrowserLabel(),
+      currentResearchLabel(),
       currentWebBackendLabel(),
       status.subagentSummary,
-      '/workflow approval|reasoning|browser|subagents|thinking',
+      '/workflow approval|reasoning|browser|subagents|review|image|research|thinking',
     ];
       showToast(parts.filter(Boolean).join(' | '));
     }catch(e){

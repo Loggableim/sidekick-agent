@@ -1976,6 +1976,69 @@ function _workflowWebBackendState(){
   };
 }
 
+function _workflowResearchModeState(){
+  const activeBtn=document.querySelector('.websearch-mode-btn.is-active[data-mode]');
+  const mode=String(activeBtn&&activeBtn.dataset&&activeBtn.dataset.mode||'quick').trim().toLowerCase()||'quick';
+  const quickBtn=document.querySelector('.websearch-mode-btn[data-mode="quick"]');
+  const deepBtn=document.querySelector('.websearch-mode-btn[data-mode="deep"]');
+  return {
+    available:!!(quickBtn&&deepBtn),
+    mode:mode==='deep'?'deep':'quick',
+    drawerOpen:!!(document.body&&document.body.classList.contains('browser-drawer-open')),
+  };
+}
+
+function workflowRefreshResearchBadge(){
+  const badge=$('researchModeBadge');
+  const value=$('researchModeValue');
+  if(!badge && !value) return;
+  const state=_workflowResearchModeState();
+  const mode=state.mode==='deep'?'deep':'quick';
+  if(badge){
+    badge.hidden=!state.available;
+    badge.disabled=!state.available;
+    badge.classList.toggle('research-mode-deep',mode==='deep');
+    badge.classList.toggle('research-mode-quick',mode!=='deep');
+    const nextMode=mode==='deep'?'quick':'deep';
+    const label='Research mode '+mode+'. Click to switch to '+(nextMode==='deep'?'deep research':'quick search')+'.';
+    badge.title=label;
+    badge.setAttribute('aria-label',label);
+  }
+  if(value){
+    value.textContent=mode;
+  }
+}
+
+function workflowToggleResearchMode(event){
+  if(event&&typeof event.preventDefault==='function') event.preventDefault();
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const state=_workflowResearchModeState();
+  const nextMode=state.mode==='deep'?'quick':'deep';
+  if(nextMode==='deep' && typeof browserSetDrawerOpen==='function'){
+    browserSetDrawerOpen(true,{force:true,keepViewport:true});
+  }
+  if(typeof websearchToggleMode==='function'){
+    websearchToggleMode(nextMode);
+  }else if(nextMode==='deep' && typeof browserResearchPanelActivated==='function'){
+    browserResearchPanelActivated();
+  }
+  workflowRefreshResearchBadge();
+  return false;
+}
+
+function workflowOpenResearchPanel(){
+  if(typeof browserSetDrawerOpen==='function'){
+    browserSetDrawerOpen(true,{force:true,keepViewport:true});
+  }
+  if(typeof websearchToggleMode==='function'){
+    websearchToggleMode('deep');
+  }else if(typeof browserResearchPanelActivated==='function'){
+    browserResearchPanelActivated();
+  }
+  workflowRefreshResearchBadge();
+  return false;
+}
+
 function _workflowHeaderMenuSearchEl(){
   return $('workflowHeaderMenuSearch');
 }
@@ -2225,13 +2288,16 @@ function syncWorkflowChip(){
   const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
   const webBackend=_workflowWebBackendState();
   const review=_workflowReviewState();
+  const research=_workflowResearchModeState();
   const subagents=_workflowSubagentChipLabel();
   value.textContent=approval+' · '+reasoning+(review.visible ? ' · review' : '')+' · '+subagents;
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
   const reviewLabel=review.visible ? _workflowReviewLabel() : 'local review ready';
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
+  const researchLabel=research.mode==='deep' ? 'deep research' : 'quick search';
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
   badge.title=label;
   badge.setAttribute('aria-label',label);
+  workflowRefreshResearchBadge();
   workflowRefreshHeaderMenu();
 }
 
@@ -2444,9 +2510,7 @@ function workflowRunHeaderAction(action){
       else if(typeof executeCommand==='function') executeCommand('/web toggle');
       break;
     case 'research':
-      if(typeof browserSetDrawerOpen==='function') browserSetDrawerOpen(true,{force:true,keepViewport:true});
-      if(typeof websearchToggleMode==='function') websearchToggleMode('deep');
-      if(typeof browserResearchPanelActivated==='function') browserResearchPanelActivated();
+      if(typeof workflowOpenResearchPanel==='function') workflowOpenResearchPanel();
       break;
     case 'review': {
       const review=_workflowReviewState();

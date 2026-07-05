@@ -8771,6 +8771,28 @@ body.focus-mode aside.rightpanel {
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
 }
 
+.titlebar-research-badge.research-mode-quick {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: #fbbf24;
+}
+
+.titlebar-research-badge.research-mode-quick .titlebar-approval-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.titlebar-research-badge.research-mode-deep {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+  color: #93c5fd;
+}
+
+.titlebar-research-badge.research-mode-deep .titlebar-approval-dot {
+  background: #38bdf8;
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.14);
+}
+
 .titlebar-browser-badge.browser-state-open {
   border-color: rgba(59, 130, 246, 0.35);
   background: rgba(59, 130, 246, 0.08);

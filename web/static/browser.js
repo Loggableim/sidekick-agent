@@ -2333,6 +2333,7 @@ function websearchToggleMode(mode) {
     // Refresh deep research list when switching to deep
     browserResearchPanelActivated();
   }
+  if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
 }
 
 // ── History Sidebar Toggle ─────────────────────
