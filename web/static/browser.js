@@ -665,6 +665,7 @@ async function browserSendScreenshotToChat() {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
   }
+  if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
   const frameUrl = _browserFrameObjectUrl || '';
   const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
   const textarea = _browserComposerTextarea();
@@ -709,6 +710,7 @@ async function browserSendPageContextToChat(opts = {}) {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
   }
+  if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
   const frameUrl = _browserFrameObjectUrl || '';
   api('/api/browser/action', {
     method: 'POST',
