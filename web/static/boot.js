@@ -13,6 +13,13 @@
   try{localStorage.setItem('sidekick-migrated-v1','1');}catch(_){}
 })();
 
+function _setConversationRestorePlaceholder(text){
+  const inner = document.getElementById('msgInner');
+  if (!inner) return;
+  const label = String(text || 'Restoring conversation...');
+  inner.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">${label}</div>`;
+}
+
 async function cancelStream(){
   const streamId = S.activeStreamId;
   if(!streamId) return;
@@ -1134,6 +1141,7 @@ $('modelSelect').onchange=async()=>{
   S.session.model=modelState.model;
   S.session.model_provider=modelState.model_provider||null;
   if(typeof syncModelChip==='function') syncModelChip();
+  if(typeof syncReasoningChip==='function') syncReasoningChip();
   syncTopbar();
   // Clarify scope: composer model changes are session-local, not the global default.
   if(typeof showToast==='function'){
@@ -1921,6 +1929,10 @@ function _bootTimeout(promise, ms, label) {
   // Pre-load workspace list so sidebar name is correct from first render.
   // Render the session list before restoring the saved conversation so a stale
   // saved-session/client-side boot error cannot leave the sidebar empty forever.
+  try {
+    const _bootEarlySessionId = (typeof _sessionIdFromLocation === 'function') ? _sessionIdFromLocation() : null;
+    if (_bootEarlySessionId) _setConversationRestorePlaceholder('Restoring conversation...');
+  } catch (_) {}
   await _bootTimeout(loadWorkspaceList(),10000,'workspace list').catch((e)=>{
     console.warn('[boot] workspace list unavailable, continuing', e);
   });
@@ -1935,6 +1947,13 @@ function _bootTimeout(promise, ms, label) {
     console.warn('[boot] onboarding unavailable, continuing', e);
   });
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
+  const urlWorkspace = (() => {
+    try {
+      return String(new URLSearchParams(location.search).get('workspace') || '').trim().toLowerCase();
+    } catch (_) {
+      return '';
+    }
+  })();
   const savedLocal=localStorage.getItem('sidekick-webui-session');
   const saved=urlSession||savedLocal;
   const _bootRestoreEpoch=Number(window.__sidekickSessionNavigationEpoch||0)||0;
@@ -1942,11 +1961,14 @@ function _bootTimeout(promise, ms, label) {
     !!window.__sidekickSkipBootSessionRestore ||
     ((Number(window.__sidekickSessionNavigationEpoch||0)||0)!==_bootRestoreEpoch)
   );
+  if (urlSession && saved && !_bootRestoreCanceled()) {
+    _setConversationRestorePlaceholder('Restoring conversation...');
+  }
   let _bootSavedSessionLoadPromise = null;
   if (urlSession && saved && !_bootRestoreCanceled()) {
     // Direct session URLs should start loading immediately instead of waiting
     // for sidebar/session-list rendering to finish.
-    _bootSavedSessionLoadPromise = loadSession(saved).catch((e) => {
+    _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '' }).catch((e) => {
       if (!_bootRestoreCanceled()) throw e;
     });
   }
@@ -1976,6 +1998,9 @@ function _bootTimeout(promise, ms, label) {
       if (_bootSavedSessionLoadPromise) await _bootSavedSessionLoadPromise;
       else if(!_bootRestoreCanceled()) await loadSession(saved);
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
+      if (saved && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
+        await loadSession(saved, { expectedSpace: urlWorkspace || '' }).catch(() => {});
+      }
       // If the restored session has no messages it is an ephemeral scratch pad —
       // treat the page as a fresh start rather than resuming a blank conversation.
       // loadSession() already ran, so loadDir() has populated the workspace file tree.
@@ -2099,9 +2124,16 @@ window.addEventListener('pageshow', async (event) => {
   // active_stream_id / pending_user_message can reattach like a reload restore.
   if (S.session && S.session.session_id && typeof loadSession === 'function') {
     try {
+      _setConversationRestorePlaceholder('Restoring conversation...');
       await loadSession(S.session.session_id);
       if (S.session && S.session.session_id && typeof checkInflightOnBoot === 'function') {
         try { await checkInflightOnBoot(S.session.session_id); } catch (_) {}
+      }
+      if (typeof renderMessages === 'function') {
+        try { renderMessages({preserveScroll:true}); } catch (_) {}
+      }
+      if (typeof browserSyncToCurrentSession === 'function') {
+        try { browserSyncToCurrentSession({force:true, allowPending:true}); } catch (_) {}
       }
     } catch (_) {}
   }

@@ -1704,6 +1704,8 @@ window.addEventListener('resize',()=>{
 
 // ── Reasoning effort chip ────────────────────────────────────────────────────
 let _currentReasoningEffort=null;
+let _currentReasoningAllowedEfforts=null;
+let _currentReasoningContextKey='';
 
 function _normalizeReasoningEffort(eff){
   return String(eff||'').trim().toLowerCase();
@@ -1715,9 +1717,42 @@ function _formatReasoningEffortLabel(effort){
   return effort;
 }
 
-function _applyReasoningChip(eff){
+function _reasoningContextState(){
+  const session=S&&S.session?S.session:null;
+  let model=session&&session.model?String(session.model).trim():'';
+  let modelProvider=session&&session.model_provider?String(session.model_provider).trim():'';
+  if(!model){
+    const sel=$('modelSelect');
+    if(sel&&sel.value) model=String(sel.value).trim();
+  }
+  if(!modelProvider && model){
+    if(typeof _modelStateForSelect==='function'){
+      const select=$('modelSelect');
+      const state=_modelStateForSelect(select,model);
+      if(state&&state.model_provider) modelProvider=String(state.model_provider).trim();
+    }
+    if(!modelProvider && typeof _providerFromModelValue==='function'){
+      modelProvider=String(_providerFromModelValue(model)||'').trim();
+    }
+  }
+  const params=new URLSearchParams();
+  if(model) params.set('model',model);
+  if(modelProvider) params.set('model_provider',modelProvider);
+  return {model, model_provider:modelProvider||null, query:params.toString()};
+}
+
+function _reasoningAllowedEffortsList(allowed){
+  if(!Array.isArray(allowed)) return null;
+  const list=allowed.map(_normalizeReasoningEffort).filter(Boolean);
+  return list.length?list:null;
+}
+
+function _applyReasoningChip(eff, status){
   const effort=_normalizeReasoningEffort(eff);
   _currentReasoningEffort=effort;
+  _currentReasoningContextKey=_reasoningContextState().query;
+  const allowed=_reasoningAllowedEffortsList(status&&status.allowed_efforts);
+  _currentReasoningAllowedEfforts=allowed;
   const wrap=$('composerReasoningWrap');
   const label=$('composerReasoningLabel');
   const chip=$('composerReasoningChip');
@@ -1727,34 +1762,75 @@ function _applyReasoningChip(eff){
   wrap.style.display='';
   if(mobileAction) mobileAction.style.display='';
   const text=_formatReasoningEffortLabel(effort);
+  const allowedSet=allowed?new Set(allowed):null;
+  const supported=!allowedSet||!effort||effort==='none'||allowedSet.has(effort);
+  const allowedText=allowed&&allowed.length?' ? allowed: '+allowed.join(' | '):'';
+  const title='Reasoning effort: '+text+allowedText+(supported ? '' : ' (not supported by the selected model)');
   label.textContent=text;
   if(mobileLabel) mobileLabel.textContent=text;
   if(chip){
     const inactive=!effort||effort==='none';
     chip.classList.toggle('inactive',inactive);
-    chip.title='Reasoning effort: '+text;
+    chip.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
+    chip.title=title;
   }
-  if(mobileAction) mobileAction.classList.toggle('inactive',!effort||effort==='none');
+  if(mobileAction){
+    const inactive=!effort||effort==='none';
+    mobileAction.classList.toggle('inactive',inactive);
+    mobileAction.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
+    mobileAction.title=title;
+  }
+  const options=document.querySelectorAll('.reasoning-option');
+  options.forEach(function(opt){
+    const optEff=_normalizeReasoningEffort(opt&&opt.dataset&&opt.dataset.effort);
+    const visible=!allowedSet||allowedSet.has(optEff);
+    opt.hidden=!visible;
+    opt.classList.toggle('is-hidden',!visible);
+    opt.setAttribute('aria-hidden',String(!visible));
+  });
   _highlightReasoningOption(effort);
 }
 
 function fetchReasoningChip(){
-  api('/api/reasoning').then(function(st){
-    _applyReasoningChip((st&&st.reasoning_effort)||'');
-  }).catch(function(){_applyReasoningChip('');});
+  const ctx=_reasoningContextState();
+  const key=ctx.query;
+  const url=key?('/api/reasoning?'+key):'/api/reasoning';
+  return api(url).then(function(st){
+    _currentReasoningContextKey=key;
+    _applyReasoningChip((st&&st.reasoning_effort)||'', st||{});
+    return st;
+  }).catch(function(){
+    _currentReasoningAllowedEfforts=null;
+    _applyReasoningChip('');
+  });
 }
 
 function syncReasoningChip(){
-  if(_currentReasoningEffort===null){fetchReasoningChip();return;}
-  _applyReasoningChip(_currentReasoningEffort);
+  const ctx=_reasoningContextState();
+  if(_currentReasoningEffort===null || _currentReasoningContextKey!==ctx.query || !_currentReasoningAllowedEfforts){
+    fetchReasoningChip();
+    return;
+  }
+  _applyReasoningChip(_currentReasoningEffort, {allowed_efforts:_currentReasoningAllowedEfforts});
 }
 
 function _highlightReasoningOption(effort){
   const dd=$('composerReasoningDropdown');
   if(!dd) return;
+  const selected=_normalizeReasoningEffort(effort);
+  let matched=false;
   dd.querySelectorAll('.reasoning-option').forEach(function(opt){
-    opt.classList.toggle('selected',opt.dataset.effort===effort);
+    const visible=!opt.hidden;
+    const isSelected=visible&&opt.dataset.effort===selected;
+    opt.classList.toggle('selected',isSelected);
+    if(isSelected) matched=true;
   });
+  if(!matched){
+    dd.querySelectorAll('.reasoning-option').forEach(function(opt){
+      if(opt.hidden) return;
+      if(opt.dataset.effort==='none'&&selected==='none') opt.classList.add('selected');
+    });
+  }
 }
 
 function toggleReasoningDropdown(){
@@ -1805,18 +1881,20 @@ document.addEventListener('click',function(e){
     const opt=e.target.closest('.reasoning-option');
     const effort=opt&&opt.dataset.effort;
     if(effort){
-      api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:effort})})
+      const ctx=_reasoningContextState();
+      api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:effort,model:ctx.model||'',model_provider:ctx.model_provider||null})})
         .then(function(st){
-          _applyReasoningChip((st&&st.reasoning_effort)||effort);
-          showToast('🧠 Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
+          _currentReasoningContextKey=ctx.query;
+          _applyReasoningChip((st&&st.reasoning_effort)||effort, st||{});
+          showToast('?? Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
         })
-        .catch(function(){showToast('🧠 Failed to set effort');});
+        .catch(function(){showToast('?? Failed to set effort');});
       closeReasoningDropdown();
     }
   }
 });
 
-// ── Session toolsets chip (#493) ───────────────────────────────────────────
+// Session toolsets chip (#493)
 let _currentSessionToolsets = null; // null = global, array = custom list
 
 function _applyToolsetsChip(toolsets) {

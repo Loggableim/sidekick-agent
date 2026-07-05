@@ -4049,8 +4049,13 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/reasoning":
         # Current reasoning config (shared source of truth with the CLI —
         # reads display.show_reasoning and agent.reasoning_effort from
-        # the active profile's config.yaml).
-        return j(handler, get_reasoning_status())
+        # the active profile's config.yaml). Optional model context lets the
+        # WebUI narrow the available effort levels to what the active model
+        # actually supports.
+        query = parse_qs(parsed.query)
+        model_id = (query.get("model", [""])[0] or "").strip()
+        model_provider = (query.get("model_provider", [""])[0] or "").strip() or None
+        return j(handler, get_reasoning_status(model_id, model_provider))
 
     if parsed.path == "/api/onboarding/status":
         return j(handler, get_onboarding_status())
@@ -6090,15 +6095,17 @@ def handle_post(handler, parsed) -> bool:
         try:
             display = body.get("display")
             effort = body.get("effort")
+            model_id = str(body.get("model", "") or "").strip()
+            model_provider = str(body.get("model_provider", "") or "").strip() or None
             if display is not None:
                 flag = str(display).strip().lower()
                 if flag in ("show", "on", "true", "1"):
-                    return j(handler, set_reasoning_display(True))
+                    return j(handler, set_reasoning_display(True, model_id, model_provider))
                 if flag in ("hide", "off", "false", "0"):
-                    return j(handler, set_reasoning_display(False))
+                    return j(handler, set_reasoning_display(False, model_id, model_provider))
                 return bad(handler, f"display must be show|hide|on|off (got '{display}')")
             if effort is not None:
-                return j(handler, set_reasoning_effort(effort))
+                return j(handler, set_reasoning_effort(effort, model_id, model_provider))
             return bad(handler, "reasoning: must supply 'display' or 'effort'")
         except ValueError as e:
             return bad(handler, str(e))

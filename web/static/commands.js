@@ -972,22 +972,70 @@ function cmdStatus(){
   });
   renderMessages();
 }
+function _reasoningProviderFromModelValue(model){
+  const value=String(model||'').trim();
+  if(!value) return '';
+  if(value.startsWith('@')&&value.includes(':')){
+    return value.slice(1,value.lastIndexOf(':')).trim().toLowerCase();
+  }
+  const slash=value.indexOf('/');
+  if(slash>0) return value.slice(0,slash).trim().toLowerCase();
+  return '';
+}
+
+function _reasoningCommandContext(){
+  const session=S&&S.session?S.session:null;
+  let model=session&&session.model?String(session.model).trim():'';
+  let modelProvider=session&&session.model_provider?String(session.model_provider).trim():'';
+  if(!model){
+    const sel=$('modelSelect');
+    if(sel&&sel.value) model=String(sel.value).trim();
+  }
+  if(!modelProvider&&model){
+    if(typeof _modelStateForSelect==='function'){
+      const select=$('modelSelect');
+      const state=_modelStateForSelect(select,model);
+      if(state&&state.model_provider) modelProvider=String(state.model_provider).trim();
+    }
+    if(!modelProvider) modelProvider=_reasoningProviderFromModelValue(model);
+  }
+  const params=new URLSearchParams();
+  if(model) params.set('model',model);
+  if(modelProvider) params.set('model_provider',modelProvider);
+  return {model, model_provider:modelProvider||null, query:params.toString()};
+}
+
 function cmdReasoning(args){
   const arg=(args||'').trim().toLowerCase();
-  const BRAIN='\uD83E\uDDE0';
-  // Matches hermes_constants.VALID_REASONING_EFFORTS + 'none' (CLI parity).
+  const normalizedArg=(arg==='max')?'xhigh':arg;
+  const BRAIN='??';
   const EFFORTS=['none','minimal','low','medium','high','xhigh'];
-  // Shared status renderer used by the no-args branch and as a fallback.
   function _fmtStatus(st){
     const vis=(st && st.show_reasoning===false)?'off':'on';
     const eff=(st && st.reasoning_effort)||'default';
-    return BRAIN+' Reasoning effort: '+eff+' \u00B7 display: '+vis
-      +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh';
+    const allowed=Array.isArray(st && st.allowed_efforts)
+      ? st.allowed_efforts.map(function(v){return String(v||'').trim().toLowerCase();}).filter(Boolean)
+      : [];
+    const fullAllowed=['none','minimal','low','medium','high','xhigh'];
+    const allowedText=allowed.length&&allowed.join('|')!==fullAllowed.join('|')
+      ? ' ? allowed: '+allowed.join('|')
+      : '';
+    const supportText=(st && st.reasoning_effort_supported===false)
+      ? ' (not supported by the selected model)'
+      : '';
+    return BRAIN+' Reasoning effort: '+eff+' ? display: '+vis
+      +allowedText
+      +supportText
+      +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
   }
+  const ctx=_reasoningCommandContext();
+  const query=ctx.query ? '?' + ctx.query : '';
   if(!arg){
-    // Status — read from the same config.yaml keys the CLI uses.
-    api('/api/reasoning').then(function(st){showToast(_fmtStatus(st));})
-      .catch(function(){showToast(BRAIN+' /reasoning — status unavailable');});
+    api('/api/reasoning'+query).then(function(st){
+      showToast(_fmtStatus(st));
+      if(typeof _applyReasoningChip==='function') _applyReasoningChip((st && st.reasoning_effort)||'', st||{});
+    })
+      .catch(function(){showToast(BRAIN+' /reasoning ? status unavailable');});
     return true;
   }
   if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){
@@ -995,35 +1043,40 @@ function cmdReasoning(args){
     // Update the UI render gate immediately for responsiveness.
     window._showThinking=on;
     if(typeof renderMessages==='function') renderMessages();
-    // Persist via /api/reasoning → config.yaml display.show_reasoning
+    // Persist via /api/reasoning ? config.yaml display.show_reasoning
     // (CLI reads the same key).  Also mirror into WebUI settings.json
     // show_thinking so boot.js picks it up on reload without hitting
     // /api/reasoning on every page load.
-    api('/api/reasoning',{method:'POST',body:JSON.stringify({display:arg})}).catch(function(){});
+    api('/api/reasoning',{method:'POST',body:JSON.stringify({display:arg,model:ctx.model||'',model_provider:ctx.model_provider||null})})
+      .then(function(st){
+        if(typeof _applyReasoningChip==='function') _applyReasoningChip((st && st.reasoning_effort)||'', st||{});
+      })
+      .catch(function(){});
     api('/api/settings',{method:'POST',body:JSON.stringify({show_thinking:on})}).catch(function(){});
     showToast(BRAIN+' Thinking blocks: '+(on?'on':'off')+' (saved)');
     return true;
   }
-  if(EFFORTS.includes(arg)){
-    // Persist via /api/reasoning → config.yaml agent.reasoning_effort.
+  if(EFFORTS.includes(normalizedArg)){
+    // Persist via /api/reasoning ? config.yaml agent.reasoning_effort.
     // Takes effect on the NEXT session/turn (agent re-reads config at
-    // construction time), matching CLI semantics where `/reasoning high`
+    // construction time), matching CLI semantics where /reasoning high
     // also forces an agent re-init.
-    api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:arg})})
+    api('/api/reasoning',{method:'POST',body:JSON.stringify({effort:normalizedArg,model:ctx.model||'',model_provider:ctx.model_provider||null})})
       .then(function(st){
-        const eff=(st && st.reasoning_effort)||arg;
+        const eff=(st && st.reasoning_effort)||normalizedArg;
         showToast(BRAIN+' Reasoning effort: '+eff+' (saved; applies to next turn)');
-        if(typeof _applyReasoningChip==='function') _applyReasoningChip(eff);
+        if(typeof _applyReasoningChip==='function') _applyReasoningChip(eff, st||{});
       })
       .catch(function(e){
-        showToast(BRAIN+' Failed to set effort: '+(e && e.message ? e.message : arg));
+        showToast(BRAIN+' Failed to set reasoning effort: '+e.message);
       });
     return true;
   }
-  showToast('Unknown argument: '+arg+' \u2014 use show|hide|'+EFFORTS.join('|'));
-  return true;
+  // Any other token falls through to the agent (e.g. user prose after /reasoning).
+  return false;
 }
-async function cmdApproval(args){
+
+function cmdApproval(args){
   const arg=(args||'').trim().toLowerCase();
   const MODES=['manual','smart','off'];
   const normalizeMode=arg==='ask'?'manual':arg==='deny'?'smart':arg==='yolo'?'off':arg;

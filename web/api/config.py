@@ -1899,17 +1899,54 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
 VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 
 
+def _normalize_reasoning_effort_value(effort):
+    eff = str(effort or "").strip().lower()
+    if eff == "max":
+        return "xhigh"
+    return eff
+
+
+def _normalize_reasoning_provider(value):
+    provider = str(value or "").strip().lower()
+    if provider in {"", "auto", "default"}:
+        return ""
+    if provider in {"ollama", "ollama_cloud", "ollama-cloud"}:
+        return "ollama-cloud"
+    return provider
+
+
+def _reasoning_allowed_efforts_for_model(model_id=None, model_provider=None):
+    allowed = list(dict.fromkeys(("none",) + VALID_REASONING_EFFORTS))
+    provider = _normalize_reasoning_provider(model_provider)
+    model = str(model_id or "").strip()
+    if provider == "ollama-cloud" and model:
+        try:
+            from cli.models import ollama_cloud_model_reasoning_efforts
+
+            model_efforts = []
+            for item in ollama_cloud_model_reasoning_efforts(model):
+                normalized = _normalize_reasoning_effort_value(item)
+                if normalized:
+                    model_efforts.append(normalized)
+        except Exception:
+            model_efforts = []
+        if model_efforts:
+            allowed = list(dict.fromkeys(("none",) + tuple(model_efforts)))
+    return allowed
+
+
 def parse_reasoning_effort(effort):
     """Parse an effort level into the dict the agent expects.
 
     Returns None when *effort* is empty or unrecognised (caller interprets as
     "use default"), ``{"enabled": False}`` for ``"none"``, and
     ``{"enabled": True, "effort": <level>}`` for any of
-    ``VALID_REASONING_EFFORTS``.
+    ``VALID_REASONING_EFFORTS``. ``max`` is accepted as an alias for
+    ``xhigh`` for Ollama parity.
     """
-    if not effort or not str(effort).strip():
+    eff = _normalize_reasoning_effort_value(effort)
+    if not eff:
         return None
-    eff = str(effort).strip().lower()
     if eff == "none":
         return {"enabled": False}
     if eff in VALID_REASONING_EFFORTS:
@@ -1917,7 +1954,7 @@ def parse_reasoning_effort(effort):
     return None
 
 
-def get_reasoning_status() -> dict:
+def get_reasoning_status(model_id=None, model_provider=None) -> dict:
     """Return current reasoning configuration from the active profile's
     config.yaml — the same source of truth the CLI reads from.
 
@@ -1930,14 +1967,20 @@ def get_reasoning_status() -> dict:
     agent_cfg = config_data.get("agent") or {}
     show_raw = display_cfg.get("show_reasoning") if isinstance(display_cfg, dict) else None
     effort_raw = agent_cfg.get("reasoning_effort") if isinstance(agent_cfg, dict) else None
+    reasoning_effort = _normalize_reasoning_effort_value(effort_raw)
+    allowed_efforts = _reasoning_allowed_efforts_for_model(model_id, model_provider)
     return {
         # Match CLI default (True if unset in config.yaml)
         "show_reasoning": bool(show_raw) if isinstance(show_raw, bool) else True,
-        "reasoning_effort": str(effort_raw or "").strip().lower(),
+        "reasoning_effort": reasoning_effort,
+        "allowed_efforts": allowed_efforts,
+        "model": str(model_id or "").strip(),
+        "model_provider": _normalize_reasoning_provider(model_provider) or None,
+        "reasoning_effort_supported": bool(reasoning_effort in allowed_efforts or not reasoning_effort),
     }
 
 
-def set_reasoning_display(show: bool) -> dict:
+def set_reasoning_display(show: bool, model_id=None, model_provider=None) -> dict:
     """Persist ``display.show_reasoning`` to the active profile's config.yaml.
 
     Mirrors CLI ``/reasoning show|hide``: writes the same key that the CLI
@@ -1954,23 +1997,28 @@ def set_reasoning_display(show: bool) -> dict:
         config_data["display"] = display_cfg
         _save_yaml_config_file(config_path, config_data)
     reload_config()
-    return get_reasoning_status()
+    return get_reasoning_status(model_id, model_provider)
 
 
-def set_reasoning_effort(effort: str) -> dict:
+def set_reasoning_effort(effort: str, model_id=None, model_provider=None) -> dict:
     """Persist ``agent.reasoning_effort`` to the active profile's config.yaml.
 
     Mirrors CLI ``/reasoning <level>``: same key, same valid values
-    (``none`` | ``minimal`` | ``low`` | ``medium`` | ``high`` | ``xhigh``).
+    (``none`` | ``minimal`` | ``low`` | ``medium`` | ``high`` | ``xhigh``),
+    plus ``max`` as an alias for ``xhigh``.
     Raises ``ValueError`` on an unrecognised level so callers can return 400.
     """
-    raw = str(effort or "").strip().lower()
+    raw = _normalize_reasoning_effort_value(effort)
     if not raw:
         raise ValueError("effort is required")
-    if raw != "none" and raw not in VALID_REASONING_EFFORTS:
+    allowed_efforts = _reasoning_allowed_efforts_for_model(model_id, model_provider)
+    if raw != "none" and raw not in allowed_efforts:
+        model_name = str(model_id or "").strip() or "current model"
+        provider_name = _normalize_reasoning_provider(model_provider)
+        provider_hint = f" ({provider_name})" if provider_name else ""
         raise ValueError(
-            f"Unknown reasoning effort '{effort}'. "
-            f"Valid: none, {', '.join(VALID_REASONING_EFFORTS)}."
+            f"Reasoning effort '{effort}' is not supported for {model_name}{provider_hint}. "
+            f"Allowed: {', '.join(allowed_efforts)}."
         )
     config_path = _get_config_path()
     with _cfg_lock:
@@ -1982,7 +2030,7 @@ def set_reasoning_effort(effort: str) -> dict:
         config_data["agent"] = agent_cfg
         _save_yaml_config_file(config_path, config_data)
     reload_config()
-    return get_reasoning_status()
+    return get_reasoning_status(model_id, model_provider)
 
 
 def set_hermes_default_model(model_id: str) -> dict:
