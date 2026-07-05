@@ -3,6 +3,7 @@ Sidekick -- Route handlers for GET and POST endpoints.
 Extracted from server.py (Sprint 11) so server.py is a thin shell.
 """
 
+import difflib
 import html as _html
 import copy
 import importlib.util
@@ -289,6 +290,77 @@ def _worktree_retained_payload_for_session_id(sid: str) -> dict:
         return _worktree_retained_payload(get_session(sid, metadata_only=True))
     except KeyError:
         return {}
+
+
+def _review_repo_root(session_id: str | None = None) -> Path:
+    if session_id:
+        try:
+            session = get_session(session_id, metadata_only=True)
+            repo_root = getattr(session, "worktree_repo_root", None)
+            if repo_root:
+                return Path(str(repo_root)).expanduser().resolve()
+        except Exception:
+            pass
+    return Path(__file__).resolve().parents[2]
+
+
+def _run_git_command(repo_root: Path, *args: str, timeout: int = 20) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout or ""
+
+
+def _git_status_label(staged: str, worktree: str, raw: str) -> str:
+    if raw == "??":
+        return "?"
+    code = staged or worktree
+    mapping = {
+        "M": "M",
+        "A": "A",
+        "D": "D",
+        "R": "R",
+        "C": "C",
+        "U": "U",
+        "?": "?",
+    }
+    return mapping.get(code, code)
+
+
+def _review_untracked_file_diff(repo_root: Path, rel_path: str, *, size_limit: int = 256_000) -> tuple[str | None, str | None, int]:
+    file_path = (repo_root / rel_path)
+    try:
+        if not file_path.is_file():
+            return None, "missing", 0
+        data = file_path.read_bytes()
+    except Exception as exc:
+        return None, f"read failed: {exc}", 0
+    if len(data) > size_limit:
+        return None, "too large", 0
+    if b"\x00" in data:
+        return None, "binary", 0
+    text = data.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    diff = "\n".join(
+        difflib.unified_diff(
+            [],
+            lines,
+            fromfile="/dev/null",
+            tofile=f"b/{rel_path}",
+            lineterm="",
+        )
+    )
+    return diff, None, len(lines)
     except Exception:
         logger.debug("Failed to read worktree metadata for deleted session %s", sid)
         return {}
@@ -940,6 +1012,8 @@ from web.api.config import (
     get_reasoning_status,
     set_reasoning_display,
     set_reasoning_effort,
+    get_web_backend_status,
+    set_web_backend,
     create_stream_channel,
     get_webui_session_save_mode,
     STREAM_GOAL_RELATED,
@@ -3977,8 +4051,16 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/reasoning":
         # Current reasoning config (shared source of truth with the CLI —
         # reads display.show_reasoning and agent.reasoning_effort from
-        # the active profile's config.yaml).
-        return j(handler, get_reasoning_status())
+        # the active profile's config.yaml). Optional model context lets the
+        # WebUI narrow the available effort levels to what the active model
+        # actually supports.
+        query = parse_qs(parsed.query)
+        model_id = (query.get("model", [""])[0] or "").strip()
+        model_provider = (query.get("model_provider", [""])[0] or "").strip() or None
+        return j(handler, get_reasoning_status(model_id, model_provider))
+
+    if parsed.path == "/api/web/backend":
+        return j(handler, get_web_backend_status())
 
     if parsed.path == "/api/onboarding/status":
         return j(handler, get_onboarding_status())
@@ -4945,6 +5027,16 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/mcp/servers":
         return _handle_mcp_servers_list(handler)
 
+    if parsed.path.startswith("/api/mcp/servers/"):
+        name = parsed.path[len("/api/mcp/servers/"):].strip()
+        if not name:
+            return bad(handler, "name is required")
+        if handler.command == "POST":
+            return _handle_mcp_server_update(handler, name, body or {})
+        if handler.command == "DELETE":
+            return _handle_mcp_server_delete(handler, name)
+        return bad(handler, "method not allowed", 405)
+
     # ── MCP Tools (GET) ──
     if parsed.path == "/api/mcp/tools":
         return _handle_mcp_tools_list(handler)
@@ -4978,6 +5070,145 @@ def handle_get(handler, parsed) -> bool:
         except Exception as e:
             logger.exception("rollback/diff failed")
             return bad(handler, e, status=500)
+
+    if parsed.path == "/api/review/diff":
+        qs = parse_qs(parsed.query)
+        session_id = qs.get("session_id", [""])[0].strip()
+        repo_root = _review_repo_root(session_id or None)
+        git_dir = _run_git_command(repo_root, "rev-parse", "--git-dir")
+        if git_dir is None:
+            return j(handler, {
+                "ok": True,
+                "is_git_repo": False,
+                "repo_root": str(repo_root),
+                "branch": None,
+                "commit": None,
+                "files": [],
+                "diff": "",
+                "summary": {
+                    "files": 0,
+                    "staged": 0,
+                    "unstaged": 0,
+                    "untracked": 0,
+                    "binary_untracked": 0,
+                    "skipped_untracked": 0,
+                    "additions": 0,
+                    "deletions": 0,
+                    "truncated": False,
+                },
+            })
+
+        branch = _run_git_command(repo_root, "rev-parse", "--abbrev-ref", "HEAD")
+        commit = _run_git_command(repo_root, "rev-parse", "--short", "HEAD")
+        porcelain = _run_git_command(repo_root, "status", "--porcelain")
+        files: list[dict[str, object]] = []
+        untracked_paths: list[str] = []
+        staged_count = 0
+        unstaged_count = 0
+        untracked_count = 0
+        if porcelain:
+            for line in porcelain.splitlines():
+                line = line.rstrip("\r\n")
+                if not line:
+                    continue
+                xy = line[:2]
+                path_part = line[3:]
+                if "->" in path_part and (xy[0] == "R" or xy[1] == "R" or xy[0] == "C" or xy[1] == "C"):
+                    path_part = path_part.split(" -> ", 1)[-1].strip() or path_part
+                staged = xy[0] if xy[0] != " " else ""
+                worktree = xy[1] if xy[1] != " " else ""
+                status = _git_status_label(staged, worktree, xy)
+                files.append({
+                    "path": path_part,
+                    "status": status,
+                    "staged": staged != "",
+                })
+                if staged:
+                    staged_count += 1
+                if worktree:
+                    unstaged_count += 1
+                if xy == "??":
+                    untracked_count += 1
+                    untracked_paths.append(path_part)
+
+        def _sum_numstat(output: str | None) -> tuple[int, int]:
+            added = 0
+            deleted = 0
+            if not output:
+                return added, deleted
+            for line in output.splitlines():
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                add_raw, del_raw = parts[0].strip(), parts[1].strip()
+                if add_raw.isdigit():
+                    added += int(add_raw)
+                if del_raw.isdigit():
+                    deleted += int(del_raw)
+            return added, deleted
+
+        additions, deletions = _sum_numstat(_run_git_command(repo_root, "diff", "--cached", "--numstat", "--"))
+        add2, del2 = _sum_numstat(_run_git_command(repo_root, "diff", "--numstat", "--"))
+        additions += add2
+        deletions += del2
+
+        diff_parts: list[str] = []
+        staged_diff = _run_git_command(repo_root, "diff", "--cached", "--no-color", "--no-ext-diff", "--binary", "--unified=3", "--")
+        unstaged_diff = _run_git_command(repo_root, "diff", "--no-color", "--no-ext-diff", "--binary", "--unified=3", "--")
+        if staged_diff and staged_diff.strip():
+            diff_parts.append(staged_diff.strip())
+        if unstaged_diff and unstaged_diff.strip():
+            diff_parts.append(unstaged_diff.strip())
+
+        binary_untracked: list[str] = []
+        skipped_untracked: list[str] = []
+        for rel_path in untracked_paths:
+            file_diff, skip_reason, added_lines = _review_untracked_file_diff(repo_root, rel_path)
+            if not file_diff:
+                if skip_reason == "binary":
+                    binary_untracked.append(rel_path)
+                elif skip_reason:
+                    skipped_untracked.append(f"{rel_path} ({skip_reason})")
+                continue
+            diff_parts.append(file_diff)
+            additions += added_lines
+
+        diff_text = "\n\n".join(part for part in diff_parts if part.strip())
+        truncated = False
+        max_chars = 180_000
+        if len(diff_text) > max_chars:
+            truncated = True
+            diff_text = diff_text[:max_chars]
+            last_nl = diff_text.rfind("\n")
+            if last_nl > 0:
+                diff_text = diff_text[:last_nl]
+            diff_text += "\n\n... truncated ...\n"
+
+        summary = {
+            "files": len(files),
+            "staged": staged_count,
+            "unstaged": unstaged_count,
+            "untracked": untracked_count,
+            "binary_untracked": len(binary_untracked),
+            "skipped_untracked": len(skipped_untracked),
+            "additions": additions,
+            "deletions": deletions,
+            "truncated": truncated,
+        }
+        if binary_untracked:
+            summary["binary_untracked_paths"] = binary_untracked
+        if skipped_untracked:
+            summary["skipped_untracked_paths"] = skipped_untracked
+        return j(handler, {
+            "ok": True,
+            "is_git_repo": True,
+            "repo_root": str(repo_root),
+            "branch": (branch or "").strip() or None,
+            "commit": (commit or "").strip() or None,
+            "files": files,
+            "diff": diff_text,
+            "summary": summary,
+        })
 
     # ── Terminal stream (SSE) ──
     if parsed.path == "/api/terminal/stream":
@@ -5879,20 +6110,33 @@ def handle_post(handler, parsed) -> bool:
         try:
             display = body.get("display")
             effort = body.get("effort")
+            model_id = str(body.get("model", "") or "").strip()
+            model_provider = str(body.get("model_provider", "") or "").strip() or None
             if display is not None:
                 flag = str(display).strip().lower()
                 if flag in ("show", "on", "true", "1"):
-                    return j(handler, set_reasoning_display(True))
+                    return j(handler, set_reasoning_display(True, model_id, model_provider))
                 if flag in ("hide", "off", "false", "0"):
-                    return j(handler, set_reasoning_display(False))
+                    return j(handler, set_reasoning_display(False, model_id, model_provider))
                 return bad(handler, f"display must be show|hide|on|off (got '{display}')")
             if effort is not None:
-                return j(handler, set_reasoning_effort(effort))
+                return j(handler, set_reasoning_effort(effort, model_id, model_provider))
             return bad(handler, "reasoning: must supply 'display' or 'effort'")
         except ValueError as e:
             return bad(handler, str(e))
         except RuntimeError as e:
             return bad(handler, str(e), 500)
+
+    if parsed.path == "/api/web/backend":
+        backend = body.get("backend")
+        if backend is None:
+            backend = body.get("mode")
+        if backend is None:
+            return bad(handler, "backend is required")
+        try:
+            return j(handler, set_web_backend(backend))
+        except ValueError as e:
+            return bad(handler, str(e))
 
     if parsed.path == "/api/approval":
         raw_mode = str(body.get("mode", "") or "").strip()
@@ -6533,6 +6777,91 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(e), 500)
 
     # ── Skills (POST) ──
+    if parsed.path == "/api/execute_code":
+        from tools.code_execution_tool import execute_code
+        from toolsets import resolve_toolset
+
+        sid = str(body.get("session_id") or "").strip()
+        code = str(body.get("code") or "")
+        if not sid:
+            return bad(handler, "session_id is required")
+        if not code.strip():
+            return bad(handler, "code is required")
+        try:
+            session = get_session(sid)
+        except KeyError:
+            return bad(handler, "Session not found", 404)
+        enabled_tools = None
+        toolset_names = getattr(session, "enabled_toolsets", None) or []
+        if toolset_names:
+            resolved_tools: set[str] = set()
+            for toolset_name in toolset_names:
+                if not toolset_name:
+                    continue
+                try:
+                    resolved_tools.update(resolve_toolset(toolset_name))
+                except Exception:
+                    logger.debug(
+                        "Failed to resolve execute_code toolset %s for session %s",
+                        toolset_name,
+                        sid,
+                        exc_info=True,
+                    )
+            if resolved_tools:
+                enabled_tools = sorted(resolved_tools)
+        try:
+            result = json.loads(execute_code(code, task_id=sid, enabled_tools=enabled_tools))
+        except json.JSONDecodeError:
+            result = {
+                "status": "error",
+                "error": "execute_code returned invalid JSON",
+                "output": "",
+            }
+        if not isinstance(result, dict):
+            result = {
+                "status": "error",
+                "error": "execute_code returned unexpected data",
+                "output": str(result),
+            }
+        result["session_id"] = sid
+        return j(handler, result)
+
+    if parsed.path == "/api/image_generate":
+        from tools.image_generation_tool import _handle_image_generate
+
+        sid = str(body.get("session_id") or "").strip()
+        prompt = str(body.get("prompt") or "").strip()
+        aspect_ratio = str(body.get("aspect_ratio") or "").strip() or "1:1"
+        if not sid:
+            return bad(handler, "session_id is required")
+        if not prompt:
+            return bad(handler, "prompt is required")
+        try:
+            get_session(sid)
+        except KeyError:
+            return bad(handler, "Session not found", 404)
+        try:
+            result = json.loads(_handle_image_generate({"prompt": prompt, "aspect_ratio": aspect_ratio}))
+        except json.JSONDecodeError:
+            result = {
+                "success": False,
+                "image": None,
+                "error": "image_generate returned invalid JSON",
+                "error_type": "internal_error",
+            }
+        if not isinstance(result, dict):
+            result = {
+                "success": False,
+                "image": None,
+                "error": "image_generate returned unexpected data",
+                "error_type": "internal_error",
+                "raw": str(result),
+            }
+        result["session_id"] = sid
+        result["prompt"] = prompt
+        result["aspect_ratio"] = aspect_ratio
+        return j(handler, result)
+
     if parsed.path == "/api/skills/save":
         return _handle_skill_save(handler, body)
 
@@ -12756,8 +13085,8 @@ def _handle_mcp_servers_list(handler):
     ]
     return j(handler, {
         "servers": result,
-        "toggle_supported": False,
-        "reload_required": True,
+        "toggle_supported": True,
+        "reload_required": False,
     })
 
 
@@ -12807,24 +13136,31 @@ def _handle_mcp_server_update(handler, name, body):
     if not name:
         return bad(handler, "name is required")
     # Validate: must have url (http) or command (stdio)
-    server_cfg = {}
     cfg = get_config()
     servers = cfg.get("mcp_servers", {})
     if not isinstance(servers, dict):
         servers = {}
     existing_cfg = servers.get(name, {})
+    server_cfg = dict(existing_cfg) if isinstance(existing_cfg, dict) else {}
     if body.get("url"):
         server_cfg["url"] = body["url"].strip()
+        server_cfg.pop("command", None)
+        server_cfg.pop("args", None)
+        server_cfg.pop("env", None)
         if body.get("headers"):
             server_cfg["headers"] = _strip_masked_values(body["headers"], existing_cfg.get("headers", {}))
     elif body.get("command"):
         server_cfg["command"] = body["command"].strip()
+        server_cfg.pop("url", None)
+        server_cfg.pop("headers", None)
         if body.get("args"):
             server_cfg["args"] = body["args"] if isinstance(body["args"], list) else [body["args"]]
         if body.get("env"):
             server_cfg["env"] = _strip_masked_values(body["env"], existing_cfg.get("env", {}))
-    else:
+    elif not existing_cfg:
         return bad(handler, "url or command is required")
+    if "enabled" in body:
+        server_cfg["enabled"] = _parse_mcp_enabled(body["enabled"])
     if body.get("timeout") is not None:
         try:
             server_cfg["timeout"] = int(body["timeout"])

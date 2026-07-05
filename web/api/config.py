@@ -1899,17 +1899,70 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
 VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
 
 
+def _normalize_reasoning_effort_value(effort):
+    eff = str(effort or "").strip().lower()
+    if eff == "max":
+        return "xhigh"
+    return eff
+
+
+def _normalize_reasoning_provider(value):
+    provider = str(value or "").strip().lower()
+    if provider in {"", "auto", "default"}:
+        return ""
+    if provider in {"ollama", "ollama_cloud", "ollama-cloud"}:
+        return "ollama-cloud"
+    return provider
+
+
+def _reasoning_allowed_efforts_for_model(model_id=None, model_provider=None):
+    allowed = list(dict.fromkeys(("none",) + VALID_REASONING_EFFORTS))
+    provider = _normalize_reasoning_provider(model_provider)
+    model = str(model_id or "").strip()
+    if provider == "ollama-cloud" and model:
+        try:
+            from cli.models import ollama_cloud_model_reasoning_efforts
+
+            model_efforts = []
+            for item in ollama_cloud_model_reasoning_efforts(model):
+                normalized = _normalize_reasoning_effort_value(item)
+                if normalized:
+                    model_efforts.append(normalized)
+        except Exception:
+            model_efforts = []
+        if model_efforts:
+            allowed = list(dict.fromkeys(("none",) + tuple(model_efforts)))
+    return allowed
+
+
+_WEB_BACKEND_VALUES = ("parallel", "firecrawl", "tavily", "exa", "searxng", "brave-free", "ddgs")
+
+
+def _normalize_web_backend_value(value, strict: bool = False) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"", "auto", "default", "none"}:
+        return ""
+    if raw in _WEB_BACKEND_VALUES:
+        return raw
+    if strict:
+        raise ValueError(
+            "backend must be one of auto, firecrawl, parallel, tavily, exa, searxng, brave-free, ddgs"
+        )
+    return ""
+
+
 def parse_reasoning_effort(effort):
     """Parse an effort level into the dict the agent expects.
 
     Returns None when *effort* is empty or unrecognised (caller interprets as
     "use default"), ``{"enabled": False}`` for ``"none"``, and
     ``{"enabled": True, "effort": <level>}`` for any of
-    ``VALID_REASONING_EFFORTS``.
+    ``VALID_REASONING_EFFORTS``. ``max`` is accepted as an alias for
+    ``xhigh`` for Ollama parity.
     """
-    if not effort or not str(effort).strip():
+    eff = _normalize_reasoning_effort_value(effort)
+    if not eff:
         return None
-    eff = str(effort).strip().lower()
     if eff == "none":
         return {"enabled": False}
     if eff in VALID_REASONING_EFFORTS:
@@ -1917,7 +1970,7 @@ def parse_reasoning_effort(effort):
     return None
 
 
-def get_reasoning_status() -> dict:
+def get_reasoning_status(model_id=None, model_provider=None) -> dict:
     """Return current reasoning configuration from the active profile's
     config.yaml — the same source of truth the CLI reads from.
 
@@ -1930,14 +1983,47 @@ def get_reasoning_status() -> dict:
     agent_cfg = config_data.get("agent") or {}
     show_raw = display_cfg.get("show_reasoning") if isinstance(display_cfg, dict) else None
     effort_raw = agent_cfg.get("reasoning_effort") if isinstance(agent_cfg, dict) else None
+    reasoning_effort = _normalize_reasoning_effort_value(effort_raw)
+    allowed_efforts = _reasoning_allowed_efforts_for_model(model_id, model_provider)
     return {
         # Match CLI default (True if unset in config.yaml)
         "show_reasoning": bool(show_raw) if isinstance(show_raw, bool) else True,
-        "reasoning_effort": str(effort_raw or "").strip().lower(),
+        "reasoning_effort": reasoning_effort,
+        "allowed_efforts": allowed_efforts,
+        "model": str(model_id or "").strip(),
+        "model_provider": _normalize_reasoning_provider(model_provider) or None,
+        "reasoning_effort_supported": bool(reasoning_effort in allowed_efforts or not reasoning_effort),
     }
 
 
-def set_reasoning_display(show: bool) -> dict:
+def get_web_backend_status() -> dict:
+    """Return the current web backend selection from config.yaml.
+
+    ``backend`` is the effective backend the tool layer will use. When the
+    ``web.backend`` override is absent, the UI shows the auto-selected backend
+    so the user can see what is actually active at a glance.
+    """
+    config_data = _load_yaml_config_file(_get_config_path())
+    web_cfg = config_data.get("web") or {}
+    configured_raw = web_cfg.get("backend") if isinstance(web_cfg, dict) else None
+    configured_backend = _normalize_web_backend_value(configured_raw)
+    effective_backend = configured_backend
+    if not effective_backend:
+        try:
+            from tools.web_tools import _get_backend as _resolve_web_backend
+
+            effective_backend = str(_resolve_web_backend() or "").strip().lower() or "auto"
+        except Exception:
+            effective_backend = "auto"
+    return {
+        "backend": effective_backend,
+        "configured_backend": configured_backend,
+        "is_auto": not configured_backend,
+        "is_firecrawl": effective_backend == "firecrawl",
+    }
+
+
+def set_reasoning_display(show: bool, model_id=None, model_provider=None) -> dict:
     """Persist ``display.show_reasoning`` to the active profile's config.yaml.
 
     Mirrors CLI ``/reasoning show|hide``: writes the same key that the CLI
@@ -1954,23 +2040,47 @@ def set_reasoning_display(show: bool) -> dict:
         config_data["display"] = display_cfg
         _save_yaml_config_file(config_path, config_data)
     reload_config()
-    return get_reasoning_status()
+    return get_reasoning_status(model_id, model_provider)
 
 
-def set_reasoning_effort(effort: str) -> dict:
+def set_web_backend(backend: str) -> dict:
+    """Persist ``web.backend`` to the active profile's config.yaml."""
+    normalized = _normalize_web_backend_value(backend, strict=True)
+    config_path = _get_config_path()
+    with _cfg_lock:
+        config_data = _load_yaml_config_file(config_path)
+        web_cfg = config_data.get("web")
+        if not isinstance(web_cfg, dict):
+            web_cfg = {}
+        if normalized:
+            web_cfg["backend"] = normalized
+        else:
+            web_cfg.pop("backend", None)
+        config_data["web"] = web_cfg
+        _save_yaml_config_file(config_path, config_data)
+    reload_config()
+    return get_web_backend_status()
+
+
+def set_reasoning_effort(effort: str, model_id=None, model_provider=None) -> dict:
     """Persist ``agent.reasoning_effort`` to the active profile's config.yaml.
 
     Mirrors CLI ``/reasoning <level>``: same key, same valid values
-    (``none`` | ``minimal`` | ``low`` | ``medium`` | ``high`` | ``xhigh``).
+    (``none`` | ``minimal`` | ``low`` | ``medium`` | ``high`` | ``xhigh``),
+    plus ``max`` as an alias for ``xhigh``.
     Raises ``ValueError`` on an unrecognised level so callers can return 400.
     """
-    raw = str(effort or "").strip().lower()
+    raw = _normalize_reasoning_effort_value(effort)
     if not raw:
         raise ValueError("effort is required")
-    if raw != "none" and raw not in VALID_REASONING_EFFORTS:
+    allowed_efforts = _reasoning_allowed_efforts_for_model(model_id, model_provider)
+    if raw != "none" and raw not in allowed_efforts:
+        model_name = str(model_id or "").strip() or "current model"
+        provider_name = _normalize_reasoning_provider(model_provider)
+        provider_hint = f" ({provider_name})" if provider_name else ""
         raise ValueError(
-            f"Unknown reasoning effort '{effort}'. "
-            f"Valid: none, {', '.join(VALID_REASONING_EFFORTS)}."
+            f"Reasoning effort '{effort}' is not supported for {model_name}{provider_hint}. "
+            f"Allowed: {', '.join(allowed_efforts)}."
         )
     config_path = _get_config_path()
     with _cfg_lock:
@@ -1982,7 +2092,7 @@ def set_reasoning_effort(effort: str) -> dict:
         config_data["agent"] = agent_cfg
         _save_yaml_config_file(config_path, config_data)
     reload_config()
-    return get_reasoning_status()
+    return get_reasoning_status(model_id, model_provider)
 
 
 def set_hermes_default_model(model_id: str) -> dict:
@@ -2108,7 +2218,7 @@ def _current_webui_version() -> str | None:
 # guarantees that even if a future release accidentally reuses the same
 # WebUI version string (or a debug build doesn't have a version), a structural
 # change still invalidates the cache.
-_MODELS_CACHE_SCHEMA_VERSION = 3
+_MODELS_CACHE_SCHEMA_VERSION = 4
 
 
 _models_cache_path = STATE_DIR / "models_cache.json"
@@ -2767,6 +2877,16 @@ def get_available_models() -> dict:
         default_model = get_effective_default_model(cfg)
         groups = []
 
+        try:
+            from cli.models import OLLAMA_CLOUD_CURATED_MODELS as _ollama_thinking_model_ids
+            _ollama_thinking_model_ids = {
+                str(mid).strip().lower()
+                for mid in _ollama_thinking_model_ids
+                if str(mid).strip()
+            }
+        except Exception:
+            _ollama_thinking_model_ids = set()
+
         def _norm_model_id(model_id: str) -> str:
             s = str(model_id or "").strip().lower()
             # Strip @provider: prefix (e.g., @custom:jingdong:GLM-5 -> GLM-5).
@@ -2781,6 +2901,26 @@ def get_available_models() -> dict:
                 parts = s.split("/")
                 s = parts[-1] or s
             return s.replace("-", ".")
+
+        def _thinking_model_variants(model_id: str) -> set[str]:
+            raw = str(model_id or "").strip().lower()
+            if not raw:
+                return set()
+            variants = {raw}
+            if raw.startswith("@") and ":" in raw:
+                variants.add(raw.split(":", 1)[1].strip())
+            if "/" in raw:
+                variants.add(raw.split("/", 1)[-1].strip())
+                if raw.startswith("@") and ":" in raw:
+                    after = raw.split(":", 1)[1].strip()
+                    if "/" in after:
+                        variants.add(after.split("/", 1)[-1].strip())
+            return {v for v in variants if v}
+
+        def _is_ollama_thinking_model(model_id: str) -> bool:
+            if not _ollama_thinking_model_ids:
+                return False
+            return any(v in _ollama_thinking_model_ids for v in _thinking_model_variants(model_id))
 
         def _build_configured_model_badges() -> dict[str, dict[str, str]]:
             configured_entries: list[dict[str, str]] = []
@@ -3867,6 +4007,18 @@ def get_available_models() -> dict:
         # collisions with @provider_id: so the frontend can distinguish them.
         _deduplicate_model_ids(groups)
 
+        thinking_models: list[str] = []
+        seen_thinking_models: set[str] = set()
+        for group in groups:
+            for model_bucket in ("models", "extra_models"):
+                for model in group.get(model_bucket, []) or []:
+                    mid = str(model.get("id", "") or "").strip()
+                    if not mid or mid in seen_thinking_models:
+                        continue
+                    if _is_ollama_thinking_model(mid):
+                        seen_thinking_models.add(mid)
+                        thinking_models.append(mid)
+
         # Defense-in-depth: drop any optgroup that ended up with zero models
         # — those are pure UI noise. A zero-model group typically means a
         # detection path added an id that has no static catalog AND the
@@ -3882,11 +4034,24 @@ def get_available_models() -> dict:
             or (g.get("provider_id") or "").startswith("custom:")
         ]
 
+        thinking_models = []
+        seen_thinking_models = set()
+        for group in groups:
+            for model_bucket in ("models", "extra_models"):
+                for model in group.get(model_bucket, []) or []:
+                    mid = str(model.get("id", "") or "").strip()
+                    if not mid or mid in seen_thinking_models:
+                        continue
+                    if _is_ollama_thinking_model(mid):
+                        seen_thinking_models.add(mid)
+                        thinking_models.append(mid)
+
         return {
             "active_provider": active_provider,
             "default_model": default_model,
             "configured_model_badges": _build_configured_model_badges(),
             "groups": groups,
+            "thinking_models": thinking_models,
         }
 
     # ── FAST PATH ─────────────────────────────────────────────────────────────

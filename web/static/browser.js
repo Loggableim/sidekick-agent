@@ -1,6 +1,7 @@
 ﻿let _browserActiveSessionId = null;
 let _browserEventSource = null;
 let _browserPollTimer = null;
+let _browserSyncRetryTimer = null;
 let _browserRequestRev = 0;
 let _browserState = null;
 let _browserMoveThrottle = null;
@@ -26,7 +27,10 @@ let _browserResearchQuestionsBySession = {};
 let _browserResearchResearchPromptBySession = {};
 let _browserResearchModeBySession = {};
 let _browserPermissionMode = 'none';
+let _browserWebBackend = 'auto';
+let _browserWebBackendConfigured = '';
 let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
+let _browserSplitScreen = localStorage.getItem('sidekick-browser-split-open') === '1';
 let _browserDrawerHost = null;
 let _browserDrawerHostNext = null;
 let _browserFrameObjectUrl = '';
@@ -36,9 +40,124 @@ let _browserDiffTimer = null;
 let _browserTraceThumbnails = [];
 let _browserChatContextActive = false;
 let _browserPrevFrameRev = '';
+let _browserHeaderMenuOpen = false;
 
 function _browserEl(id) {
   return document.getElementById(id);
+}
+
+function _browserEnsureSplitStyles() {
+  if (document.getElementById('browserSplitStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'browserSplitStyles';
+  style.textContent = `
+body.browser-split {
+  --browser-split-width: min(48vw, 860px);
+}
+body.browser-split header.app-titlebar,
+body.browser-split nav.rail,
+body.browser-split aside.sidebar,
+body.browser-split aside.rightpanel,
+body.browser-split .split-resize-handle {
+  display: none !important;
+}
+body.browser-split .app-main,
+body.browser-split main.main {
+  min-height: 0;
+}
+body.browser-split main.main {
+  padding-right: var(--browser-split-width) !important;
+  box-sizing: border-box;
+}
+body.browser-split main.main > :not(#mainChat):not(#mainBrowser) {
+  display: none !important;
+}
+body.browser-split main.main > #mainBrowser {
+  display: flex !important;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+body.browser-split main.main > #mainChat {
+  display: flex !important;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+body.browser-split #mainChat > :not(#chatSplitLayout) {
+  display: none !important;
+}
+body.browser-split #chatSplitLayout {
+  display: grid !important;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+}
+body.browser-split .browser-drawer {
+  position: fixed;
+  top: 38px !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  left: auto !important;
+  width: var(--browser-split-width) !important;
+  height: calc(100vh - 38px) !important;
+  display: flex;
+  flex-direction: column;
+  z-index: 260;
+  margin: 0;
+  max-height: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto;
+  transform: none !important;
+}
+body.browser-split .browser-drawer-shell {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  box-shadow: none;
+}
+body.browser-split .browser-drawer .browser-stage-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+body.browser-split .browser-drawer .browser-stage {
+  height: 100%;
+  min-height: 0;
+}
+.browser-split-btn.is-active {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent);
+}
+@media (max-width: 1100px) {
+  .browser-split-btn {
+    display: none !important;
+  }
+  body.browser-split {
+    --browser-split-width: min(760px, calc(100vw - 32px));
+  }
+  body.browser-split main.main {
+    padding-right: 0;
+  }
+  body.browser-split .browser-drawer {
+    left: 50% !important;
+    right: auto !important;
+    width: min(760px, calc(100vw - 32px)) !important;
+    transform: translateX(-50%) !important;
+    border-radius: 12px;
+    top: auto !important;
+    bottom: calc(12px + env(safe-area-inset-bottom,0px)) !important;
+    height: min(52vh, 560px) !important;
+  }
+  body.browser-split .browser-drawer-shell {
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.16);
+  }
+}
+  `;
+  document.head.appendChild(style);
 }
 
 function _browserCurrentSessionId() {
@@ -377,12 +496,25 @@ function _browserSyncFullscreenButton(active) {
   btn.setAttribute('aria-label', active ? 'Restore browser' : 'Maximize browser');
 }
 
+function _browserSyncSplitButton(active) {
+  const btn = _browserEl('browserBtnSplit');
+  if (!btn) return;
+  btn.classList.toggle('is-active', !!active);
+  btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  btn.setAttribute('data-tooltip', active ? 'Exit split screen' : 'Split browser and chat');
+  btn.setAttribute('aria-label', active ? 'Exit split screen' : 'Split browser and chat');
+}
+
 function _browserSetFullscreen(open) {
   const next = !!open;
   _browserFullscreen = next;
   try { localStorage.setItem('sidekick-browser-fullscreen', next ? '1' : '0'); } catch (_) {}
+  if (next && _browserSplitScreen) {
+    _browserSetSplitScreen(false);
+  }
   document.body.classList.toggle('browser-maximized', next);
   _browserSyncFullscreenButton(next);
+  _browserUpdateHeaderBadge();
   if (next) {
     _browserHoistDrawer();
     browserSetDrawerOpen(true, {force: true, keepViewport: true});
@@ -390,6 +522,31 @@ function _browserSetFullscreen(open) {
   } else {
     _browserRestoreDrawerHost();
     _browserSetDrawerAccessibility(_browserDrawerOpen);
+  }
+}
+
+function browserToggleFullscreen() {
+  _browserSetFullscreen(!_browserFullscreen);
+}
+
+function _browserSetSplitScreen(open) {
+  const next = !!open;
+  _browserSplitScreen = next;
+  try { localStorage.setItem('sidekick-browser-split-open', next ? '1' : '0'); } catch (_) {}
+  if (next && _browserFullscreen) {
+    _browserSetFullscreen(false);
+  }
+  document.body.classList.toggle('browser-split', next);
+  _browserSyncSplitButton(next);
+  _browserUpdateHeaderBadge();
+  if (next) {
+    if (!_browserDrawerOpen) {
+      browserSetDrawerOpen(true, {force: true, keepViewport: true});
+    } else {
+      void browserSyncToCurrentSession({allowPending: true});
+    }
+  } else {
+    document.body.classList.remove('browser-split');
   }
 }
 
@@ -413,6 +570,7 @@ function browserToggleExploreMode() {
   if (typeof showToast === 'function') {
     showToast(_browserExploreMode ? 'Explore mode: you can click the viewport' : 'Follow mode: agent controls the browser', 2000, 'info');
   }
+  _browserUpdateHeaderBadge();
 }
 
 function _browserTriggerDiffOverlay() {
@@ -442,23 +600,173 @@ function _browserUpdateChatContext(state) {
     (actionCount > 0 ? ' — <span class="browser-ctx-actions">' + actionCount + ' action' + (actionCount !== 1 ? 's' : '') + '</span>' : '');
 }
 
-function browserSendScreenshotToChat() {
+async function _browserEnsureCurrentState() {
+  const sessionId = _browserCurrentSessionId();
+  if (!sessionId) return null;
   const state = _browserState;
-  if (!state || !state.url) {
-    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
-    return;
+  if (state && state.session_id === sessionId && (state.url || state.frame_rev)) {
+    return state;
   }
-  const url = state.url;
-  const frameUrl = _browserFrameObjectUrl || '';
-  const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
-  const textarea = document.querySelector('#composerTextarea, #messageInput, textarea');
-  if (textarea && typeof insertAtCursor === 'function') {
+  try {
+    const synced = await browserSyncToCurrentSession({force: true, allowPending: true});
+    if (synced && synced.session_id === sessionId) return synced;
+  } catch (_) {}
+  return (_browserState && _browserState.session_id === sessionId) ? _browserState : null;
+}
+
+function _browserComposerTextarea() {
+  return _browserEl('msg')
+    || _browserEl('composerTextarea')
+    || _browserEl('messageInput')
+    || document.querySelector('textarea');
+}
+
+function _browserIsEditableTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tagName = String(target.tagName || '').toUpperCase();
+  if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
+  return typeof target.closest === 'function' && !!target.closest('[contenteditable="true"]');
+}
+
+function _browserInsertIntoComposer(text) {
+  const textarea = _browserComposerTextarea();
+  if (!textarea) return false;
+  if (typeof insertAtCursor === 'function') {
     insertAtCursor(textarea, text);
-  } else if (textarea) {
+  } else {
     textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
     textarea.dispatchEvent(new Event('input', {bubbles: true}));
   }
+  if (typeof textarea.focus === 'function') textarea.focus();
+  if (typeof textarea.setSelectionRange === 'function') {
+    const pos = String(textarea.value || '').length;
+    try { textarea.setSelectionRange(pos, pos); } catch (_) {}
+  }
+  return true;
+}
+
+function _browserVisibleUrl() {
+  const stateUrl = String((_browserState && _browserState.url) || '').trim();
+  if (stateUrl) return stateUrl;
+  const input = _browserEl('browserUrlInput');
+  const inputUrl = String(input && input.value || '').trim();
+  if (inputUrl) return inputUrl;
+  const drawer = _browserEl('browserDrawer');
+  const text = String(drawer && drawer.innerText ? drawer.innerText : '').trim();
+  if (!text) return '';
+  const match = text.match(/\bhttps?:\/\/[^\s)]+|\babout:[^\s)]+/i);
+  return match ? String(match[0] || '').trim() : '';
+}
+
+function _browserFallbackReadableText() {
+  const drawer = _browserEl('browserDrawer');
+  const raw = String(drawer && drawer.innerText ? drawer.innerText : '').trim();
+  if (!raw) return '';
+  const lines = raw
+    .split('\n')
+    .map(function(line) { return String(line || '').trim(); })
+    .filter(Boolean);
+  if (!lines.length) return '';
+  const startIndex = lines.findIndex(function(line) {
+    return /^https?:\/\//i.test(line) || /^about:/i.test(line);
+  });
+  const relevant = (startIndex >= 0 ? lines.slice(startIndex) : lines.slice()).filter(function(line) {
+    if (!line) return false;
+    if (/^session [A-Za-z0-9]+$/i.test(line)) return false;
+    if (/^#\d+$/.test(line)) return false;
+    if (line === 'WEBSEARCH' || line === 'Web auto' || line === 'IDLE' || line === 'LOADING') return false;
+    if (line === 'AGENT CONTROL' || line === 'AGENT LOCKED') return false;
+    if (line === 'Go' || line === 'Change detected' || line === 'snapshot') return false;
+    return true;
+  });
+  return relevant.slice(0, 40).join('\n').trim();
+}
+
+async function browserSendScreenshotToChat() {
+  const state = await _browserEnsureCurrentState();
+  const url = String((state && state.url) || _browserVisibleUrl() || '').trim();
+  if (!url) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+  const frameUrl = _browserFrameObjectUrl || '';
+  const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
+  if (!_browserInsertIntoComposer(text)) {
+    if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+    return;
+  }
   if (typeof showToast === 'function') showToast('Screenshot added to chat', 2000, 'success');
+}
+
+async function browserCopyCurrentUrl() {
+  const state = await _browserEnsureCurrentState();
+  const url = String((state && state.url) || _browserVisibleUrl() || '').trim();
+  if (!url) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  const clipboard = (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) ? navigator.clipboard.writeText(url) : null;
+  if (!clipboard) {
+    if (typeof showToast === 'function') showToast('Copy failed', 2200, 'error');
+    return;
+  }
+  clipboard.then(function() {
+    if (typeof showToast === 'function') showToast('URL copied to clipboard', 1800, 'success');
+  }).catch(function() {
+    if (typeof showToast === 'function') showToast('Copy failed', 2200, 'error');
+  });
+}
+
+async function browserSendPageContextToChat(opts = {}) {
+  const full = !!(opts && opts.full);
+  const state = await _browserEnsureCurrentState();
+  const sid = _browserCurrentSessionId();
+  if (!sid) {
+    if (typeof showToast === 'function') showToast('No chat session selected', 2000, 'error');
+    return;
+  }
+  const visibleUrl = _browserVisibleUrl();
+  if (!visibleUrl && !(state && state.url)) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+  const frameUrl = _browserFrameObjectUrl || '';
+  api('/api/browser/action', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: sid,
+      action: 'snapshot',
+      full,
+    }),
+  }).then(function(data) {
+    const snapshotText = String(data && data.text || '').trim() || _browserFallbackReadableText();
+    const snapshotState = data && data.state ? data.state : state;
+    const pageTitle = String((snapshotState && snapshotState.title) || '').trim();
+    const pageUrl = String((snapshotState && snapshotState.url) || visibleUrl || state && state.url || '').trim();
+    const heading = pageTitle || pageUrl || 'Browser page';
+    const lines = [
+      (full ? '📘 **Full browser page context**' : '🌐 **Browser page context**'),
+      'URL: ' + (pageUrl || heading),
+      '',
+      snapshotText || 'No readable text returned by the browser snapshot.',
+    ];
+    if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
+    const text = lines.join('\n');
+    if (!_browserInsertIntoComposer(text)) {
+      if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+      return;
+    }
+    if (typeof showToast === 'function') showToast(full ? 'Full page context added to chat' : 'Readable page text added to chat', 2000, 'success');
+  }).catch(function() {
+    if (typeof showToast === 'function') showToast('Page text export failed', 2200, 'error');
+  });
+}
+
+async function browserSendFullPageContextToChat() {
+  return browserSendPageContextToChat({full: true});
 }
 
 function _browserResearchRenderQuickAnswer(text, meta = {}) {
@@ -601,6 +909,218 @@ function _browserSetSessionLabel(state) {
   el.textContent = _browserSessionLabel(state);
 }
 
+function _browserUpdateHeaderBadge() {
+  const badge = _browserEl('browserStatusBadge');
+  const value = _browserEl('browserStatusValue');
+  if (!badge || !value) return;
+
+  const open = !!_browserDrawerOpen;
+  const mode = String(_browserPermissionMode || 'none');
+  const openState = open ? 'open' : 'closed';
+  const modeState = mode === 'control' ? 'control' : (mode === 'read' ? 'read' : 'locked');
+  const extraStates = [];
+  if (_browserExploreMode) extraStates.push('explore');
+  if (_browserSplitScreen) extraStates.push('split');
+  if (_browserFullscreen) extraStates.push('fullscreen');
+
+  badge.classList.remove('browser-state-open', 'browser-state-closed', 'browser-state-control', 'browser-state-read', 'browser-state-locked', 'browser-state-explore', 'browser-state-split', 'browser-state-fullscreen');
+  badge.classList.add('browser-state-' + openState);
+  badge.classList.add('browser-state-' + modeState);
+  extraStates.forEach(stateName => badge.classList.add('browser-state-' + stateName));
+
+  value.textContent = 'browser ' + openState + ' · ' + modeState;
+
+  const parts = [
+    'Browser drawer ' + openState,
+    modeState === 'control' ? 'agent control enabled' : (modeState === 'read' ? 'agent watch mode' : 'agent locked')
+  ];
+  if (_browserState && _browserState.status) parts.push(String(_browserState.status));
+  if (_browserExploreMode) parts.push('explore mode');
+  if (_browserSplitScreen) parts.push('split view');
+  if (_browserFullscreen) parts.push('fullscreen');
+  const label = parts.join(' · ') + '. Click to toggle the drawer.';
+  badge.setAttribute('title', label);
+  badge.setAttribute('aria-label', label);
+  _browserRefreshHeaderMenu();
+  if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
+}
+
+function _browserRefreshHeaderMenu() {
+  const drawerBtn = _browserEl('browserHeaderDrawerAction');
+  const permissionBtn = _browserEl('browserHeaderPermissionAction');
+  const exploreBtn = _browserEl('browserHeaderExploreAction');
+  const splitBtn = _browserEl('browserHeaderSplitAction');
+  const fullscreenBtn = _browserEl('browserHeaderFullscreenAction');
+  const backBtn = _browserEl('browserHeaderBackAction');
+  const forwardBtn = _browserEl('browserHeaderForwardAction');
+  const reloadBtn = _browserEl('browserHeaderReloadAction');
+  const stopBtn = _browserEl('browserHeaderStopAction');
+  const navigateBtn = _browserEl('browserHeaderNavigateAction');
+  const newTabBtn = _browserEl('browserHeaderNewTabAction');
+  const copyUrlBtn = _browserEl('browserHeaderCopyUrlAction');
+  const pageContextBtn = _browserEl('browserHeaderPageContextAction');
+  const fullPageContextBtn = _browserEl('browserHeaderFullPageContextAction');
+  const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+
+  if (drawerBtn) drawerBtn.textContent = _browserDrawerOpen ? 'Close drawer' : 'Open drawer';
+  if (permissionBtn) {
+    permissionBtn.textContent = _browserPermissionMode === 'control'
+      ? 'Pause agent control'
+      : (_browserPermissionMode === 'read' ? 'Resume agent control' : 'Enable agent control');
+  }
+  if (exploreBtn) {
+    exploreBtn.textContent = _browserExploreMode ? 'Switch to Follow mode' : 'Switch to Explore mode';
+  }
+  if (splitBtn) {
+    splitBtn.textContent = _browserSplitScreen ? 'Exit split view' : 'Split browser and chat';
+  }
+  if (fullscreenBtn) {
+    fullscreenBtn.textContent = _browserFullscreen ? 'Exit fullscreen' : 'Maximize browser';
+  }
+  if (backBtn) backBtn.textContent = 'Go back';
+  if (forwardBtn) forwardBtn.textContent = 'Go forward';
+  if (reloadBtn) reloadBtn.textContent = 'Reload page';
+  if (stopBtn) stopBtn.textContent = 'Stop loading';
+  if (navigateBtn) navigateBtn.textContent = 'Navigate to URL...';
+  if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
+  if (copyUrlBtn) copyUrlBtn.textContent = 'Copy current URL';
+  if (pageContextBtn) pageContextBtn.textContent = 'Send readable page text to chat';
+  if (fullPageContextBtn) fullPageContextBtn.textContent = 'Send full page context to chat';
+  if (screenshotBtn) {
+    screenshotBtn.textContent = 'Send screenshot to chat';
+  }
+  if (menuBtn) {
+    menuBtn.setAttribute('aria-expanded', _browserHeaderMenuOpen ? 'true' : 'false');
+  }
+}
+
+function _browserCloseHeaderMenu() {
+  const menu = _browserEl('browserStatusMenu');
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+  if (menu) menu.hidden = true;
+  if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+  if (_browserHeaderMenuOpen) {
+    document.removeEventListener('click', _browserHeaderMenuOutsideClick, true);
+    document.removeEventListener('keydown', _browserHeaderMenuKeydown, true);
+  }
+  _browserHeaderMenuOpen = false;
+}
+
+function _browserHeaderMenuOutsideClick(event) {
+  if (!_browserHeaderMenuOpen) return;
+  const menu = _browserEl('browserStatusMenu');
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+  const target = event && event.target;
+  if (menu && target && menu.contains(target)) return;
+  if (menuBtn && target && menuBtn.contains(target)) return;
+  _browserCloseHeaderMenu();
+}
+
+function _browserHeaderMenuKeydown(event) {
+  if (!event) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    _browserCloseHeaderMenu();
+  }
+}
+
+function _browserHandleExportHotkeys(event) {
+  if (!event || event.defaultPrevented) return;
+  if (!_browserPanelVisible()) return;
+  if (_browserHeaderMenuOpen) return;
+  if (_browserIsEditableTarget(event.target)) return;
+  const key = String(event.key || '').toLowerCase();
+  if (key !== 'e') return;
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.altKey) {
+    void browserSendFullPageContextToChat();
+  } else {
+    void browserSendPageContextToChat();
+  }
+}
+
+function browserToggleHeaderMenu(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const menu = _browserEl('browserStatusMenu');
+  if (!menu) return false;
+  if (_browserHeaderMenuOpen) {
+    _browserCloseHeaderMenu();
+    return false;
+  }
+  _browserRefreshHeaderMenu();
+  menu.hidden = false;
+  _browserHeaderMenuOpen = true;
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+  if (menuBtn) menuBtn.setAttribute('aria-expanded', 'true');
+  document.addEventListener('click', _browserHeaderMenuOutsideClick, true);
+  document.addEventListener('keydown', _browserHeaderMenuKeydown, true);
+  return false;
+}
+
+function browserRunHeaderAction(action) {
+  _browserCloseHeaderMenu();
+  switch (String(action || '')) {
+    case 'drawer-toggle':
+      browserToggleDrawer();
+      break;
+    case 'permission':
+      void browserTogglePermission();
+      break;
+    case 'explore':
+      browserToggleExploreMode();
+      break;
+    case 'split':
+      browserToggleSplit();
+      break;
+    case 'fullscreen':
+      browserToggleFullscreen();
+      break;
+    case 'screenshot':
+      browserSendScreenshotToChat();
+      break;
+    case 'copyurl':
+      browserCopyCurrentUrl();
+      break;
+    case 'pagecontext':
+      browserSendPageContextToChat();
+      break;
+    case 'fullpagecontext':
+    case 'pagecontext-full':
+    case 'extract':
+      browserSendFullPageContextToChat();
+      break;
+    case 'back':
+      browserGoBack();
+      break;
+    case 'forward':
+      browserGoForward();
+      break;
+    case 'reload':
+      browserReload();
+      break;
+    case 'stop':
+      browserStop();
+      break;
+    case 'navigate': {
+      const current = (_browserState && _browserState.url) ? String(_browserState.url) : String((_browserEl('browserUrlInput') || {}).value || '');
+      const next = typeof window !== 'undefined' && typeof window.prompt === 'function'
+        ? window.prompt('Navigate browser to URL', current || 'https://')
+        : current;
+      if (!next) break;
+      browserNavigateUrl(next);
+      break;
+    }
+    case 'newtab':
+      browserOpenInNewTab();
+      break;
+  }
+  return false;
+}
+
 function browserRenderPermission(permission) {
   const mode = permission && permission.mode ? String(permission.mode) : 'none';
   _browserPermissionMode = mode;
@@ -633,6 +1153,58 @@ function browserRenderPermission(permission) {
     stopBtn.setAttribute('aria-label', mode === 'none' ? 'Stop Nova agent browser handoff' : 'Stop Nova agent browser handoff');
     stopBtn.dataset.tooltip = mode === 'none' ? 'Stop Nova agent browser handoff' : 'Stop Nova agent browser handoff';
   }
+  _browserUpdateHeaderBadge();
+}
+
+function browserRenderWebBackend(status) {
+  const backend = status && status.backend ? String(status.backend).trim().toLowerCase() : 'auto';
+  const configuredBackend = status && status.configured_backend ? String(status.configured_backend).trim().toLowerCase() : '';
+  _browserWebBackend = backend || 'auto';
+  _browserWebBackendConfigured = configuredBackend;
+  const el = _browserEl('browserBackendStatus');
+  if (!el) return;
+  const nextMode = configuredBackend === 'firecrawl' ? 'auto' : 'firecrawl';
+  const tooltip = configuredBackend === 'firecrawl'
+    ? 'Return web backend to auto-detect'
+    : 'Pin web backend to Firecrawl';
+  el.textContent = 'Web ' + _browserWebBackend;
+  el.classList.toggle('is-active', _browserWebBackend === 'firecrawl');
+  el.classList.toggle('is-auto', !configuredBackend);
+  el.setAttribute('aria-pressed', configuredBackend === 'firecrawl' ? 'true' : 'false');
+  el.setAttribute('aria-label', tooltip);
+  el.dataset.tooltip = tooltip;
+  el.dataset.backend = _browserWebBackend;
+  el.dataset.configuredBackend = configuredBackend || 'auto';
+  el.dataset.nextMode = nextMode;
+  _browserUpdateHeaderBadge();
+}
+
+async function browserRefreshWebBackend() {
+  try {
+    const data = await api('/api/web/backend');
+    browserRenderWebBackend(data || {backend: 'auto', configured_backend: ''});
+  } catch (_) {
+    browserRenderWebBackend({backend: 'auto', configured_backend: ''});
+  }
+}
+
+async function browserToggleWebBackend() {
+  const nextBackend = _browserWebBackendConfigured === 'firecrawl' ? 'auto' : 'firecrawl';
+  try {
+    const data = await api('/api/web/backend', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({backend: nextBackend}),
+    });
+    browserRenderWebBackend(data || {backend: nextBackend, configured_backend: nextBackend === 'auto' ? '' : nextBackend});
+    if (typeof showToast === 'function') {
+      showToast(nextBackend === 'firecrawl' ? 'Web backend pinned to Firecrawl' : 'Web backend returned to auto', 2200, nextBackend === 'firecrawl' ? 'success' : 'info');
+    }
+  } catch (e) {
+    browserRenderWebBackend({backend: _browserWebBackend, configured_backend: _browserWebBackendConfigured});
+    if (typeof showToast === 'function') showToast('Web backend update failed', 2400, 'error');
+  }
+  return false;
 }
 
 async function browserRefreshPermission() {
@@ -880,6 +1452,10 @@ function _browserSetImage(state) {
 
 function _browserRender(state, opts = {}) {
   if (!state) return;
+  if (_browserSyncRetryTimer) {
+    clearTimeout(_browserSyncRetryTimer);
+    _browserSyncRetryTimer = null;
+  }
   _browserState = state;
   _browserActiveSessionId = String(state.session_id || _browserCurrentSessionId() || '');
   _browserRecordActionTrace(state);
@@ -892,6 +1468,7 @@ function _browserRender(state, opts = {}) {
   _browserSetCursor(state);
   if (state.click_ts != null) _browserFlashClick(state);
   _browserSetSessionLabel(state);
+  _browserUpdateHeaderBadge();
   const isBlocked = state.status === 'blocked';
   const isError = state.status === 'error';
   const isRunning = state.status === 'running' || state.busy;
@@ -942,9 +1519,36 @@ function _browserCloseStream() {
     clearTimeout(_browserPollTimer);
     _browserPollTimer = null;
   }
+  if (_browserSyncRetryTimer) {
+    clearTimeout(_browserSyncRetryTimer);
+    _browserSyncRetryTimer = null;
+  }
+}
+
+function _browserScheduleSyncRetry(delayMs = 1200) {
+  if (_browserSyncRetryTimer) return;
+  if (!_browserPanelVisible()) return;
+  const sessionId = _browserCurrentSessionId();
+  if (!sessionId) return;
+  _browserSyncRetryTimer = setTimeout(async function retry() {
+    _browserSyncRetryTimer = null;
+    if (!_browserPanelVisible()) return;
+    const sid = _browserCurrentSessionId();
+    if (!sid) return;
+    const state = _browserState;
+    if (state && state.session_id === sid && (state.url || state.frame_rev)) return;
+    try {
+      await browserSyncToCurrentSession({force: true, allowPending: true});
+    } catch (_) {}
+    const nextState = _browserState;
+    if (_browserPanelVisible() && !(nextState && nextState.session_id === sid && (nextState.url || nextState.frame_rev))) {
+      _browserScheduleSyncRetry(Math.min(delayMs + 1000, 5000));
+    }
+  }, delayMs);
 }
 
 function browserPrepareSessionSwitch() {
+  _browserCloseHeaderMenu();
   _browserCloseStream();
   _browserRequestRev += 1;
   _browserActiveSessionId = null;
@@ -963,17 +1567,27 @@ function browserPrepareSessionSwitch() {
   _browserSetEmptyVisible(true);
   _browserSetButtonsDisabled(true, null);
   browserRenderPermission({mode: 'none'});
+  _browserUpdateHeaderBadge();
+  _browserScheduleSyncRetry(1200);
 }
 
 function browserSetDrawerOpen(open, opts = {}) {
   const nextOpen = !!open;
   const prevOpen = _browserDrawerOpen;
+  _browserCloseHeaderMenu();
   _browserDrawerOpen = nextOpen;
   localStorage.setItem('sidekick-browser-drawer-open', nextOpen ? '1' : '0');
   document.body.classList.toggle('browser-drawer-open', nextOpen);
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
+  _browserUpdateHeaderBadge();
+  if (nextOpen) {
+    void browserRefreshWebBackend();
+  }
   if (!nextOpen) {
+    if (_browserSplitScreen) {
+      _browserSetSplitScreen(false);
+    }
     if (_browserFullscreen) {
       _browserSetFullscreen(false);
     }
@@ -988,6 +1602,7 @@ function browserSetDrawerOpen(open, opts = {}) {
     }
     return;
   }
+  _browserScheduleSyncRetry(1200);
   if (!prevOpen || opts.force) {
     void browserSyncToCurrentSession({force: true, allowPending: true});
   } else {
@@ -996,7 +1611,22 @@ function browserSetDrawerOpen(open, opts = {}) {
 }
 
 function browserToggleDrawer() {
+  _browserCloseHeaderMenu();
   browserSetDrawerOpen(!_browserDrawerOpen, {force: true});
+}
+
+function browserToggleSplit() {
+  if (!_browserSplitScreen) {
+    if (_browserFullscreen) _browserSetFullscreen(false);
+    _browserSetSplitScreen(true);
+    return;
+  }
+  _browserSetSplitScreen(false);
+}
+
+if (typeof window !== 'undefined') {
+  window.browserToggleFullscreen = browserToggleFullscreen;
+  window.browserToggleSplit = browserToggleSplit;
 }
 
 async function _browserFetchState(sessionId) {
@@ -1079,6 +1709,7 @@ async function browserSyncToCurrentSession(opts = {}) {
       _browserSetEmptyVisible(true);
       _browserSetButtonsDisabled(true, null);
     }
+    _browserScheduleSyncRetry();
     return null;
   }
   if (!sessionId) {
@@ -1105,6 +1736,8 @@ async function browserSyncToCurrentSession(opts = {}) {
     const state = await _browserFetchState(sessionId);
     if (state && visible) {
       _browserStartStream(sessionId);
+    } else if (visible) {
+      _browserScheduleSyncRetry();
     }
     return state;
   }
@@ -1167,6 +1800,15 @@ function browserSubmitUrl(event) {
   if (!url) return false;
   void _browserSendControl('navigate', {url: url});
   return false;
+}
+
+function browserNavigateUrl(url) {
+  const next = String(url || '').trim();
+  if (!next) return false;
+  const input = _browserEl('browserUrlInput');
+  if (input) input.value = next;
+  void _browserSendControl('navigate', {url: next});
+  return true;
 }
 
 function _browserCoordsFromEvent(event) {
@@ -1599,9 +2241,14 @@ window.browserPanelActivated = browserPanelActivated;
 window.browserPanelDeactivated = browserPanelDeactivated;
 window.browserSetDrawerOpen = browserSetDrawerOpen;
 window.browserToggleDrawer = browserToggleDrawer;
+window.browserToggleHeaderMenu = browserToggleHeaderMenu;
+window.browserRunHeaderAction = browserRunHeaderAction;
 window.browserTogglePermission = browserTogglePermission;
 window.browserStopPermission = browserStopPermission;
 window.browserRenderPermission = browserRenderPermission;
+window.browserRenderWebBackend = browserRenderWebBackend;
+window.browserRefreshWebBackend = browserRefreshWebBackend;
+window.browserToggleWebBackend = browserToggleWebBackend;
 window.browserRefreshPermission = browserRefreshPermission;
 window.browserResearchPanelActivated = browserResearchPanelActivated;
 window.browserResearchPanelDeactivated = browserResearchPanelDeactivated;
@@ -1613,26 +2260,38 @@ window.browserGoBack = browserGoBack;
 window.browserGoForward = browserGoForward;
 window.browserReload = browserReload;
 window.browserStop = browserStop;
-window.browserToggleFullscreen = browserToggleFullscreen;
 window.browserSubmitUrl = browserSubmitUrl;
+window.browserNavigateUrl = browserNavigateUrl;
 window.browserToggleExploreMode = browserToggleExploreMode;
 window.browserSendScreenshotToChat = browserSendScreenshotToChat;
+window.browserSendPageContextToChat = browserSendPageContextToChat;
+window.browserSendFullPageContextToChat = browserSendFullPageContextToChat;
 
 window.addEventListener('load', function() {
+  _browserEnsureSplitStyles();
   _browserSyncFullscreenButton(_browserFullscreen);
+  _browserSyncSplitButton(_browserSplitScreen);
   if (_browserDrawerOpen) {
     document.body.classList.add('browser-drawer-open');
     _browserSyncDrawerButton(true);
     _browserSetDrawerAccessibility(true);
+    void browserRefreshWebBackend();
     if (_browserFullscreen) {
       document.body.classList.add('browser-maximized');
       _browserHoistDrawer();
     }
+    if (_browserSplitScreen) {
+      document.body.classList.add('browser-split');
+    }
     void browserSyncToCurrentSession({force: true, allowPending: true});
+    _browserScheduleSyncRetry(1200);
   } else {
     _browserSetDrawerAccessibility(false);
     _browserSyncFullscreenButton(false);
+    _browserSyncSplitButton(false);
   }
+  document.addEventListener('keydown', _browserHandleExportHotkeys, true);
+  _browserUpdateHeaderBadge();
   _browserAttachPointerHandlers();
 });
 
@@ -1674,6 +2333,7 @@ function websearchToggleMode(mode) {
     // Refresh deep research list when switching to deep
     browserResearchPanelActivated();
   }
+  if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
 }
 
 // ── History Sidebar Toggle ─────────────────────

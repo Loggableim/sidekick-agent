@@ -1,4 +1,4 @@
-﻿let _currentPanel = 'chat';
+let _currentPanel = 'chat';
 let _renamingAppTitlebar = false;  // guard against re-entrant rename
 let _kanbanBoard = null;
 let _kanbanLatestEventId = 0;
@@ -273,6 +273,7 @@ async function switchPanel(name, opts = {}) {
   }
   if (!opts.bypassSettingsGuard && !_beforePanelSwitch(nextPanel)) return false;
   if (prevPanel !== 'settings' && nextPanel === 'settings') _beginSettingsPanelSession();
+  if (nextPanel === 'review' && typeof ensureReviewPanel === 'function') ensureReviewPanel();
   // Close any long-lived Kanban SSE stream when leaving the kanban panel
   // so we don't keep a stale connection open in the background.
   if (prevPanel === 'kanban' && nextPanel !== 'kanban') {
@@ -401,7 +402,7 @@ async function switchPanel(name, opts = {}) {
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
   if (mainEl) {
-    ['settings','skills','memory','tasks','kanban','workspaces','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
+    ['settings','skills','memory','tasks','kanban','workspaces','review','subagents','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }
@@ -4440,18 +4441,30 @@ function syncWorkspaceDisplays(){
   const ws=hasSession?S.session.workspace:(defaultWs||'');
   const hasWorkspace=!!(ws);
   const label=hasWorkspace?getWorkspaceFriendlyName(ws):t('no_workspace');
+  const activeSpaceDir=String(window._activeSpaceConfig&&window._activeSpaceConfig.project_dir||'').trim();
+  const displayLabel=hasWorkspace
+    ? (label + (S._bootReady && activeSpaceDir && ws===activeSpaceDir ? ' *' : ''))
+    : t('no_workspace');
+  const headerLabel=hasWorkspace
+    ? displayLabel
+    : (S._bootReady ? t('no_workspace') : 'workspace loading');
+  const headerTitle=hasWorkspace
+    ? ('Workspace: '+ws+(label&&label!==ws?' ('+label+')':'')+'. Click to open workspaces.')
+    : (S._bootReady ? 'No workspace selected. Click to open workspaces.' : 'Workspace loading. Click to open workspaces.');
 
   const composerChip=$('composerWorkspaceChip');
   const composerLabel=$('composerWorkspaceLabel');
   const mobileAction=$('composerMobileWorkspaceAction');
   const mobileLabel=$('composerMobileWorkspaceLabel');
   const composerDropdown=$('composerWsDropdown');
+  const headerBadge=$('workspaceStatusBadge');
+  const headerValue=$('workspaceStatusValue');
   const canChooseWorkspace = hasWorkspace || ((Array.isArray(_workspaceList) ? _workspaceList.length : 0) > 0);
   if(!hasWorkspace && composerDropdown) composerDropdown.classList.remove('open');
   // Only show workspace label once boot has finished to prevent
   // flash of "No workspace" before the saved session finishes loading.
-  if(composerLabel) composerLabel.textContent=((S._bootReady?label:'') + (hasWorkspace && window._activeSpaceConfig?.project_dir && ws === window._activeSpaceConfig.project_dir ? ' ★' : ''));
-  if(mobileLabel) mobileLabel.textContent=S._bootReady?label:'';
+  if(composerLabel) composerLabel.textContent=(S._bootReady?displayLabel:'');
+  if(mobileLabel) mobileLabel.textContent=S._bootReady?displayLabel:'';
   if(composerChip){
     composerChip.disabled=!canChooseWorkspace;
     composerChip.title=hasWorkspace ? ws : ((S._bootReady && canChooseWorkspace) ? 'Choose workspace' : t('no_workspace'));
@@ -4460,6 +4473,18 @@ function syncWorkspaceDisplays(){
   if(mobileAction){
     mobileAction.title=hasWorkspace?ws:t('no_workspace');
     mobileAction.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
+  }
+  if(headerBadge){
+    ['workspace-state-loading','workspace-state-active','workspace-state-empty'].forEach(cls=>headerBadge.classList.remove(cls));
+    const headerState=hasWorkspace ? 'workspace-state-active' : (S._bootReady ? 'workspace-state-empty' : 'workspace-state-loading');
+    headerBadge.classList.add(headerState);
+    headerBadge.hidden=false;
+    headerBadge.disabled=false;
+    headerBadge.title=headerTitle;
+    headerBadge.setAttribute('aria-label',headerTitle);
+  }
+  if(headerValue){
+    headerValue.textContent=headerLabel;
   }
 }
 
@@ -4663,6 +4688,21 @@ function toggleComposerWsDropdown(){
       if(mobileAction) mobileAction.classList.add('active');
     });
   }
+}
+
+function workflowOpenWorkspacePanel(event){
+  if(event&&event.preventDefault) event.preventDefault();
+  if(event&&event.stopPropagation) event.stopPropagation();
+  const chip=$('composerWorkspaceChip');
+  if(chip && !chip.disabled && typeof toggleComposerWsDropdown==='function'){
+    toggleComposerWsDropdown();
+    return false;
+  }
+  if(typeof switchPanel==='function'){
+    switchPanel('workspaces',{fromRailClick:true});
+    return false;
+  }
+  return false;
 }
 
 function closeWsDropdown(){
@@ -8848,13 +8888,20 @@ function loadMcpServers(){
       list.innerHTML=`<div class="mcp-empty-state" style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('mcp_no_servers'))}</div>`;
       return;
     }
-    const toggleNote=r.toggle_supported?'':'<div class="mcp-readonly-note">'+esc(t('mcp_toggle_followup'))+'</div>';
+    const toggleSupported=!!r.toggle_supported;
+    const toggleNote=toggleSupported?'':'<div class="mcp-readonly-note">'+esc(t('mcp_toggle_followup'))+'</div>';
     list.innerHTML=r.servers.map(s=>{
       const transportLabel=s.transport==='http'?'HTTP':s.transport==='stdio'?'stdio':(''+(s.transport||'unknown'));
       const transportClass=s.transport==='http'?'mcp-http':s.transport==='stdio'?'mcp-stdio':'mcp-unknown';
       const transportBadge=`<span class="mcp-transport-badge ${transportClass}">${esc(transportLabel)}</span>`;
       const status=s.status||'configured';
       const statusBadge=`<span class="mcp-status-badge mcp-status-${esc(status)}">${esc(_mcpStatusLabel(status))}</span>`;
+      const toggleButton=toggleSupported
+        ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleMcpServerEnabled(${JSON.stringify(String(s.name||''))}, ${s.enabled===false ? 'true' : 'false'})" aria-label="${esc(s.enabled===false ? 'Enable MCP server' : 'Disable MCP server')}" title="${esc(s.enabled===false ? 'Enable MCP server' : 'Disable MCP server')}">${esc(s.enabled===false ? 'Enable' : 'Disable')}</button>`
+        : '';
+      const deleteButton=toggleSupported
+        ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px;color:var(--error,#e94560);border-color:var(--error,#e94560)" onclick="deleteMcpServer(${JSON.stringify(String(s.name||''))})" aria-label="${esc(t('mcp_delete_confirm_title'))}" title="${esc(t('mcp_delete_confirm_title'))}">${esc(t('delete_title'))}</button>`
+        : '';
       const toolCount=s.tool_count===null||typeof s.tool_count==='undefined'?'—':String(s.tool_count);
       const detail=s.transport==='http'
         ? (s.url||'')
@@ -8863,10 +8910,14 @@ function loadMcpServers(){
       const headersInfo=s.headers?Object.entries(s.headers).map(([k,v])=>`${k}=${v}`).join(', '):'';
       const secretInfo=[envInfo,headersInfo].filter(Boolean).join(' | ');
       return `<div class="mcp-server-row">
-        <div class="mcp-server-row-head">
-          <span class="mcp-server-name">${esc(s.name)}</span>
-          ${transportBadge}
-          ${statusBadge}
+        <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px;align-items:flex-start">
+          <span class="mcp-server-name" title="${esc(s.name)}">${esc(s.name)}</span>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+            ${transportBadge}
+            ${statusBadge}
+            ${toggleButton}
+            ${deleteButton}
+          </div>
         </div>
         <div class="mcp-server-detail">${esc(detail)}${secretInfo?' | '+esc(secretInfo):''}</div>
         <div class="mcp-server-meta"><span class="mcp-tool-count">${esc(t('mcp_tool_count',toolCount))}</span><span>${esc(t(s.enabled===false?'mcp_enabled_no':'mcp_enabled_yes'))}</span></div>
@@ -8874,6 +8925,49 @@ function loadMcpServers(){
     }).join('')+toggleNote;
   }).catch(()=>{list.innerHTML=`<div class="mcp-error-state" style="color:#ef4444;font-size:12px;padding:6px 0">${esc(t('mcp_load_failed'))}</div>`});
 }
+async function toggleMcpServerEnabled(name, enabled){
+  const serverName=String(name||'').trim();
+  if(!serverName) return;
+  const nextEnabled=!!enabled;
+  try{
+    const saved=await api('/api/mcp/servers/'+encodeURIComponent(serverName),{
+      method:'POST',
+      body:JSON.stringify({enabled:nextEnabled}),
+    });
+    if(typeof loadMcpServers==='function') loadMcpServers();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    if(typeof showToast==='function'){
+      const summary=saved&&saved.server&&saved.server.enabled===false ? 'disabled' : 'enabled';
+      showToast('MCP server '+summary+': '+serverName,2200,'info');
+    }
+  }catch(e){
+    if(typeof showToast==='function') showToast('Failed to update MCP server: '+(e&&e.message?e.message:e),2400,'error');
+  }
+}
+window.toggleMcpServerEnabled = toggleMcpServerEnabled;
+async function deleteMcpServer(name){
+  const serverName=String(name||'').trim();
+  if(!serverName) return;
+  try{
+    const ok=await showConfirmDialog({
+      title:t('mcp_delete_confirm_title'),
+      message:t('mcp_delete_confirm_message',serverName),
+      confirmLabel:t('delete_title'),
+      danger:true,
+      focusCancel:true,
+    });
+    if(!ok) return false;
+    await api('/api/mcp/servers/'+encodeURIComponent(serverName),{method:'DELETE'});
+    if(typeof loadMcpServers==='function') loadMcpServers();
+    if(typeof loadMcpTools==='function') loadMcpTools();
+    if(typeof showToast==='function') showToast(t('mcp_deleted'),2200,'success');
+    return true;
+  }catch(e){
+    if(typeof showToast==='function') showToast(t('mcp_delete_failed')+((e&&e.message)?(': '+e.message):''),2400,'error');
+    return false;
+  }
+}
+window.deleteMcpServer = deleteMcpServer;
 let _mcpToolsCache=[];
 function _filterMcpToolsForSearch(tools, query){
   const q=(query||'').trim().toLowerCase();
@@ -8954,11 +9048,176 @@ function loadGatewayStatus(){
     card.innerHTML=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block"></span><span style="font-size:13px;font-weight:500;color:#22c55e">Running</span></div>${badges?`<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">${badges}</div>`:''}<div style="display:flex;gap:12px">${sessionInfo}${lastActive}</div>`;
   }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px">Failed to load gateway status</div>`});
 }
+function _subagentStatusLabel(status){
+  const normalized=String(status||'').trim().toLowerCase();
+  if(!normalized) return 'Unknown';
+  if(normalized==='running'||normalized==='active') return 'Running';
+  if(normalized==='completed') return 'Completed';
+  if(normalized==='failed') return 'Failed';
+  if(normalized==='interrupted') return 'Interrupted';
+  if(normalized==='paused') return 'Paused';
+  return normalized.charAt(0).toUpperCase()+normalized.slice(1);
+}
+function _renderSubagentStatus(active, paused, targetId='subagentStatusCard'){
+  const list=$(targetId);
+  if(!list) return;
+  const entries=Array.isArray(active)?active:[];
+  const pauseLabel=paused?'Resume spawning':'Pause spawning';
+  const pauseTitle=paused?'Allow new subagents to spawn again':'Temporarily block new subagent spawns';
+  const toggleButton=`<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="toggleSubagentSpawnPause('${esc(targetId)}')" aria-label="${esc(pauseTitle)}" title="${esc(pauseTitle)}">${paused?'▶':'⏸'} ${esc(pauseLabel)}</button>`;
+  if(!entries.length){
+    list.innerHTML=`<div class="mcp-server-row">
+      <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
+        <span class="mcp-server-name">No active subagents</span>
+        ${toggleButton}
+      </div>
+      <div class="mcp-server-detail">${paused?'Spawn is paused. No new delegate_task workers will start.':'Spawn is open. New delegate_task workers may start.'}</div>
+    </div>`;
+    return;
+  }
+  list.innerHTML=`<div class="mcp-server-row" style="margin-bottom:8px">
+    <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
+      <span class="mcp-server-name">${entries.length} active subagent${entries.length===1?'':'s'}</span>
+      ${toggleButton}
+    </div>
+    <div class="mcp-server-detail">${paused?'Spawn is paused.':'Spawn is open.'}</div>
+  </div>` + entries.map(item=>{
+    const sid=String(item&&item.subagent_id||'').trim();
+    const sessionId=String(item&&item.session_id||'').trim();
+    const goal=String(item&&item.goal||'').trim()||'Untitled task';
+    const model=String(item&&item.model||'').trim();
+    const depth=typeof item?.depth==='number'?item.depth:null;
+    const toolCount=typeof item?.tool_count==='number'?item.tool_count:null;
+    const status=_subagentStatusLabel(item&&item.status);
+    const metaParts=[];
+    if(model) metaParts.push(model);
+    if(depth!==null) metaParts.push('depth '+depth);
+    if(toolCount!==null) metaParts.push(toolCount+' tools');
+    const meta=metaParts.join(' · ');
+    const interruptButton=sid
+      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation();interruptActiveSubagent('${esc(sid)}','${esc(targetId)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
+      : '';
+    const rowClick=sessionId && typeof loadSession==='function'
+      ? `onclick="loadSession('${esc(sessionId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadSession('${esc(sessionId)}')}" tabindex="0" role="button" aria-label="Open subagent session ${esc(sid||sessionId)}"`
+      : '';
+    return `<div class="mcp-server-row" ${rowClick} style="${sessionId ? 'cursor:pointer;' : ''}">
+      <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <span class="mcp-server-name" title="${esc(goal)}">${esc(goal)}</span>
+          <span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sid||'unknown')} · ${esc(status)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          ${interruptButton}
+        </div>
+      </div>
+      <div class="mcp-server-detail">${meta?esc(meta):'No additional metadata'}</div>
+    </div>`;
+  }).join('');
+}
+function _updateWorkflowSubagentSummary(active, paused){
+  const entries=Array.isArray(active)?active:[];
+  const first=entries[0]||{};
+  window._workflowSubagentSummary={
+    count:entries.length,
+    paused:!!paused,
+    goal:String(first.goal||'').trim(),
+    subagent_id:String(first.subagent_id||first.session_id||'').trim(),
+    session_id:String(first.session_id||'').trim(),
+    preview:String(first.goal||first.session_id||first.subagent_id||'').trim(),
+  };
+  if(typeof syncWorkflowChip==='function') syncWorkflowChip();
+}
+function loadSubagentStatus(targetId='subagentStatusCard'){
+  const card=$(targetId);
+  if(!card) return;
+  card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
+  api('/api/subagents').then(r=>{
+    const active=(r&&r.active)||[];
+    const paused=!!(r&&r.spawn_paused);
+    _renderSubagentStatus(active, paused, targetId);
+    _updateWorkflowSubagentSummary(active, paused);
+  }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:6px 0">Failed to load subagent status</div>`});
+}
+async function toggleSubagentSpawnPause(targetId='subagentStatusCard'){
+  try{
+    const current=await api('/api/subagents');
+    const nextPaused=!Boolean(current&&current.spawn_paused);
+    const saved=await api('/api/subagents',{
+      method:'POST',
+      body:JSON.stringify({spawn_paused:nextPaused}),
+    });
+    const active=(saved&&saved.active)||[];
+    const paused=!!(saved&&saved.spawn_paused);
+    _renderSubagentStatus(active, paused, targetId);
+    _updateWorkflowSubagentSummary(active, paused);
+    if(typeof showToast==='function') showToast(nextPaused?'Subagent spawning paused':'Subagent spawning resumed',2200,nextPaused?'info':'success');
+  }catch(e){
+    if(typeof showToast==='function') showToast('Failed to update subagent spawning: '+(e&&e.message?e.message:e),2400,'error');
+  }
+}
+async function interruptActiveSubagent(subagentId, targetId='subagentStatusCard'){
+  const sid=String(subagentId||'').trim();
+  if(!sid) return;
+  try{
+    const saved=await api('/api/subagents',{
+      method:'POST',
+      body:JSON.stringify({subagent_id:sid}),
+    });
+    const active=(saved&&saved.active)||[];
+    const paused=!!(saved&&saved.spawn_paused);
+    _renderSubagentStatus(active, paused, targetId);
+    _updateWorkflowSubagentSummary(active, paused);
+    if(typeof showToast==='function') showToast('Subagent interrupted: '+sid.slice(0,8),2200,'info');
+  }catch(e){
+    if(typeof showToast==='function') showToast('Failed to interrupt subagent: '+(e&&e.message?e.message:e),2400,'error');
+  }
+}
+function ensureSubagentsPanel(){
+  const main=document.querySelector('main.main');
+  if(!main) return null;
+  let panel=$('panelSubagents');
+  if(!panel){
+    panel=document.createElement('div');
+    panel.className='panel-view';
+    panel.id='panelSubagents';
+    panel.innerHTML=`
+      <div class="panel-head">
+        <span>Subagents</span>
+        <div class="panel-head-actions">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom" type="button" data-tooltip="Refresh" aria-label="Refresh" onclick="loadSubagentsPanel(true)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="subagents-panel-shell">
+        <div class="subagents-panel-note">Active delegate_task workers and the spawn pause switch.</div>
+        <div id="subagentStatusCardPanel"></div>
+      </div>
+    `;
+    const ref=$('panelProfiles')||$('panelLogs')||$('panelSettings')||$('panelAppstore')||null;
+    if(ref && ref.parentNode===main) main.insertBefore(panel, ref);
+    else main.appendChild(panel);
+  }
+  return panel;
+}
+function loadSubagentsPanel(force){
+  ensureSubagentsPanel();
+  loadSubagentStatus('subagentStatusCardPanel');
+  return !!force;
+}
+function openSubagentsPanel(){
+  ensureSubagentsPanel();
+  if(typeof switchPanel==='function') switchPanel('subagents',{bypassSettingsGuard:true});
+  loadSubagentsPanel(true);
+}
+window.ensureSubagentsPanel=ensureSubagentsPanel;
+window.loadSubagentsPanel=loadSubagentsPanel;
+window.openSubagentsPanel=openSubagentsPanel;
 // Load MCP servers when system settings tab opens
 const _origSwitchSettings=switchSettingsSection;
 switchSettingsSection=function(name){
   _origSwitchSettings(name);
-  if(name==='system'){loadMcpServers();loadMcpTools();loadGatewayStatus();}
+  if(name==='system'){loadMcpServers();loadMcpTools();loadGatewayStatus();loadSubagentStatus();}
 };
 
 // ── Checkpoints / Rollback ──────────────────────────────────────────────────

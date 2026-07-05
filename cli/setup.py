@@ -116,7 +116,10 @@ _DEFAULT_PROVIDER_MODELS = {
 def _current_reasoning_effort(config: Dict[str, Any]) -> str:
     agent_cfg = config.get("agent")
     if isinstance(agent_cfg, dict):
-        return str(agent_cfg.get("reasoning_effort") or "").strip().lower()
+        effort = str(agent_cfg.get("reasoning_effort") or "").strip().lower()
+        if effort == "max":
+            return "xhigh"
+        return effort
     return ""
 
 

@@ -13,6 +13,13 @@
   try{localStorage.setItem('sidekick-migrated-v1','1');}catch(_){}
 })();
 
+function _setConversationRestorePlaceholder(text){
+  const inner = document.getElementById('msgInner');
+  if (!inner) return;
+  const label = String(text || 'Restoring conversation...');
+  inner.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">${label}</div>`;
+}
+
 async function cancelStream(){
   const streamId = S.activeStreamId;
   if(!streamId) return;
@@ -1134,6 +1141,7 @@ $('modelSelect').onchange=async()=>{
   S.session.model=modelState.model;
   S.session.model_provider=modelState.model_provider||null;
   if(typeof syncModelChip==='function') syncModelChip();
+  if(typeof syncReasoningChip==='function') syncReasoningChip();
   syncTopbar();
   // Clarify scope: composer model changes are session-local, not the global default.
   if(typeof showToast==='function'){
@@ -1282,6 +1290,12 @@ document.addEventListener('keydown',async e=>{
     // the moment they want to switch context. newSession() leaves the in-flight
     // stream running on its own session; the user just gets a fresh blank one.
     await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
+  }
+  // Cmd/Ctrl+Shift+K opens the workflow palette from anywhere.
+  if((e.metaKey||e.ctrlKey)&&e.shiftKey&&!e.altKey&&(e.key==='k'||e.key==='K')){
+    e.preventDefault();
+    if(typeof workflowToggleHeaderMenu==='function') workflowToggleHeaderMenu(e);
+    return;
   }
   // Ctrl+Shift+F: toggle Focus Mode (hide all panels, only chat full-width)
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&(e.key==='f'||e.key==='F')){
@@ -1921,6 +1935,10 @@ function _bootTimeout(promise, ms, label) {
   // Pre-load workspace list so sidebar name is correct from first render.
   // Render the session list before restoring the saved conversation so a stale
   // saved-session/client-side boot error cannot leave the sidebar empty forever.
+  try {
+    const _bootEarlySessionId = (typeof _sessionIdFromLocation === 'function') ? _sessionIdFromLocation() : null;
+    if (_bootEarlySessionId) _setConversationRestorePlaceholder('Restoring conversation...');
+  } catch (_) {}
   await _bootTimeout(loadWorkspaceList(),10000,'workspace list').catch((e)=>{
     console.warn('[boot] workspace list unavailable, continuing', e);
   });
@@ -1935,6 +1953,13 @@ function _bootTimeout(promise, ms, label) {
     console.warn('[boot] onboarding unavailable, continuing', e);
   });
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
+  const urlWorkspace = (() => {
+    try {
+      return String(new URLSearchParams(location.search).get('workspace') || '').trim().toLowerCase();
+    } catch (_) {
+      return '';
+    }
+  })();
   const savedLocal=localStorage.getItem('sidekick-webui-session');
   const saved=urlSession||savedLocal;
   const _bootRestoreEpoch=Number(window.__sidekickSessionNavigationEpoch||0)||0;
@@ -1942,11 +1967,15 @@ function _bootTimeout(promise, ms, label) {
     !!window.__sidekickSkipBootSessionRestore ||
     ((Number(window.__sidekickSessionNavigationEpoch||0)||0)!==_bootRestoreEpoch)
   );
+  if (urlSession && saved && !_bootRestoreCanceled()) {
+    _setConversationRestorePlaceholder('Restoring conversation...');
+  }
   let _bootSavedSessionLoadPromise = null;
+  let _bootMissingSession = false;
   if (urlSession && saved && !_bootRestoreCanceled()) {
     // Direct session URLs should start loading immediately instead of waiting
     // for sidebar/session-list rendering to finish.
-    _bootSavedSessionLoadPromise = loadSession(saved).catch((e) => {
+    _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
       if (!_bootRestoreCanceled()) throw e;
     });
   }
@@ -1973,9 +2002,30 @@ function _bootTimeout(promise, ms, label) {
         return;
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
-      if (_bootSavedSessionLoadPromise) await _bootSavedSessionLoadPromise;
-      else if(!_bootRestoreCanceled()) await loadSession(saved);
+      if (_bootSavedSessionLoadPromise) {
+        const _bootLoadResult = await _bootSavedSessionLoadPromise;
+        _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
+      }
+      else if(!_bootRestoreCanceled()) {
+        const _bootLoadResult = await loadSession(saved);
+        _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
+      }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
+      if (saved && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
+        const _bootRetryResult = await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
+        _bootMissingSession = _bootMissingSession || !!(_bootRetryResult && _bootRetryResult.missingSession);
+      }
+      if (_bootMissingSession && urlSession && saved) {
+        if (typeof newSession === 'function') {
+          await newSession();
+          if (typeof showToast === 'function') {
+            showToast('Previous session was missing. Started a new one.', 3000, 'info');
+          }
+          if (typeof renderSessionList === 'function') await renderSessionList();
+          if (typeof startGatewaySSE === 'function') startGatewaySSE();
+          return;
+        }
+      }
       // If the restored session has no messages it is an ephemeral scratch pad —
       // treat the page as a fresh start rather than resuming a blank conversation.
       // loadSession() already ran, so loadDir() has populated the workspace file tree.
@@ -2099,9 +2149,16 @@ window.addEventListener('pageshow', async (event) => {
   // active_stream_id / pending_user_message can reattach like a reload restore.
   if (S.session && S.session.session_id && typeof loadSession === 'function') {
     try {
+      _setConversationRestorePlaceholder('Restoring conversation...');
       await loadSession(S.session.session_id);
       if (S.session && S.session.session_id && typeof checkInflightOnBoot === 'function') {
         try { await checkInflightOnBoot(S.session.session_id); } catch (_) {}
+      }
+      if (typeof renderMessages === 'function') {
+        try { renderMessages({preserveScroll:true}); } catch (_) {}
+      }
+      if (typeof browserSyncToCurrentSession === 'function') {
+        try { browserSyncToCurrentSession({force:true, allowPending:true}); } catch (_) {}
       }
     } catch (_) {}
   }

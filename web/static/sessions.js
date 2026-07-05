@@ -51,7 +51,7 @@ function _abortStaleSessionLoad(sid, previousState) {
   if (_loadingSessionId === sid) _loadingSessionId = null;
   const inner = $('msgInner');
   const txt = (inner && inner.textContent || '').trim();
-  if (inner && (!txt || /Loading conversation/i.test(txt)) && S.session && S.session.session_id !== sid && S.messages && S.messages.length) {
+  if (inner && (!txt || /Loading conversation|Restoring conversation/i.test(txt)) && S.session && S.session.session_id !== sid && S.messages && S.messages.length) {
     try { renderMessages({preserveScroll:true}); } catch (_) {}
   }
   try {
@@ -64,7 +64,7 @@ const _SESSION_LOAD_TIMEOUT_MS = 15000;
 function _conversationPaneShowsLoading(){
   const inner = $('msgInner');
   const txt = inner ? String(inner.innerText || inner.textContent || '').trim() : '';
-  return !!(inner && /Loading conversation/i.test(txt));
+  return !!(inner && /Loading conversation|Restoring conversation/i.test(txt));
 }
 
 function _scheduleConversationPaneRecovery(sid){
@@ -78,6 +78,33 @@ function _scheduleConversationPaneRecovery(sid){
         if(typeof renderMessages === 'function') renderMessages({preserveScroll:true});
       }catch(_){}
     }, delay);
+  }
+}
+
+function _forceConversationMessageRecovery(sid, initialMessageCount = 0, signal = null) {
+  if (!sid || !S.session || S.session.session_id !== sid) return;
+  try {
+    if (typeof syncTopbar === 'function') syncTopbar();
+  } catch (_) {}
+  try {
+    renderMessages({ preserveScroll: true });
+  } catch (_) {}
+  try {
+    if (typeof browserSyncToCurrentSession === 'function') {
+      browserSyncToCurrentSession({ force: true, allowPending: true });
+    }
+  } catch (_) {}
+  if ((!Array.isArray(S.messages) || !S.messages.length) && Number(initialMessageCount) > 0 && typeof _ensureMessagesLoaded === 'function') {
+    void _ensureMessagesLoaded(sid, signal).then(() => {
+      try {
+        if (!S.session || S.session.session_id !== sid) return;
+        syncTopbar();
+        renderMessages({ preserveScroll: true });
+        if (typeof browserSyncToCurrentSession === 'function') {
+          browserSyncToCurrentSession({ force: true, allowPending: true });
+        }
+      } catch (_) {}
+    }).catch(() => {});
   }
 }
 async function _sessionApi(path, timeoutMs, externalSignal) {
@@ -639,6 +666,7 @@ if (document.readyState === 'loading') {
 
 async function loadSession(sid, options){
   options = options || {};
+  const suppressMissingSessionMessage = !!options.suppressMissingSessionMessage;
   let spaceLoadKey = (typeof _activeSpaceLoadKey === 'function') ? _activeSpaceLoadKey() : '';
   const currentSid = S.session ? S.session.session_id : null;
   const currentHasMessages = Array.isArray(S.messages) && S.messages.some(m => m && m.role);
@@ -650,7 +678,14 @@ async function loadSession(sid, options){
   // Clicking the already-open session in the sidebar is a no-op. Reloading it
   // tears down active pane state and can reset the long-session scroll window
   // to the top even though the user did not navigate anywhere.
-  if(currentSid===sid && currentHasMessages && _loadingSessionId !== sid && !_conversationPaneShowsLoading()) return;
+  if(currentSid===sid && currentHasMessages && _loadingSessionId !== sid && !_conversationPaneShowsLoading()) {
+    try {
+      syncTopbar();
+      renderMessages({preserveScroll:true});
+      if (typeof browserSyncToCurrentSession === 'function') browserSyncToCurrentSession({force:true, allowPending:true});
+    } catch (_) {}
+    return;
+  }
   if (_activeSessionLoadAbortController) {
     try { _activeSessionLoadAbortController.abort(); } catch (_) {}
   }
@@ -702,6 +737,16 @@ async function loadSession(sid, options){
     const _msgInner = $('msgInner');
     if(_msgInner){
       if(e.status===404){
+        if (suppressMissingSessionMessage) {
+          _msgInner.innerHTML='';
+          const emptyState = $('emptyState');
+          if (emptyState) emptyState.style.display='';
+          if(!currentSid&&localStorage.getItem('sidekick-webui-session')===sid){
+            localStorage.removeItem('sidekick-webui-session');
+          }
+          if (_loadingSessionId === sid) _loadingSessionId = null;
+          return {missingSession: true};
+        }
         _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Session not available in web UI.</div>';
         // If this 404 was for the saved active-session ID (not a click-into request),
         // wipe the stale localStorage value and rethrow so boot can fall through to
@@ -725,6 +770,7 @@ async function loadSession(sid, options){
     if (_loadingSessionId === sid) _loadingSessionId = null;
     return;
   }
+  const initialMessageCount = Number(data.session?.message_count || 0);
   if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) {
     _abortStaleSessionLoad(sid, previousState);
     return;
@@ -925,9 +971,10 @@ async function loadSession(sid, options){
       startApprovalPolling(sid);
       if(typeof startClarifyPolling==='function') startClarifyPolling(sid);
       if(typeof _fetchYoloState==='function') _fetchYoloState(sid);
-      if(typeof attachLiveStream==='function') attachLiveStream(sid, activeStreamId, S.session.pending_attachments||[], {reconnecting:true});
-      else if(typeof watchInflightSession==='function') watchInflightSession(sid, activeStreamId);
-    }else{
+    if(typeof attachLiveStream==='function') attachLiveStream(sid, activeStreamId, S.session.pending_attachments||[], {reconnecting:true});
+    else if(typeof watchInflightSession==='function') watchInflightSession(sid, activeStreamId);
+    _forceConversationMessageRecovery(sid, 0, loadAbortController.signal);
+  }else{
       S.busy=false;
       S.activeStreamId=null;
       updateSendBtn();
@@ -941,6 +988,21 @@ async function loadSession(sid, options){
       // navigation feel hung.
       void loadDir('.');
       highlightCode();
+      // Race-safety: when the metadata already reports messages but the first
+      // hydration fetch lands before the persisted transcript is ready, the
+      // pane can stay visually empty until another interaction forces a reload.
+      // Retry once shortly after the initial render to catch the completed save.
+      _forceConversationMessageRecovery(sid, initialMessageCount, loadAbortController.signal);
+      if (!S.messages.length && initialMessageCount > 0) {
+        setTimeout(() => {
+          try {
+            if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
+            if (!S.session || S.session.session_id !== sid) return;
+            if (Array.isArray(S.messages) && S.messages.length) return;
+            void _ensureMessagesLoaded(sid);
+          } catch (_) {}
+        }, 900);
+      }
     }
     _scheduleConversationPaneRecovery(sid);
   }
@@ -1614,6 +1676,7 @@ async function _ensureAllMessagesLoaded() {
     if (S.session && S.session.session_id === sid) {
       S.session.message_count = Number(data.session.message_count || msgs.length);
     }
+    if (typeof renderMessages === 'function') renderMessages();
   } finally {
     _loadingOlder = false;
   }
