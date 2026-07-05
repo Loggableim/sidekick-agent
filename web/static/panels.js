@@ -9054,20 +9054,19 @@ function _renderSubagentStatus(active, paused){
     if(depth!==null) metaParts.push('depth '+depth);
     if(toolCount!==null) metaParts.push(toolCount+' tools');
     const meta=metaParts.join(' · ');
-    const openSessionButton=sessionId
-      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation();if(typeof loadSession==='function')loadSession('${esc(sessionId)}')" aria-label="Open session for subagent ${esc(sid||sessionId)}" title="Open this subagent session">Open session</button>`
-      : '';
     const interruptButton=sid
-      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="interruptActiveSubagent('${esc(sid)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
+      ? `<button type="button" class="panel-icon-btn" style="width:auto;padding:2px 8px;font-size:11px;display:inline-flex;align-items:center;gap:4px" onclick="event.stopPropagation();interruptActiveSubagent('${esc(sid)}')" aria-label="Interrupt subagent ${esc(sid)}" title="Interrupt this subagent">Stop</button>`
       : '';
-    return `<div class="mcp-server-row">
-      <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px">
+    const rowClick=sessionId && typeof loadSession==='function'
+      ? `onclick="loadSession('${esc(sessionId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();loadSession('${esc(sessionId)}')}" tabindex="0" role="button" aria-label="Open subagent session ${esc(sid||sessionId)}"`
+      : '';
+    return `<div class="mcp-server-row" ${rowClick} style="${sessionId ? 'cursor:pointer;' : ''}">
+      <div class="mcp-server-row-head" style="justify-content:space-between;gap:8px;align-items:flex-start">
         <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
           <span class="mcp-server-name" title="${esc(goal)}">${esc(goal)}</span>
           <span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(sid||'unknown')} · ${esc(status)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">
-          ${openSessionButton}
           ${interruptButton}
         </div>
       </div>
