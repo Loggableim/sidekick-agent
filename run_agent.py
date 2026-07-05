@@ -5338,9 +5338,11 @@ class AIAgent:
             return
         try:
             from runtime.rate_limit_tracker import parse_rate_limit_headers
+            from runtime.provider_response_state import record_provider_response
             state = parse_rate_limit_headers(headers, provider=self.provider)
             if state is not None:
                 self._rate_limit_state = state
+                record_provider_response(self.provider, headers=headers)
         except Exception:
             pass  # Never let header parsing break the agent loop
 

@@ -9,6 +9,7 @@ from runtime.provider_response_state import (
 )
 from runtime.auxiliary_client import call_llm
 from web.api.providers import get_provider_quota
+from run_agent import AIAgent
 
 
 def test_records_rate_limit_headers_and_usage_metadata_for_provider():
@@ -128,3 +129,27 @@ def test_call_llm_captures_raw_response_headers_and_usage(monkeypatch):
     assert state.rate_limit.requests_min.limit == 10
     assert state.rate_limit.requests_min.remaining == 7
     assert state.usage == {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12}
+
+
+def test_agent_stream_rate_limit_capture_updates_provider_response_state():
+    clear_provider_response_states()
+    agent = AIAgent.__new__(AIAgent)
+    agent.provider = "custom"
+    agent._rate_limit_state = None
+
+    agent._capture_rate_limits(
+        SimpleNamespace(
+            headers={
+                "x-ratelimit-limit-requests": "20",
+                "x-ratelimit-remaining-requests": "15",
+                "x-ratelimit-reset-requests": "45",
+            }
+        )
+    )
+
+    state = get_provider_response_state("custom")
+    assert agent.get_rate_limit_state() is not None
+    assert state is not None
+    assert state.rate_limit is not None
+    assert state.rate_limit.requests_min.limit == 20
+    assert state.rate_limit.requests_min.remaining == 15
