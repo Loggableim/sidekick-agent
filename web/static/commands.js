@@ -36,7 +36,7 @@ const COMMANDS=[
   {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
   {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable|delete]', subArgs:['status','open','refresh','tools','toggle','enable','disable','delete'], noEcho:true},
   {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|refresh|pause|resume]', subArgs:['status','open','refresh','pause','resume'], noEcho:true},
-  {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
+  {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot','pagecontext'], noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
@@ -1535,6 +1535,7 @@ async function cmdBrowser(args){
   const reload=()=>{ if(typeof window.browserReload==='function') window.browserReload(); };
   const stop=()=>{ if(typeof window.browserStop==='function') window.browserStop(); };
   const screenshot=()=>{ if(typeof window.browserSendScreenshotToChat==='function') window.browserSendScreenshotToChat(); };
+  const pageContext=()=>{ if(typeof window.browserSendPageContextToChat==='function') window.browserSendPageContextToChat(); };
   const currentSessionId=()=>String((S&&S.session&&S.session.session_id)||'').trim();
   const currentDrawerOpen=()=>!!(document.body&&document.body.classList.contains('browser-drawer-open'));
   const currentSplit=()=>!!(document.body&&document.body.classList.contains('browser-split'));
@@ -1607,7 +1608,7 @@ async function cmdBrowser(args){
   };
   if(!arg||arg==='help'||arg==='status'){
     await showStatus();
-    if(!arg||arg==='help') showToast('/browser open|open <url>|navigate <url>|back|forward|reload|stop|screenshot|status|permission|explore|split|fullscreen', 3200, 'info');
+    if(!arg||arg==='help') showToast('/browser open|open <url>|navigate <url>|back|forward|reload|stop|screenshot|pagecontext|status|permission|explore|split|fullscreen', 3200, 'info');
     return true;
   }
   if(arg.startsWith('open ')){
@@ -1629,6 +1630,7 @@ async function cmdBrowser(args){
   if(arg==='reload'){ openDrawer(); reload(); return true; }
   if(arg==='stop'){ openDrawer(); stop(); return true; }
   if(arg==='screenshot'||arg==='shot'||arg==='capture'){ openDrawer(); screenshot(); return true; }
+  if(arg==='pagecontext'||arg==='context'||arg==='text'){ openDrawer(); pageContext(); return true; }
   if(arg.startsWith('navigate ')){
     navigateTo(arg.slice('navigate '.length));
     return true;
@@ -1641,7 +1643,7 @@ async function cmdBrowser(args){
     navigateTo(arg);
     return true;
   }
-  showToast('Unknown argument: '+arg+' \u2014 use open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot');
+  showToast('Unknown argument: '+arg+' \u2014 use open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext');
   return true;
 }
 
@@ -3137,6 +3139,7 @@ async function cmdBrowser(args){
   const reload=()=>{ if(typeof window.browserReload==='function') window.browserReload(); };
   const stop=()=>{ if(typeof window.browserStop==='function') window.browserStop(); };
   const screenshot=()=>{ if(typeof window.browserSendScreenshotToChat==='function') window.browserSendScreenshotToChat(); };
+  const pageContext=()=>{ if(typeof window.browserSendPageContextToChat==='function') window.browserSendPageContextToChat(); };
   const currentSessionId=()=>String((S&&S.session&&S.session.session_id)||'').trim();
   const currentDrawerOpen=()=>!!(document.body&&document.body.classList.contains('browser-drawer-open'));
   const currentSplit=()=>!!(document.body&&document.body.classList.contains('browser-split'));
@@ -3209,7 +3212,7 @@ async function cmdBrowser(args){
   };
   if(!arg||arg==='help'||arg==='status'){
     await showStatus();
-    if(!arg||arg==='help') showToast('/browser open|open <url>|navigate <url>|back|forward|reload|stop|screenshot|status|permission|explore|split|fullscreen', 3200, 'info');
+    if(!arg||arg==='help') showToast('/browser open|open <url>|navigate <url>|back|forward|reload|stop|screenshot|pagecontext|status|permission|explore|split|fullscreen', 3200, 'info');
     return true;
   }
   if(arg.startsWith('open ')){
@@ -3231,6 +3234,7 @@ async function cmdBrowser(args){
   if(arg==='reload'){ openDrawer(); reload(); return true; }
   if(arg==='stop'){ openDrawer(); stop(); return true; }
   if(arg==='screenshot'||arg==='shot'||arg==='capture'){ openDrawer(); screenshot(); return true; }
+  if(arg==='pagecontext'||arg==='context'||arg==='text'){ openDrawer(); pageContext(); return true; }
   if(arg.startsWith('navigate ')){
     navigateTo(arg.slice('navigate '.length));
     return true;
@@ -3243,7 +3247,7 @@ async function cmdBrowser(args){
     navigateTo(arg);
     return true;
   }
-  showToast('Unknown argument: '+arg+' \u2014 use open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot');
+  showToast('Unknown argument: '+arg+' \u2014 use open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext');
   return true;
 }
 

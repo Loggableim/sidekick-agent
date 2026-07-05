@@ -2211,6 +2211,7 @@ window.browserSubmitUrl = browserSubmitUrl;
 window.browserNavigateUrl = browserNavigateUrl;
 window.browserToggleExploreMode = browserToggleExploreMode;
 window.browserSendScreenshotToChat = browserSendScreenshotToChat;
+window.browserSendPageContextToChat = browserSendPageContextToChat;
 
 window.addEventListener('load', function() {
   _browserEnsureSplitStyles();
