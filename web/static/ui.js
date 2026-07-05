@@ -1466,9 +1466,57 @@ function renderModelDropdown(){
   _scopeNote.textContent=t('model_scope_advisory')||'Applies to this conversation from your next message.';
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
-  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
+  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-thinking-toggle" type="button" title="Show only Ollama thinking models" aria-pressed="false">Thinking</button><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
   const _si=_searchRow.querySelector('.model-search-input');
+  const _tf=_searchRow.querySelector('.model-search-thinking-toggle');
   const _sc=_searchRow.querySelector('.model-search-clear');
+  const _thinkingKey=s=>String(s||'').trim().toLowerCase().replace(/^@[^:]+:/,'').replace(/^[^/]+\//,'').replace(/[^a-z0-9]+/g,'');
+  const _thinkingModelKeys=new Set(
+    Array.isArray(window._availableModelsData&&window._availableModelsData.thinking_models)
+      ? window._availableModelsData.thinking_models.map(id=>_thinkingKey(id)).filter(Boolean)
+      : []
+  );
+  const _isThinkingModel=value=>_thinkingModelKeys.has(_thinkingKey(value));
+  if(_tf){
+    _tf.style.flexShrink='0';
+    _tf.style.minWidth='84px';
+    _tf.style.height='24px';
+    _tf.style.border='1px solid var(--border2)';
+    _tf.style.borderRadius='999px';
+    _tf.style.background='transparent';
+    _tf.style.color='var(--muted)';
+    _tf.style.cursor='pointer';
+    _tf.style.display='inline-flex';
+    _tf.style.alignItems='center';
+    _tf.style.justifyContent='center';
+    _tf.style.transition='color .12s,border-color .12s,background .12s';
+    _tf.style.fontSize='10px';
+    _tf.style.fontWeight='700';
+    _tf.style.letterSpacing='.04em';
+    _tf.style.textTransform='uppercase';
+    _tf.style.padding='0 10px';
+    _tf.style.whiteSpace='nowrap';
+  }
+  const _syncThinkingToggle=()=>{
+    const enabled=!!window._modelDropdownThinkingOnly;
+    if(_tf){
+      _tf.textContent=enabled?'Thinking only':'Thinking';
+      _tf.setAttribute('aria-pressed',enabled?'true':'false');
+      _tf.style.background=enabled?'var(--accent-bg)':'transparent';
+      _tf.style.borderColor=enabled?'var(--accent)':'var(--border2)';
+      _tf.style.color=enabled?'var(--accent-text)':'var(--muted)';
+      _tf.disabled=!_thinkingModelKeys.size;
+      _tf.style.opacity=_thinkingModelKeys.size?'1':'0.5';
+      _tf.style.cursor=_thinkingModelKeys.size?'pointer':'not-allowed';
+      _tf.title=_thinkingModelKeys.size
+        ? (enabled ? 'Showing only Ollama thinking models' : 'Show only Ollama thinking models')
+        : 'No Ollama thinking models available';
+    }
+    _scopeNote.textContent=enabled
+      ? 'Showing Ollama thinking models only.'
+      : (t('model_scope_advisory')||'Applies to this conversation from your next message.');
+  };
+  _syncThinkingToggle();
   // Create custom model section elements
   const _custSep=document.createElement('div');
   _custSep.className='model-group model-custom-sep';
@@ -1490,15 +1538,17 @@ function renderModelDropdown(){
   // Filter function (defined AFTER _searchRow and _cust* are created)
   const _filterModels=(term)=>{
     term=term.trim().toLowerCase();
+    const thinkingOnly=!!window._modelDropdownThinkingOnly;
     const found=new Set();
     for(const m of _modelData){
+      if(thinkingOnly && !_isThinkingModel(m.value)) continue;
       const name=m.name.toLowerCase();
       const id=m.id.toLowerCase();
       if(name.includes(term)||id.includes(term)){
         found.add(m.value);
       }
     }
-    const matches=(m)=>!term||found.has(m.value);
+    const matches=(m)=>(!thinkingOnly||_isThinkingModel(m.value))&&(!term||found.has(m.value));
     const configuredModels=_modelData
       .filter(m=>m.badge&&matches(m))
       .sort((a,b)=>{
@@ -1566,7 +1616,7 @@ function renderModelDropdown(){
     // Count models per group for heading labels (#1425)
     const _groupCounts={};
     for(const m of _modelData){
-      if(configuredIds.has(m.value)) continue;
+      if(configuredIds.has(m.value)||!matches(m)) continue;
       if(m.group) _groupCounts[m.group]=(_groupCounts[m.group]||0)+1;
     }
     for(const m of _modelData){
@@ -1628,6 +1678,14 @@ function renderModelDropdown(){
     // Restore focus to search input
     _si.focus();
   };
+  _tf.addEventListener('click',e=>{
+    e.preventDefault();
+    e.stopPropagation();
+    window._modelDropdownThinkingOnly=!window._modelDropdownThinkingOnly;
+    _syncThinkingToggle();
+    _filterModels(_si.value);
+    _si.focus();
+  });
   // Event handlers for search input
   _si.addEventListener('input',()=>_filterModels(_si.value));
   _si.addEventListener('keydown',e=>{if(e.key==='Enter') {e.preventDefault();}if(e.key==='Escape') {closeModelDropdown();}});
