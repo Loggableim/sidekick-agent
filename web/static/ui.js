@@ -1939,6 +1939,28 @@ function _workflowSubagentMenuLabel(){
   return 'Open subagents ('+state.count+' active'+(state.paused?', paused':'')+')';
 }
 
+function _workflowReviewState(){
+  const state=window._reviewChainState||null;
+  return {
+    available:!!state,
+    visible:!!(state&&state.visible),
+    awaitingResult:!!(state&&state.awaitingResult),
+    mode:String(state&&state.reviewMode||'chain').trim().toLowerCase()||'chain',
+    phase:String(state&&state.reviewPhase||'idle').trim().toLowerCase()||'idle',
+  };
+}
+
+function _workflowReviewLabel(){
+  const state=_workflowReviewState();
+  if(!state.available) return 'Run local review chain';
+  if(state.visible){
+    if(state.awaitingResult) return 'Review chain running';
+    if(state.phase==='done') return 'Review card open';
+    return 'Open local review card';
+  }
+  return 'Run local review chain';
+}
+
 function _workflowWebBackendState(){
   const btn=$('browserBackendStatus');
   const backend=String(btn&&btn.dataset&&btn.dataset.backend||'').trim().toLowerCase();
@@ -2202,10 +2224,12 @@ function syncWorkflowChip(){
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
   const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
   const webBackend=_workflowWebBackendState();
+  const review=_workflowReviewState();
   const subagents=_workflowSubagentChipLabel();
-  value.textContent=approval+' · '+reasoning+' · '+subagents;
+  value.textContent=approval+' · '+reasoning+(review.visible ? ' · review' : '')+' · '+subagents;
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+webBackend.label+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
+  const reviewLabel=review.visible ? _workflowReviewLabel() : 'local review ready';
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
   badge.title=label;
   badge.setAttribute('aria-label',label);
   workflowRefreshHeaderMenu();
@@ -2259,6 +2283,13 @@ function workflowRefreshHeaderMenu(){
   if(browserPageContext) browserPageContext.textContent='Send readable page text to chat';
   const browserFullPageContext=$('workflowHeaderBrowserFullPageContextAction');
   if(browserFullPageContext) browserFullPageContext.textContent='Send full page context to chat';
+  const reviewAction=$('workflowHeaderReviewAction');
+  if(reviewAction){
+    const reviewLabel=_workflowReviewLabel();
+    reviewAction.textContent=reviewLabel;
+    reviewAction.title=reviewLabel;
+    reviewAction.setAttribute('aria-label',reviewLabel);
+  }
   const webBackendAction=$('workflowHeaderWebBackendAction');
   if(webBackendAction){
     const webState=_workflowWebBackendState();
@@ -2400,6 +2431,11 @@ function workflowRunHeaderAction(action){
       if(typeof browserToggleWebBackend==='function') browserToggleWebBackend();
       else if(typeof executeCommand==='function') executeCommand('/web toggle');
       break;
+    case 'review': {
+      const review=_workflowReviewState();
+      if(typeof executeCommand==='function') executeCommand(review.visible ? '/review show' : '/review');
+      break;
+    }
     case 'subagents':
       if(typeof executeCommand==='function') executeCommand('/subagents open');
       break;
