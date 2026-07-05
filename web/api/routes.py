@@ -6816,6 +6816,42 @@ def handle_post(handler, parsed) -> bool:
         result["session_id"] = sid
         return j(handler, result)
 
+    if parsed.path == "/api/image_generate":
+        from tools.image_generation_tool import _handle_image_generate
+
+        sid = str(body.get("session_id") or "").strip()
+        prompt = str(body.get("prompt") or "").strip()
+        aspect_ratio = str(body.get("aspect_ratio") or "").strip() or "1:1"
+        if not sid:
+            return bad(handler, "session_id is required")
+        if not prompt:
+            return bad(handler, "prompt is required")
+        try:
+            get_session(sid)
+        except KeyError:
+            return bad(handler, "Session not found", 404)
+        try:
+            result = json.loads(_handle_image_generate({"prompt": prompt, "aspect_ratio": aspect_ratio}))
+        except json.JSONDecodeError:
+            result = {
+                "success": False,
+                "image": None,
+                "error": "image_generate returned invalid JSON",
+                "error_type": "internal_error",
+            }
+        if not isinstance(result, dict):
+            result = {
+                "success": False,
+                "image": None,
+                "error": "image_generate returned unexpected data",
+                "error_type": "internal_error",
+                "raw": str(result),
+            }
+        result["session_id"] = sid
+        result["prompt"] = prompt
+        result["aspect_ratio"] = aspect_ratio
+        return j(handler, result)
+
     if parsed.path == "/api/skills/save":
         return _handle_skill_save(handler, body)
 

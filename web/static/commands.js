@@ -28,6 +28,7 @@ const COMMANDS=[
   {name:'btw',       desc:t('cmd_btw'),      fn:cmdBtw,       arg:'question', noEcho:true},
   {name:'background',desc:t('cmd_background'),fn:cmdBackground,arg:'prompt',  noEcho:true},
   {name:'exec',      desc:'Run Python code in the session sandbox', fn:cmdExec, arg:'[python code]', noEcho:true},
+  {name:'image',     desc:'Generate an image from a prompt', fn:cmdImage, arg:'[prompt]', noEcho:true},
   {name:'status',    desc:t('cmd_status'),   fn:cmdStatus},
   {name:'voice',     desc:t('cmd_voice'),    fn:cmdVoice,     noEcho:true},
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
@@ -996,6 +997,53 @@ async function cmdExec(args){
   }
 }
 
+function _formatImageGenerationMessage(result, prompt){
+  const success=!!(result&&result.success);
+  const image=String(result&&result.image||'').trim();
+  const error=String(result&&result.error||'').trim();
+  const title=success ? '**Image generated**' : '**Image generation failed**';
+  const parts=[title];
+  if(prompt) parts.push(`**Prompt**\n${prompt}`);
+  if(image){
+    parts.push(`![${prompt||'generated image'}](${image})`);
+    parts.push(`[Open full image](${image})`);
+  }
+  if(error) parts.push(`**Error:** ${error}`);
+  if(!image && !error) parts.push('_No output returned_');
+  return parts.join('\n\n');
+}
+
+async function cmdImage(args){
+  if(!S.session){showToast(t('no_active_session'));return;}
+  const activeSid=S.session.session_id;
+  const raw=String(args||'').trim();
+  if(!raw){showToast('Use /image <prompt>');return;}
+  const aspectMatch=raw.match(/^((?:\d+:\d+)|square|portrait|landscape)\s+([\s\S]+)$/i);
+  const aspectRatio=aspectMatch ? String(aspectMatch[1]).toLowerCase() : '';
+  const prompt=aspectMatch ? String(aspectMatch[2]||'').trim() : raw;
+  if(!prompt){showToast('Use /image <prompt>');return;}
+  showToast('Generating image…');
+  try{
+    const r=await api('/api/image_generate',{
+      method:'POST',
+      body:JSON.stringify({session_id:activeSid, prompt, aspect_ratio:aspectRatio})
+    });
+    if(!S.session||S.session.session_id!==activeSid){
+      showToast('Session changed before image generation finished');
+      return;
+    }
+    S.messages.push({
+      role:'assistant',
+      content:_formatImageGenerationMessage(r, prompt),
+      _ts:Date.now()/1000,
+    });
+    renderMessages();
+    showToast((r&&r.success) ? 'Image generated' : 'Image generation failed');
+  }catch(e){
+    showToast('Image generation failed: '+(e&&e.message?e.message:e));
+  }
+}
+
 function _formatStatusTimestamp(value){
   if(value===undefined||value===null||value==='') return t('status_unknown');
   let date;
@@ -1939,6 +1987,8 @@ HANDLERS.approval = cmdApproval;
 HANDLERS.web = cmdWeb;
 HANDLERS.mcp = cmdMcp;
 HANDLERS.subagents = cmdSubagents;
+HANDLERS.exec = cmdExec;
+HANDLERS.image = cmdImage;
 HANDLERS.review = cmdReview;
 
 if(typeof window!=='undefined'){
