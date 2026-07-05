@@ -1322,14 +1322,20 @@ function syncModelChip(){
   const speedDot=$('modelSpeedDot');
   const mobileLabel=$('composerMobileModelLabel');
   const mobileAction=$('composerMobileModelAction');
+  const headerBadge=$('modelStatusBadge');
+  const headerValue=$('modelStatusValue');
   const dd=$('composerModelDropdown');
   if(!sel||!chip||!label) return;
-  // Don't show a model label until boot has finished loading to prevent flash of wrong default
   if(!S._bootReady){
     label.textContent='';
     if(providerEl) providerEl.textContent='';
     if(speedDot) speedDot.className='model-speed-dot';
     if(mobileLabel) mobileLabel.textContent='';
+    if(headerValue) headerValue.textContent='model';
+    if(headerBadge){
+      headerBadge.title='Conversation model';
+      headerBadge.setAttribute('aria-label','Conversation model. Click to open the model picker.');
+    }
     chip.title='Conversation model';
     return;
   }
@@ -1339,23 +1345,30 @@ function syncModelChip(){
   const displayText=_formatGatewayModelLabel(sel.value||'',text,gatewayRouting)||text;
   label.textContent=displayText;
   if(mobileLabel) mobileLabel.textContent=displayText;
-  chip.title=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
+  const badgeTitle=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
+  chip.title=badgeTitle;
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
+  if(headerValue) headerValue.textContent=displayText;
+  if(headerBadge){
+    headerBadge.title=badgeTitle+'. Click to open the model picker.';
+    headerBadge.setAttribute('aria-label',badgeTitle+'. Click to open the model picker.');
+    headerBadge.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
+  }
   if(mobileAction) mobileAction.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   // Update provider label
   if(providerEl){
     const providerName=_getModelProviderName(sel.value||'');
     if(gatewayRouting&&gatewayRouting.used_provider){
       const usedProvider=_formatProviderName(gatewayRouting.used_provider);
-      providerEl.textContent=usedProvider||providerName||'—';
+      providerEl.textContent=usedProvider||providerName||'-';
     }else{
-      providerEl.textContent=providerName||'—';
+      providerEl.textContent=providerName||'-';
     }
   }
-  // ★-Space-Default-Indikator
+  // Space default indicator
   const spaceDefaultModel = window._activeSpaceConfig?.model?.default || '';
   if (spaceDefaultModel && sel.value === spaceDefaultModel) {
-    label.textContent = (label.textContent || '') + ' ★';
+    label.textContent = (label.textContent || '') + ' *';
   }
   // Update speed/cost dot
   if(speedDot){
@@ -1363,7 +1376,6 @@ function syncModelChip(){
     speedDot.className='model-speed-dot model-speed-dot--'+speedClass;
   }
 }
-
 function _positionComposerDropdownWithinViewport(dd,anchor,footer){
   if(!dd||!anchor||!footer) return;
   const viewportMargin=8;

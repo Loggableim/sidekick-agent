@@ -9,7 +9,7 @@ const COMMANDS=[
   {name:'clear',     desc:t('cmd_clear'),         fn:cmdClear,     noEcho:true},
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
-  {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'model_name', subArgs:'models', noEcho:true},
+  {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|model_name]', subArgs:'models', noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
   {name:'new',       desc:t('cmd_new'),            fn:cmdNew,       noEcho:true},
@@ -326,10 +326,31 @@ function cmdClear(){
 }
 
 async function cmdModel(args){
-  if(!args){showToast(t('model_usage'));return;}
+  if(!S.session){
+    showToast(t('no_active_session'));
+    return true;
+  }
   const sel=$('modelSelect');
   if(!sel)return;
-  const q=args.toLowerCase();
+  const raw=(args||'').trim();
+  const q=raw.toLowerCase();
+  const currentLabel=(typeof _selectedModelOption==='function' && _selectedModelOption() && _selectedModelOption().textContent)
+    ? _selectedModelOption().textContent.trim()
+    : (sel.value||'');
+  const currentProvider=(S.session&&S.session.model_provider)
+    ? String(S.session.model_provider).trim()
+    : (_reasoningProviderFromModelValue(sel.value||'')||'');
+  const statusText='Model: '+(currentLabel||sel.value||'unknown')+(currentProvider?' ('+currentProvider+')':'');
+  if(!raw||q==='open'||q==='show'||q==='toggle'){
+    if(typeof toggleModelDropdown==='function') toggleModelDropdown();
+    showToast(statusText);
+    return true;
+  }
+  if(q==='status'||q==='current'||q==='list'){
+    if(typeof toggleModelDropdown==='function') toggleModelDropdown();
+    showToast(statusText);
+    return true;
+  }
   // Fuzzy match: find first option whose label or value contains the query
   let match=null;
   for(const opt of sel.options){
@@ -337,10 +358,11 @@ async function cmdModel(args){
       match=opt.value;break;
     }
   }
-  if(!match){showToast(t('no_model_match')+`"${args}"`);return;}
+  if(!match){showToast(t('no_model_match')+`"${args}"`);return true;}
   sel.value=match;
   await sel.onchange();
   showToast(t('switched_to')+match);
+  return true;
 }
 
 async function cmdWorkspace(args){
