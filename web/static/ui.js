@@ -1905,6 +1905,31 @@ function syncReasoningChip(){
 
 let _workflowHeaderMenuOpen=false;
 
+function _workflowSubagentSummaryState(){
+  const summary=window._workflowSubagentSummary||null;
+  return {
+    count:Number(summary&&summary.count||0)||0,
+    paused:!!(summary&&summary.paused),
+    goal:String(summary&&summary.goal||'').trim(),
+    subagentId:String(summary&&summary.subagent_id||'').trim(),
+    available:!!summary,
+  };
+}
+
+function _workflowSubagentChipLabel(){
+  const state=_workflowSubagentSummaryState();
+  if(!state.available) return 'subagents';
+  const parts=['subagents '+state.count];
+  if(state.paused) parts.push('paused');
+  return parts.join(' · ');
+}
+
+function _workflowSubagentMenuLabel(){
+  const state=_workflowSubagentSummaryState();
+  if(!state.available) return 'Open subagents';
+  return 'Open subagents ('+state.count+' active'+(state.paused?', paused':'')+')';
+}
+
 function syncWorkflowChip(){
   const badge=$('workflowStatusBadge');
   const value=$('workflowStatusValue');
@@ -1921,9 +1946,10 @@ function syncWorkflowChip(){
   const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
   const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
-  value.textContent=approval+' · '+reasoning;
+  const subagents=_workflowSubagentChipLabel();
+  value.textContent=approval+' · '+reasoning+' · '+subagents;
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', model '+model+', browser '+browser+'. Click to show workflow status.';
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
   badge.title=label;
   badge.setAttribute('aria-label',label);
   workflowRefreshHeaderMenu();
@@ -1935,6 +1961,7 @@ function workflowRefreshHeaderMenu(){
   const menuBtn=$('workflowStatusMenuBtn');
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
+  const subagents=$('workflowHeaderSubagentsAction');
   if(menu){
     menu.hidden=!_workflowHeaderMenuOpen;
   }
@@ -1957,6 +1984,7 @@ function workflowRefreshHeaderMenu(){
       ? 'Pause browser control'
       : (mode==='read' ? 'Resume browser control' : 'Enable browser control');
   }
+  if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
 }
 
 function workflowCloseHeaderMenu(){
@@ -1970,7 +1998,6 @@ function workflowCloseHeaderMenu(){
   document.removeEventListener('keydown', _workflowHeaderMenuKeydown, true);
   workflowRefreshHeaderMenu();
 }
-
 function _workflowHeaderMenuOutsideClick(event){
   const menu=$('workflowStatusMenu');
   const btn=$('workflowStatusMenuBtn');

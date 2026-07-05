@@ -1483,6 +1483,18 @@ async function cmdWorkflow(args){
     const subagentSummary=subagentRes.status==='fulfilled'
       ? summarizeSubagents(subagentRes.value)
       : 'Subagents unavailable';
+    if(subagentRes.status==='fulfilled'){
+      const payload=subagentRes.value||{};
+      const active=Array.isArray(payload.active)?payload.active:[];
+      const first=active[0]||{};
+      window._workflowSubagentSummary={
+        count:active.length,
+        paused:!!payload.spawn_paused,
+        goal:String(first.goal||'').trim(),
+        subagent_id:String(first.subagent_id||first.session_id||'').trim(),
+      };
+      if(typeof syncWorkflowChip==='function') syncWorkflowChip();
+    }
     return {approvalMode, reasoningMode, subagentSummary};
   };
   if(!sub||sub==='status'||sub==='show'||sub==='summary'){

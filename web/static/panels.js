@@ -9074,12 +9074,26 @@ function _renderSubagentStatus(active, paused){
     </div>`;
   }).join('');
 }
+function _updateWorkflowSubagentSummary(active, paused){
+  const entries=Array.isArray(active)?active:[];
+  const first=entries[0]||{};
+  window._workflowSubagentSummary={
+    count:entries.length,
+    paused:!!paused,
+    goal:String(first.goal||'').trim(),
+    subagent_id:String(first.subagent_id||first.session_id||'').trim(),
+  };
+  if(typeof syncWorkflowChip==='function') syncWorkflowChip();
+}
 function loadSubagentStatus(){
   const card=$('subagentStatusCard');
   if(!card) return;
   card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
   api('/api/subagents').then(r=>{
-    _renderSubagentStatus((r&&r.active)||[], !!(r&&r.spawn_paused));
+    const active=(r&&r.active)||[];
+    const paused=!!(r&&r.spawn_paused);
+    _renderSubagentStatus(active, paused);
+    _updateWorkflowSubagentSummary(active, paused);
   }).catch(()=>{card.innerHTML=`<div style="color:#ef4444;font-size:12px;padding:6px 0">Failed to load subagent status</div>`});
 }
 async function toggleSubagentSpawnPause(){
@@ -9090,7 +9104,10 @@ async function toggleSubagentSpawnPause(){
       method:'POST',
       body:JSON.stringify({spawn_paused:nextPaused}),
     });
-    _renderSubagentStatus((saved&&saved.active)||[], !!(saved&&saved.spawn_paused));
+    const active=(saved&&saved.active)||[];
+    const paused=!!(saved&&saved.spawn_paused);
+    _renderSubagentStatus(active, paused);
+    _updateWorkflowSubagentSummary(active, paused);
     if(typeof showToast==='function') showToast(nextPaused?'Subagent spawning paused':'Subagent spawning resumed',2200,nextPaused?'info':'success');
   }catch(e){
     if(typeof showToast==='function') showToast('Failed to update subagent spawning: '+(e&&e.message?e.message:e),2400,'error');
@@ -9104,7 +9121,10 @@ async function interruptActiveSubagent(subagentId){
       method:'POST',
       body:JSON.stringify({subagent_id:sid}),
     });
-    _renderSubagentStatus((saved&&saved.active)||[], !!(saved&&saved.spawn_paused));
+    const active=(saved&&saved.active)||[];
+    const paused=!!(saved&&saved.spawn_paused);
+    _renderSubagentStatus(active, paused);
+    _updateWorkflowSubagentSummary(active, paused);
     if(typeof showToast==='function') showToast('Subagent interrupted: '+sid.slice(0,8),2200,'info');
   }catch(e){
     if(typeof showToast==='function') showToast('Failed to interrupt subagent: '+(e&&e.message?e.message:e),2400,'error');
