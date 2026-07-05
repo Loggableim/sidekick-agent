@@ -745,7 +745,7 @@ async function loadSession(sid, options){
             localStorage.removeItem('sidekick-webui-session');
           }
           if (_loadingSessionId === sid) _loadingSessionId = null;
-          return;
+          return {missingSession: true};
         }
         _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Session not available in web UI.</div>';
         // If this 404 was for the saved active-session ID (not a click-into request),

@@ -1965,6 +1965,7 @@ function _bootTimeout(promise, ms, label) {
     _setConversationRestorePlaceholder('Restoring conversation...');
   }
   let _bootSavedSessionLoadPromise = null;
+  let _bootMissingSession = false;
   if (urlSession && saved && !_bootRestoreCanceled()) {
     // Direct session URLs should start loading immediately instead of waiting
     // for sidebar/session-list rendering to finish.
@@ -1995,11 +1996,26 @@ function _bootTimeout(promise, ms, label) {
         return;
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
-      if (_bootSavedSessionLoadPromise) await _bootSavedSessionLoadPromise;
-      else if(!_bootRestoreCanceled()) await loadSession(saved);
+      if (_bootSavedSessionLoadPromise) {
+        const _bootLoadResult = await _bootSavedSessionLoadPromise;
+        _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
+      }
+      else if(!_bootRestoreCanceled()) {
+        const _bootLoadResult = await loadSession(saved);
+        _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
+      }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
       if (saved && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
-        await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
+        const _bootRetryResult = await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
+        _bootMissingSession = _bootMissingSession || !!(_bootRetryResult && _bootRetryResult.missingSession);
+      }
+      if (_bootMissingSession && urlSession && saved) {
+        if (typeof newSession === 'function') {
+          await newSession();
+          if (typeof renderSessionList === 'function') await renderSessionList();
+          if (typeof startGatewaySSE === 'function') startGatewaySSE();
+          return;
+        }
       }
       // If the restored session has no messages it is an ephemeral scratch pad —
       // treat the page as a fresh start rather than resuming a blank conversation.
