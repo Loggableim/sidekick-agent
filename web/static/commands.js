@@ -31,6 +31,7 @@ const COMMANDS=[
   {name:'voice',     desc:t('cmd_voice'),    fn:cmdVoice,     noEcho:true},
   {name:'reasoning', desc:t('cmd_reasoning'), fn:cmdReasoning, arg:'show|hide|none|minimal|low|medium|high|xhigh|max', subArgs:['show','hide','none','minimal','low','medium','high','xhigh','max'], noEcho:true},
   {name:'approval',  desc:'Set approval mode (manual/smart/off)', fn:cmdApproval, arg:'manual|smart|off|status', subArgs:['manual','smart','off','status'], noEcho:true},
+  {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot'], noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt]', subArgs:['show','status','prompt'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
@@ -1146,6 +1147,54 @@ function cmdApproval(args){
   return true;
 }
 
+async function cmdWeb(args){
+  const raw=String(args||'').trim().toLowerCase();
+  const validModes=['auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'];
+  const formatStatus=(st)=>{
+    const backend=String((st&&st.backend)||'auto').trim().toLowerCase()||'auto';
+    const configured=String((st&&st.configured_backend)||'').trim().toLowerCase();
+    const source=configured ? 'pinned' : 'auto';
+    const label=configured ? configured : backend;
+    return 'Web backend: '+label+' ('+source+') | /web status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs';
+  };
+  const applyStatus=(st)=>{
+    if(typeof browserRenderWebBackend==='function') browserRenderWebBackend(st||{backend:'auto',configured_backend:''});
+    return formatStatus(st);
+  };
+  if(!raw||raw==='status'||raw==='show'){
+    try{
+      const st=await api('/api/web/backend');
+      showToast(applyStatus(st));
+    }catch(e){
+      showToast('Web backend status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  let target=raw;
+  if(raw==='toggle'){
+    try{
+      const st=await api('/api/web/backend');
+      target=String((st&&st.configured_backend)||'').trim().toLowerCase()==='firecrawl' ? 'auto' : 'firecrawl';
+    }catch(_){
+      target='firecrawl';
+    }
+  }
+  if(!validModes.includes(target)){
+    showToast('Use /web status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs');
+    return true;
+  }
+  try{
+    const st=await api('/api/web/backend',{
+      method:'POST',
+      body:JSON.stringify({backend:target}),
+    });
+    showToast(applyStatus(st));
+  }catch(e){
+    showToast('Failed to set web backend: '+(e&&e.message?e.message:target));
+  }
+  return true;
+}
+
 async function cmdBrowser(args){
   const arg=String(args||'').trim().toLowerCase();
   const openDrawer=()=>{ if(typeof window.browserSetDrawerOpen==='function') window.browserSetDrawerOpen(true, {force:true, keepViewport:true}); };
@@ -1693,6 +1742,7 @@ function selectCmdDropdownItem(){
 const HANDLERS = {};
 HANDLERS.skills = cmdSkills;
 HANDLERS.approval = cmdApproval;
+HANDLERS.web = cmdWeb;
 HANDLERS.review = cmdReview;
 
 if(typeof window!=='undefined'){

@@ -1834,6 +1834,7 @@ window.browserToggleDrawer = browserToggleDrawer;
 window.browserTogglePermission = browserTogglePermission;
 window.browserStopPermission = browserStopPermission;
 window.browserRenderPermission = browserRenderPermission;
+window.browserRenderWebBackend = browserRenderWebBackend;
 window.browserRefreshWebBackend = browserRefreshWebBackend;
 window.browserToggleWebBackend = browserToggleWebBackend;
 window.browserRefreshPermission = browserRefreshPermission;
