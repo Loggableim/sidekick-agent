@@ -273,6 +273,7 @@ async function switchPanel(name, opts = {}) {
   }
   if (!opts.bypassSettingsGuard && !_beforePanelSwitch(nextPanel)) return false;
   if (prevPanel !== 'settings' && nextPanel === 'settings') _beginSettingsPanelSession();
+  if (nextPanel === 'review' && typeof ensureReviewPanel === 'function') ensureReviewPanel();
   // Close any long-lived Kanban SSE stream when leaving the kanban panel
   // so we don't keep a stale connection open in the background.
   if (prevPanel === 'kanban' && nextPanel !== 'kanban') {
@@ -401,7 +402,7 @@ async function switchPanel(name, opts = {}) {
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
   if (mainEl) {
-    ['settings','skills','memory','tasks','kanban','workspaces','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
+    ['settings','skills','memory','tasks','kanban','workspaces','review','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }

@@ -2649,6 +2649,7 @@ function workflowRunHeaderAction(action){
       if(typeof workflowOpenResearchPanel==='function') workflowOpenResearchPanel();
       break;
     case 'review': {
+      if(typeof switchPanel==='function') switchPanel('review',{bypassSettingsGuard:true});
       const review=_workflowReviewState();
       if(typeof executeCommand==='function') executeCommand(review.visible ? '/review show' : '/review');
       break;
@@ -7607,7 +7608,7 @@ function renderMessages(options){
     const activeSid = S && S.session && S.session.session_id ? String(S.session.session_id) : '';
     if (!activeSid || !_reviewChainState.session_id || String(_reviewChainState.session_id) !== activeSid) {
       _reviewChainState.visible = false;
-    } else {
+    } else if (_reviewChainState.surface !== 'panel') {
       const existing = inner.querySelector('.review-card');
       if (!existing) {
         inner.appendChild(_reviewChainState.element);

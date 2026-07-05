@@ -39,7 +39,7 @@ const COMMANDS=[
   {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable|delete]', subArgs:['status','open','refresh','tools','toggle','enable','disable','delete'], noEcho:true},
   {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|open <id>|refresh|pause|resume|stop <id>|interrupt <id>]', subArgs:['status','open','refresh','pause','resume','stop','interrupt'], noEcho:true},
   {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext|extract', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot','pagecontext','extract'], noEcho:true},
-  {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[show|status|prompt|chain|single]', subArgs:['show','status','prompt','chain','single'], noEcho:true},
+  {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[open|show|status|prompt|chain|single]', subArgs:['open','show','status','prompt','chain','single'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
 ];
@@ -1645,7 +1645,7 @@ async function cmdWorkflow(args){
     return true;
   }
   if(sub==='thinking') return cmdThinking(rest||'status');
-  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|image <prompt>|research <topic>|mcp <open|status>|thinking <query>');
+  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <open|show|chain|single|prompt>|image <prompt>|research <topic>|mcp <open|status>|thinking <query>');
   return true;
 }
 
@@ -2429,9 +2429,55 @@ function _reviewBuildResultSection(state){
   return wrap;
 }
 
+function _reviewPanelPlaceholderHtml(){
+  return '<div class="review-panel-empty-title">Local review</div><div class="review-panel-empty-copy">Run /review to inspect the current diff here instead of in chat.</div>';
+}
+
+function _reviewPanelBody(){
+  return $('reviewPanelBody');
+}
+
+function ensureReviewPanel(){
+  const main=document.querySelector('main.main');
+  if(!main) return null;
+  let panel=$('panelReview');
+  if(!panel){
+    panel=document.createElement('div');
+    panel.className='panel-view';
+    panel.id='panelReview';
+    panel.innerHTML=`
+      <div class="panel-head">
+        <span>Local review</span>
+      </div>
+      <div class="review-panel-shell">
+        <div class="review-panel-empty" id="reviewPanelEmpty">${_reviewPanelPlaceholderHtml()}</div>
+        <div class="msg-row assistant-turn proposed-patch-card review-card review-panel-body" id="reviewPanelBody" style="display:none;margin:8px 0;"></div>
+      </div>
+    `;
+    const ref=$('panelProfiles')||$('panelLogs')||$('panelSettings')||$('panelAppstore')||null;
+    if(ref && ref.parentNode===main) main.insertBefore(panel, ref);
+    else main.appendChild(panel);
+  }else if(!panel.querySelector('#reviewPanelBody')){
+    const shell=document.createElement('div');
+    shell.className='review-panel-shell';
+    shell.innerHTML=`
+      <div class="review-panel-empty" id="reviewPanelEmpty">${_reviewPanelPlaceholderHtml()}</div>
+      <div class="msg-row assistant-turn proposed-patch-card review-card review-panel-body" id="reviewPanelBody" style="display:none;margin:8px 0;"></div>
+    `;
+    panel.appendChild(shell);
+  }
+  return panel;
+}
+window.ensureReviewPanel=ensureReviewPanel;
+
 function _reviewSyncCard(state){
   if(!state||!state.element) return null;
   const card=state.element;
+  if(card.id==='reviewPanelBody'){
+    const empty=$('reviewPanelEmpty');
+    if(empty) empty.style.display='none';
+    card.style.display='';
+  }
   card.innerHTML='';
 
   const role=document.createElement('div');
@@ -2439,7 +2485,7 @@ function _reviewSyncCard(state){
   role.style.fontSize='11px';
   role.style.padding='4px 10px';
   role.style.opacity='0.7';
-  role.textContent='ÃƒÂ°Ã…Â¸Ã¢â‚¬ÂÃ…Â½ Local review';
+  role.textContent='Local review';
   card.appendChild(role);
 
   const data=state.data||{};
@@ -2454,7 +2500,7 @@ function _reviewSyncCard(state){
     `Branch: ${String((data&&data.branch)||'detached')}`,
     `Files: ${Number(summary.files||0)||0}`,
     `+${Number(summary.additions||0)||0}/-${Number(summary.deletions||0)||0}${summary.truncated ? ' (truncated)' : ''}`,
-  ].join(' Ãƒâ€šÃ‚Â· ');
+  ].join(' · ');
   card.appendChild(meta);
 
   const actions=document.createElement('div');
@@ -2509,8 +2555,11 @@ function _reviewSyncCard(state){
     }, false));
   }
 
-  const runLabel=state.result&&state.result.findings&&state.result.findings.length ? 'Run review again' : 'Review in chat';
-  const runBtn=makeBtn(state.awaitingResult?'Review runningÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦':runLabel, async()=>{
+  const inPanel=String(state.surface||'').trim().toLowerCase()==='panel' || !!(card&&card.id==='reviewPanelBody');
+  const runLabel=state.result&&state.result.findings&&state.result.findings.length
+    ? 'Run review again'
+    : (inPanel ? 'Run review' : 'Review in chat');
+  const runBtn=makeBtn(state.awaitingResult?'Review running...':runLabel, async()=>{
     await _reviewSendPrompt(prompt, {state});
   }, true);
   if(state.awaitingResult){
@@ -2598,8 +2647,9 @@ async function _reviewSendPrompt(prompt, opts={}){
 }
 function _renderReviewCard(data, prompt){
   _clearReviewCard();
+  const panelBody=_reviewPanelBody();
   const msgInner=document.getElementById('msgInner');
-  if(!msgInner) return null;
+  if(!panelBody && !msgInner) return null;
 
   const state=window._reviewChainState||(window._reviewChainState={});
   state.visible=true;
@@ -2614,7 +2664,15 @@ function _renderReviewCard(data, prompt){
   state.primaryResultText='';
   state.resultText='';
   state.lastCompletedAt=0;
+  state.surface=panelBody ? 'panel' : 'chat';
   state.element=null;
+
+  if(panelBody){
+    state.element=panelBody;
+    _reviewSyncCard(state);
+    if(typeof scrollIfPinned==='function' && state.surface!=='panel') scrollIfPinned();
+    return panelBody;
+  }
 
   const card=document.createElement('div');
   card.className='msg-row assistant-turn proposed-patch-card review-card';
@@ -2631,6 +2689,13 @@ function _clearReviewCard(){
   state.visible=false;
   state.data=null;
   state.prompt='';
+  if(state.element && state.element.id==='reviewPanelBody'){
+    state.element.innerHTML='';
+    state.element.style.display='none';
+    const empty=$('reviewPanelEmpty');
+    if(empty) empty.style.display='';
+    return;
+  }
   if(state.element&&typeof state.element.remove==='function'){
     try{ state.element.remove(); }catch(_){}
   }
@@ -2644,6 +2709,10 @@ async function cmdReview(args){
     _clearReviewCard();
     showToast('Open a chat session before running review', 2400, 'error');
     return true;
+  }
+  const panel=typeof ensureReviewPanel==='function' ? ensureReviewPanel() : null;
+  if(panel && typeof switchPanel==='function'){
+    switchPanel('review',{bypassSettingsGuard:true});
   }
   try{
     const data=await api('/api/review/diff?session_id='+encodeURIComponent(sid));
@@ -2661,7 +2730,7 @@ async function cmdReview(args){
     }
     const prompt=_buildReviewPrompt(data);
     _renderReviewCard(data, prompt);
-    if(arg==='show'||arg==='status'){
+    if(arg==='open'||arg==='show'||arg==='status'){
       return true;
     }
     if(arg==='prompt'||arg==='draft'){

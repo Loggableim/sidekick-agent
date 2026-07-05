@@ -3835,6 +3835,12 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .panel-head-btn:hover{background:var(--accent-bg);color:var(--accent-text);}
 .panel-head-btn svg{width:14px;height:14px;display:block;}
 .panel-head-sub{padding:6px 12px 8px;font-size:11px;color:var(--muted);flex-shrink:0;}
+.review-panel-shell{flex:1;min-height:0;overflow:auto;padding:8px 12px 12px;display:flex;flex-direction:column;}
+.review-panel-body{min-height:0;}
+.review-panel-body.review-card{background:var(--surface);border:1px solid var(--border2);border-radius:12px;box-shadow:0 1px 0 rgba(255,255,255,.02) inset;overflow:hidden;}
+.review-panel-empty{margin:12px 0;padding:14px 16px;border:1px dashed var(--border2);border-radius:12px;background:rgba(255,255,255,.03);color:var(--muted);line-height:1.55;}
+.review-panel-empty-title{margin-bottom:6px;color:var(--text);font-size:13px;font-weight:600;letter-spacing:.02em;text-transform:none;}
+.review-panel-empty-copy{font-size:12px;}
 .side-menu{display:flex;flex-direction:column;gap:2px;padding:8px;overflow-y:auto;}
 .side-menu-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;border:none;background:transparent;color:var(--text);cursor:pointer;text-align:left;font-size:13px;font-weight:500;transition:background .15s,color .15s;width:100%;}
 .side-menu-item:hover{background:var(--surface);}
