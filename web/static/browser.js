@@ -621,6 +621,31 @@ function _browserComposerTextarea() {
     || document.querySelector('textarea');
 }
 
+function _browserIsEditableTarget(target) {
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tagName = String(target.tagName || '').toUpperCase();
+  if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') return true;
+  return typeof target.closest === 'function' && !!target.closest('[contenteditable="true"]');
+}
+
+function _browserInsertIntoComposer(text) {
+  const textarea = _browserComposerTextarea();
+  if (!textarea) return false;
+  if (typeof insertAtCursor === 'function') {
+    insertAtCursor(textarea, text);
+  } else {
+    textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
+    textarea.dispatchEvent(new Event('input', {bubbles: true}));
+  }
+  if (typeof textarea.focus === 'function') textarea.focus();
+  if (typeof textarea.setSelectionRange === 'function') {
+    const pos = String(textarea.value || '').length;
+    try { textarea.setSelectionRange(pos, pos); } catch (_) {}
+  }
+  return true;
+}
+
 function _browserVisibleUrl() {
   const stateUrl = String((_browserState && _browserState.url) || '').trim();
   if (stateUrl) return stateUrl;
@@ -668,12 +693,9 @@ async function browserSendScreenshotToChat() {
   if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
   const frameUrl = _browserFrameObjectUrl || '';
   const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
-  const textarea = _browserComposerTextarea();
-  if (textarea && typeof insertAtCursor === 'function') {
-    insertAtCursor(textarea, text);
-  } else if (textarea) {
-    textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
-    textarea.dispatchEvent(new Event('input', {bubbles: true}));
+  if (!_browserInsertIntoComposer(text)) {
+    if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+    return;
   }
   if (typeof showToast === 'function') showToast('Screenshot added to chat', 2000, 'success');
 }
@@ -733,12 +755,9 @@ async function browserSendPageContextToChat(opts = {}) {
     ];
     if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
     const text = lines.join('\n');
-    const textarea = _browserComposerTextarea();
-    if (textarea && typeof insertAtCursor === 'function') {
-      insertAtCursor(textarea, text);
-    } else if (textarea) {
-      textarea.value = (textarea.value ? textarea.value + '\n' : '') + text;
-      textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    if (!_browserInsertIntoComposer(text)) {
+      if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+      return;
     }
     if (typeof showToast === 'function') showToast(full ? 'Full page context added to chat' : 'Readable page text added to chat', 2000, 'success');
   }).catch(function() {
@@ -1002,6 +1021,23 @@ function _browserHeaderMenuKeydown(event) {
   if (event.key === 'Escape') {
     event.preventDefault();
     _browserCloseHeaderMenu();
+  }
+}
+
+function _browserHandleExportHotkeys(event) {
+  if (!event || event.defaultPrevented) return;
+  if (!_browserPanelVisible()) return;
+  if (_browserHeaderMenuOpen) return;
+  if (_browserIsEditableTarget(event.target)) return;
+  const key = String(event.key || '').toLowerCase();
+  if (key !== 'e') return;
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.altKey) {
+    void browserSendFullPageContextToChat();
+  } else {
+    void browserSendPageContextToChat();
   }
 }
 
@@ -2253,6 +2289,7 @@ window.addEventListener('load', function() {
     _browserSyncFullscreenButton(false);
     _browserSyncSplitButton(false);
   }
+  document.addEventListener('keydown', _browserHandleExportHotkeys, true);
   _browserUpdateHeaderBadge();
   _browserAttachPointerHandlers();
 });
