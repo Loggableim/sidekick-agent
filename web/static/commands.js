@@ -10,6 +10,7 @@ const COMMANDS=[
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
   {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
+  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','thinking'], noEcho:true},
   {name:'thinking',  desc:'Open or filter Ollama thinking models', fn:cmdThinking, arg:'[status|open|toggle|list|off|<query>]', subArgs:['status','open','toggle','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
@@ -1396,6 +1397,126 @@ async function cmdApproval(args){
   }catch(e){
     showToast('Approval mode update failed: '+(e&&e.message?e.message:normalizeMode));
   }
+  return true;
+}
+
+async function cmdWorkflow(args){
+  const raw=String(args||'').trim();
+  const parts=raw.split(/\s+/).filter(Boolean);
+  const sub=(parts.shift()||'status').toLowerCase();
+  const rest=parts.join(' ').trim();
+  const getValue=(payload, keys, fallback='')=>{
+    for(const key of keys){
+      const value=payload&&payload[key];
+      if(value!=null&&String(value).trim()) return value;
+    }
+    return fallback;
+  };
+  const normalizeApprovalMode=(mode)=>{
+    const value=String(mode||'').trim().toLowerCase();
+    if(value==='ask') return 'manual';
+    if(value==='deny') return 'smart';
+    if(value==='yolo') return 'off';
+    if(value==='manual'||value==='smart'||value==='off') return value;
+    return value||'manual';
+  };
+  const normalizeKey=(value)=>String(value||'').trim().toLowerCase().replace(/^@[^:]+:/,'').replace(/^[^/]+\//,'').replace(/[^a-z0-9]+/g,'');
+  const thinkingIds=Array.isArray(window._availableModelsData&&window._availableModelsData.thinking_models)
+    ? window._availableModelsData.thinking_models.map(normalizeKey).filter(Boolean)
+    : [];
+  const isThinkingModel=(value)=>{
+    const key=normalizeKey(value);
+    return !!key && thinkingIds.includes(key);
+  };
+  const currentModelLabel=()=>{
+    const headerValue=document.getElementById('modelStatusValue');
+    const headerText=String((headerValue&&headerValue.textContent)||'').trim();
+    if(headerText && headerText.toLowerCase()!=='model') return headerText;
+    const sel=document.getElementById('modelSelect');
+    const value=String((sel&&sel.value)||((S&&S.session&&S.session.model)||'')).trim();
+    if(!value) return 'model';
+    const opt=sel&&sel.selectedOptions&&sel.selectedOptions[0];
+    const text=String((opt&&opt.textContent)||value).trim();
+    return isThinkingModel(value) ? `${text} (thinking)` : text;
+  };
+  const currentBrowserLabel=()=>{
+    const body=document.body;
+    const drawerOpen=!!(body&&body.classList.contains('browser-drawer-open'));
+    const split=!!(body&&body.classList.contains('browser-split'));
+    const fullscreen=!!(body&&body.classList.contains('browser-maximized'));
+    const permissionBtn=document.getElementById('browserPermissionBtn');
+    const exploreBtn=document.getElementById('browserExploreBtn');
+    const permission=permissionBtn ? permissionBtn.getAttribute('aria-pressed')==='true' : null;
+    const explore=exploreBtn ? exploreBtn.getAttribute('aria-pressed')==='true' : null;
+    const parts=['Browser '+(drawerOpen?'open':'closed')];
+    if(permission!==null) parts.push(permission?'permission on':'permission off');
+    if(explore!==null) parts.push(explore?'explore on':'explore off');
+    parts.push(split?'split on':'split off');
+    parts.push(fullscreen?'fullscreen on':'fullscreen off');
+    return parts.join(', ');
+  };
+  const summarizeSubagents=(payload)=>{
+    const active=Array.isArray(payload&&payload.active)?payload.active:[];
+    const paused=!!(payload&&payload.spawn_paused);
+    const parts=['Subagents '+active.length, paused?'spawn paused':'spawn open'];
+    const first=active[0];
+    if(first){
+      const goal=String(first.goal||'').trim();
+      const sid=String(first.subagent_id||first.session_id||'').trim();
+      if(goal) parts.push(goal.slice(0,72));
+      else if(sid) parts.push(sid.slice(0,12));
+    }
+    return parts.join(', ');
+  };
+  const loadStatus=async()=>{
+    const [approvalRes, reasoningRes, subagentRes] = await Promise.allSettled([
+      api('/api/approval'),
+      api('/api/reasoning'),
+      api('/api/subagents'),
+    ]);
+    const approvalMode=approvalRes.status==='fulfilled'
+      ? normalizeApprovalMode(getValue(approvalRes.value,['mode','approval_mode','approval','value'],'manual'))
+      : 'unknown';
+    const reasoningMode=reasoningRes.status==='fulfilled'
+      ? String(getValue(reasoningRes.value,['mode','reasoning_effort','effort','reasoning','value'],'default')).trim().toLowerCase()
+      : 'unknown';
+    const subagentSummary=subagentRes.status==='fulfilled'
+      ? summarizeSubagents(subagentRes.value)
+      : 'Subagents unavailable';
+    return {approvalMode, reasoningMode, subagentSummary};
+  };
+  if(!sub||sub==='status'||sub==='show'||sub==='summary'){
+    try{
+      const status=await loadStatus();
+      const parts=[
+        'Workflow: Approval '+status.approvalMode,
+        'Reasoning '+status.reasoningMode,
+        'Model '+currentModelLabel(),
+        currentBrowserLabel(),
+        status.subagentSummary,
+        '/workflow approval|reasoning|browser|subagents|thinking',
+      ];
+      showToast(parts.filter(Boolean).join(' | '));
+    }catch(e){
+      showToast('Workflow status unavailable: '+(e&&e.message?e.message:e));
+    }
+    return true;
+  }
+  if(sub==='open'||sub==='settings'||sub==='system'){
+    if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
+    if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+    if(typeof browserSetDrawerOpen==='function' && !(document.body&&document.body.classList.contains('browser-drawer-open'))){
+      browserSetDrawerOpen(true,{force:true,keepViewport:true});
+    }
+    showToast('Workflow controls opened');
+    return true;
+  }
+  if(sub==='approval') return cmdApproval(rest||'status');
+  if(sub==='reasoning') return cmdReasoning(rest||'status');
+  if(sub==='browser') return cmdBrowser(rest||'status');
+  if(sub==='subagents') return cmdSubagents(rest||'status');
+  if(sub==='thinking') return cmdThinking(rest||'status');
+  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|thinking <query>');
   return true;
 }
 
@@ -3910,6 +4031,7 @@ HANDLERS.approval = cmdApproval;
 HANDLERS.web = cmdWeb;
 HANDLERS.mcp = cmdMcp;
 HANDLERS.subagents = cmdSubagents;
+HANDLERS.workflow = cmdWorkflow;
 HANDLERS.thinking = cmdThinking;
 HANDLERS.exec = cmdExec;
 HANDLERS.image = cmdImage;
