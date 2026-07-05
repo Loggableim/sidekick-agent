@@ -1455,6 +1455,13 @@ async function cmdWorkflow(args){
     parts.push(fullscreen?'fullscreen on':'fullscreen off');
     return parts.join(', ');
   };
+  const currentWebBackendLabel=()=>{
+    const btn=document.getElementById('browserBackendStatus');
+    const configured=String((btn&&btn.dataset&&btn.dataset.configuredBackend)||'').trim().toLowerCase();
+    const backend=String((btn&&btn.dataset&&btn.dataset.backend)||'').trim().toLowerCase();
+    if(configured==='firecrawl' || backend==='firecrawl' || backend==='web firecrawl') return 'Web firecrawl';
+    return 'Web auto';
+  };
   const summarizeSubagents=(payload)=>{
     const active=Array.isArray(payload&&payload.active)?payload.active:[];
     const paused=!!(payload&&payload.spawn_paused);
@@ -1502,14 +1509,15 @@ async function cmdWorkflow(args){
   if(!sub||sub==='status'||sub==='show'||sub==='summary'){
     try{
       const status=await loadStatus();
-      const parts=[
-        'Workflow: Approval '+status.approvalMode,
-        'Reasoning '+status.reasoningMode,
-        'Model '+currentModelLabel(),
-        currentBrowserLabel(),
-        status.subagentSummary,
-        '/workflow approval|reasoning|browser|subagents|thinking',
-      ];
+    const parts=[
+      'Workflow: Approval '+status.approvalMode,
+      'Reasoning '+status.reasoningMode,
+      'Model '+currentModelLabel(),
+      currentBrowserLabel(),
+      currentWebBackendLabel(),
+      status.subagentSummary,
+      '/workflow approval|reasoning|browser|subagents|thinking',
+    ];
       showToast(parts.filter(Boolean).join(' | '));
     }catch(e){
       showToast('Workflow status unavailable: '+(e&&e.message?e.message:e));

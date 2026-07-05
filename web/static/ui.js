@@ -1939,6 +1939,21 @@ function _workflowSubagentMenuLabel(){
   return 'Open subagents ('+state.count+' active'+(state.paused?', paused':'')+')';
 }
 
+function _workflowWebBackendState(){
+  const btn=$('browserBackendStatus');
+  const backend=String(btn&&btn.dataset&&btn.dataset.backend||'').trim().toLowerCase();
+  const configured=String(btn&&btn.dataset&&btn.dataset.configuredBackend||'').trim().toLowerCase();
+  const active=configured==='firecrawl';
+  const label=active ? 'Web firecrawl' : 'Web auto';
+  return {
+    available:!!btn,
+    backend:backend|| (active ? 'firecrawl' : 'auto'),
+    configured,
+    active,
+    label,
+  };
+}
+
 function _workflowHeaderMenuSearchEl(){
   return $('workflowHeaderMenuSearch');
 }
@@ -2186,10 +2201,11 @@ function syncWorkflowChip(){
   const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
   const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
+  const webBackend=_workflowWebBackendState();
   const subagents=_workflowSubagentChipLabel();
   value.textContent=approval+' · '+reasoning+' · '+subagents;
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+webBackend.label+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
   badge.title=label;
   badge.setAttribute('aria-label',label);
   workflowRefreshHeaderMenu();
@@ -2243,6 +2259,18 @@ function workflowRefreshHeaderMenu(){
   if(browserPageContext) browserPageContext.textContent='Send readable page text to chat';
   const browserFullPageContext=$('workflowHeaderBrowserFullPageContextAction');
   if(browserFullPageContext) browserFullPageContext.textContent='Send full page context to chat';
+  const webBackendAction=$('workflowHeaderWebBackendAction');
+  if(webBackendAction){
+    const webState=_workflowWebBackendState();
+    const text=webState.active ? 'Return web backend to auto' : 'Pin web backend to Firecrawl';
+    webBackendAction.hidden=!webState.available;
+    webBackendAction.disabled=!webState.available;
+    webBackendAction.textContent=text;
+    webBackendAction.title=webState.available
+      ? text
+      : 'Web backend controls unavailable';
+    webBackendAction.setAttribute('aria-label',webBackendAction.title);
+  }
   if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
   workflowFilterHeaderMenu(window._workflowHeaderMenuQuery||(_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
   workflowRefreshHeaderMenuFooter();
@@ -2367,6 +2395,10 @@ function workflowRunHeaderAction(action){
       if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('fullpagecontext');
       else if(typeof browserSendFullPageContextToChat==='function') browserSendFullPageContextToChat();
       else if(typeof browserSendPageContextToChat==='function') browserSendPageContextToChat({full:true});
+      break;
+    case 'web-backend':
+      if(typeof browserToggleWebBackend==='function') browserToggleWebBackend();
+      else if(typeof executeCommand==='function') executeCommand('/web toggle');
       break;
     case 'subagents':
       if(typeof executeCommand==='function') executeCommand('/subagents open');
