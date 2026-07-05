@@ -1912,6 +1912,7 @@ function _workflowSubagentSummaryState(){
     paused:!!(summary&&summary.paused),
     goal:String(summary&&summary.goal||'').trim(),
     subagentId:String(summary&&summary.subagent_id||'').trim(),
+    sessionId:String(summary&&summary.session_id||'').trim(),
     available:!!summary,
   };
 }
@@ -2140,9 +2141,11 @@ function workflowRefreshHeaderMenu(){
   const menu=$('workflowStatusMenu');
   const badge=$('workflowStatusBadge');
   const menuBtn=$('workflowStatusMenuBtn');
+  const primarySubagent=$('workflowHeaderPrimarySubagentAction');
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
   const subagents=$('workflowHeaderSubagentsAction');
+  const subagentState=_workflowSubagentSummaryState();
   if(menu){
     menu.hidden=!_workflowHeaderMenuOpen;
   }
@@ -2151,6 +2154,17 @@ function workflowRefreshHeaderMenu(){
   }
   if(menuBtn){
     menuBtn.setAttribute('aria-expanded',_workflowHeaderMenuOpen?'true':'false');
+  }
+  if(primarySubagent){
+    const preview=_workflowSubagentPreviewLabel(subagentState);
+    const available=!!subagentState.available;
+    primarySubagent.hidden=!available;
+    primarySubagent.disabled=!available;
+    primarySubagent.textContent=preview ? 'Open first subagent · '+preview : 'Open first subagent';
+    primarySubagent.title=available
+      ? 'Open the first active subagent session'+(preview ? ' · '+preview : '')
+      : 'No active subagents';
+    primarySubagent.setAttribute('aria-label',primarySubagent.title);
   }
   if(browserToggle){
     const drawerOpen=!!(document.body&&document.body.classList.contains('browser-drawer-open'));
@@ -2239,6 +2253,16 @@ function workflowRunHeaderAction(action){
     case 'status':
       if(typeof executeCommand==='function') executeCommand('/workflow status');
       break;
+    case 'subagent-primary': {
+      const state=_workflowSubagentSummaryState();
+      const target=String(state.sessionId||state.subagentId||'').trim();
+      if(target && typeof executeCommand==='function'){
+        executeCommand('/subagents open '+target);
+      }else if(typeof executeCommand==='function'){
+        executeCommand('/subagents open');
+      }
+      break;
+    }
     case 'approval-manual':
       if(typeof saveApprovalMode==='function') void saveApprovalMode('manual');
       else if(typeof executeCommand==='function') executeCommand('/approval manual');

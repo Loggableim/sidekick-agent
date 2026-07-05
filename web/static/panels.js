@@ -9082,6 +9082,7 @@ function _updateWorkflowSubagentSummary(active, paused){
     paused:!!paused,
     goal:String(first.goal||'').trim(),
     subagent_id:String(first.subagent_id||first.session_id||'').trim(),
+    session_id:String(first.session_id||'').trim(),
   };
   if(typeof syncWorkflowChip==='function') syncWorkflowChip();
 }
