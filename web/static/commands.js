@@ -10,7 +10,7 @@ const COMMANDS=[
   {name:'compress',  desc:t('cmd_compress'),       fn:cmdCompress, arg:'[focus topic]', noEcho:true},
   {name:'compact',   desc:t('cmd_compact_alias'),       fn:cmdCompact, noEcho:true},
   {name:'model',     desc:t('cmd_model'),  fn:cmdModel,     arg:'[status|open|list|think|thinking|model_name]', subArgs:'models', noEcho:true},
-  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, research, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|research ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','research','thinking'], noEcho:true},
+  {name:'workflow',  desc:'Summarize and route approval, reasoning, browser, review, image, research, mcp, and subagent controls', fn:cmdWorkflow, arg:'[status|open|approval ...|reasoning ...|browser ...|subagents ...|review ...|image ...|research ...|mcp ...|thinking ...]', subArgs:['status','open','approval','reasoning','browser','subagents','review','image','research','mcp','thinking'], noEcho:true},
   {name:'thinking',  desc:'Open or filter Ollama thinking models', fn:cmdThinking, arg:'[status|open|toggle|list|off|<query>]', subArgs:['status','open','toggle','list','off'], noEcho:true},
   {name:'workspace', desc:t('cmd_workspace'),            fn:cmdWorkspace, arg:'name',           noEcho:true},
   {name:'terminal',  desc:t('cmd_terminal'),             fn:cmdTerminal,                        noEcho:true},
@@ -1460,6 +1460,11 @@ async function cmdWorkflow(args){
     const mode=String((activeBtn&&activeBtn.dataset&&activeBtn.dataset.mode)||'quick').trim().toLowerCase()||'quick';
     return 'Research '+(mode==='deep'?'deep':'quick');
   };
+  const currentMcpLabel=()=>{
+    const value=document.getElementById('mcpStatusValue');
+    const label=String((value&&value.textContent)||'mcp unknown').trim();
+    return label||'mcp unknown';
+  };
   const currentWebBackendLabel=()=>{
     const btn=document.getElementById('browserBackendStatus');
     const configured=String((btn&&btn.dataset&&btn.dataset.configuredBackend)||'').trim().toLowerCase();
@@ -1481,10 +1486,11 @@ async function cmdWorkflow(args){
     return parts.join(', ');
   };
   const loadStatus=async()=>{
-    const [approvalRes, reasoningRes, subagentRes] = await Promise.allSettled([
+    const [approvalRes, reasoningRes, subagentRes, mcpRes] = await Promise.allSettled([
       api('/api/approval'),
       api('/api/reasoning'),
       api('/api/subagents'),
+      api('/api/mcp/servers'),
     ]);
     const approvalMode=approvalRes.status==='fulfilled'
       ? normalizeApprovalMode(getValue(approvalRes.value,['mode','approval_mode','approval','value'],'manual'))
@@ -1509,6 +1515,17 @@ async function cmdWorkflow(args){
       };
       if(typeof syncWorkflowChip==='function') syncWorkflowChip();
     }
+    if(mcpRes.status==='fulfilled'){
+      const servers=Array.isArray(mcpRes.value&&mcpRes.value.servers)?mcpRes.value.servers:[];
+      const connected=servers.filter(server=>server&&server.connected).length;
+      window._workflowMcpSummary={
+        connected:connected,
+        total:servers.length,
+        tools:servers.reduce((sum,server)=>sum+(Number(server&&server.tools)||0),0),
+        offline:Math.max(0,servers.length-connected),
+      };
+      if(typeof syncWorkflowChip==='function') syncWorkflowChip();
+    }
     return {approvalMode, reasoningMode, subagentSummary};
   };
   if(!sub||sub==='status'||sub==='show'||sub==='summary'){
@@ -1520,9 +1537,10 @@ async function cmdWorkflow(args){
       'Model '+currentModelLabel(),
       currentBrowserLabel(),
       currentResearchLabel(),
+      currentMcpLabel(),
       currentWebBackendLabel(),
       status.subagentSummary,
-      '/workflow approval|reasoning|browser|subagents|review|image|research|thinking',
+      '/workflow approval|reasoning|browser|subagents|review|image|research|mcp|thinking',
     ];
       showToast(parts.filter(Boolean).join(' | '));
     }catch(e){
@@ -1582,6 +1600,7 @@ async function cmdWorkflow(args){
     if(!cleaned) return true;
     return cmdImage(cleaned);
   }
+  if(sub==='mcp') return cmdMcp(rest||'open');
   if(sub==='research'){
     const topic=String(rest||'').trim();
     if(typeof browserSetDrawerOpen==='function') browserSetDrawerOpen(true,{force:true,keepViewport:true});
@@ -1602,7 +1621,7 @@ async function cmdWorkflow(args){
     return true;
   }
   if(sub==='thinking') return cmdThinking(rest||'status');
-  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|image <prompt>|research <topic>|thinking <query>');
+  showToast('Use /workflow status|open|approval <mode>|reasoning <mode>|browser <action>|subagents <action>|review <show|chain|single|prompt>|image <prompt>|research <topic>|mcp <open|status>|thinking <query>');
   return true;
 }
 

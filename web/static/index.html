@@ -246,6 +246,10 @@
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="researchModeValue">quick</span>
       </button>
+      <button class="titlebar-approval-badge titlebar-mcp-badge mcp-state-loading" id="mcpStatusBadge" type="button" aria-live="polite" aria-label="MCP loading. Click to open MCP settings." title="MCP loading. Click to open MCP settings." onclick="workflowOpenMcpPanel(event)">
+        <span class="titlebar-approval-dot" aria-hidden="true"></span>
+        <span class="titlebar-approval-value" id="mcpStatusValue">mcp loading</span>
+      </button>
       <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." title="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
         <span id="modelStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">model</span>
       </button>
@@ -293,6 +297,7 @@
         <button class="titlebar-action-btn" id="workflowHeaderBrowserPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserFullPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderWebBackendAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('web-backend')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle web backend</button>
+        <button class="titlebar-action-btn" id="workflowHeaderMcpAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('mcp')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open MCP settings</button>
         <button class="titlebar-action-btn" id="workflowHeaderResearchAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('research')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open research panel</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
         <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>

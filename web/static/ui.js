@@ -2040,6 +2040,96 @@ function workflowOpenResearchPanel(){
   return false;
 }
 
+function _workflowMcpSummaryState(){
+  const summary=window._workflowMcpSummary||null;
+  const loading=!!window._workflowMcpSummaryPromise;
+  return {
+    available:!!(summary && !summary.error),
+    error:!!(summary && summary.error),
+    loading:loading,
+    connected:Number(summary&&summary.connected||0)||0,
+    total:Number(summary&&summary.total||0)||0,
+    tools:Number(summary&&summary.tools||0)||0,
+    offline:Number(summary&&summary.offline||0)||0,
+  };
+}
+
+function _workflowMcpLabel(state){
+  if(!state) state=_workflowMcpSummaryState();
+  if(state.error) return 'mcp unavailable';
+  if(!state.available) return state.loading ? 'mcp loading' : 'mcp unknown';
+  const parts=['mcp '+state.connected+'/'+state.total];
+  if(state.tools) parts.push(state.tools+' tools');
+  if(state.offline) parts.push(state.offline+' offline');
+  return parts.join(' · ');
+}
+
+function _workflowMcpStateClass(state){
+  if(!state) state=_workflowMcpSummaryState();
+  if(state.error) return 'mcp-state-offline';
+  if(!state.available) return state.loading ? 'mcp-state-loading' : 'mcp-state-offline';
+  if(state.total && state.connected===state.total) return 'mcp-state-connected';
+  if(state.connected>0) return 'mcp-state-partial';
+  return 'mcp-state-offline';
+}
+
+function workflowRefreshMcpBadge(force){
+  const badge=$('mcpStatusBadge');
+  const value=$('mcpStatusValue');
+  const state=_workflowMcpSummaryState();
+  if(badge){
+    ['mcp-state-loading','mcp-state-connected','mcp-state-partial','mcp-state-offline'].forEach(cls=>badge.classList.remove(cls));
+    badge.classList.add(_workflowMcpStateClass(state));
+    badge.hidden=false;
+    badge.disabled=false;
+    const label=state.error
+      ? 'MCP unavailable. Click to open MCP settings.'
+      : (state.available
+        ? ('MCP '+state.connected+'/'+state.total+(state.tools ? ', '+state.tools+' tools' : '')+'. Click to open MCP settings.')
+        : 'MCP loading. Click to open MCP settings.');
+    badge.title=label;
+    badge.setAttribute('aria-label',label);
+  }
+  if(value){
+    value.textContent=_workflowMcpLabel(state);
+  }
+  if((force || (!state.available && !state.error)) && !window._workflowMcpSummaryPromise && typeof api==='function'){
+    window._workflowMcpSummaryPromise=api('/api/mcp/servers').then(data=>{
+      const servers=Array.isArray(data&&data.servers)?data.servers:[];
+      const connected=servers.filter(server=>server&&server.connected).length;
+      const tools=servers.reduce((sum,server)=>sum+(Number(server&&server.tools)||0),0);
+      window._workflowMcpSummary={
+        connected:connected,
+        total:servers.length,
+        tools:tools,
+        offline:Math.max(0,servers.length-connected),
+      };
+      return window._workflowMcpSummary;
+    }).catch(()=>{
+      window._workflowMcpSummary={error:true, connected:0, total:0, tools:0, offline:0};
+      return window._workflowMcpSummary;
+    }).finally(()=>{
+      window._workflowMcpSummaryPromise=null;
+      workflowRefreshMcpBadge(false);
+      if(typeof syncWorkflowChip==='function') syncWorkflowChip();
+    });
+  }
+  return state;
+}
+
+function workflowOpenMcpPanel(event){
+  if(event&&typeof event.preventDefault==='function') event.preventDefault();
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  if(typeof executeCommand==='function'){
+    executeCommand('/mcp open');
+  }else if(typeof switchPanel==='function'){
+    switchPanel('settings',{fromRailClick:true});
+    if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+  }
+  workflowRefreshMcpBadge(true);
+  return false;
+}
+
 function _workflowHeaderMenuSearchEl(){
   return $('workflowHeaderMenuSearch');
 }
@@ -2287,17 +2377,19 @@ function syncWorkflowChip(){
   const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
   const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
-  const webBackend=_workflowWebBackendState();
+    const webBackend=_workflowWebBackendState();
   const review=_workflowReviewState();
   const research=_workflowResearchModeState();
+  const mcp=_workflowMcpSummaryState();
   const subagents=_workflowSubagentChipLabel();
   value.textContent=approval+' · '+reasoning+' · '+(research.mode==='deep'?'deep':'quick')+(review.visible ? ' · review' : '')+' · '+subagents;
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
   const reviewLabel=review.visible ? _workflowReviewLabel() : 'local review ready';
   const researchLabel=research.mode==='deep' ? 'deep research' : 'quick search';
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+_workflowMcpLabel(mcp)+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
   badge.title=label;
   badge.setAttribute('aria-label',label);
+  workflowRefreshMcpBadge();
   workflowRefreshResearchBadge();
   workflowRefreshHeaderMenu();
 }
@@ -2380,6 +2472,13 @@ function workflowRefreshHeaderMenu(){
       ? text
       : 'Web backend controls unavailable';
     webBackendAction.setAttribute('aria-label',webBackendAction.title);
+  }
+  const mcpAction=$('workflowHeaderMcpAction');
+  if(mcpAction){
+    const mcpState=_workflowMcpSummaryState();
+    mcpAction.textContent='Open MCP settings';
+    mcpAction.title='Open MCP settings'+(mcpState.available ? ' · '+_workflowMcpLabel(mcpState) : '');
+    mcpAction.setAttribute('aria-label',mcpAction.title);
   }
   if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
   workflowFilterHeaderMenu(window._workflowHeaderMenuQuery||(_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
@@ -2510,6 +2609,10 @@ function workflowRunHeaderAction(action){
       if(typeof browserToggleWebBackend==='function') browserToggleWebBackend();
       else if(typeof executeCommand==='function') executeCommand('/web toggle');
       break;
+    case 'mcp':
+      if(typeof workflowOpenMcpPanel==='function') workflowOpenMcpPanel();
+      else if(typeof executeCommand==='function') executeCommand('/mcp open');
+      break;
     case 'research':
       if(typeof workflowOpenResearchPanel==='function') workflowOpenResearchPanel();
       break;
@@ -2533,6 +2636,8 @@ if(typeof window!=='undefined'){
   window.workflowRunHeaderAction=workflowRunHeaderAction;
   window.workflowCloseHeaderMenu=workflowCloseHeaderMenu;
   window.syncWorkflowChip=syncWorkflowChip;
+  window.workflowRefreshMcpBadge=workflowRefreshMcpBadge;
+  window.workflowOpenMcpPanel=workflowOpenMcpPanel;
 }
 
 function _highlightReasoningOption(effort){
