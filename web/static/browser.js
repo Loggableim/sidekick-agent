@@ -1,6 +1,7 @@
 ﻿let _browserActiveSessionId = null;
 let _browserEventSource = null;
 let _browserPollTimer = null;
+let _browserSyncRetryTimer = null;
 let _browserRequestRev = 0;
 let _browserState = null;
 let _browserMoveThrottle = null;
@@ -620,6 +621,19 @@ function _browserComposerTextarea() {
     || document.querySelector('textarea');
 }
 
+function _browserVisibleUrl() {
+  const stateUrl = String((_browserState && _browserState.url) || '').trim();
+  if (stateUrl) return stateUrl;
+  const input = _browserEl('browserUrlInput');
+  const inputUrl = String(input && input.value || '').trim();
+  if (inputUrl) return inputUrl;
+  const drawer = _browserEl('browserDrawer');
+  const text = String(drawer && drawer.innerText ? drawer.innerText : '').trim();
+  if (!text) return '';
+  const match = text.match(/\bhttps?:\/\/[^\s)]+|\babout:[^\s)]+/i);
+  return match ? String(match[0] || '').trim() : '';
+}
+
 function _browserFallbackReadableText() {
   const drawer = _browserEl('browserDrawer');
   const raw = String(drawer && drawer.innerText ? drawer.innerText : '').trim();
@@ -646,11 +660,11 @@ function _browserFallbackReadableText() {
 
 async function browserSendScreenshotToChat() {
   const state = await _browserEnsureCurrentState();
-  if (!state || !state.url) {
+  const url = String((state && state.url) || _browserVisibleUrl() || '').trim();
+  if (!url) {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
   }
-  const url = state.url;
   const frameUrl = _browserFrameObjectUrl || '';
   const text = '📸 **Browser screenshot**\nURL: ' + url + '\n' + (frameUrl ? '![](' + frameUrl + ')' : '');
   const textarea = _browserComposerTextarea();
@@ -665,7 +679,7 @@ async function browserSendScreenshotToChat() {
 
 async function browserCopyCurrentUrl() {
   const state = await _browserEnsureCurrentState();
-  const url = state && state.url ? String(state.url).trim() : '';
+  const url = String((state && state.url) || _browserVisibleUrl() || '').trim();
   if (!url) {
     if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
@@ -684,13 +698,14 @@ async function browserCopyCurrentUrl() {
 
 async function browserSendPageContextToChat() {
   const state = await _browserEnsureCurrentState();
-  if (!state || !state.url) {
-    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
-    return;
-  }
   const sid = _browserCurrentSessionId();
   if (!sid) {
     if (typeof showToast === 'function') showToast('No chat session selected', 2000, 'error');
+    return;
+  }
+  const visibleUrl = _browserVisibleUrl();
+  if (!visibleUrl && !(state && state.url)) {
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
     return;
   }
   const frameUrl = _browserFrameObjectUrl || '';
@@ -704,7 +719,7 @@ async function browserSendPageContextToChat() {
     const snapshotText = String(data && data.text || '').trim() || _browserFallbackReadableText();
     const snapshotState = data && data.state ? data.state : state;
     const pageTitle = String((snapshotState && snapshotState.title) || '').trim();
-    const pageUrl = String((snapshotState && snapshotState.url) || state.url || '').trim();
+    const pageUrl = String((snapshotState && snapshotState.url) || visibleUrl || state && state.url || '').trim();
     const heading = pageTitle || pageUrl || 'Browser page';
     const lines = [
       '🌐 **' + heading + '**',
@@ -1384,6 +1399,10 @@ function _browserSetImage(state) {
 
 function _browserRender(state, opts = {}) {
   if (!state) return;
+  if (_browserSyncRetryTimer) {
+    clearTimeout(_browserSyncRetryTimer);
+    _browserSyncRetryTimer = null;
+  }
   _browserState = state;
   _browserActiveSessionId = String(state.session_id || _browserCurrentSessionId() || '');
   _browserRecordActionTrace(state);
@@ -1447,6 +1466,32 @@ function _browserCloseStream() {
     clearTimeout(_browserPollTimer);
     _browserPollTimer = null;
   }
+  if (_browserSyncRetryTimer) {
+    clearTimeout(_browserSyncRetryTimer);
+    _browserSyncRetryTimer = null;
+  }
+}
+
+function _browserScheduleSyncRetry(delayMs = 1200) {
+  if (_browserSyncRetryTimer) return;
+  if (!_browserPanelVisible()) return;
+  const sessionId = _browserCurrentSessionId();
+  if (!sessionId) return;
+  _browserSyncRetryTimer = setTimeout(async function retry() {
+    _browserSyncRetryTimer = null;
+    if (!_browserPanelVisible()) return;
+    const sid = _browserCurrentSessionId();
+    if (!sid) return;
+    const state = _browserState;
+    if (state && state.session_id === sid && (state.url || state.frame_rev)) return;
+    try {
+      await browserSyncToCurrentSession({force: true, allowPending: true});
+    } catch (_) {}
+    const nextState = _browserState;
+    if (_browserPanelVisible() && !(nextState && nextState.session_id === sid && (nextState.url || nextState.frame_rev))) {
+      _browserScheduleSyncRetry(Math.min(delayMs + 1000, 5000));
+    }
+  }, delayMs);
 }
 
 function browserPrepareSessionSwitch() {
@@ -1635,6 +1680,8 @@ async function browserSyncToCurrentSession(opts = {}) {
     const state = await _browserFetchState(sessionId);
     if (state && visible) {
       _browserStartStream(sessionId);
+    } else if (visible) {
+      _browserScheduleSyncRetry();
     }
     return state;
   }
