@@ -39,6 +39,7 @@ let _browserDiffTimer = null;
 let _browserTraceThumbnails = [];
 let _browserChatContextActive = false;
 let _browserPrevFrameRev = '';
+let _browserHeaderMenuOpen = false;
 
 function _browserEl(id) {
   return document.getElementById(id);
@@ -789,6 +790,113 @@ function _browserUpdateHeaderBadge() {
   const label = parts.join(' · ') + '. Click to toggle the drawer.';
   badge.setAttribute('title', label);
   badge.setAttribute('aria-label', label);
+  _browserRefreshHeaderMenu();
+}
+
+function _browserRefreshHeaderMenu() {
+  const drawerBtn = _browserEl('browserHeaderDrawerAction');
+  const permissionBtn = _browserEl('browserHeaderPermissionAction');
+  const exploreBtn = _browserEl('browserHeaderExploreAction');
+  const splitBtn = _browserEl('browserHeaderSplitAction');
+  const fullscreenBtn = _browserEl('browserHeaderFullscreenAction');
+  const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+
+  if (drawerBtn) drawerBtn.textContent = _browserDrawerOpen ? 'Close drawer' : 'Open drawer';
+  if (permissionBtn) {
+    permissionBtn.textContent = _browserPermissionMode === 'control'
+      ? 'Pause agent control'
+      : (_browserPermissionMode === 'read' ? 'Resume agent control' : 'Enable agent control');
+  }
+  if (exploreBtn) {
+    exploreBtn.textContent = _browserExploreMode ? 'Switch to Follow mode' : 'Switch to Explore mode';
+  }
+  if (splitBtn) {
+    splitBtn.textContent = _browserSplitScreen ? 'Exit split view' : 'Split browser and chat';
+  }
+  if (fullscreenBtn) {
+    fullscreenBtn.textContent = _browserFullscreen ? 'Exit fullscreen' : 'Maximize browser';
+  }
+  if (screenshotBtn) {
+    screenshotBtn.textContent = 'Send screenshot to chat';
+  }
+  if (menuBtn) {
+    menuBtn.setAttribute('aria-expanded', _browserHeaderMenuOpen ? 'true' : 'false');
+  }
+}
+
+function _browserCloseHeaderMenu() {
+  const menu = _browserEl('browserStatusMenu');
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+  if (menu) menu.hidden = true;
+  if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
+  if (_browserHeaderMenuOpen) {
+    document.removeEventListener('click', _browserHeaderMenuOutsideClick, true);
+    document.removeEventListener('keydown', _browserHeaderMenuKeydown, true);
+  }
+  _browserHeaderMenuOpen = false;
+}
+
+function _browserHeaderMenuOutsideClick(event) {
+  if (!_browserHeaderMenuOpen) return;
+  const menu = _browserEl('browserStatusMenu');
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+  const target = event && event.target;
+  if (menu && target && menu.contains(target)) return;
+  if (menuBtn && target && menuBtn.contains(target)) return;
+  _browserCloseHeaderMenu();
+}
+
+function _browserHeaderMenuKeydown(event) {
+  if (!event) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    _browserCloseHeaderMenu();
+  }
+}
+
+function browserToggleHeaderMenu(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+  const menu = _browserEl('browserStatusMenu');
+  if (!menu) return false;
+  if (_browserHeaderMenuOpen) {
+    _browserCloseHeaderMenu();
+    return false;
+  }
+  _browserRefreshHeaderMenu();
+  menu.hidden = false;
+  _browserHeaderMenuOpen = true;
+  const menuBtn = _browserEl('browserStatusMenuBtn');
+  if (menuBtn) menuBtn.setAttribute('aria-expanded', 'true');
+  document.addEventListener('click', _browserHeaderMenuOutsideClick, true);
+  document.addEventListener('keydown', _browserHeaderMenuKeydown, true);
+  return false;
+}
+
+function browserRunHeaderAction(action) {
+  _browserCloseHeaderMenu();
+  switch (String(action || '')) {
+    case 'drawer-toggle':
+      browserToggleDrawer();
+      break;
+    case 'permission':
+      void browserTogglePermission();
+      break;
+    case 'explore':
+      browserToggleExploreMode();
+      break;
+    case 'split':
+      browserToggleSplit();
+      break;
+    case 'fullscreen':
+      browserToggleFullscreen();
+      break;
+    case 'screenshot':
+      browserSendScreenshotToChat();
+      break;
+  }
+  return false;
 }
 
 function browserRenderPermission(permission) {
@@ -1188,6 +1296,7 @@ function _browserCloseStream() {
 }
 
 function browserPrepareSessionSwitch() {
+  _browserCloseHeaderMenu();
   _browserCloseStream();
   _browserRequestRev += 1;
   _browserActiveSessionId = null;
@@ -1212,6 +1321,7 @@ function browserPrepareSessionSwitch() {
 function browserSetDrawerOpen(open, opts = {}) {
   const nextOpen = !!open;
   const prevOpen = _browserDrawerOpen;
+  _browserCloseHeaderMenu();
   _browserDrawerOpen = nextOpen;
   localStorage.setItem('sidekick-browser-drawer-open', nextOpen ? '1' : '0');
   document.body.classList.toggle('browser-drawer-open', nextOpen);
@@ -1247,6 +1357,7 @@ function browserSetDrawerOpen(open, opts = {}) {
 }
 
 function browserToggleDrawer() {
+  _browserCloseHeaderMenu();
   browserSetDrawerOpen(!_browserDrawerOpen, {force: true});
 }
 
@@ -1873,6 +1984,8 @@ window.browserPanelActivated = browserPanelActivated;
 window.browserPanelDeactivated = browserPanelDeactivated;
 window.browserSetDrawerOpen = browserSetDrawerOpen;
 window.browserToggleDrawer = browserToggleDrawer;
+window.browserToggleHeaderMenu = browserToggleHeaderMenu;
+window.browserRunHeaderAction = browserRunHeaderAction;
 window.browserTogglePermission = browserTogglePermission;
 window.browserStopPermission = browserStopPermission;
 window.browserRenderPermission = browserRenderPermission;
