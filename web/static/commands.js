@@ -1502,7 +1502,26 @@ async function cmdWorkflow(args){
     }
     return true;
   }
-  if(sub==='open'||sub==='settings'||sub==='system'){
+  if(sub==='open'){
+    if(typeof workflowToggleHeaderMenu==='function'){
+      const menu=document.getElementById('workflowStatusMenu');
+      if(menu && menu.hidden){
+        workflowToggleHeaderMenu({
+          preventDefault:function(){},
+          stopPropagation:function(){},
+        });
+      }
+    }else if(typeof switchPanel==='function'){
+      switchPanel('settings',{fromRailClick:true});
+      if(typeof switchSettingsSection==='function') switchSettingsSection('system');
+      if(typeof browserSetDrawerOpen==='function' && !(document.body&&document.body.classList.contains('browser-drawer-open'))){
+        browserSetDrawerOpen(true,{force:true,keepViewport:true});
+      }
+    }
+    showToast('Workflow controls opened');
+    return true;
+  }
+  if(sub==='settings'||sub==='system'){
     if(typeof switchPanel==='function') switchPanel('settings',{fromRailClick:true});
     if(typeof switchSettingsSection==='function') switchSettingsSection('system');
     if(typeof browserSetDrawerOpen==='function' && !(document.body&&document.body.classList.contains('browser-drawer-open'))){
@@ -1512,7 +1531,16 @@ async function cmdWorkflow(args){
     return true;
   }
   if(sub==='approval') return cmdApproval(rest||'status');
-  if(sub==='reasoning') return cmdReasoning(rest||'status');
+  if(sub==='reasoning'){
+    if(!rest||rest==='status'||rest==='show'){
+      return cmdReasoning('status');
+    }
+    if(rest==='open'){
+      if(typeof toggleReasoningDropdown==='function') toggleReasoningDropdown();
+      return true;
+    }
+    return cmdReasoning(rest);
+  }
   if(sub==='browser') return cmdBrowser(rest||'status');
   if(sub==='subagents') return cmdSubagents(rest||'status');
   if(sub==='thinking') return cmdThinking(rest||'status');

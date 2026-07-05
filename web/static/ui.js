@@ -1903,6 +1903,8 @@ function syncReasoningChip(){
   _applyReasoningChip(_currentReasoningEffort, {allowed_efforts:_currentReasoningAllowedEfforts});
 }
 
+let _workflowHeaderMenuOpen=false;
+
 function syncWorkflowChip(){
   const badge=$('workflowStatusBadge');
   const value=$('workflowStatusValue');
@@ -1920,11 +1922,143 @@ function syncWorkflowChip(){
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
   const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
   value.textContent=approval+' · '+reasoning;
-  badge.classList.remove('approval-mode-manual','approval-mode-smart','approval-mode-off');
-  badge.classList.add('approval-mode-'+approval);
+  badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
   const label='Workflow: approval '+approval+', reasoning '+reasoning+', model '+model+', browser '+browser+'. Click to show workflow status.';
   badge.title=label;
   badge.setAttribute('aria-label',label);
+  workflowRefreshHeaderMenu();
+}
+
+function workflowRefreshHeaderMenu(){
+  const menu=$('workflowStatusMenu');
+  const badge=$('workflowStatusBadge');
+  const menuBtn=$('workflowStatusMenuBtn');
+  const browserToggle=$('workflowHeaderBrowserToggleAction');
+  const browserPermission=$('workflowHeaderBrowserPermissionAction');
+  if(menu){
+    menu.hidden=!_workflowHeaderMenuOpen;
+  }
+  if(badge){
+    badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
+  }
+  if(menuBtn){
+    menuBtn.setAttribute('aria-expanded',_workflowHeaderMenuOpen?'true':'false');
+  }
+  if(browserToggle){
+    const drawerOpen=!!(document.body&&document.body.classList.contains('browser-drawer-open'));
+    browserToggle.textContent=drawerOpen ? 'Close browser drawer' : 'Open browser drawer';
+  }
+  if(browserPermission){
+    const permissionBtn=$('browserPermissionBtn');
+    const mode=permissionBtn&&permissionBtn.dataset&&permissionBtn.dataset.state
+      ? String(permissionBtn.dataset.state)
+      : ((permissionBtn&&permissionBtn.getAttribute('aria-pressed')==='true') ? 'control' : 'none');
+    browserPermission.textContent=mode==='control'
+      ? 'Pause browser control'
+      : (mode==='read' ? 'Resume browser control' : 'Enable browser control');
+  }
+}
+
+function workflowCloseHeaderMenu(){
+  const menu=$('workflowStatusMenu');
+  if(!_workflowHeaderMenuOpen && (!menu || menu.hidden)) return;
+  _workflowHeaderMenuOpen=false;
+  if(menu) menu.hidden=true;
+  const menuBtn=$('workflowStatusMenuBtn');
+  if(menuBtn) menuBtn.setAttribute('aria-expanded','false');
+  document.removeEventListener('click', _workflowHeaderMenuOutsideClick, true);
+  document.removeEventListener('keydown', _workflowHeaderMenuKeydown, true);
+  workflowRefreshHeaderMenu();
+}
+
+function _workflowHeaderMenuOutsideClick(event){
+  const menu=$('workflowStatusMenu');
+  const btn=$('workflowStatusMenuBtn');
+  if(!menu || menu.hidden) return;
+  if(menu.contains(event.target)) return;
+  if(btn && btn.contains(event.target)) return;
+  workflowCloseHeaderMenu();
+}
+
+function _workflowHeaderMenuKeydown(event){
+  if(String(event&&event.key||'').toLowerCase()==='escape') workflowCloseHeaderMenu();
+}
+
+function workflowToggleHeaderMenu(event){
+  if(event&&typeof event.preventDefault==='function') event.preventDefault();
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const menu=$('workflowStatusMenu');
+  if(!menu) return false;
+  if(_workflowHeaderMenuOpen){
+    workflowCloseHeaderMenu();
+    return false;
+  }
+  if(typeof closeModelDropdown==='function') closeModelDropdown();
+  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
+  if(typeof browserToggleHeaderMenu==='function'){
+    const browserMenu=$('browserStatusMenu');
+    if(browserMenu && !browserMenu.hidden) browserToggleHeaderMenu();
+  }
+  _workflowHeaderMenuOpen=true;
+  menu.hidden=false;
+  workflowRefreshHeaderMenu();
+  document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
+  document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
+  return false;
+}
+
+function workflowRunHeaderAction(action){
+  workflowCloseHeaderMenu();
+  switch(String(action||'')){
+    case 'status':
+      if(typeof executeCommand==='function') executeCommand('/workflow status');
+      break;
+    case 'approval-manual':
+      if(typeof saveApprovalMode==='function') void saveApprovalMode('manual');
+      else if(typeof executeCommand==='function') executeCommand('/approval manual');
+      break;
+    case 'approval-smart':
+      if(typeof saveApprovalMode==='function') void saveApprovalMode('smart');
+      else if(typeof executeCommand==='function') executeCommand('/approval smart');
+      break;
+    case 'approval-off':
+      if(typeof saveApprovalMode==='function') void saveApprovalMode('off');
+      else if(typeof executeCommand==='function') executeCommand('/approval off');
+      break;
+    case 'model':
+      if(typeof toggleModelDropdown==='function') toggleModelDropdown();
+      break;
+    case 'reasoning':
+      if(typeof toggleReasoningDropdown==='function') toggleReasoningDropdown();
+      break;
+    case 'thinking':
+      if(typeof executeCommand==='function') executeCommand('/thinking open');
+      break;
+    case 'browser-toggle':
+      if(typeof browserToggleDrawer==='function') browserToggleDrawer();
+      break;
+    case 'browser-permission':
+      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('permission');
+      else if(typeof browserTogglePermission==='function') browserTogglePermission();
+      break;
+    case 'browser-menu':
+      if(typeof browserToggleHeaderMenu==='function'){
+        const browserMenu=$('browserStatusMenu');
+        if(browserMenu && browserMenu.hidden) browserToggleHeaderMenu();
+      }
+      break;
+    case 'subagents':
+      if(typeof executeCommand==='function') executeCommand('/subagents open');
+      break;
+  }
+  return false;
+}
+
+if(typeof window!=='undefined'){
+  window.workflowToggleHeaderMenu=workflowToggleHeaderMenu;
+  window.workflowRunHeaderAction=workflowRunHeaderAction;
+  window.workflowCloseHeaderMenu=workflowCloseHeaderMenu;
+  window.syncWorkflowChip=syncWorkflowChip;
 }
 
 function _highlightReasoningOption(effort){
