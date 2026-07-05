@@ -1972,6 +1972,7 @@ function _workflowHeaderMenuClearActiveButton(){
     btn.style.removeProperty('box-shadow');
   });
   window._workflowHeaderMenuActiveButton=null;
+  workflowRefreshHeaderMenuFooter();
 }
 
 function _workflowHeaderMenuSetActiveButton(btn){
@@ -1997,6 +1998,7 @@ function _workflowHeaderMenuSetActiveButton(btn){
   if(activeBtn && typeof activeBtn.scrollIntoView==='function'){
     try{ activeBtn.scrollIntoView({block:'nearest'}); }catch(_){}
   }
+  workflowRefreshHeaderMenuFooter();
   return activeBtn;
 }
 
@@ -2018,6 +2020,26 @@ function _workflowHeaderMenuMoveSelection(delta){
   if(idx<0) idx=0;
   else idx=(idx+delta+visible.length)%visible.length;
   return _workflowHeaderMenuSetActiveButton(visible[idx]);
+}
+
+function workflowRefreshHeaderMenuFooter(){
+  const selection=$('workflowHeaderMenuSelection');
+  const shortcuts=$('workflowHeaderMenuShortcuts');
+  const visible=_workflowHeaderMenuVisibleButtons();
+  const active=window._workflowHeaderMenuActiveButton||_workflowHeaderMenuFirstVisibleButton();
+  if(selection){
+    if(!visible.length){
+      selection.textContent='No matching actions';
+    }else{
+      const label=String((active&&active.textContent)||'').trim()||'First action';
+      selection.textContent=visible.length+' actions · '+label;
+    }
+  }
+  if(shortcuts){
+    shortcuts.textContent=visible.length>1
+      ? 'Enter to run · Esc to close · ↑↓ to move'
+      : 'Enter to run · Esc to close';
+  }
 }
 
 function workflowFilterHeaderMenu(query){
@@ -2058,6 +2080,7 @@ function workflowFilterHeaderMenu(query){
   }else{
     _workflowHeaderMenuClearActiveButton();
   }
+  workflowRefreshHeaderMenuFooter();
 }
 
 function workflowFocusHeaderMenuSearch(){
@@ -2162,6 +2185,7 @@ function workflowRefreshHeaderMenu(){
   if(browserFullPageContext) browserFullPageContext.textContent='Send full page context to chat';
   if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
   workflowFilterHeaderMenu(window._workflowHeaderMenuQuery||(_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
+  workflowRefreshHeaderMenuFooter();
 }
 
 function workflowCloseHeaderMenu(){
@@ -2180,6 +2204,7 @@ function workflowCloseHeaderMenu(){
   document.removeEventListener('click', _workflowHeaderMenuOutsideClick, true);
   document.removeEventListener('keydown', _workflowHeaderMenuKeydown, true);
   workflowRefreshHeaderMenu();
+  workflowRefreshHeaderMenuFooter();
 }
 function _workflowHeaderMenuOutsideClick(event){
   const menu=$('workflowStatusMenu');
@@ -2215,6 +2240,7 @@ function workflowToggleHeaderMenu(event){
   document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
   document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
   workflowFilterHeaderMenu((_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
+  workflowRefreshHeaderMenuFooter();
   setTimeout(workflowFocusHeaderMenuSearch,0);
   return false;
 }
