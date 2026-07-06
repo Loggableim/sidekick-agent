@@ -402,6 +402,79 @@ def test_web_server_session_endpoints(monkeypatch, tmp_path):
         thread.join(timeout=5)
 
 
+def test_web_server_session_delete_clears_legacy_root_mirror(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
+    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
+    server = create_server()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        from web.api.config import SESSION_DIR, clear_session_dir, set_session_dir
+        from web.api.models import Session
+        from web.api.space_engine import clear_active_workspace, get_or_create_workspace, set_active_workspace
+
+        workspace = get_or_create_workspace("color")
+        set_active_workspace(workspace.slug)
+        set_session_dir(str(workspace.sessions_dir))
+        session_id = "mirrorcleanup"
+        session = Session(
+            session_id=session_id,
+            title="Mirror Cleanup",
+            workspace=str(workspace.root),
+            workspace_slug=workspace.slug,
+            messages=[{"role": "user", "content": "hello"}],
+            created_at=10.0,
+            updated_at=11.0,
+        )
+        session.save()
+
+        workspace_file = workspace.sessions_dir / f"{session_id}.json"
+        legacy_file = SESSION_DIR / f"{session_id}.json"
+        assert workspace_file.exists()
+        assert legacy_file.exists()
+
+        host, port = server.server_address[:2]
+        headers = {"Content-Type": "application/json"}
+
+        before_workspace = json.loads(
+            urllib.request.urlopen(f"http://{host}:{port}/api/sessions?workspace=color", timeout=5).read().decode("utf-8")
+        )
+        before_default = json.loads(
+            urllib.request.urlopen(f"http://{host}:{port}/api/sessions?workspace=default", timeout=5).read().decode("utf-8")
+        )
+        assert any(row["session_id"] == session_id for row in before_workspace["sessions"])
+        assert any(row["session_id"] == session_id for row in before_default["sessions"])
+
+        delete_req = urllib.request.Request(
+            f"http://{host}:{port}/api/session/delete?workspace=color",
+            data=json.dumps({"session_id": session_id}).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(delete_req, timeout=5) as response:
+            deleted = json.loads(response.read().decode("utf-8"))
+        assert deleted["ok"] is True
+
+        assert not workspace_file.exists()
+        assert not legacy_file.exists()
+
+        after_workspace = json.loads(
+            urllib.request.urlopen(f"http://{host}:{port}/api/sessions?workspace=color", timeout=5).read().decode("utf-8")
+        )
+        after_default = json.loads(
+            urllib.request.urlopen(f"http://{host}:{port}/api/sessions?workspace=default", timeout=5).read().decode("utf-8")
+        )
+        assert after_workspace["sessions"] == []
+        assert after_default["sessions"] == []
+    finally:
+        clear_session_dir()
+        clear_active_workspace()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
 def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
@@ -462,3 +535,48 @@ def test_web_server_root_serves_html(monkeypatch, tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_web_server_static_assets_cache_versioned_files(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
+    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
+    server = create_server()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[:2]
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/static/sessions.js?v=test",
+            timeout=5,
+        ) as response:
+            assert response.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+            assert "javascript" in response.headers.get("Content-Type", "")
+
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/static/browser-control-fixture.html",
+            timeout=5,
+        ) as response:
+            assert response.headers.get("Cache-Control") == "no-store"
+            assert "text/html" in response.headers.get("Content-Type", "")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_kanban_path_helpers_ignore_missing_env_vars(monkeypatch, tmp_path):
+    from cli import kanban_db as kb
+    from runtime._compat import shim_constants
+
+    root = (tmp_path / "hermes-root").resolve()
+    monkeypatch.setattr(shim_constants, "get_default_hermes_root", lambda: root)
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_DB", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", raising=False)
+
+    assert kb.kanban_home() == root
+    assert kb.kanban_db_path() == root / "kanban.db"
+    assert kb.workspaces_root() == root / "kanban" / "workspaces"
+    assert kb.get_current_board() == kb.DEFAULT_BOARD
