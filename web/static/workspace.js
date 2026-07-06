@@ -161,7 +161,7 @@ let _loadDirRev = 0;
 const _LOAD_DIR_TIMEOUT_MS = 8000;
 const _MAX_EXPANDED_DIR_PREFETCH = 16;
 
-async function _apiWithTimeout(path, timeoutMs) {
+async function _workspaceApiWithTimeout(path, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs || _LOAD_DIR_TIMEOUT_MS);
   try {
@@ -192,27 +192,56 @@ function _restoreExpandedDirs(){
   }catch(e){S._expandedDirs=new Set();}
 }
 
-async function loadDir(path){
+let _pendingWorkspaceTreeRefresh = null;
+
+function _workspaceTreeVisibleForAutoRefresh(){
+  const panel = $('chatFileTreePanel');
+  if (panel && panel.classList.contains('file-tree-panel--minimized')) return false;
+  if (document.body && document.body.classList.contains('browser-drawer-open') && !document.body.classList.contains('browser-split') && !document.body.classList.contains('browser-maximized')) return false;
+  const box = $('fileTree');
+  if (!box) return false;
+  const style = getComputedStyle(box);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  const rect = box.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function flushPendingWorkspaceTreeRefresh(){
+  const pending = _pendingWorkspaceTreeRefresh;
+  if (!pending || !S.session || pending.session_id !== S.session.session_id) return false;
+  if (!_workspaceTreeVisibleForAutoRefresh()) return false;
+  _pendingWorkspaceTreeRefresh = null;
+  void loadDir(pending.path || '.');
+  return true;
+}
+
+async function loadDir(path, opts){
   if(!S.session)return;
+  const requestedPath = path || '.';
+  if (opts && opts.auto && !_workspaceTreeVisibleForAutoRefresh()) {
+    _pendingWorkspaceTreeRefresh = {session_id: S.session.session_id, path: requestedPath};
+    S.currentDir = requestedPath;
+    return;
+  }
   const loadRev = ++_loadDirRev;
   const sessionId = S.session.session_id;
   try{
-    if(!path||path==='.'){
+    if(!requestedPath||requestedPath==='.'){
       S._dirCache={};
       _restoreExpandedDirs();  // restore per-workspace expanded state on root load
     }
-    S.currentDir=path||'.';
-    const data=await _apiWithTimeout(`/api/list?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}`, _LOAD_DIR_TIMEOUT_MS);
+    S.currentDir=requestedPath;
+    const data=await _workspaceApiWithTimeout(`/api/list?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(requestedPath)}`, _LOAD_DIR_TIMEOUT_MS);
     if(!_isCurrentLoadDir(loadRev, sessionId)) return;
     S.entries=data.entries||[];renderBreadcrumb();renderFileTree();
     // Pre-fetch contents of restored expanded dirs so they render without a second click
     // (parallelized — avoids serial waterfall when multiple dirs are expanded)
-    if(!path||path==='.'){
+    if(!requestedPath||requestedPath==='.'){
       const expanded=S._expandedDirs||new Set();
       const pending=[...expanded].filter(dirPath=>!S._dirCache[dirPath]).slice(0, _MAX_EXPANDED_DIR_PREFETCH);
       if(pending.length){
         const results=await Promise.all(pending.map(dirPath=>
-          _apiWithTimeout(`/api/list?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(dirPath)}`, _LOAD_DIR_TIMEOUT_MS)
+          _workspaceApiWithTimeout(`/api/list?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(dirPath)}`, _LOAD_DIR_TIMEOUT_MS)
             .then(dc=>({dirPath,entries:dc.entries||[]}))
             .catch(()=>({dirPath,entries:[]}))
         ));
@@ -229,7 +258,7 @@ async function loadDir(path){
       }
     }
     // Fetch git info for workspace root (non-blocking)
-    if(!path||path==='.') _refreshGitBadge();
+    if(!requestedPath||requestedPath==='.') _refreshGitBadge();
   }catch(e){
     const currentSessionId = S.session && S.session.session_id;
     const msg = String((e && e.message) || '');
@@ -254,6 +283,8 @@ async function loadDir(path){
     console.warn('loadDir',e);
   }
 }
+
+window.flushPendingWorkspaceTreeRefresh = flushPendingWorkspaceTreeRefresh;
 
 async function _refreshGitBadge(){
   const badge=$('gitBadge');

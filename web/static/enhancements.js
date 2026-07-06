@@ -525,6 +525,10 @@
 
   // ─── FEATURE: #28 DATE GROUPING ──────────────────────────────
   function enhanceDateGrouping() {
+    // Native sessions.js owns grouping/virtualized rendering now. The legacy
+    // MutationObserver below clones and replaces the whole list, dropping event
+    // bindings and causing major jank during space/session switches.
+    return;
     // Patch into the session list render function
     // The existing function renderSessions() creates session-item elements
     // We wrap them in date-group sections after render
@@ -604,6 +608,10 @@
 
   // ─── FEATURE: #29 INFINITE SCROLL ────────────────────────────
   function setupInfiniteScroll() {
+    // Native session rendering is already scoped/virtualized. This legacy
+    // infinite-scroll path calls /api/sessions with ignored limit/offset params
+    // and can repeatedly request the full list while the user scrolls.
+    return;
     const sentinel = EL('div', { className: 'scroll-sentinel', style: { height: '1px' } });
     const list = document.getElementById('sessionList');
     if (!list) return;

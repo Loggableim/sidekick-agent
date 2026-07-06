@@ -9406,6 +9406,23 @@ class GatewayRunner:
             state = mgr.resume()
             if state is None:
                 return t("gateway.goal.no_resume")
+            try:
+                adapter = self.adapters.get(event.source.platform) if event.source else None
+                _quick_key = self._session_key_for_source(event.source) if event.source else None
+                if adapter and _quick_key:
+                    self._clear_goal_pending_continuations(_quick_key, adapter)
+                    prompt = mgr.next_continuation_prompt()
+                    if prompt:
+                        resume_event = MessageEvent(
+                            text=prompt,
+                            message_type=MessageType.TEXT,
+                            source=event.source,
+                            message_id=event.message_id,
+                            channel_prompt=event.channel_prompt,
+                        )
+                        self._enqueue_fifo(_quick_key, resume_event, adapter)
+            except Exception as exc:
+                logger.debug("goal resume enqueue failed: %s", exc)
             return t("gateway.goal.resumed", goal=state.goal)
 
         if lower in {"clear", "stop", "done"}:

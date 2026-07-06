@@ -38,7 +38,8 @@ const COMMANDS=[
   {name:'web',       desc:'Set web backend (auto/firecrawl/other)', fn:cmdWeb, arg:'[status|toggle|auto|parallel|firecrawl|tavily|exa|searxng|brave-free|ddgs]', subArgs:['status','toggle','auto','parallel','firecrawl','tavily','exa','searxng','brave-free','ddgs'], noEcho:true},
   {name:'mcp',       desc:'Inspect MCP servers and open system settings', fn:cmdMcp, arg:'[status|open|refresh|tools|toggle|enable|disable|delete]', subArgs:['status','open','refresh','tools','toggle','enable','disable','delete'], noEcho:true},
   {name:'subagents', desc:'Inspect active subagents and pause spawning', fn:cmdSubagents, arg:'[status|open|open <id>|refresh|pause|resume|stop <id>|interrupt <id>]', subArgs:['status','open','refresh','pause','resume','stop','interrupt'], noEcho:true},
-  {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext|extract', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot','pagecontext','extract'], noEcho:true},
+  {name:'browser',   desc:'Open or control the browser drawer', fn:cmdBrowser, arg:'open|close|toggle|status|permission|explore|split|fullscreen|navigate|back|forward|reload|stop|screenshot|pagecontext|extract|webui-smoke', subArgs:['open','close','toggle','status','permission','explore','split','fullscreen','navigate','back','forward','reload','stop','screenshot','pagecontext','extract','webui-smoke'], noEcho:true},
+  {name:'webui-smoke', desc:'Run WebUI browser smoke with visual screenshot evidence', fn:cmdWebuiSmoke, noEcho:true},
   {name:'review',    desc:'Review current local changes', fn:cmdReview, arg:'[open|show|status|prompt|chain|single]', subArgs:['open','show','status','prompt','chain','single'], noEcho:true},
   {name:'yolo', desc:t('cmd_yolo'), fn:cmdYolo, noEcho:true},
   {name:'branch', desc:t('cmd_branch'), fn:cmdBranch, arg:'[name]', noEcho:true},
@@ -323,6 +324,15 @@ function cmdHelp(){
   S.messages.push(msg);
   renderMessages();
   showToast(t('type_slash'));
+}
+
+async function cmdWebuiSmoke(){
+  if(typeof window.browserRunWebuiSmokeToChat==='function'){
+    await window.browserRunWebuiSmokeToChat();
+    return true;
+  }
+  if(typeof showToast==='function') showToast('WebUI smoke unavailable',2200,'error');
+  return true;
 }
 
 function cmdClear(){
@@ -2123,6 +2133,11 @@ async function cmdBrowser(args){
   if(arg==='screenshot'||arg==='shot'||arg==='capture'){ openDrawer(); screenshot(); return true; }
   if(arg==='pagecontext'||arg==='context'||arg==='text'){ openDrawer(); pageContext(); return true; }
   if(arg==='extract'||arg==='fullcontext'||arg==='fullpagecontext'){ openDrawer(); fullPageContext(); return true; }
+  if(arg==='webui-smoke'||arg==='smoke'){
+    if(typeof window.browserRunWebuiSmokeToChat==='function') return window.browserRunWebuiSmokeToChat();
+    showToast('WebUI smoke unavailable', 2200, 'error');
+    return true;
+  }
   if(arg.startsWith('navigate ')){
     navigateTo(arg.slice('navigate '.length));
     return true;
@@ -3967,6 +3982,11 @@ async function cmdBrowser(args){
   if(arg==='screenshot'||arg==='shot'||arg==='capture'){ openDrawer(); screenshot(); return true; }
   if(arg==='pagecontext'||arg==='context'||arg==='text'){ openDrawer(); pageContext(); return true; }
   if(arg==='extract'||arg==='fullcontext'||arg==='fullpagecontext'){ openDrawer(); fullPageContext(); return true; }
+  if(arg==='webui-smoke'||arg==='smoke'){
+    if(typeof window.browserRunWebuiSmokeToChat==='function') return window.browserRunWebuiSmokeToChat();
+    showToast('WebUI smoke unavailable', 2200, 'error');
+    return true;
+  }
   if(arg.startsWith('navigate ')){
     navigateTo(arg.slice('navigate '.length));
     return true;
@@ -4247,6 +4267,7 @@ HANDLERS.thinking = cmdThinking;
 HANDLERS.exec = cmdExec;
 HANDLERS.image = cmdImage;
 HANDLERS.review = cmdReview;
+HANDLERS['webui-smoke'] = cmdWebuiSmoke;
 
 if(typeof window!=='undefined'){
   const _origActionChipClick=window.actionChipClick;

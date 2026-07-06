@@ -726,14 +726,36 @@ def safe_resolve_ws(root: Path, requested: str) -> Path:
     return resolved
 
 
+def _safe_is_symlink(path: Path) -> bool:
+    try:
+        return path.is_symlink()
+    except OSError:
+        return False
+
+
+def _safe_is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _safe_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def list_dir(workspace: Path, rel: str='.'):
     target = safe_resolve_ws(workspace, rel)
     if not target.is_dir():
         raise FileNotFoundError(f"Not a directory: {rel}")
     ws_resolved = workspace.resolve()
     entries = []
-    for item in sorted(target.iterdir(), key=lambda p: (not p.is_symlink(), p.is_file(), p.name.lower())):
-        if item.is_symlink():
+    for item in sorted(target.iterdir(), key=lambda p: (not _safe_is_symlink(p), _safe_is_file(p), p.name.lower())):
+        is_link = _safe_is_symlink(item)
+        if is_link:
             # Resolve the symlink target and check if it stays within workspace
             try:
                 link_target = item.resolve()
@@ -778,8 +800,8 @@ def list_dir(workspace: Path, rel: str='.'):
             entry_path = item.name
             if rel and rel != '.':
                 entry_path = rel + '/' + item.name
-            is_dir = item.is_dir()
-            is_file = item.is_file()
+            is_dir = _safe_is_dir(item)
+            is_file = _safe_is_file(item)
             size = None
             if is_file:
                 try:

@@ -309,6 +309,7 @@ def _payload(
     action: str,
     message: str,
     state: Any = None,
+    session_id: str = "",
     error: str | None = None,
     kickoff_prompt: str | None = None,
     decision: Dict[str, Any] | None = None,
@@ -319,7 +320,7 @@ def _payload(
         "ok": bool(ok),
         "action": action,
         "message": message,
-        "goal": _state_payload(state),
+        "goal": _state_payload(state, session_id=session_id),
     }
     if error:
         body["error"] = error
@@ -472,18 +473,19 @@ def goal_command_payload(
     Mirrors the gateway command semantics:
     - /goal or /goal status shows status
     - /goal pause pauses
-    - /goal resume resumes without auto-starting a turn
+    - /goal resume resumes and can return a kickoff_prompt so the caller can
+      continue immediately when the session is idle
     - /goal clear|stop|done clears
     - /goal <text> sets a new active goal and returns kickoff_prompt so the
       caller can start the first normal user-role turn immediately.
     """
     sid = str(session_id or "").strip()
     if not sid:
-        return _payload(ok=False, action="error", error="missing_session", message="session_id required")
+        return _payload(ok=False, action="error", error="missing_session", message="session_id required", session_id=sid)
 
     mgr = _manager(sid, profile_home=profile_home)
     if mgr is None:
-        return _payload(ok=False, action="error", error="unavailable", message="Goals unavailable on this session.")
+        return _payload(ok=False, action="error", error="unavailable", message="Goals unavailable on this session.", session_id=sid)
 
     text = str(args or "").strip()
     lower = text.lower()
@@ -491,7 +493,7 @@ def goal_command_payload(
     if not text or lower == "status":
         state = getattr(mgr, "state", None)
         status_payload = _goal_status_payload(state)
-        return _payload(action="status", state=state, **status_payload)
+        return _payload(action="status", state=state, session_id=sid, **status_payload)
 
     if lower == "pause":
         state = mgr.pause(reason="user-paused")
@@ -502,6 +504,7 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal set.",
                 message_key="goal_no_goal",
+                session_id=sid,
             )
         return _payload(
             action="pause",
@@ -509,6 +512,7 @@ def goal_command_payload(
             message_key="goal_paused",
             message_args=[str(state.goal)],
             state=state,
+            session_id=sid,
         )
 
     if lower == "resume":
@@ -520,16 +524,20 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal to resume.",
                 message_key="goal_no_goal",
+                session_id=sid,
             )
+        kickoff_prompt = None if stream_running else mgr.next_continuation_prompt()
         return _payload(
             action="resume",
             message=(
                 f"▶ Goal resumed: {state.goal}\n"
-                "Send a new message, or type continue, to kick it off."
+                "Continuing now."
             ),
             message_key="goal_resumed",
             message_args=[str(state.goal)],
             state=state,
+            session_id=sid,
+            kickoff_prompt=kickoff_prompt,
         )
 
     if lower in ("clear", "stop", "done"):
@@ -540,6 +548,7 @@ def goal_command_payload(
             message="Goal cleared." if had else "No active goal.",
             message_key="goal_cleared" if had else "goal_no_goal",
             state=getattr(mgr, "state", None),
+            session_id=sid,
         )
 
     if stream_running:
@@ -551,12 +560,14 @@ def goal_command_payload(
                 "Agent is running — use /goal status / pause / clear mid-run, "
                 "or /stop before setting a new goal."
             ),
+            state=getattr(mgr, "state", None),
+            session_id=sid,
         )
 
     try:
         state = mgr.set(text)
     except ValueError as exc:
-        return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}")
+        return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}", session_id=sid)
 
     return _payload(
         action="set",
@@ -568,6 +579,7 @@ def goal_command_payload(
         message_key="goal_set",
         message_args=[state.max_turns, state.goal],
         state=state,
+        session_id=sid,
         kickoff_prompt=state.goal,
     )
 

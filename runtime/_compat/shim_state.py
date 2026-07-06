@@ -151,6 +151,12 @@ class SessionDB:
                 token_count INTEGER DEFAULT 0,
                 reasoning_content TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS state_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
             """
         )
         self._repair_missing_parent_session_refs()
@@ -503,6 +509,41 @@ class SessionDB:
             )
 
         return {"session_id": session_id, "role": role, "content": content_text}
+
+    def get_meta(self, key: str) -> str | None:
+        key = str(key or "").strip()
+        if not key:
+            return None
+        try:
+            row = self._conn.execute(
+                "SELECT value FROM state_meta WHERE key = ?",
+                (key,),
+            ).fetchone()
+        except Exception:
+            return None
+        if row is None:
+            return None
+        try:
+            return str(row["value"])
+        except Exception:
+            return str(row[0]) if row else None
+
+    def set_meta(self, key: str, value: Any) -> None:
+        key = str(key or "").strip()
+        if not key:
+            return
+        import time
+
+        self._conn.execute(
+            """
+            INSERT INTO state_meta (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, "" if value is None else str(value), time.time()),
+        )
 
     def get_messages(self, session_id: str, limit: int | None = None) -> list[dict[str, Any]]:
         columns = self._table_columns("messages")

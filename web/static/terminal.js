@@ -17,6 +17,85 @@ const TERMINAL_UI={
   resizeStartHeight:0,
 };
 
+const TERMINAL_LIBRARY_ASSETS = [
+  {
+    key: 'Terminal',
+    src: 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js',
+    integrity: 'sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc',
+    ready: () => typeof window.Terminal === 'function',
+  },
+  {
+    key: 'FitAddon',
+    src: 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js',
+    integrity: 'sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL',
+    ready: () => !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function'),
+  },
+  {
+    key: 'WebLinksAddon',
+    src: 'https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js',
+    integrity: 'sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl',
+    ready: () => !!(window.WebLinksAddon && typeof window.WebLinksAddon.WebLinksAddon === 'function'),
+  },
+];
+
+let _terminalLibraryLoadPromise = null;
+
+function _terminalLibraryReady(asset) {
+  return !!(asset && typeof asset.ready === 'function' && asset.ready());
+}
+
+function _loadTerminalLibrary(asset) {
+  return new Promise((resolve, reject) => {
+    if (_terminalLibraryReady(asset)) {
+      resolve();
+      return;
+    }
+    const root = document.head || document.documentElement;
+    if (!root) {
+      reject(new Error('Unable to attach terminal library script'));
+      return;
+    }
+    const existing = document.querySelector(`script[data-sidekick-terminal-library="${asset.key}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Failed to load ${asset.key}`)), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = asset.src;
+    script.crossOrigin = 'anonymous';
+    if (asset.integrity) script.integrity = asset.integrity;
+    script.dataset.sidekickTerminalLibrary = asset.key;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load ${asset.key}`));
+    root.appendChild(script);
+  });
+}
+
+async function _ensureTerminalLibraries() {
+  if (TERMINAL_LIBRARY_ASSETS.every(_terminalLibraryReady)) return;
+  if (!_terminalLibraryLoadPromise) {
+    _terminalLibraryLoadPromise = (async () => {
+      for (const asset of TERMINAL_LIBRARY_ASSETS) {
+        if (_terminalLibraryReady(asset)) continue;
+        await _loadTerminalLibrary(asset);
+      }
+    })().catch(err => {
+      _terminalLibraryLoadPromise = null;
+      throw err;
+    });
+  }
+  return _terminalLibraryLoadPromise;
+}
+
+function _showTerminalLoadingState(message) {
+  const { surface } = _terminalEls();
+  if (!surface) return;
+  const text = String(message || 'Loading terminal...');
+  surface.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;padding:20px;color:var(--text-muted);font-size:13px;text-align:center;">' + text + '</div>';
+}
+
 const TERMINAL_HEIGHT_DEFAULT=260;
 const TERMINAL_HEIGHT_MIN=180;
 const TERMINAL_HEIGHT_MAX=520;
@@ -122,14 +201,32 @@ function _xtermReady(){
   return typeof window.Terminal==='function';
 }
 
-function _ensureXterm(){
+function _xtermFitAddonReady(){
+  return !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function');
+}
+
+function _xtermWebLinksAddonReady(){
+  return !!(window.WebLinksAddon && typeof window.WebLinksAddon.WebLinksAddon === 'function');
+}
+
+async function _ensureXterm(){
   const {surface}= _terminalEls();
   if(!surface)return null;
   if(TERMINAL_UI.term)return TERMINAL_UI.term;
-  if(!_xtermReady()){
-    surface.textContent='Terminal library failed to load. Check network access to cdn.jsdelivr.net.';
-    return null;
+  if(!_xtermReady() || !_xtermFitAddonReady() || !_xtermWebLinksAddonReady()){
+    _showTerminalLoadingState('Loading terminal...');
+    try{
+      await _ensureTerminalLibraries();
+    }catch(_){
+      surface.textContent='Terminal library failed to load. Check network access to cdn.jsdelivr.net.';
+      return null;
+    }
+    if(!_xtermReady()){
+      surface.textContent='Terminal library failed to load. Check network access to cdn.jsdelivr.net.';
+      return null;
+    }
   }
+  surface.textContent='';
   const term=new window.Terminal({
     cursorBlink:true,
     fontSize:13,
@@ -408,7 +505,7 @@ async function _startComposerTerminal(restart=false){
     syncTerminalButton();
     return;
   }
-  const term=_ensureXterm();
+  const term=await _ensureXterm();
   if(!term)return;
   _fitTerminal();
   const dims=_terminalDimensions();
@@ -793,8 +890,11 @@ function openSplitTerminal(){
     // Move the xterm terminal surface into the split pane body
     mainSurface.appendChild(existingSurface);
   }
-  _ensureXterm();
-  if(TERMINAL_UI.fitAddon)TERMINAL_UI.fitAddon.fit();
+  void _ensureXterm().then(() => {
+    if(TERMINAL_UI.fitAddon)TERMINAL_UI.fitAddon.fit();
+  }).catch(err => {
+    console.warn('openSplitTerminal failed', err);
+  });
 }
 
 /**
@@ -823,7 +923,7 @@ function toggleSplitTerminal(){
   const pane=$('terminalPane');
   if(!pane)return;
   if(pane.hidden!==false){
-    openSplitTerminal();
+    void openSplitTerminal();
   }else{
     closeTerminalPane();
   }
@@ -936,8 +1036,11 @@ function openSplitTerminal(){
     // Move the xterm terminal surface into the split pane body
     mainSurface.appendChild(existingSurface);
   }
-  _ensureXterm();
-  if(TERMINAL_UI.fitAddon)TERMINAL_UI.fitAddon.fit();
+  void _ensureXterm().then(() => {
+    if(TERMINAL_UI.fitAddon)TERMINAL_UI.fitAddon.fit();
+  }).catch(err => {
+    console.warn('openSplitTerminal failed', err);
+  });
 }
 
 /**
@@ -966,7 +1069,7 @@ function toggleSplitTerminal(){
   const pane=$('terminalPane');
   if(!pane)return;
   if(pane.hidden!==false){
-    openSplitTerminal();
+    void openSplitTerminal();
   }else{
     closeTerminalPane();
   }

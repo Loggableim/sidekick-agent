@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>Sidekick Browser QA Broken Fixture</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 1200px;
+      font-family: Arial, sans-serif;
+      background: #fafafa;
+      color: #111827;
+    }
+    main {
+      width: 220vw;
+      padding: 48px;
+      box-sizing: border-box;
+    }
+    .fixed-blocker {
+      position: fixed;
+      inset: 72px auto auto 80px;
+      width: 72vw;
+      height: 68vh;
+      display: grid;
+      place-items: center;
+      background: rgba(17, 24, 39, .92);
+      color: #fff;
+      z-index: 40;
+    }
+    .bad-row {
+      margin-top: 72vh;
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+    #badIconButton {
+      width: 56px;
+      height: 56px;
+      border: 0;
+      border-radius: 999px;
+      background: #ef4444;
+      cursor: pointer;
+    }
+    img {
+      width: 180px;
+      height: 120px;
+      object-fit: cover;
+      background: #fde68a;
+      border: 4px solid #f59e0b;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h2>Broken browser QA fixture</h2>
+    <p>This page intentionally has no h1, horizontal overflow, a large fixed overlay, an unlabeled button, and an image without alt text.</p>
+    <div class="fixed-blocker">Large fixed overlay</div>
+    <div class="bad-row">
+      <button id="badIconButton" type="button"></button>
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='240'%3E%3Crect width='360' height='240' fill='%23facc15'/%3E%3Ccircle cx='180' cy='120' r='64' fill='%23dc2626'/%3E%3C/svg%3E">
+    </div>
+  </main>
+</body>
+</html>

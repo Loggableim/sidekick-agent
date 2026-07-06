@@ -26,6 +26,7 @@ Backward-compat: reads old ``workspaces/`` dir as fallback.
 from __future__ import annotations
 
 import logging
+import json
 import os
 import shutil
 import threading
@@ -342,6 +343,7 @@ class Space:
 
     def to_dict(self) -> dict:
         cfg = self.load_config()
+        session_counts = self._session_counts()
         return {
             "slug": self.slug,
             "name": cfg.get("name") or self.name or self.slug,
@@ -353,13 +355,45 @@ class Space:
             "color": cfg.get("color", "#4FC3F7"),
             "emoji": cfg.get("emoji", "📁"),
             "agents": self.list_agents(),
-            "session_count": self._session_count(),
+            "session_count": session_counts["active"],
+            "active_session_count": session_counts["active"],
+            "archived_session_count": session_counts["archived"],
+            "total_session_count": session_counts["total"],
+            "raw_session_count": session_counts["raw"],
         }
 
     def _session_count(self) -> int:
+        return self._session_counts()["active"]
+
+    def _session_counts(self) -> dict[str, int]:
         if not self.sessions_dir.exists():
-            return 0
-        return len(list(self.sessions_dir.glob("*.json")))
+            return {"active": 0, "archived": 0, "total": 0, "raw": 0}
+        raw = len([p for p in self.sessions_dir.glob("*.json") if not p.name.startswith("_")])
+        index_path = self.sessions_dir / "_index.json"
+        if not index_path.exists():
+            return {"active": raw, "archived": 0, "total": raw, "raw": raw}
+        try:
+            entries = json.loads(index_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"active": raw, "archived": 0, "total": raw, "raw": raw}
+        if not isinstance(entries, list):
+            return {"active": raw, "archived": 0, "total": raw, "raw": raw}
+        visible = []
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            sid = str(item.get("session_id") or "").strip()
+            if not sid or not (self.sessions_dir / f"{sid}.json").exists():
+                continue
+            message_count = int(item.get("message_count") or 0)
+            active_stream_id = item.get("active_stream_id")
+            has_pending_user_message = item.get("has_pending_user_message") or item.get("pending_user_message")
+            if message_count <= 0 and not active_stream_id and not has_pending_user_message:
+                continue
+            visible.append(item)
+        archived = sum(1 for item in visible if item.get("archived"))
+        total = len(visible)
+        return {"active": max(0, total - archived), "archived": archived, "total": total, "raw": raw}
 
     def __repr__(self) -> str:
         return f"<Space slug={self.slug!r} name={self.name!r}>"

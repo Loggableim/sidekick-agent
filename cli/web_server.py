@@ -1228,6 +1228,26 @@ def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
         raw = []
     if not isinstance(raw, list):
         raw = []
+    index_changed = False
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        if not row.get("active_stream_id"):
+            continue
+        if bool(row.get("is_streaming")):
+            continue
+        row["active_stream_id"] = None
+        row["pending_user_message"] = None
+        row["pending_attachments"] = []
+        row["pending_started_at"] = None
+        row["has_pending_user_message"] = False
+        row["is_streaming"] = False
+        index_changed = True
+    if index_changed:
+        try:
+            _write_json_file(index_path, raw)
+        except Exception:
+            _log.debug("Failed to update stale stream markers in %s", index_path, exc_info=True)
     sessions: list[dict[str, Any]] = []
     for item in raw:
         if not isinstance(item, dict):
@@ -1250,10 +1270,6 @@ def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
         and not s.get("has_pending_user_message")
         and not s.get("worktree_path")
     )]
-    for session in sessions:
-        sid = str(session.get("session_id") or "").strip()
-        path, normalized_slug = _space_session_path(slug, sid) if sid else (None, slug)
-        _repair_stale_space_session_from_listing(session, slug)
     return sessions
 
 
@@ -1460,22 +1476,42 @@ def _repair_stale_space_session_from_listing(session: dict[str, Any], slug: str)
     return False
 
 
+_SPACE_STREAM_STATUS_CACHE: dict[tuple[str, str], tuple[float, bool]] = {}
+_SPACE_STREAM_STATUS_CACHE_TTL_SECONDS = 5.0
+_SPACE_STREAM_STATUS_TIMEOUT_SECONDS = 0.5
+
+
 def _stream_is_active_for_space(stream_id: str, slug: str) -> bool:
     stream_id = str(stream_id or "").strip()
     if not stream_id:
         return False
+    cache_key = (str(slug or "").strip().lower(), stream_id)
+    now = time.time()
+    cached = _SPACE_STREAM_STATUS_CACHE.get(cache_key)
+    if cached and now - cached[0] < _SPACE_STREAM_STATUS_CACHE_TTL_SECONDS:
+        return cached[1]
     try:
+        port = _ensure_stdlib_backend()
+        if port == 0:
+            return True
         path = "/api/chat/stream/status?stream_id=" + urllib.parse.quote(stream_id)
         if slug:
             path += "&workspace=" + urllib.parse.quote(slug)
-        status, body, _headers, _ct = _proxy_sync("GET", path, {"X-Hermes-Workspace": slug}, None)
-        if status != 200:
-            return False
+        url = f"http://127.0.0.1:{port}{path}"
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("X-Hermes-Workspace", slug)
+        req.add_header("Connection", "close")
+        with urllib.request.urlopen(req, timeout=_SPACE_STREAM_STATUS_TIMEOUT_SECONDS) as resp:
+            if resp.status != 200:
+                return True
+            body = resp.read()
         payload = json.loads(body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body))
-        return bool(payload.get("active"))
+        active = bool(payload.get("active"))
+        _SPACE_STREAM_STATUS_CACHE[cache_key] = (now, active)
+        return active
     except Exception:
         _log.debug("Failed to check space stream status for %s", stream_id, exc_info=True)
-        return False
+        return True
 
 
 def _repair_stale_space_session_stream(session: dict[str, Any], path: Path, slug: str) -> bool:
@@ -1583,6 +1619,7 @@ def _slice_session_messages(session: dict[str, Any], *, load_messages: bool, msg
 
 @app.get("/api/session")
 async def get_space_session_detail(request: Request):
+    t0 = time.perf_counter()
     workspace_slug = _workspace_slug_from_request(request)
     if not workspace_slug:
         return await _proxy_request_to_stdlib(request)
@@ -1591,6 +1628,7 @@ async def get_space_session_detail(request: Request):
     if not sid:
         return JSONResponse({"error": "session_id is required"}, status_code=400)
     path, slug = _space_session_path(workspace_slug, sid)
+    t_path = time.perf_counter()
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -1601,8 +1639,10 @@ async def get_space_session_detail(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to load session: {exc}") from exc
     if not isinstance(session, dict):
         raise HTTPException(status_code=500, detail="Invalid session file")
+    t_load = time.perf_counter()
 
     _repair_stale_space_session_stream(session, path, slug)
+    t_repair_stream = time.perf_counter()
 
     load_messages = request.query_params.get("messages", "1") != "0"
     try:
@@ -1615,47 +1655,79 @@ async def get_space_session_detail(request: Request):
         msg_before = int(msg_before_raw) if msg_before_raw else None
     except Exception:
         msg_before = None
+    include_tool_calls_raw = request.query_params.get("include_tool_calls")
+    if include_tool_calls_raw is None:
+        # Fast session switching uses a bounded tail window. Do not include the
+        # full legacy session-level tool_calls list in that path; modern visible
+        # messages carry per-message tool metadata and the legacy list can dwarf
+        # the requested 24-message window.
+        include_session_tool_calls = load_messages and msg_limit is None and msg_before is None
+    else:
+        include_session_tool_calls = str(include_tool_calls_raw).strip().lower() not in {"0", "false", "no", "off"}
 
+    _repair_space_session_slug(session, slug, path)
+    t_repair_slug = time.perf_counter()
     messages, truncated, offset = _slice_session_messages(
         session,
         load_messages=load_messages,
         msg_limit=msg_limit,
         msg_before=msg_before,
     )
+    t_slice = time.perf_counter()
     payload = dict(session)
     payload.pop("context_messages", None)
     payload["messages"] = messages
-    if not load_messages:
+    if not include_session_tool_calls:
         payload["tool_calls"] = []
+    if not load_messages:
         payload["pending_attachments"] = []
-    payload["message_count"] = _session_message_count(session)
+    stored_message_count = session.get("message_count")
+    if isinstance(stored_message_count, int) and stored_message_count >= 0:
+        payload["message_count"] = stored_message_count
+    else:
+        payload["message_count"] = _session_message_count(session)
     payload["_messages_truncated"] = truncated
     payload["_messages_offset"] = offset
-    _repair_space_session_slug(payload, slug, path)
+    payload["workspace_slug"] = slug
     payload["has_pending_user_message"] = bool(payload.get("pending_user_message"))
-    return {"session": payload}
+    t_payload = time.perf_counter()
+    server_timing = (
+        f"path;dur={(t_path - t0) * 1000:.1f}, "
+        f"load;dur={(t_load - t_path) * 1000:.1f}, "
+        f"stream_repair;dur={(t_repair_stream - t_load) * 1000:.1f}, "
+        f"slug_repair;dur={(t_repair_slug - t_repair_stream) * 1000:.1f}, "
+        f"slice;dur={(t_slice - t_repair_slug) * 1000:.1f}, "
+        f"payload;dur={(t_payload - t_slice) * 1000:.1f}"
+    )
+    return JSONResponse({"session": payload}, headers={"Server-Timing": server_timing})
 
 
 @app.get("/api/sessions")
 async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
     try:
+        include_archived_raw = str(request.query_params.get("include_archived") or "").strip().lower()
+        include_archived = include_archived_raw in {"1", "true", "yes", "on"}
         workspace_slug = _workspace_slug_from_request(request)
         if workspace_slug:
             sessions = _load_space_sessions(workspace_slug)
-            total = len(sessions)
-            page = sessions[offset:offset + limit]
+            archived_count = sum(1 for s in sessions if s.get("archived"))
+            visible_sessions = sessions if include_archived else [s for s in sessions if not s.get("archived")]
+            total = len(visible_sessions)
+            page = visible_sessions[offset:offset + limit]
             now = time.time()
             for s in page:
                 s["is_active"] = (
                     s.get("ended_at") is None
                     and (now - s.get("last_active", s.get("started_at", s.get("updated_at", 0)))) < 300
                 )
-            return {"sessions": page, "total": total, "limit": limit, "offset": offset}
+            return {"sessions": page, "total": total, "archived_count": archived_count, "limit": limit, "offset": offset}
 
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
         try:
             sessions = db.list_sessions(limit=limit, offset=offset)
+            if not include_archived:
+                sessions = [s for s in sessions if not s.get("archived")]
             total = len(sessions)
             if total == limit or offset > 0:
                 try:
