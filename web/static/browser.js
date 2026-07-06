@@ -27,6 +27,10 @@ let _browserResearchQuestionsBySession = {};
 let _browserResearchResearchPromptBySession = {};
 let _browserResearchModeBySession = {};
 let _browserPermissionMode = 'none';
+const _BROWSER_PERMISSION_STORAGE_KEY = 'sidekick-browser-permission-mode';
+let _browserAgentContext = null;
+let _browserAgentContextSid = '';
+let _browserAgentContextPromise = null;
 let _browserWebBackend = 'auto';
 let _browserWebBackendConfigured = '';
 let _browserFullscreen = localStorage.getItem('sidekick-browser-fullscreen') === '1';
@@ -109,7 +113,7 @@ function _browserEnsureSplitStyles() {
   style.id = 'browserSplitStyles';
   style.textContent = `
 body.browser-split {
-  --browser-split-width: min(48vw, 860px);
+  --browser-split-width: min(760px, max(420px, 42vw));
 }
 body.browser-split aside.rightpanel,
 body.browser-split .split-resize-handle {
@@ -235,6 +239,28 @@ function _browserCurrentSessionId() {
   return '';
 }
 
+function _browserRememberedPermissionMode() {
+  const liveMode = String(_browserPermissionMode || '').trim().toLowerCase();
+  if (liveMode === 'read' || liveMode === 'control') return liveMode;
+  try {
+    const storedMode = String(localStorage.getItem(_BROWSER_PERMISSION_STORAGE_KEY) || '').trim().toLowerCase();
+    if (storedMode === 'read' || storedMode === 'control') return storedMode;
+  } catch (_) {}
+  return 'none';
+}
+
+function _browserPersistPermissionMode(mode) {
+  const nextMode = String(mode || '').trim().toLowerCase();
+  try {
+    if (nextMode === 'read' || nextMode === 'control') {
+      localStorage.setItem(_BROWSER_PERMISSION_STORAGE_KEY, nextMode);
+    } else {
+      localStorage.removeItem(_BROWSER_PERMISSION_STORAGE_KEY);
+    }
+  } catch (_) {}
+  return nextMode;
+}
+
 function _browserPanelVisible() {
   return document.body.classList.contains('browser-drawer-open');
 }
@@ -252,10 +278,21 @@ function _browserSessionLabel(state) {
   return 'session ' + sid.slice(0, 8);
 }
 
-function _browserSetEmptyVisible(visible) {
+function _browserSetEmptyVisible(visible, opts = {}) {
   const empty = _browserEl('browserEmptyState');
-  if (!empty) return;
-  empty.classList.toggle('visible', !!visible);
+  const isVisible = !!visible;
+  if (empty) {
+    const title = empty.querySelector ? empty.querySelector('.browser-empty-title') : null;
+    const text = empty.querySelector ? empty.querySelector('.browser-empty-text') : null;
+    if (isVisible && title) title.textContent = opts.title || 'Browser not attached';
+    if (isVisible && text) text.textContent = opts.text || 'Open a chat session to attach the browser runtime.';
+    empty.classList.toggle('visible', isVisible);
+    empty.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+  }
+  const stage = _browserEl('browserStage');
+  if (stage) stage.classList.toggle('has-empty-state', isVisible);
+  const wrap = _browserEl('browserStageWrap');
+  if (wrap) wrap.classList.toggle('has-empty-state', isVisible);
 }
 
 function _browserClearViewport() {
@@ -278,6 +315,7 @@ function _browserClearViewport() {
   if (cursor) cursor.classList.remove('visible');
   const flash = _browserEl('browserClickFlash');
   if (flash) flash.classList.remove('visible');
+  _browserApplyFrameHitBounds(null);
 }
 
 function _browserSetPill(kind, text) {
@@ -355,10 +393,11 @@ function _browserResearchApplySessionState() {
 function _browserSetButtonsDisabled(disabled, state) {
   state = state || {};
   const attached = !!(state && state.session_id) && !disabled;
+  const hasSession = !!((state && state.session_id) || _browserCurrentSessionId());
   const busy = !!(state && state.busy);
   const buttons = {
-    browserPermissionBtn: attached,
-    browserAgentStopBtn: attached,
+    browserPermissionBtn: hasSession,
+    browserAgentStopBtn: hasSession && _browserPermissionMode !== 'none',
     browserBtnBack: attached && !busy && !!state.can_go_back,
     browserBtnForward: attached && !busy && !!state.can_go_forward,
     browserBtnReload: attached && !busy,
@@ -824,6 +863,357 @@ function _browserVisibleUrl() {
   return match ? String(match[0] || '').trim() : '';
 }
 
+function browserGetState() {
+  const state = _browserState ? Object.assign({}, _browserState) : {};
+  const img = _browserEl('browserFrameImage');
+  return {
+    session_id: String(state.session_id || _browserCurrentSessionId() || ''),
+    url: String(state.url || _browserVisibleUrl() || ''),
+    status: String(state.status || ''),
+    error: String(state.error || ''),
+    busy: !!state.busy,
+    can_go_back: !!state.can_go_back,
+    can_go_forward: !!state.can_go_forward,
+    drawer_open: !!_browserDrawerOpen,
+    split: !!_browserSplitScreen,
+    fullscreen: !!_browserFullscreen,
+    permission_mode: String(_browserPermissionMode || 'none'),
+    web_backend: String(_browserWebBackend || 'auto'),
+    frame_rev: state.frame_rev == null ? null : state.frame_rev,
+    frame_url: String(state.frame_url || (img && img.src) || ''),
+    frame_complete: !!(img && img.complete),
+    frame_width: img ? (img.naturalWidth || 0) : 0,
+    frame_height: img ? (img.naturalHeight || 0) : 0,
+  };
+}
+
+function _browserShouldAcceptState(nextState) {
+  if (!nextState || !nextState.session_id) return false;
+  const current = _browserState;
+  if (!current || current.session_id !== nextState.session_id) return true;
+  const currentUpdated = Number(current.updated_at || 0);
+  const nextUpdated = Number(nextState.updated_at || 0);
+  if (Number.isFinite(currentUpdated) && Number.isFinite(nextUpdated)) {
+    if (nextUpdated + 0.000001 < currentUpdated) return false;
+    if (nextUpdated > currentUpdated + 0.000001) return true;
+  }
+  const currentRev = Number(current.frame_rev || 0);
+  const nextRev = Number(nextState.frame_rev || 0);
+  if (Number.isFinite(currentRev) && Number.isFinite(nextRev)) {
+    if (nextRev < currentRev) return false;
+    if (nextRev > currentRev) return true;
+  }
+  const currentRunning = String(current.status || '').toLowerCase() === 'running' || !!current.busy;
+  const nextRunning = String(nextState.status || '').toLowerCase() === 'running' || !!nextState.busy;
+  if (!currentRunning && nextRunning) return false;
+  return true;
+}
+
+function browserGetQaState() {
+  const remembered = _browserLoadRememberedTestReport();
+  const report = remembered && remembered.report ? remembered.report : null;
+  const reportText = String((remembered && remembered.text) || '').trim();
+  const state = browserGetState();
+  const fix = _browserQaActionUi(reportText, report, state, {kind: 'fix'});
+  const repro = _browserQaActionUi(reportText, report, state, {kind: 'repro'});
+  const scopeRisk = _browserQaScopeRisk(report, state);
+  const ageMinutes = report ? _browserQaEvidenceAgeMinutes(report) : null;
+  const findings = report ? _browserReportFindings(report) : [];
+  const actionableLabels = report ? _browserReportActionableLabels(report) : [];
+  return {
+    session_id: state.session_id,
+    browser_url: state.url,
+    has_report: !!(report && reportText),
+    report,
+    report_text: reportText,
+    report_url: report ? String(report.url || '') : '',
+    report_status: report ? String(report.status || 'unknown') : 'missing',
+    clean_pass: _browserReportIsCleanPass(report),
+    busy: !!_browserQaBusy,
+    stale: !!(scopeRisk && scopeRisk.risk),
+    scope_risk: scopeRisk,
+    age_minutes: ageMinutes,
+    old_evidence: !!(report && report.qa_recorded_at_inferred) || (typeof ageMinutes === 'number' && ageMinutes >= 30),
+    findings,
+    actionable_labels: actionableLabels,
+    actions: {
+      fix: {
+        enabled: !fix.disabled,
+        disabled: !!fix.disabled,
+        reason: fix.reason,
+        label: fix.text,
+        menu_label: fix.menuText,
+        title: fix.title,
+      },
+      repro: {
+        enabled: !repro.disabled,
+        disabled: !!repro.disabled,
+        reason: repro.reason,
+        label: repro.text,
+        menu_label: repro.menuText,
+        title: repro.title,
+      },
+    },
+    last_action_result: (typeof window !== 'undefined' && window.browserLastQaActionResult) ? window.browserLastQaActionResult : null,
+  };
+}
+
+function browserGetAgentContext() {
+  const state = browserGetState();
+  const qa = browserGetQaState();
+  const backendContext = _browserAgentContext && _browserAgentContext.session_id === state.session_id
+    ? _browserAgentContext
+    : null;
+  const textOf = function(id, fallback) {
+    const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
+    const text = String(el && el.textContent || '').trim();
+    return text || fallback || '';
+  };
+  const approvalMode = String((typeof window !== 'undefined' && window._approvalMode) || textOf('approvalModeValue', 'manual') || 'manual').trim().toLowerCase();
+  const workflowMode = textOf('workflowStatusValue', '');
+  const model = textOf('modelStatusValue', '');
+  const reasoningMode = textOf('reasoningModeValue', '');
+  const goalState = (typeof window !== 'undefined' && window._goalState && typeof window._goalState === 'object') ? window._goalState : null;
+  const goalSession = String((goalState && goalState.session_id) || '');
+  const goalMatchesSession = !!goalState && (!goalSession || !state.session_id || goalSession === state.session_id);
+  const activeGoal = goalMatchesSession ? {
+    available: true,
+    present: !!String(goalState.goal || '').trim(),
+    active: String(goalState.status || 'active').toLowerCase() === 'active',
+    goal: String(goalState.goal || ''),
+    status: String(goalState.status || ''),
+    turns_used: Number(goalState.turns_used || 0),
+    max_turns: Number(goalState.max_turns || 0),
+    session_id: goalSession || state.session_id || '',
+  } : {
+    available: true,
+    present: false,
+    active: false,
+    session_id: state.session_id || '',
+    stale_session_id: goalSession || '',
+  };
+  const permissionMode = String(state.permission_mode || 'none');
+  const canControl = permissionMode === 'control';
+  const canWatch = permissionMode === 'control' || permissionMode === 'read';
+  const frameReady = !!(state.frame_complete && state.frame_width > 0 && state.frame_height > 0);
+  const nextActions = [];
+  if (!state.drawer_open) nextActions.push('open_browser_drawer');
+  if (!canWatch) nextActions.push('request_browser_permission');
+  if (!state.url || state.url === 'about:blank') nextActions.push('navigate_to_url');
+  if (state.busy) nextActions.push('wait_for_browser_idle');
+  if (!frameReady) nextActions.push('wait_for_rendered_frame');
+  if (!qa.has_report && frameReady && !state.busy) nextActions.push('run_browser_qa');
+  if (qa.has_report && qa.stale) nextActions.push('retest_current_page');
+  if (qa.actions && qa.actions.fix && qa.actions.fix.enabled) nextActions.push('fix_browser_findings');
+  if (qa.actions && qa.actions.repro && qa.actions.repro.enabled) nextActions.push('create_browser_repro');
+  if (qa.clean_pass && qa.has_report && !qa.stale) nextActions.push('use_current_qa_as_evidence');
+  const localContext = {
+    session_id: state.session_id,
+    browser: state,
+    qa,
+    permission: {
+      mode: permissionMode,
+      can_watch: canWatch,
+      can_control: canControl,
+      needs_user_approval: !canWatch,
+    },
+    controls: {
+      approval_mode: approvalMode,
+      workflow_mode: workflowMode,
+      model,
+      reasoning_mode: reasoningMode,
+    },
+    approval_mode: approvalMode,
+    active_goal: activeGoal,
+    expected_frame_rev: state.frame_rev == null ? null : state.frame_rev,
+    rendered_frame_ready: frameReady,
+    agent_can_operate: canControl && frameReady && !state.busy,
+    agent_can_assess: canWatch && frameReady && !state.busy,
+    next_actions: nextActions,
+    generated_at: Date.now(),
+  };
+  if (!backendContext || typeof backendContext !== 'object') return localContext;
+  return Object.assign({}, localContext, {
+    backend_context: backendContext,
+    browser: backendContext.browser || localContext.browser,
+    permission: backendContext.permission || localContext.permission,
+    approval_mode: backendContext.approval_mode || localContext.approval_mode,
+    active_goal: backendContext.active_goal || localContext.active_goal,
+    expected_frame_rev: backendContext.expected_frame_rev != null ? backendContext.expected_frame_rev : localContext.expected_frame_rev,
+    rendered_frame_ready: backendContext.rendered_frame_ready != null ? !!backendContext.rendered_frame_ready : localContext.rendered_frame_ready,
+    agent_can_operate: backendContext.agent_can_operate != null ? !!backendContext.agent_can_operate : localContext.agent_can_operate,
+    agent_can_assess: backendContext.agent_can_assess != null ? !!backendContext.agent_can_assess : localContext.agent_can_assess,
+    next_actions: Array.isArray(backendContext.next_actions) ? backendContext.next_actions : localContext.next_actions,
+    available_actions: backendContext.available_actions || {},
+    recommended_action: backendContext.recommended_action || '',
+    blocked_reasons: Array.isArray(backendContext.blocked_reasons) ? backendContext.blocked_reasons : [],
+    visual_findings: Array.isArray(backendContext.visual_findings) ? backendContext.visual_findings : [],
+    technical_findings: Array.isArray(backendContext.technical_findings) ? backendContext.technical_findings : [],
+    generated_at: backendContext.generated_at || localContext.generated_at,
+  });
+}
+
+function _browserQaObservedCurrentUrl(report) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const direct = String(
+    reportObj.current_browser_url ||
+    reportObj.currentBrowserUrl ||
+    reportObj.current_url ||
+    reportObj.currentUrl ||
+    reportObj.visible_url ||
+    reportObj.visibleUrl ||
+    reportObj.browser_url ||
+    reportObj.browserUrl ||
+    ''
+  ).trim();
+  if (direct) return direct;
+  return String(_browserVisibleUrl() || '').trim();
+}
+
+function _browserQaScopeRisk(report, state) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const reportUrl = String(reportObj.url || '').trim();
+  const currentUrl = String((state && state.url) || _browserQaObservedCurrentUrl(reportObj) || '').trim();
+  if (reportUrl && currentUrl && _browserComparableQaUrl(reportUrl) !== _browserComparableQaUrl(currentUrl)) {
+    return {risk: true, stale: true, unknown: false, reportUrl: reportUrl, currentUrl: currentUrl};
+  }
+  if (reportUrl && !currentUrl) {
+    return {risk: true, stale: false, unknown: true, reportUrl: reportUrl, currentUrl: ''};
+  }
+  return {risk: false, stale: false, unknown: false, reportUrl: reportUrl, currentUrl: currentUrl};
+}
+
+function _browserQaRetestUi(scopeRisk, oldEvidence) {
+  const risk = scopeRisk && scopeRisk.risk;
+  return {
+    text: risk ? 'Retest URL' : (oldEvidence ? 'Refresh' : 'Retest'),
+    title: risk ? 'Retest the last QA report URL and update the QA scope before Fix/Repro.' : (oldEvidence ? 'Refresh old QA evidence for the current URL.' : 'Retest the latest QA report URL.'),
+    aria: risk ? 'Retest the last QA report URL and update QA scope' : (oldEvidence ? 'Refresh old QA evidence' : 'Retest the latest QA report URL'),
+    menuText: risk ? 'Retest QA URL' : (oldEvidence ? 'Refresh browser QA' : 'Retest current page'),
+  };
+}
+
+function _browserApplySharedRetestUi(retestUi) {
+  if (!retestUi) return;
+  window.browserQaRetestMenuLabel = retestUi.menuText;
+  window.browserQaRetestTitle = retestUi.title;
+  window.browserQaRetestAria = retestUi.aria;
+  const workflowRetestBtn = document.getElementById('workflowHeaderBrowserRetestPageAction');
+  if (workflowRetestBtn) {
+    workflowRetestBtn.textContent = retestUi.menuText;
+    workflowRetestBtn.setAttribute('title', retestUi.title);
+    workflowRetestBtn.setAttribute('aria-label', retestUi.aria);
+  }
+}
+
+function _browserQaActionUi(reportText, report, state, opts) {
+  opts = opts || {};
+  const kind = opts.kind === 'repro' ? 'repro' : 'fix';
+  const reportObj = report && typeof report === 'object' ? report : null;
+  const hasReportText = !!String(reportText || '').trim();
+  const hasReport = !!reportObj;
+  const cleanPass = _browserReportIsCleanPass(reportObj);
+  const scopeRisk = _browserQaScopeRisk(reportObj, state || _browserState);
+  const age = reportObj ? _browserQaEvidenceAgeMinutes(reportObj) : null;
+  const oldEvidence = !!(reportObj && reportObj.qa_recorded_at_inferred) || (typeof age === 'number' && age >= 30);
+  const actionable = _browserReportActionableLabels(reportObj).length;
+  const baseText = kind === 'repro' ? 'Repro' : 'Fix';
+  const menuText = kind === 'repro' ? 'Create browser repro' : 'Fix browser findings';
+  const noReportTitle = kind === 'repro' ? 'Run Browser QA before creating a repro brief.' : 'Run Browser QA before fixing browser findings.';
+  const cleanTitle = kind === 'repro' ? 'No browser findings to reproduce. Retest if the page changed.' : 'No browser findings to fix. Retest if the page changed.';
+  const staleTitle = kind === 'repro' ? 'Retest before creating a repro. QA scope is stale or the current browser URL was not observed.' : 'Retest before fixing. QA scope is stale or the current browser URL was not observed.';
+  const oldTitle = kind === 'repro' ? 'Create a repro brief from old QA evidence; retest before final proof.' : 'Fix findings from old QA evidence; retest before using this as final proof.';
+  const readyTitle = kind === 'repro' ? 'Create a repro brief from the latest QA report.' : 'Fix findings from the latest QA report.';
+  let disabled = false;
+  let text = baseText;
+  let title = oldEvidence ? oldTitle : readyTitle;
+  let aria = kind === 'repro' ? 'Create repro brief from the latest QA report' : 'Fix findings from the latest QA report';
+  let reason = '';
+  if (_browserQaBusy) {
+    disabled = true;
+    text = 'QA running';
+    title = 'Browser QA is running. Wait for the current QA run to finish.';
+    aria = title;
+    reason = 'busy';
+  } else if (!hasReportText || !hasReport) {
+    disabled = true;
+    text = baseText;
+    title = noReportTitle;
+    aria = noReportTitle;
+    reason = 'missing';
+  } else if (cleanPass) {
+    disabled = true;
+    text = kind === 'repro' ? 'No repro' : 'No fix';
+    title = cleanTitle;
+    aria = cleanTitle;
+    reason = 'clean-pass';
+  } else if (scopeRisk.risk) {
+    disabled = true;
+    text = 'Retest first';
+    title = staleTitle;
+    aria = staleTitle;
+    reason = scopeRisk.stale ? 'stale' : 'unknown-scope';
+  } else {
+    text = oldEvidence ? (kind === 'repro' ? 'Repro old' : 'Fix old') : baseText;
+    aria = oldEvidence
+      ? (kind === 'repro' ? 'Create repro brief from old QA evidence' : 'Fix findings from old QA evidence')
+      : (kind === 'repro' ? 'Create repro brief from the latest QA report' : 'Fix findings from the latest QA report');
+    reason = oldEvidence ? 'old' : (actionable ? 'ready' : 'needs-review');
+  }
+  return {
+    kind,
+    disabled,
+    reason,
+    text,
+    menuText: disabled && reason === 'clean-pass'
+      ? (kind === 'repro' ? 'No browser repro needed' : 'No browser fix needed')
+      : menuText,
+    title,
+    aria,
+    cleanPass,
+    scopeRisk,
+    oldEvidence,
+  };
+}
+
+function _browserSetActionButtonUi(button, actionUi, opts) {
+  if (!button || !actionUi) return;
+  opts = opts || {};
+  button.disabled = !!actionUi.disabled;
+  button.setAttribute('aria-disabled', actionUi.disabled ? 'true' : 'false');
+  button.setAttribute('title', actionUi.title);
+  button.setAttribute('aria-label', actionUi.aria);
+  if (opts.tooltip) button.dataset.tooltip = actionUi.title;
+  if (opts.text === 'card') button.textContent = actionUi.text;
+  else if (opts.text === 'menu') button.textContent = actionUi.menuText;
+}
+
+function _browserApplySharedFixReproUi(fixUi, reproUi) {
+  if (!fixUi || !reproUi) return;
+  window.browserQaFixFindingsDisabled = !!fixUi.disabled;
+  window.browserQaFixFindingsMenuLabel = fixUi.menuText;
+  window.browserQaFixFindingsTitle = fixUi.title;
+  window.browserQaFixFindingsAria = fixUi.aria;
+  window.browserQaReproDisabled = !!reproUi.disabled;
+  window.browserQaReproMenuLabel = reproUi.menuText;
+  window.browserQaReproTitle = reproUi.title;
+  window.browserQaReproAria = reproUi.aria;
+  _browserSetActionButtonUi(document.getElementById('browserQaFixBtn'), fixUi, {text: 'card'});
+  _browserSetActionButtonUi(document.getElementById('browserQaReproBtn'), reproUi, {text: 'card'});
+  _browserSetActionButtonUi(document.getElementById('browserFixFindingsBtn'), fixUi, {tooltip: true});
+  _browserSetActionButtonUi(document.getElementById('browserHeaderFixFindingsAction'), fixUi, {text: 'menu'});
+  _browserSetActionButtonUi(document.getElementById('browserHeaderReproAction'), reproUi, {text: 'menu'});
+  _browserSetActionButtonUi(document.getElementById('workflowHeaderBrowserFixFindingsAction'), fixUi, {text: 'menu'});
+  _browserSetActionButtonUi(document.getElementById('workflowHeaderBrowserReproAction'), reproUi, {text: 'menu'});
+}
+
+function _browserCurrentQaActionUi(kind, stateOverride) {
+  const remembered = _browserLoadRememberedTestReport();
+  const reportText = String((remembered && remembered.text) || '').trim();
+  const report = remembered && remembered.report ? remembered.report : null;
+  return _browserQaActionUi(reportText, report, stateOverride || _browserState, {kind});
+}
+
 function _browserFallbackReadableText() {
   const drawer = _browserEl('browserDrawer');
   const raw = String(drawer && drawer.innerText ? drawer.innerText : '').trim();
@@ -932,6 +1322,1529 @@ async function browserSendPageContextToChat(opts = {}) {
 
 async function browserSendFullPageContextToChat() {
   return browserSendPageContextToChat({full: true});
+}
+
+let _browserLastTestReportText = '';
+let _browserLastTestReport = null;
+let _browserPreviousTestReportText = '';
+let _browserPreviousTestReport = null;
+let _browserQaBusy = false;
+let _browserQaDetailsUserToggled = false;
+let _browserQaFreshnessTimer = null;
+
+function _browserQaHistoryItem(text, report) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  return {
+    ts: Date.now(),
+    url: String(reportObj.url || _browserVisibleUrl() || 'about:blank'),
+    title: String(reportObj.title || ''),
+    status: String(reportObj.status || 'unknown'),
+    findings: _browserReportActionableLabels(reportObj).length,
+    visual: _browserQaCountReportArrays(reportObj, ['visual_findings', 'visualFindings']),
+    layout: _browserQaCountReportArrays(reportObj, ['layout_findings', 'layoutFindings']),
+    a11y: _browserQaCountReportArrays(reportObj, ['accessibility_findings', 'accessibilityFindings']),
+    console: _browserQaCountReportArrays(reportObj, ['console_events', 'consoleEvents']),
+    network: _browserQaCountReportArrays(reportObj, ['network_events', 'networkEvents']),
+    permission: String((reportObj.permission && reportObj.permission.mode) || 'none'),
+    hasText: !!String(text || '').trim(),
+  };
+}
+
+function _browserRememberQaHistory(text, report) {
+  try {
+    const item = _browserQaHistoryItem(text, report);
+    const raw = localStorage.getItem('sidekick-browser-test-history') || '[]';
+    const existing = JSON.parse(raw);
+    const history = (Array.isArray(existing) ? existing : []).filter(function(entry) {
+      return entry && typeof entry === 'object' && entry.url;
+    });
+    history.unshift(item);
+    localStorage.setItem('sidekick-browser-test-history', JSON.stringify(history.slice(0, 8)));
+  } catch (_) {}
+}
+
+function _browserLoadQaHistory() {
+  try {
+    const raw = localStorage.getItem('sidekick-browser-test-history') || '[]';
+    const history = JSON.parse(raw);
+    return Array.isArray(history) ? history.filter(function(entry) {
+      return entry && typeof entry === 'object' && entry.url;
+    }).slice(0, 8) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function browserClearQaReports() {
+  _browserLastTestReportText = '';
+  _browserLastTestReport = null;
+  _browserPreviousTestReportText = '';
+  _browserPreviousTestReport = null;
+  _browserQaDetailsUserToggled = false;
+  if (_browserQaFreshnessTimer && typeof window !== 'undefined' && typeof window.clearInterval === 'function') {
+    window.clearInterval(_browserQaFreshnessTimer);
+    _browserQaFreshnessTimer = null;
+  }
+  try {
+    localStorage.removeItem('sidekick-browser-last-test-report-text');
+    localStorage.removeItem('sidekick-browser-last-test-report');
+    localStorage.removeItem('sidekick-browser-previous-test-report-text');
+    localStorage.removeItem('sidekick-browser-previous-test-report');
+    localStorage.removeItem('sidekick-browser-test-history');
+  } catch (_) {}
+  const card = document.getElementById('browserQaCard');
+  const details = document.getElementById('browserQaDetails');
+  const button = document.getElementById('browserQaDetailsBtn');
+  if (details) details.hidden = true;
+  if (button) button.setAttribute('aria-expanded', 'false');
+  if (card) card.hidden = true;
+  _browserApplySharedFixReproUi(
+    _browserQaActionUi('', null, _browserState, {kind: 'fix'}),
+    _browserQaActionUi('', null, _browserState, {kind: 'repro'})
+  );
+  _browserRefreshHeaderMenu();
+  if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
+  if (typeof showToast === 'function') showToast('Browser QA reports cleared', 1800, 'success');
+}
+
+function _browserSetComposerText(text) {
+  const textarea = _browserComposerTextarea();
+  if (!textarea) return false;
+  textarea.value = String(text || '');
+  textarea.dispatchEvent(new Event('input', {bubbles: true}));
+  if (typeof textarea.focus === 'function') textarea.focus();
+  if (typeof textarea.setSelectionRange === 'function') {
+    const pos = String(textarea.value || '').length;
+    try { textarea.setSelectionRange(pos, pos); } catch (_) {}
+  }
+  return true;
+}
+
+function _browserRememberTestReport(text, report) {
+  const previousText = _browserLastTestReportText;
+  const previousReport = _browserLastTestReport;
+  const reportForStorage = report && typeof report === 'object' ? Object.assign({}, report) : null;
+  if (reportForStorage && !reportForStorage.qa_recorded_at) {
+    reportForStorage.qa_recorded_at = new Date().toISOString();
+  }
+  if (previousText) {
+    _browserPreviousTestReportText = previousText;
+    _browserPreviousTestReport = previousReport || null;
+  }
+  _browserLastTestReport = reportForStorage || null;
+  _browserLastTestReportText = _browserNormalizeStoredQaText(text, _browserLastTestReport);
+  try {
+    if (previousText) {
+      localStorage.setItem('sidekick-browser-previous-test-report-text', previousText);
+      localStorage.setItem('sidekick-browser-previous-test-report', JSON.stringify(previousReport || {}));
+    }
+    localStorage.setItem('sidekick-browser-last-test-report-text', _browserLastTestReportText);
+    localStorage.setItem('sidekick-browser-last-test-report', JSON.stringify(_browserLastTestReport || {}));
+  } catch (_) {}
+  _browserRememberQaHistory(_browserLastTestReportText, _browserLastTestReport);
+  _browserQaDetailsUserToggled = false;
+  _browserStartQaFreshnessTimer();
+  _browserRenderQaCard(_browserLastTestReportText, _browserLastTestReport);
+}
+
+function _browserLoadRememberedTestReport() {
+  if (_browserLastTestReportText) {
+    _browserLastTestReportText = _browserNormalizeStoredQaText(_browserLastTestReportText, _browserLastTestReport);
+    return {text: _browserLastTestReportText, report: _browserLastTestReport};
+  }
+  try {
+    const text = String(localStorage.getItem('sidekick-browser-last-test-report-text') || '').trim();
+    const raw = localStorage.getItem('sidekick-browser-last-test-report') || '{}';
+    const report = JSON.parse(raw);
+    if (text) {
+      _browserLastTestReport = report || null;
+      if (_browserLastTestReport && typeof _browserLastTestReport === 'object' && !_browserLastTestReport.qa_recorded_at) {
+        _browserLastTestReport.qa_recorded_at = new Date().toISOString();
+        _browserLastTestReport.qa_recorded_at_inferred = true;
+        try { localStorage.setItem('sidekick-browser-last-test-report', JSON.stringify(_browserLastTestReport)); } catch (_) {}
+      }
+      _browserLastTestReportText = _browserNormalizeStoredQaText(text, _browserLastTestReport);
+      if (_browserLastTestReportText !== text) {
+        try { localStorage.setItem('sidekick-browser-last-test-report-text', _browserLastTestReportText); } catch (_) {}
+      }
+      return {text: _browserLastTestReportText, report: _browserLastTestReport};
+    }
+  } catch (_) {}
+  return {text: '', report: null};
+}
+
+function _browserLoadPreviousTestReport() {
+  if (_browserPreviousTestReportText) {
+    _browserPreviousTestReportText = _browserNormalizeStoredQaText(_browserPreviousTestReportText, _browserPreviousTestReport);
+    return {text: _browserPreviousTestReportText, report: _browserPreviousTestReport};
+  }
+  try {
+    const text = String(localStorage.getItem('sidekick-browser-previous-test-report-text') || '').trim();
+    const raw = localStorage.getItem('sidekick-browser-previous-test-report') || '{}';
+    const report = JSON.parse(raw);
+    if (text) {
+      _browserPreviousTestReport = report || null;
+      _browserPreviousTestReportText = _browserNormalizeStoredQaText(text, _browserPreviousTestReport);
+      if (_browserPreviousTestReportText !== text) {
+        try { localStorage.setItem('sidekick-browser-previous-test-report-text', _browserPreviousTestReportText); } catch (_) {}
+      }
+      return {text: _browserPreviousTestReportText, report: _browserPreviousTestReport};
+    }
+  } catch (_) {}
+  return {text: '', report: null};
+}
+
+function _browserQaStatusKey(status) {
+  const raw = String(status || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (raw === 'running' || raw === 'testing' || raw === 'busy') return 'running';
+  if (raw === 'pass' || raw === 'passed' || raw === 'ok' || raw === 'success') return 'pass';
+  if (raw === 'failed' || raw === 'fail' || raw === 'error' || raw === 'blocked') return 'failed';
+  return 'needs_review';
+}
+
+function _browserQaStatusLabel(status) {
+  const key = _browserQaStatusKey(status);
+  if (key === 'running') return 'RUNNING';
+  if (key === 'pass') return 'PASS';
+  if (key === 'failed') return 'FAILED';
+  return 'NEEDS REVIEW';
+}
+
+function _browserSetQaBusy(isBusy, label) {
+  _browserQaBusy = !!isBusy;
+  const card = document.getElementById('browserQaCard');
+  if (!card) return;
+  const statusEl = document.getElementById('browserQaCardStatus');
+  const urlEl = document.getElementById('browserQaCardUrl');
+  const buttons = [
+    document.getElementById('browserQaFixBtn'),
+    document.getElementById('browserQaRetestBtn'),
+    document.getElementById('browserQaReproBtn'),
+    document.getElementById('browserQaCopyBtn'),
+    document.getElementById('browserQaDetailsBtn'),
+    document.getElementById('browserQaClearBtn'),
+    document.getElementById('browserTestPageBtn'),
+    document.getElementById('browserRetestPageBtn'),
+    document.getElementById('browserQaBtn'),
+    document.getElementById('browserWebuiSmokeBtn'),
+    document.getElementById('browserFixFindingsBtn'),
+    document.getElementById('browserHeaderFixFindingsAction'),
+    document.getElementById('browserHeaderReproAction'),
+    document.getElementById('workflowHeaderBrowserFixFindingsAction'),
+    document.getElementById('workflowHeaderBrowserReproAction'),
+  ];
+  card.hidden = false;
+  card.dataset.busy = isBusy ? '1' : '0';
+  if (isBusy) {
+    card.dataset.status = 'running';
+    if (statusEl) statusEl.textContent = 'RUNNING';
+    if (urlEl) {
+      urlEl.textContent = label || 'Browser QA is running...';
+      urlEl.title = label || 'Browser QA is running...';
+    }
+  }
+  buttons.forEach(function(button) {
+    if (button) button.disabled = !!isBusy;
+  });
+}
+
+function _browserBeginQaRun(label) {
+  if (_browserQaBusy) {
+    if (typeof showToast === 'function') showToast('Browser QA is already running', 1800, 'info');
+    return false;
+  }
+  _browserSetQaBusy(true, label);
+  return true;
+}
+
+function _browserFinishQaRun() {
+  _browserSetQaBusy(false);
+  _browserRenderRememberedQaCard();
+}
+
+function _browserQaCountReportArrays(report, keys) {
+  if (!report || typeof report !== 'object') return 0;
+  return keys.reduce(function(total, key) {
+    const value = report[key];
+    if (Array.isArray(value)) return total + value.length;
+    if (value && typeof value === 'object') return total + Object.keys(value).length;
+    if (typeof value === 'number' && Number.isFinite(value)) return total + Math.max(0, value);
+    return total;
+  }, 0);
+}
+
+function _browserHtmlEscape(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+    return ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]);
+  });
+}
+
+function _browserQaMetric(label, value) {
+  return '<span class="browser-qa-metric"><span>' + label + '</span><strong>' + String(value) + '</strong></span>';
+}
+
+function _browserQaList(title, items, emptyText) {
+  const list = Array.isArray(items) ? items.map(function(item) {
+    return String(item || '').trim();
+  }).filter(Boolean).slice(0, 6) : [];
+  const body = list.length
+    ? '<ul>' + list.map(function(item) { return '<li>' + _browserHtmlEscape(item).slice(0, 320) + '</li>'; }).join('') + '</ul>'
+    : '<div class="browser-qa-empty">' + _browserHtmlEscape(emptyText || 'None') + '</div>';
+  return '<section class="browser-qa-detail-section"><h4>' + _browserHtmlEscape(title) + '</h4>' + body + '</section>';
+}
+
+function _browserQaRetestSummary(comparison) {
+  if (!comparison) return '';
+  const rows = [
+    ['Previous', comparison.previousStatus],
+    ['Current', comparison.currentStatus],
+    ['Change', comparison.improved ? 'improved' : (comparison.regressed ? 'regressed' : 'unchanged')],
+    ['Fixed', comparison.fixed.length],
+    ['Still', comparison.stillFailing.length],
+    ['New', comparison.newRisks.length],
+  ];
+  return '<section class="browser-qa-detail-section browser-qa-retest-section"><h4>Retest</h4>' +
+    '<div class="browser-qa-retest-pills">' +
+    rows.map(function(row) {
+      return '<span class="browser-qa-retest-pill"><span>' + _browserHtmlEscape(row[0]) + '</span><strong>' + _browserHtmlEscape(row[1]) + '</strong></span>';
+    }).join('') +
+    '</div>' +
+    _browserQaList('Fixed findings', comparison.fixed, 'No previous finding disappeared.').replace('browser-qa-detail-section', 'browser-qa-detail-section browser-qa-subsection') +
+    _browserQaList('Still failing', comparison.stillFailing, 'No previous finding is still present.').replace('browser-qa-detail-section', 'browser-qa-detail-section browser-qa-subsection') +
+    _browserQaList('New risks', comparison.newRisks, 'No new risks detected.').replace('browser-qa-detail-section', 'browser-qa-detail-section browser-qa-subsection') +
+    '</section>';
+}
+
+function _browserQaNextActions(report) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const status = _browserQaStatusKey(reportObj.status || '');
+  const findings = _browserReportFindings(reportObj);
+  const actionableCount = _browserReportActionableLabels(reportObj).length;
+  const permissionMode = String((reportObj.permission && reportObj.permission.mode) || 'none');
+  const visualCount = _browserQaCountReportArrays(reportObj, ['visual_findings', 'visualFindings']);
+  const layoutCount = _browserQaCountReportArrays(reportObj, ['layout_findings', 'layoutFindings']);
+  const a11yCount = _browserQaCountReportArrays(reportObj, ['accessibility_findings', 'accessibilityFindings']);
+  const consoleCount = _browserQaCountReportArrays(reportObj, ['console_events', 'consoleEvents']);
+  const networkCount = _browserQaCountReportArrays(reportObj, ['network_events', 'networkEvents']);
+  const reportUrl = String(reportObj.url || '').trim();
+  const currentUrl = _browserQaObservedCurrentUrl(reportObj);
+  const stale = !!(reportUrl && currentUrl && _browserComparableQaUrl(reportUrl) !== _browserComparableQaUrl(currentUrl));
+  const evidenceAgeMinutes = _browserQaEvidenceAgeMinutes(reportObj);
+  const oldEvidence = !!reportObj.qa_recorded_at_inferred || (typeof evidenceAgeMinutes === 'number' && evidenceAgeMinutes >= 30);
+  const actions = [];
+  if (stale) {
+    actions.push('QA scope is stale; use Retest URL or navigate back to the report URL before fixing current-page-specific issues.');
+  } else if (reportUrl && !currentUrl) {
+    actions.push('Current browser URL was not observed; retest before treating this report as current-page proof.');
+  } else if (oldEvidence) {
+    actions.push(reportObj.qa_recorded_at_inferred ? 'QA evidence uses an inferred legacy timestamp; retest before using it as final fix evidence.' : 'QA evidence is older than 30 minutes; retest before using it as final fix evidence.');
+  }
+  if (status === 'pass' && !actionableCount) {
+    actions.push('Keep this report as passing evidence; no blocking browser issue is currently detected.');
+    actions.push('If this followed a patch, use Retest evidence and Delta before claiming the fix is done.');
+  } else if (status === 'pass' && actionableCount) {
+    actions.push('PASS includes technical QA signals; inspect the listed console/network/layout evidence before treating it as clean.');
+    actions.push('Use Repro or Fix only after confirming the signal is app-owned and reproducible.');
+  } else {
+    actions.push('Use Repro to create a focused bug brief before editing files.');
+    actions.push('Use Fix only after identifying the likely affected files and root cause.');
+  }
+  if (permissionMode === 'none') {
+    actions.push('Browser permission is locked; enable read/control only if the next action requires agent interaction.');
+  }
+  if (visualCount || layoutCount) {
+    actions.push('Prioritize visual/layout evidence first; compare the live frame against the reported viewport risks.');
+  }
+  if (a11yCount) {
+    actions.push('Review accessibility heuristics manually; fix labels, alt text, or heading structure only where semantically correct.');
+  }
+  if (consoleCount || networkCount) {
+    actions.push('Inspect console/network entries before changing UI code; distinguish app errors from third-party noise.');
+  }
+  return actions.slice(0, 6);
+}
+
+function _browserQaHistoryHtml() {
+  const history = _browserLoadQaHistory();
+  if (!history.length) return '';
+  const rows = history.map(function(entry) {
+    const ts = Number(entry.ts || 0);
+    const when = ts ? new Date(ts).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : 'unknown';
+    const status = _browserQaStatusLabel(entry.status || 'unknown');
+    const issues = [
+      'F ' + String(entry.findings || 0),
+      'V ' + String(entry.visual || 0),
+      'L ' + String(entry.layout || 0),
+      'A ' + String(entry.a11y || 0),
+      'C ' + String(entry.console || 0),
+      'N ' + String(entry.network || 0),
+      'M ' + String(entry.permission || 'none'),
+    ].join(' · ');
+    return '<div class="browser-qa-history-row">' +
+      '<span class="browser-qa-history-status" data-status="' + _browserHtmlEscape(_browserQaStatusKey(entry.status || '')) + '">' + _browserHtmlEscape(status) + '</span>' +
+      '<span class="browser-qa-history-url" title="' + _browserHtmlEscape(entry.url || '') + '">' + _browserHtmlEscape(entry.url || 'about:blank') + '</span>' +
+      '<span class="browser-qa-history-issues">' + _browserHtmlEscape(issues) + '</span>' +
+      '<span class="browser-qa-history-time">' + _browserHtmlEscape(when) + '</span>' +
+      '<button type="button" class="browser-qa-history-open" onclick="browserOpenQaHistoryUrl(\'' + _browserHtmlEscape(encodeURIComponent(entry.url || '')) + '\')">Open</button>' +
+      '</div>';
+  }).join('');
+  return '<section class="browser-qa-detail-section browser-qa-history-section"><h4>Recent QA</h4>' + rows + '</section>';
+}
+
+function browserOpenQaHistoryUrl(encodedUrl) {
+  let url = '';
+  try {
+    url = decodeURIComponent(String(encodedUrl || ''));
+  } catch (_) {
+    url = String(encodedUrl || '');
+  }
+  url = String(url || '').trim();
+  if (!url || url === 'about:blank') {
+    if (typeof showToast === 'function') showToast('No QA history URL available', 1800, 'error');
+    return;
+  }
+  if (typeof browserNavigateUrl === 'function') {
+    browserNavigateUrl(url);
+    if (typeof showToast === 'function') showToast('Opening QA history URL', 1600, 'info');
+  }
+}
+
+function _browserBuildQaDetailsHtml(report, reportText) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const previous = _browserLoadPreviousTestReport();
+  const comparison = previous && previous.report ? _browserBuildRetestComparison(previous, {text: reportText, report: reportObj}) : null;
+  const screenshot = reportObj.screenshot && typeof reportObj.screenshot === 'object' ? reportObj.screenshot : {};
+  const analysis = screenshot.analysis && typeof screenshot.analysis === 'object' ? screenshot.analysis : {};
+  const page = reportObj.page && typeof reportObj.page === 'object' ? reportObj.page : {};
+  const permission = reportObj.permission && typeof reportObj.permission === 'object' ? reportObj.permission : {};
+  const findings = _browserReportFindings(reportObj);
+  const visualFindings = Array.isArray(reportObj.visual_findings) ? reportObj.visual_findings : [];
+  const layoutFindings = Array.isArray(reportObj.layout_findings) ? reportObj.layout_findings : [];
+  const a11yFindings = Array.isArray(reportObj.accessibility_findings) ? reportObj.accessibility_findings : [];
+  const consoleEvents = _browserReportItemsForKeys(reportObj, ['console_events', 'consoleEvents', 'console_errors', 'consoleErrors', 'page_errors', 'pageErrors']);
+  const networkEvents = _browserReportItemsForKeys(reportObj, ['network_events', 'networkEvents', 'network_errors', 'networkErrors', 'failed_requests', 'failedRequests']);
+  const layout = page.layout && typeof page.layout === 'object' ? page.layout : {};
+  const accessibility = page.accessibility && typeof page.accessibility === 'object' ? page.accessibility : {};
+  const consoleFindings = consoleEvents.map(function(ev) { return String(ev).slice(0, 260); });
+  const networkFindings = networkEvents.map(function(ev) { return String(ev).slice(0, 260); });
+  const evidence = [
+    'Screenshot: ' + (screenshot.available ? 'available' : 'missing') + ' rev ' + String(screenshot.frame_rev || 0),
+    'Browser permission: ' + String(permission.mode || 'none') + (permission.granted ? ' granted' : ' locked'),
+    'Visual luma: ' + String(analysis.avg_luma == null ? 'unknown' : analysis.avg_luma) + ' bright=' + String(analysis.bright_ratio == null ? 'unknown' : analysis.bright_ratio) + ' dark=' + String(analysis.dark_ratio == null ? 'unknown' : analysis.dark_ratio),
+    'Horizontal overflow: ' + String(layout.horizontalOverflowPx || 0) + 'px',
+    'Fixed overlays: ' + String(Array.isArray(layout.fixedOverlays) ? layout.fixedOverlays.length : 0),
+    'Offscreen interactive controls: ' + String(Array.isArray(layout.offscreenInteractive) ? layout.offscreenInteractive.length : 0),
+    'Unlabeled controls: ' + String(Array.isArray(accessibility.unlabeledInteractive) ? accessibility.unlabeledInteractive.length : 0),
+    'Images missing alt: ' + String(Array.isArray(accessibility.imagesMissingAlt) ? accessibility.imagesMissingAlt.length : 0),
+    'Visible H1 count: ' + String(accessibility.h1Count || 0),
+    'Text length: ' + String(page.text_length || 0),
+    'Interactive controls: ' + String(page.interactive_count || 0),
+  ];
+  return [
+    '<div class="browser-qa-detail-grid">',
+    comparison ? _browserQaRetestSummary(comparison) : '',
+    _browserQaList('Next action', _browserQaNextActions(reportObj), 'No next action available.'),
+    _browserQaList('Findings', findings, 'No findings in latest report.'),
+    _browserQaList('Visual', visualFindings, 'No visual screenshot risks detected.'),
+    _browserQaList('Layout', layoutFindings, 'No layout overflow or overlay risks detected.'),
+    _browserQaList('A11y', a11yFindings, 'No accessibility heuristic risks detected.'),
+    _browserQaList('Console', consoleFindings, 'No console warnings/errors in latest report.'),
+    _browserQaList('Network', networkFindings, 'No failed network events in latest report.'),
+    _browserQaList('Scope', _browserQaScopeDetails(reportObj), 'Scope matches the current browser page.'),
+    _browserQaList('Evidence', evidence, 'No evidence available.'),
+    _browserQaHistoryHtml(),
+    '</div>',
+    reportText ? '<div class="browser-qa-detail-foot">Full report is stored for Copy/Fix/Retest.</div>' : '',
+  ].join('');
+}
+
+function _browserComparableQaUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      ['cb', '_', 't', 'ts', 'cache', 'cachebuster', 'cache_buster'].forEach(function(param) {
+        parsed.searchParams.delete(param);
+      });
+      let path = parsed.pathname || '/';
+      if (path.length > 1) path = path.replace(/\/+$/, '');
+      return (parsed.protocol + '//' + parsed.host + path + parsed.search).toLowerCase();
+    }
+    return raw.toLowerCase();
+  } catch (_) {
+    return raw.replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+function _browserQaScopeDetails(report) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const reportUrl = String(reportObj.url || '').trim();
+  const currentUrl = _browserQaObservedCurrentUrl(reportObj);
+  const recordedAt = String(reportObj.qa_recorded_at || reportObj.timestamp || '').trim();
+  const evidenceAgeMinutes = _browserQaEvidenceAgeMinutes(reportObj);
+  const lines = [];
+  if (recordedAt) lines.push('Recorded: ' + recordedAt + (reportObj.qa_recorded_at_inferred ? ' (inferred from load time)' : ''));
+  if (typeof evidenceAgeMinutes === 'number') {
+    lines.push('Evidence freshness: ' + (reportObj.qa_recorded_at_inferred ? 'unknown legacy timestamp - retest before final proof' : (evidenceAgeMinutes >= 30 ? 'old - retest before final proof' : 'current')));
+  }
+  if (reportUrl) lines.push('Report URL: ' + reportUrl);
+  else lines.push('Report URL: not stored');
+  if (currentUrl) lines.push('Current browser URL: ' + currentUrl);
+  else lines.push('Current browser URL: not observed');
+  if (reportUrl && currentUrl && _browserComparableQaUrl(reportUrl) !== _browserComparableQaUrl(currentUrl)) {
+    lines.push('Scope status: STALE - retest or navigate to the report URL before claiming current-page fixes.');
+  } else if (reportUrl && !currentUrl) {
+    lines.push('Scope status: UNKNOWN - retest before claiming current-page fixes.');
+  } else {
+    lines.push('Scope status: current');
+  }
+  return lines;
+}
+
+function _browserQaRecordedLabel(report) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const raw = String(reportObj.qa_recorded_at || reportObj.timestamp || '').trim();
+  if (!raw) return '';
+  const date = new Date(raw);
+  const suffix = reportObj.qa_recorded_at_inferred ? '*' : '';
+  if (!Number.isNaN(date.getTime())) {
+    return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + suffix;
+  }
+  return (raw.length > 16 ? raw.slice(0, 16) : raw) + suffix;
+}
+
+function _browserQaEvidenceAgeMinutes(report) {
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const raw = String(reportObj.qa_recorded_at || reportObj.timestamp || '').trim();
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  const ageMs = Date.now() - date.getTime();
+  if (ageMs < 0) return 0;
+  return Math.round(ageMs / 60000);
+}
+
+function _browserRenderQaCard(text, report) {
+  const card = document.getElementById('browserQaCard');
+  if (!card) return;
+  const reportObj = report && typeof report === 'object' ? report : {};
+  const reportText = String(text || '').trim();
+  if (!reportText && !Object.keys(reportObj).length) {
+    _browserApplySharedFixReproUi(
+      _browserQaActionUi('', null, _browserState, {kind: 'fix'}),
+      _browserQaActionUi('', null, _browserState, {kind: 'repro'})
+    );
+    card.hidden = true;
+    return;
+  }
+  const status = _browserQaStatusKey(reportObj.status || '');
+  const reportUrl = String(reportObj.url || '').trim();
+  const visibleUrl = _browserQaObservedCurrentUrl(reportObj);
+  const scopeRisk = _browserQaScopeRisk(reportObj);
+  const url = String(reportUrl || visibleUrl || 'about:blank').trim();
+  const stale = scopeRisk.stale;
+  const scopeUnknown = scopeRisk.unknown;
+  const findings = _browserReportFindings(reportObj).length;
+  const cleanPass = _browserReportIsCleanPass(reportObj);
+  const actionableCount = _browserReportActionableLabels(reportObj).length;
+  const technicalPass = status === 'pass' && !cleanPass && actionableCount > 0;
+  const consoleCount = _browserQaCountReportArrays(reportObj, [
+    'console_events',
+    'consoleEvents',
+    'console_errors',
+    'consoleErrors',
+    'page_errors',
+    'pageErrors',
+  ]);
+  const networkCount = _browserQaCountReportArrays(reportObj, [
+    'network_events',
+    'networkEvents',
+    'network_errors',
+    'networkErrors',
+    'failed_requests',
+    'failedRequests',
+  ]);
+  const visualCount = _browserQaCountReportArrays(reportObj, [
+    'visual_findings',
+    'visualFindings',
+    'visual_errors',
+    'visualErrors',
+  ]);
+  const permissionMode = String((reportObj.permission && reportObj.permission.mode) || 'none');
+  const recordedLabel = _browserQaRecordedLabel(reportObj);
+  const evidenceAgeMinutes = _browserQaEvidenceAgeMinutes(reportObj);
+  const oldEvidence = !!reportObj.qa_recorded_at_inferred || (typeof evidenceAgeMinutes === 'number' && evidenceAgeMinutes >= 30);
+  const layoutCount = _browserQaCountReportArrays(reportObj, [
+    'layout_findings',
+    'layoutFindings',
+    'layout_errors',
+    'layoutErrors',
+  ]);
+  const a11yCount = _browserQaCountReportArrays(reportObj, [
+    'accessibility_findings',
+    'accessibilityFindings',
+    'a11y_findings',
+    'a11yFindings',
+  ]);
+  const previous = _browserLoadPreviousTestReport();
+  const comparison = previous && previous.report ? _browserBuildRetestComparison(previous, {text: reportText, report: reportObj}) : null;
+  const deltaLabel = comparison
+    ? (comparison.improved ? 'improved' : (comparison.regressed ? 'regressed' : 'same'))
+    : '';
+  const statusEl = document.getElementById('browserQaCardStatus');
+  const urlEl = document.getElementById('browserQaCardUrl');
+  const metricsEl = document.getElementById('browserQaCardMetrics');
+  const retestBtn = document.getElementById('browserQaRetestBtn');
+  const toolbarRetestBtn = document.getElementById('browserRetestPageBtn');
+  const fixBtn = document.getElementById('browserQaFixBtn');
+  const reproBtn = document.getElementById('browserQaReproBtn');
+  const copyBtn = document.getElementById('browserQaCopyBtn');
+  const detailsBtn = document.getElementById('browserQaDetailsBtn');
+  const clearBtn = document.getElementById('browserQaClearBtn');
+  const detailsEl = document.getElementById('browserQaDetails');
+  const retestUi = _browserQaRetestUi(scopeRisk, oldEvidence);
+  const fixUi = _browserQaActionUi(reportText, reportObj, _browserState, {kind: 'fix'});
+  const reproUi = _browserQaActionUi(reportText, reportObj, _browserState, {kind: 'repro'});
+  if (stale || scopeUnknown) {
+    const staleReason = stale ? 'stale' : 'unknown-scope';
+    const staleFixTitle = 'Retest before fixing. QA scope is stale or the current browser URL was not observed.';
+    const staleReproTitle = 'Retest before creating a repro. QA scope is stale or the current browser URL was not observed.';
+    Object.assign(fixUi, {
+      disabled: true,
+      reason: staleReason,
+      text: 'Retest first',
+      title: staleFixTitle,
+      aria: staleFixTitle,
+      scopeRisk,
+    });
+    Object.assign(reproUi, {
+      disabled: true,
+      reason: staleReason,
+      text: 'Retest first',
+      title: staleReproTitle,
+      aria: staleReproTitle,
+      scopeRisk,
+    });
+  }
+  _browserApplySharedRetestUi(retestUi);
+  _browserApplySharedFixReproUi(fixUi, reproUi);
+  card.hidden = false;
+  card.dataset.status = status;
+  card.dataset.stale = stale ? '1' : '0';
+  card.dataset.scopeUnknown = scopeUnknown ? '1' : '0';
+  card.dataset.oldEvidence = oldEvidence ? '1' : '0';
+  card.dataset.technicalPass = technicalPass ? '1' : '0';
+  if (statusEl) {
+  const statusLabel = _browserQaStatusLabel(reportObj.status || status) + (technicalPass ? ' · SIGNALS' : '');
+  statusEl.textContent = stale ? ('STALE · ' + statusLabel) : (scopeUnknown ? ('UNKNOWN SCOPE · ' + statusLabel) : (oldEvidence ? ('OLD · ' + statusLabel) : statusLabel));
+  }
+  if (urlEl) {
+    urlEl.textContent = (stale || scopeUnknown) ? ('Last QA: ' + (url || 'about:blank')) : (url || 'about:blank');
+    if (stale) {
+      urlEl.title = 'Last QA URL: ' + (url || 'about:blank') + '\nCurrent browser URL: ' + visibleUrl;
+    } else if (scopeUnknown) {
+      urlEl.title = 'Last QA URL: ' + (url || 'about:blank') + '\nCurrent browser URL: not observed. Retest before fixing current-page issues.';
+    } else {
+      urlEl.title = (url || 'about:blank') + (reportObj.qa_recorded_at_inferred ? '\nRecorded timestamp inferred from load time.' : '');
+    }
+  }
+  if (metricsEl) {
+    metricsEl.innerHTML = [
+      stale ? _browserQaMetric('Scope', 'stale') : '',
+      scopeUnknown ? _browserQaMetric('Scope', 'unknown') : '',
+      _browserQaMetric('Findings', findings),
+      _browserQaMetric('Visual', visualCount),
+      _browserQaMetric('Layout', layoutCount),
+      _browserQaMetric('A11y', a11yCount),
+      _browserQaMetric('Console', consoleCount),
+      _browserQaMetric('Network', networkCount),
+      _browserQaMetric('Mode', permissionMode),
+      recordedLabel ? _browserQaMetric('Recorded', recordedLabel) : '',
+      evidenceAgeMinutes != null ? _browserQaMetric('Age', evidenceAgeMinutes + 'm') : '',
+      deltaLabel ? _browserQaMetric('Delta', deltaLabel) : '',
+    ].join('');
+  }
+  if (retestBtn) retestBtn.disabled = !url;
+  _browserSetActionButtonUi(fixBtn, fixUi, {text: 'card'});
+  _browserSetActionButtonUi(reproBtn, reproUi, {text: 'card'});
+  if (copyBtn) copyBtn.disabled = !reportText;
+  if (detailsBtn) detailsBtn.disabled = !reportText && !Object.keys(reportObj).length;
+  if (clearBtn) clearBtn.disabled = !reportText && !Object.keys(reportObj).length && !_browserLoadQaHistory().length;
+  if (retestBtn) retestBtn.title = retestUi.title;
+  if (toolbarRetestBtn) {
+    toolbarRetestBtn.setAttribute('title', retestUi.title);
+    toolbarRetestBtn.setAttribute('aria-label', retestUi.aria);
+    toolbarRetestBtn.dataset.tooltip = retestUi.menuText;
+  }
+  if (copyBtn) copyBtn.title = stale ? 'Copy the last QA report. Report URL differs from the current browser URL.' : (oldEvidence ? 'Copy old QA evidence with scope and timestamp.' : 'Copy the latest QA report.');
+  if (detailsBtn) detailsBtn.title = stale ? 'Show details for the last QA report. Report URL differs from the current browser URL.' : (oldEvidence ? 'Show old QA details with scope and timestamp.' : 'Show latest QA details.');
+  if (retestBtn) retestBtn.textContent = retestUi.text;
+  if (copyBtn) copyBtn.textContent = stale ? 'Copy last' : (oldEvidence ? 'Copy old' : 'Copy');
+  if (detailsBtn) detailsBtn.textContent = stale ? 'Details' : (oldEvidence ? 'Details' : 'Details');
+  if (retestBtn) retestBtn.setAttribute('aria-label', retestUi.aria);
+  if (copyBtn) copyBtn.setAttribute('aria-label', stale ? 'Copy the last QA report' : (oldEvidence ? 'Copy old QA evidence' : 'Copy the latest QA report'));
+  if (detailsBtn) detailsBtn.setAttribute('aria-label', stale ? 'Show details for the last QA report' : (oldEvidence ? 'Show old QA details' : 'Show latest QA details'));
+  if (detailsEl) detailsEl.innerHTML = _browserBuildQaDetailsHtml(reportObj, reportText);
+  if (detailsEl && detailsBtn && !_browserQaDetailsUserToggled && !_browserQaBusy) {
+    const shouldOpen = !!reportText && status !== 'pass';
+    detailsEl.hidden = !shouldOpen;
+    detailsBtn.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  }
+  _browserRefreshHeaderMenu();
+  if (_browserQaBusy) _browserSetQaBusy(true);
+}
+
+function _browserRenderRememberedQaCard() {
+  const remembered = _browserLoadRememberedTestReport();
+  if (remembered.text || remembered.report) _browserStartQaFreshnessTimer();
+  _browserRenderQaCard(remembered.text, remembered.report);
+}
+
+function _browserStartQaFreshnessTimer() {
+  if (_browserQaFreshnessTimer || typeof window === 'undefined' || typeof window.setInterval !== 'function') return;
+  _browserQaFreshnessTimer = window.setInterval(function() {
+    if (_browserLastTestReportText || _browserLastTestReport) {
+      _browserRenderQaCard(_browserLastTestReportText, _browserLastTestReport);
+    }
+  }, 60000);
+}
+
+function browserToggleQaDetails() {
+  const details = document.getElementById('browserQaDetails');
+  const button = document.getElementById('browserQaDetailsBtn');
+  if (!details) return;
+  _browserQaDetailsUserToggled = true;
+  details.hidden = !details.hidden;
+  if (button) button.setAttribute('aria-expanded', details.hidden ? 'false' : 'true');
+}
+
+function _browserReportFindings(report) {
+  return Array.isArray(report && report.findings) ? report.findings.map(function(item) {
+    return String(item || '').trim();
+  }).filter(Boolean) : [];
+}
+
+function _browserReportItemsForKeys(report, keys) {
+  if (!report || typeof report !== 'object') return [];
+  const items = [];
+  keys.forEach(function(key) {
+    if (!Array.isArray(report[key])) return;
+    report[key].forEach(function(item) {
+      if (item && typeof item === 'object') {
+        const kind = String(item.type || item.kind || item.status || item.error || '').trim();
+        const body = String(item.text || item.message || item.method || item.url || '').trim();
+        const extra = item.url && body !== String(item.url).trim() ? (' ' + String(item.url).trim()) : '';
+        const text = (kind ? (kind + ': ') : '') + (body || JSON.stringify(item)) + extra;
+        if (text.trim()) items.push(text.trim());
+        return;
+      }
+      const text = String(item || '').trim();
+      if (text) items.push(text);
+    });
+  });
+  return items;
+}
+
+function _browserReportActionableLabels(report) {
+  if (!report || typeof report !== 'object') return [];
+  const groups = [
+    ['Finding', ['findings']],
+    ['Visual', ['visual_findings', 'visualFindings', 'visual_errors', 'visualErrors']],
+    ['Layout', ['layout_findings', 'layoutFindings', 'layout_errors', 'layoutErrors']],
+    ['A11y', ['accessibility_findings', 'accessibilityFindings', 'a11y_findings', 'a11yFindings']],
+    ['Console', ['console_events', 'consoleEvents', 'console_errors', 'consoleErrors', 'page_errors', 'pageErrors']],
+    ['Network', ['network_events', 'networkEvents', 'network_errors', 'networkErrors', 'failed_requests', 'failedRequests']],
+  ];
+  const labels = [];
+  groups.forEach(function(group) {
+    const prefix = group[0];
+    _browserReportItemsForKeys(report, group[1]).forEach(function(text) {
+      if (text) labels.push(prefix + ': ' + text);
+    });
+  });
+  return labels;
+}
+
+function _browserReportHasActionableFindings(report) {
+  return _browserReportActionableLabels(report).length > 0;
+}
+
+function _browserReportIsCleanPass(report) {
+  return !!(report && _browserQaStatusKey(report.status || '') === 'pass' && !_browserReportHasActionableFindings(report));
+}
+
+function _browserBuildRetestComparison(previous, current) {
+  const prevReport = previous && previous.report ? previous.report : null;
+  const currentReport = current && current.report ? current.report : null;
+  const prevFindings = _browserReportActionableLabels(prevReport);
+  const currentFindings = _browserReportActionableLabels(currentReport);
+  const fixed = prevFindings.filter(function(item) { return currentFindings.indexOf(item) < 0; });
+  const stillFailing = prevFindings.filter(function(item) { return currentFindings.indexOf(item) >= 0; });
+  const newRisks = currentFindings.filter(function(item) { return prevFindings.indexOf(item) < 0; });
+  const prevStatus = String((prevReport && prevReport.status) || 'unknown');
+  const currentStatus = String((currentReport && currentReport.status) || 'unknown');
+  const improved = prevStatus !== 'pass' && currentStatus === 'pass';
+  const regressed = prevStatus === 'pass' && currentStatus !== 'pass';
+  return {
+    previousStatus: prevStatus,
+    currentStatus,
+    fixed,
+    stillFailing,
+    newRisks,
+    improved,
+    regressed,
+  };
+}
+
+function _browserRetestComparisonText(comparison) {
+  const lines = [
+    'Retest result:',
+    '- Previous status: ' + comparison.previousStatus,
+    '- Current status: ' + comparison.currentStatus,
+    '- Change: ' + (comparison.improved ? 'improved' : (comparison.regressed ? 'regressed' : 'unchanged')),
+    '',
+    'Fixed:',
+  ];
+  if (comparison.fixed.length) comparison.fixed.forEach(function(item) { lines.push('- ' + item); });
+  else lines.push('- None detected by exact finding comparison.');
+  lines.push('', 'Still failing:');
+  if (comparison.stillFailing.length) comparison.stillFailing.forEach(function(item) { lines.push('- ' + item); });
+  else lines.push('- None from previous findings.');
+  lines.push('', 'New risks:');
+  if (comparison.newRisks.length) comparison.newRisks.forEach(function(item) { lines.push('- ' + item); });
+  else lines.push('- None detected.');
+  return lines.join('\n');
+}
+
+function _browserCurrentComposerReportText() {
+  const textarea = _browserComposerTextarea();
+  const text = String(textarea && textarea.value || '').trim();
+  if (text && text.indexOf('Browser Test Report') >= 0) return text;
+  return '';
+}
+
+function _browserBuildAgentQaProtocol() {
+  return [
+    'Agent QA protocol:',
+    '- Work evidence-first: separate observed facts, inferences, and assumptions.',
+    '- Be precise and akribisch: identify the affected files before editing and explain why they are relevant.',
+    '- Fix the root cause, not only the visible symptom.',
+    '- If QA scope is STALE, navigate back to the report URL or run Retest before editing current-page-specific issues.',
+    '- If QA scope is UNKNOWN, run Retest URL before editing current-page-specific issues.',
+    '- If QA evidence is old, refresh it with Retest before using it as final proof.',
+    '- Keep user control: do not perform destructive, external, or risky actions without approval.',
+    '- After changes, rerun Browser QA / Retest current page and report the exact status, delta, remaining risks, and evidence.',
+    '- Deepseek/GLM note: use explicit short checklists and avoid claiming success without concrete test evidence.',
+  ].join('\n');
+}
+
+function _browserBuildQaScopeLines(report, state) {
+  const reportUrl = String((report && report.url) || '').trim();
+  const scopeRisk = _browserQaScopeRisk(report, state);
+  const currentUrl = scopeRisk.currentUrl;
+  const stale = scopeRisk.stale;
+  const permission = report && report.permission && typeof report.permission === 'object' ? report.permission : {};
+  const permissionMode = String(permission.mode || 'none');
+  const permissionState = permission.granted ? 'granted' : 'locked';
+  const activeGoal = report && report.active_goal && typeof report.active_goal === 'object' ? report.active_goal : null;
+  const fallbackGoal = _browserActiveGoalForCurrentSession(state && state.session_id);
+  const activeGoalText = String((activeGoal && activeGoal.goal) || (fallbackGoal && fallbackGoal.goal) || '').trim();
+  const recordedAt = String((report && (report.qa_recorded_at || report.timestamp)) || '').trim();
+  const evidenceAgeMinutes = _browserQaEvidenceAgeMinutes(report);
+  const freshness = report && report.qa_recorded_at_inferred
+    ? 'unknown legacy timestamp - retest before using this as final fix evidence'
+    : (typeof evidenceAgeMinutes === 'number' && evidenceAgeMinutes >= 30
+      ? 'old - retest before using this as final fix evidence'
+      : 'current');
+  const lines = [
+    'QA scope:',
+  ];
+  if (recordedAt) lines.push('- Recorded: ' + recordedAt + (report && report.qa_recorded_at_inferred ? ' (inferred from load time)' : ''));
+  lines.push(
+    '- Report URL: ' + (reportUrl || 'unknown'),
+    '- Current browser URL: ' + (currentUrl || 'not observed'),
+    '- Scope status: ' + (stale ? 'STALE - report belongs to a different URL; navigate/retest before claiming the current page is fixed.' : (scopeRisk.unknown ? 'UNKNOWN - current browser URL was not observed; run Retest URL before current-page fixes.' : 'current')),
+    '- Evidence freshness: ' + freshness,
+    '- Browser approval/control: ' + permissionMode + ' (' + permissionState + ')',
+    '- Active goal: ' + (activeGoalText || 'none')
+  );
+  return lines;
+}
+
+function _browserBuildFixFindingsPrompt(reportText, report, state) {
+  const url = String((report && report.url) || (state && state.url) || _browserVisibleUrl() || '').trim();
+  const status = String((report && report.status) || '').trim();
+  const findings = Array.isArray(report && report.findings) ? report.findings : [];
+  const intro = [
+    'Nutze den letzten Browser Test Report als Evidence und schliesse den Browser-Fix-Loop.',
+    '',
+    'Auftrag:',
+    '- Analysiere die Findings und die Evidence.',
+    '- Finde die betroffenen Dateien im aktuellen Workspace.',
+    '- Fixe die Root Cause, nicht nur das Symptom.',
+    '- Teste dieselbe URL danach erneut mit "Test current page".',
+    '- Wenn die Evidence als old markiert ist, nutze Retest/Refresh QA vor dem finalen Fix-Nachweis.',
+    '- Berichte am Ende kurz mit Evidence: geaenderte Dateien, Retest-Status, verbleibende Risiken.',
+    '',
+    'Constraints:',
+    '- User-Kontrolle behalten: nutze den Approval mode aus dem Browser Test Report als Arbeitsbedingung und keine riskanten Aktionen ohne Approval.',
+    '- Persistent Goal beachten: nutze die "Active goal:" Zeile im QA scope als Zielbild und reduziere Erfolg nicht auf kleinere Checks.',
+    '- Wenn der Report PASS ist, pruefe trotzdem kurz, ob es UX- oder Stabilitaetsrisiken gibt, bevor du etwas aenderst.',
+    '- Wenn kein Code-Fix noetig ist, sage das klar und begruende es mit Evidence.',
+    '',
+    _browserBuildAgentQaProtocol(),
+    '',
+    _browserBuildQaScopeLines(report, state).join('\n'),
+    '',
+    'Target URL for this report: ' + (url || 'unknown'),
+    'Report status: ' + (status || 'unknown'),
+  ];
+  if (findings.length) {
+    intro.push('', 'Findings summary:');
+    findings.slice(0, 8).forEach(function(item) {
+      intro.push('- ' + String(item || '').slice(0, 240));
+    });
+  }
+  intro.push('', 'Browser Test Report:', reportText || '(no report text available)');
+  return intro.join('\n');
+}
+
+async function browserTestCurrentPageToChat() {
+  if (!_browserBeginQaRun('Testing current browser page...')) return;
+  let state = null;
+  try {
+    state = await _browserEnsureCurrentState();
+  } catch (err) {
+    _browserFinishQaRun();
+    const message = err && (err.error || err.message) ? String(err.error || err.message) : 'Browser state unavailable';
+    if (typeof showToast === 'function') showToast(message, 2400, 'error');
+    return;
+  }
+  const sid = _browserCurrentSessionId();
+  if (!sid) {
+    _browserFinishQaRun();
+    if (typeof showToast === 'function') showToast('No chat session selected', 2000, 'error');
+    return;
+  }
+  const visibleUrl = _browserVisibleUrl();
+  if (!visibleUrl && !(state && state.url)) {
+    _browserFinishQaRun();
+    if (typeof showToast === 'function') showToast('No browser page loaded', 2000, 'error');
+    return;
+  }
+  if (typeof showToast === 'function') showToast('Testing current browser page...', 1800, 'info');
+  try {
+    if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+  } catch (err) {
+    _browserFinishQaRun();
+    const message = err && (err.error || err.message) ? String(err.error || err.message) : 'Chat panel unavailable';
+    if (typeof showToast === 'function') showToast(message, 2400, 'error');
+    return;
+  }
+  const frameUrl = _browserFrameObjectUrl || '';
+  try {
+    const data = await api('/api/browser/action', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sid,
+        action: 'test_current_page',
+      }),
+    });
+    const text = String(data && data.text || '').trim();
+    const lines = [text || '🧪 **Browser Test Report**\nStatus: NEEDS REVIEW\nNo report text returned.'];
+    if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
+    _browserRememberTestReport(lines.join('\n'), data && data.report ? data.report : null);
+    if (!_browserInsertIntoComposer(lines.join('\n'))) {
+      _browserFinishQaRun();
+      if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+      return;
+    }
+    _browserFinishQaRun();
+    const status = data && data.report && data.report.status === 'pass' ? 'success' : 'info';
+    if (typeof showToast === 'function') showToast('Browser test report added to chat', 2200, status);
+    return data || null;
+  } catch (err) {
+    const message = err && (err.error || err.message) ? String(err.error || err.message) : 'Browser page test failed';
+    const fallback = [
+      '🧪 **Browser Test Report**',
+      'Status: FAILED',
+      'URL: ' + (visibleUrl || (state && state.url) || 'about:blank'),
+      '',
+      'Findings:',
+      '- ' + message,
+      '',
+      'Suggested next steps:',
+      '- Check browser permission mode and retry.',
+    ].join('\n');
+    _browserRememberTestReport(fallback, {status: 'failed', url: visibleUrl || (state && state.url) || 'about:blank', findings: [message]});
+    _browserFinishQaRun();
+    if (!_browserInsertIntoComposer(fallback) && typeof showToast === 'function') showToast(message, 2400, 'error');
+    else if (typeof showToast === 'function') showToast('Browser test failed; report added to chat', 2400, 'error');
+    return {text: fallback, report: {status: 'failed', url: visibleUrl || (state && state.url) || 'about:blank', findings: [message]}};
+  }
+}
+
+function _browserStripCleanPassFixPrompt(text) {
+  let clean = String(text || '');
+  clean = clean.replace(
+    /\n+Fix findings prompt:\n[\s\S]*?(?=\n\n!\[Browser screenshot\]|\s*$)/,
+    ''
+  );
+  clean = clean.replace(
+    /\n+Suggested next steps:\n- If findings exist[^\n]*\n- Re-run Test current page after changes to verify the fix\./,
+    '\n\nSuggested next steps:\n- Keep this PASS report as current evidence while the URL and browser state remain unchanged.'
+  );
+  return clean.trim();
+}
+
+function _browserNormalizeStoredQaText(text, report) {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  return _browserReportIsCleanPass(report) ? _browserStripCleanPassFixPrompt(raw) : raw;
+}
+
+async function _browserRunPageTest() {
+  const state = await _browserEnsureCurrentState();
+  const sid = _browserCurrentSessionId();
+  if (!sid) throw new Error('No chat session selected');
+  const visibleUrl = _browserVisibleUrl();
+  if (!visibleUrl && !(state && state.url)) throw new Error('No browser page loaded');
+  const frameUrl = _browserFrameObjectUrl || '';
+  const data = await api('/api/browser/action', {
+    method: 'POST',
+    body: JSON.stringify({
+      session_id: sid,
+      action: 'test_current_page',
+    }),
+  });
+  const report = data && data.report ? data.report : null;
+  const text = String(data && data.text || '').trim();
+  const isCleanPass = _browserReportIsCleanPass(report);
+  const reportText = isCleanPass ? _browserStripCleanPassFixPrompt(text) : text;
+  const lines = [reportText || '🧪 **Browser Test Report**\nStatus: NEEDS REVIEW\nNo report text returned.'];
+  if (frameUrl) lines.push('', `![Browser screenshot](${frameUrl})`);
+  const fullText = lines.join('\n');
+  _browserRememberTestReport(fullText, report);
+  return {text: fullText, report};
+}
+
+async function browserRetestCurrentPageToChat() {
+  if (!_browserBeginQaRun('Retesting last browser page...')) return;
+  const remembered = _browserLoadRememberedTestReport();
+  const targetUrl = String((remembered.report && remembered.report.url) || '').trim();
+  if (!targetUrl) {
+    _browserFinishQaRun();
+    if (typeof showToast === 'function') showToast('Run Test current page first', 2200, 'error');
+    return;
+  }
+  if (typeof showToast === 'function') showToast('Retesting last browser page...', 1800, 'info');
+  try {
+    const currentState = await _browserEnsureCurrentState();
+    const currentUrl = String((currentState && currentState.url) || _browserVisibleUrl() || '').trim();
+    if (_browserComparableQaUrl(currentUrl) !== _browserComparableQaUrl(targetUrl)) {
+      _browserSetStatusUrl('Retest navigating to report URL: ' + targetUrl);
+      if (typeof showToast === 'function') showToast('Retest: navigating to last QA URL', 1800, 'info');
+      const navigatedState = await browserNavigateUrl(targetUrl);
+      const navigatedUrl = String((navigatedState && navigatedState.url) || _browserVisibleUrl() || '').trim();
+      if (_browserComparableQaUrl(navigatedUrl) !== _browserComparableQaUrl(targetUrl)) {
+        throw new Error('Retest did not reach the QA URL. Current: ' + (navigatedUrl || 'unknown'));
+      }
+    } else {
+      _browserSetStatusUrl('Retest using current URL: ' + (targetUrl || currentUrl));
+    }
+    if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+    const previous = _browserLoadRememberedTestReport();
+    const current = await _browserRunPageTest();
+    const comparison = _browserBuildRetestComparison(previous, current);
+    const previousScope = _browserBuildQaScopeLines(previous && previous.report ? previous.report : remembered.report, currentState);
+    const text = [
+      '🔁 **Browser Retest Report**',
+      'URL: ' + targetUrl,
+      '',
+      'Scope before retest:',
+      previousScope.join('\n'),
+      '',
+      _browserRetestComparisonText(comparison),
+      '',
+      'Current Browser Test Report:',
+      current.text,
+    ].join('\n');
+    if (!_browserSetComposerText(text)) {
+      _browserFinishQaRun();
+      if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+      return;
+    }
+    _browserFinishQaRun();
+    if (typeof showToast === 'function') showToast('Retest report ready', 2200, comparison.currentStatus === 'pass' ? 'success' : 'info');
+    return {text, report: current.report || null, comparison};
+  } catch (err) {
+    _browserFinishQaRun();
+    const message = err && (err.error || err.message) ? String(err.error || err.message) : 'Retest failed';
+    if (typeof showToast === 'function') showToast(message, 2400, 'error');
+    return {text: '', report: {status: 'failed', url: targetUrl || 'about:blank', findings: [message]}, error: message};
+  }
+}
+
+function _browserQaActionResult(ok, details) {
+  const result = Object.assign({ok: !!ok, at: Date.now()}, details || {});
+  try { window.browserLastQaActionResult = result; } catch (_) {}
+  return result;
+}
+
+async function browserRunBrowserQaToChat() {
+  if (!_browserBeginQaRun('Running browser QA...')) return _browserQaActionResult(false, {reason: 'busy'});
+  const previous = _browserLoadRememberedTestReport();
+  if (typeof showToast === 'function') showToast('Running browser QA...', 1800, 'info');
+  try {
+    if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+    const currentState = await _browserEnsureCurrentState();
+    const current = await _browserRunPageTest();
+    const currentReport = current && current.report ? current.report : null;
+    const currentText = String(current && current.text || '').trim();
+    const hasPrevious = !!(previous && previous.text && previous.report);
+    const comparison = hasPrevious ? _browserBuildRetestComparison(previous, current) : null;
+    const isCleanPass = _browserReportIsCleanPass(currentReport);
+    const hasTechnicalPassSignals = !!(currentReport && currentReport.status === 'pass' && !isCleanPass && _browserReportActionableLabels(currentReport).length);
+    const fixPrompt = isCleanPass ? '' : _browserBuildFixFindingsPrompt(currentText, currentReport, currentState);
+    const nextAction = isCleanPass
+      ? 'No blocking findings detected. Keep this as current evidence only while the Browser QA card is not stale or old.'
+      : (hasTechnicalPassSignals
+        ? 'PASS includes technical QA signals. Inspect the evidence, confirm ownership/repro, then use Fix/Repro only if it is app-owned.'
+        : 'Send the Fix prompt below, then run Retest current page after the patch.');
+    const lines = [
+      '🧭 **Browser QA Report**',
+      'URL: ' + String((currentReport && currentReport.url) || _browserVisibleUrl() || 'about:blank'),
+      'Current status: ' + String((currentReport && currentReport.status) || 'unknown'),
+      '',
+      'Current test:',
+      currentText || '(no current test report text)',
+      '',
+      _browserBuildQaScopeLines(currentReport, currentState).join('\n'),
+    ];
+    if (comparison) {
+      lines.push('', 'Retest comparison:', _browserRetestComparisonText(comparison));
+    } else {
+      lines.push('', 'Retest comparison:', '- No previous Browser Test Report available for comparison.');
+    }
+    if (isCleanPass) {
+      lines.push(
+        '',
+        'Evidence note:',
+        '- This Browser QA run found no blocking findings for the scoped URL/state.',
+        '- Do not treat this as final proof if the Browser QA card later becomes stale or old.',
+        '',
+        'Next action:',
+        '- ' + nextAction
+      );
+    } else {
+      lines.push('', _browserBuildAgentQaProtocol(), '', 'Fix prompt:', fixPrompt, '', 'Next action:', '- ' + nextAction);
+    }
+    const text = lines.join('\n');
+    if (!_browserSetComposerText(text)) {
+      _browserFinishQaRun();
+      if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+      return _browserQaActionResult(false, {
+        reason: 'composer_unavailable',
+        text,
+        report: currentReport,
+        comparison,
+        clean_pass: isCleanPass,
+        fix_prompt: fixPrompt,
+        next_action: nextAction,
+      });
+    }
+    _browserFinishQaRun();
+    if (typeof showToast === 'function') showToast('Browser QA report ready', 2200, currentReport && currentReport.status === 'pass' ? 'success' : 'info');
+    return _browserQaActionResult(true, {
+      action: 'browser_qa',
+      text,
+      report: currentReport,
+      comparison,
+      clean_pass: isCleanPass,
+      fix_prompt: fixPrompt,
+      next_action: nextAction,
+    });
+  } catch (err) {
+    _browserFinishQaRun();
+    const message = err && (err.error || err.message) ? String(err.error || err.message) : 'Browser QA failed';
+    if (typeof showToast === 'function') showToast(message, 2400, 'error');
+    return _browserQaActionResult(false, {reason: 'error', error: message, report: {status: 'failed', findings: [message]}});
+  }
+}
+
+function _browserCurrentWorkspaceSlug() {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    const workspace = String(params.get('workspace') || '').trim();
+    if (workspace) return workspace;
+  } catch (_) {}
+  const btn = _browserEl('titlebarSpaceBtn');
+  const text = btn ? String(btn.textContent || '').trim().replace(/\s+/g, ' ') : '';
+  if (text) return text.replace(/^[^\w-]+/, '').trim().toLowerCase() || 'nova';
+  return 'nova';
+}
+
+function _browserDefaultSwitchWorkspace(workspace) {
+  const current = String(workspace || '').trim().toLowerCase();
+  return current === 'sidekick' ? 'nova' : 'sidekick';
+}
+
+function _browserBuildWebuiSmokeReport(result) {
+  const checks = Array.isArray(result && result.checks) ? result.checks : [];
+  const failed = checks.filter(check => !(check && check.ok));
+  const timings = result && result.timings ? result.timings : {};
+  const artifacts = result && result.artifacts ? result.artifacts : {};
+  const approvalMode = String((result && result.approval_mode) || (typeof window !== 'undefined' && window._approvalMode) || 'manual').trim().toLowerCase();
+  const approvalLabel = ['manual', 'smart', 'off'].includes(approvalMode) ? approvalMode : 'manual';
+  const fallbackGoal = _browserActiveGoalForCurrentSession(result && result.session_id);
+  const activeGoalText = String((result && result.active_goal && result.active_goal.goal) || (fallbackGoal && fallbackGoal.goal) || '').trim();
+  const lines = [
+    '🧪 **WebUI Browser Smoke**',
+    'Status: ' + (result && result.ok ? 'PASS' : 'FAIL'),
+    'URL: ' + String((result && result.url) || window.location.href || ''),
+    'Approval mode: ' + approvalLabel,
+    'Active goal: ' + (activeGoalText || 'none'),
+    'Return code: ' + String((result && result.returncode) ?? 'n/a'),
+    'Elapsed: ' + String((result && result.elapsed_ms) ?? 'n/a') + 'ms',
+    '',
+    'Timings:',
+    '- Load: ' + String(timings.load_ms ?? 'n/a') + 'ms',
+    '- Switch workspace: ' + String(timings.switch_workspace_ms ?? 'n/a') + 'ms',
+    '- Restore workspace: ' + String(timings.restore_workspace_ms ?? 'n/a') + 'ms',
+    '',
+    'Checks:',
+  ];
+  if (!checks.length) {
+    lines.push('- No checks returned.');
+  } else {
+    checks.forEach(check => {
+      const name = String((check && check.name) || 'unknown');
+      lines.push('- ' + (check && check.ok ? 'PASS ' : 'FAIL ') + name);
+    });
+  }
+  if (failed.length) {
+    lines.push('', 'Failed details:');
+    failed.slice(0, 8).forEach(check => {
+      lines.push('- ' + String(check.name || 'unknown') + ': ' + JSON.stringify(check.detail || {}));
+    });
+  }
+  const screenshot = artifacts.screenshot || artifacts.failure_screenshot || '';
+  if (screenshot) {
+    lines.push('', artifacts.failure_screenshot ? 'Failure screenshot:' : 'Visual screenshot:', String(screenshot));
+  }
+  if (result && result.stderr) {
+    lines.push('', 'stderr:', '```text', String(result.stderr).slice(0, 2000), '```');
+  }
+  return lines.join('\n');
+}
+
+function _browserRenderWebuiSmokeCard(result, text) {
+  const card = document.getElementById('browserQaCard');
+  if (!card) return;
+  const data = result && typeof result === 'object' ? result : {};
+  const checks = Array.isArray(data.checks) ? data.checks : [];
+  const failed = checks.filter(check => !(check && check.ok));
+  const timings = data.timings && typeof data.timings === 'object' ? data.timings : {};
+  const artifacts = data.artifacts && typeof data.artifacts === 'object' ? data.artifacts : {};
+  const screenshot = artifacts.screenshot || artifacts.failure_screenshot || '';
+  const hasEvidence = !!screenshot || !!String(text || '').trim();
+  const running = !!data.running;
+  const ok = !!data.ok;
+  const statusEl = document.getElementById('browserQaCardStatus');
+  const urlEl = document.getElementById('browserQaCardUrl');
+  const metricsEl = document.getElementById('browserQaCardMetrics');
+  const retestBtn = document.getElementById('browserQaRetestBtn');
+  const fixBtn = document.getElementById('browserQaFixBtn');
+  const reproBtn = document.getElementById('browserQaReproBtn');
+  const copyBtn = document.getElementById('browserQaCopyBtn');
+  const detailsBtn = document.getElementById('browserQaDetailsBtn');
+  const clearBtn = document.getElementById('browserQaClearBtn');
+  const detailsEl = document.getElementById('browserQaDetails');
+  card.hidden = false;
+  card.dataset.status = running ? 'running' : (ok ? 'pass' : 'failed');
+  card.dataset.webuiSmoke = '1';
+  card.dataset.stale = '0';
+  card.dataset.scopeUnknown = '0';
+  if (statusEl) statusEl.textContent = running ? 'WEBUI RUNNING' : (ok ? 'WEBUI PASS' : 'WEBUI FAIL');
+  if (urlEl) {
+    const label = 'WebUI smoke · ' + String(data.url || window.location.href || '');
+    urlEl.textContent = label;
+    urlEl.title = label;
+  }
+  if (metricsEl) {
+    metricsEl.innerHTML = [
+      _browserQaMetric('Checks', checks.length || 0),
+      _browserQaMetric('Failed', failed.length || 0),
+      _browserQaMetric('Load', (timings.load_ms ?? 'n/a') + 'ms'),
+      _browserQaMetric('Switch', (timings.switch_workspace_ms ?? 'n/a') + 'ms'),
+      _browserQaMetric('Restore', (timings.restore_workspace_ms ?? 'n/a') + 'ms'),
+    ].join('');
+  }
+  if (retestBtn) {
+    retestBtn.disabled = running;
+    retestBtn.textContent = running ? 'Running' : 'Run smoke';
+    retestBtn.title = running ? 'WebUI smoke is running' : 'Run WebUI smoke again';
+    retestBtn.setAttribute('aria-label', running ? 'WebUI smoke is running' : 'Run WebUI smoke again');
+    retestBtn.onclick = browserRunWebuiSmokeToChat;
+  }
+  if (fixBtn) {
+    fixBtn.disabled = true;
+    fixBtn.textContent = 'Fix';
+    fixBtn.title = 'Use the generated WebUI smoke report before fixing.';
+  }
+  if (reproBtn) {
+    reproBtn.disabled = true;
+    reproBtn.textContent = 'Repro';
+    reproBtn.title = 'Use the generated WebUI smoke report before creating a repro.';
+  }
+  if (copyBtn) {
+    copyBtn.disabled = true;
+    copyBtn.textContent = 'Copy';
+    copyBtn.title = 'WebUI smoke report is written to the composer.';
+  }
+  if (clearBtn) clearBtn.disabled = false;
+  if (detailsBtn) {
+    detailsBtn.disabled = false;
+    detailsBtn.textContent = 'Details';
+    detailsBtn.setAttribute('aria-expanded', (!running && (failed.length || hasEvidence)) ? 'true' : 'false');
+    detailsBtn.title = screenshot ? 'Show WebUI smoke evidence and report' : 'Show WebUI smoke report';
+  }
+  if (detailsEl) {
+    const failedHtml = failed.length
+      ? '<h4>Failed checks</h4><ul>' + failed.slice(0, 12).map(check => (
+        '<li><strong>' + _browserHtmlEscape(check.name || 'unknown') + '</strong>: ' + _browserHtmlEscape(JSON.stringify(check.detail || {})) + '</li>'
+      )).join('') + '</ul>'
+      : '<h4>Failed checks</h4><div class="browser-qa-empty">None</div>';
+    const artifactHtml = screenshot
+      ? '<h4>' + (artifacts.failure_screenshot ? 'Failure screenshot' : 'Visual screenshot') + '</h4><div class="browser-qa-empty">' + _browserHtmlEscape(String(screenshot)) + '</div>'
+      : '';
+    detailsEl.innerHTML = failedHtml + artifactHtml + '<h4>Report</h4><pre>' + _browserHtmlEscape(String(text || '')) + '</pre>';
+    detailsEl.hidden = running || !(failed.length || hasEvidence);
+  }
+  try {
+    window.browserLastWebuiSmokeResult = data;
+    window.browserLastWebuiSmokeText = String(text || '');
+  } catch (_) {}
+  _browserRefreshHeaderMenu();
+}
+
+async function browserRunWebuiSmokeToChat() {
+  if (typeof showToast === 'function') showToast('Running WebUI smoke...', 1800, 'info');
+  try {
+    if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+    if (typeof browserSetDrawerOpen === 'function') browserSetDrawerOpen(true);
+    const workspace = _browserCurrentWorkspaceSlug();
+    const sid = _browserCurrentSessionId() || (typeof S !== 'undefined' && S.session && S.session.session_id) || '';
+    _browserRenderWebuiSmokeCard({
+      running: true,
+      url: window.location.href || '',
+      checks: [],
+      timings: {},
+    }, 'WebUI smoke is running...');
+    const result = await api('/api/browser/webui-smoke', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sid || undefined,
+        workspace,
+        switch_workspace: _browserDefaultSwitchWorkspace(workspace),
+      }),
+    });
+    const text = _browserBuildWebuiSmokeReport(result);
+    _browserRenderWebuiSmokeCard(result, text);
+    if (!_browserSetComposerText(text)) {
+      if (typeof showToast === 'function') showToast('WebUI smoke finished; composer unavailable', 2600, result && result.ok ? 'info' : 'warning');
+      return _browserQaActionResult(!!(result && result.ok), {action: 'browser_webui_smoke', result, text, reason: 'composer_unavailable'});
+    }
+    if (typeof showToast === 'function') {
+      showToast(result && result.ok ? 'WebUI smoke passed' : 'WebUI smoke failed; report ready', 2400, result && result.ok ? 'success' : 'warning');
+    }
+    return _browserQaActionResult(!!(result && result.ok), {action: 'browser_webui_smoke', result, text});
+  } catch (err) {
+    const message = err && (err.error || err.message) ? String(err.error || err.message) : 'WebUI smoke failed';
+    const errorPayload = err && err.data && typeof err.data === 'object' ? err.data : null;
+    if (errorPayload && (Array.isArray(errorPayload.checks) || errorPayload.returncode !== undefined || errorPayload.ok === false)) {
+      const text = _browserBuildWebuiSmokeReport(errorPayload);
+      _browserRenderWebuiSmokeCard(errorPayload, text);
+      _browserSetComposerText(text);
+      if (typeof showToast === 'function') showToast('WebUI smoke failed; report ready', 2600, 'warning');
+      return _browserQaActionResult(false, {action: 'browser_webui_smoke', result: errorPayload, text, reason: 'smoke_failed'});
+    }
+    const fallback = {
+      ok: false,
+      url: window.location.href || '',
+      timings: {},
+      artifacts: {},
+      checks: [{name: 'webui_smoke_request', ok: false, detail: {message}}],
+    };
+    const text = _browserBuildWebuiSmokeReport(fallback);
+    _browserRenderWebuiSmokeCard(fallback, text);
+    _browserSetComposerText(text);
+    if (typeof showToast === 'function') showToast(message, 2600, 'error');
+    return _browserQaActionResult(false, {action: 'browser_webui_smoke', reason: 'error', error: message});
+  }
+}
+
+async function browserFixFindingsToChat() {
+  const composerReport = _browserCurrentComposerReportText();
+  const remembered = _browserLoadRememberedTestReport();
+  const reportText = composerReport || remembered.text;
+  const preActionUi = _browserQaActionUi(reportText, remembered.report, _browserState, {kind: 'fix'});
+  if (preActionUi.disabled && (preActionUi.reason === 'missing' || preActionUi.reason === 'clean-pass' || preActionUi.reason === 'busy')) {
+    if (typeof showToast === 'function') showToast(preActionUi.title, 2600, preActionUi.reason === 'clean-pass' ? 'info' : 'warning');
+    return _browserQaActionResult(false, {action: 'fix_findings', reason: preActionUi.reason || 'disabled', title: preActionUi.title, report: remembered.report || null});
+  }
+  const state = await _browserEnsureCurrentState();
+  const actionUi = _browserQaActionUi(reportText, remembered.report, state, {kind: 'fix'});
+  if (actionUi.disabled) {
+    if (typeof showToast === 'function') showToast(actionUi.title, 2600, actionUi.reason === 'clean-pass' ? 'info' : 'warning');
+    return _browserQaActionResult(false, {action: 'fix_findings', reason: actionUi.reason || 'disabled', title: actionUi.title, report: remembered.report || null, state});
+  }
+  if (!reportText) {
+    if (typeof showToast === 'function') showToast('Run Test current page first', 2200, 'error');
+    return _browserQaActionResult(false, {action: 'fix_findings', reason: 'missing_report', report: null, state});
+  }
+  if (_browserReportIsCleanPass(remembered.report)) {
+    if (typeof showToast === 'function') showToast('No browser findings to fix; retest if the page changed', 2400, 'info');
+    return _browserQaActionResult(false, {action: 'fix_findings', reason: 'clean_pass', report: remembered.report || null, state});
+  }
+  const scopeRisk = _browserQaScopeRisk(remembered.report, state);
+  if (scopeRisk.risk) {
+    const message = scopeRisk.stale
+      ? 'Retest first: QA report URL differs from the current browser URL'
+      : 'Retest first: current browser URL was not observed';
+    if (typeof showToast === 'function') showToast(message, 2600, 'warning');
+    return _browserQaActionResult(false, {action: 'fix_findings', reason: scopeRisk.stale ? 'stale_report' : 'unobserved_url', message, report: remembered.report || null, state, scope_risk: scopeRisk});
+  }
+  if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+  const prompt = _browserBuildFixFindingsPrompt(reportText, remembered.report, state);
+  if (!_browserSetComposerText(prompt)) {
+    if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+    return _browserQaActionResult(false, {action: 'fix_findings', reason: 'composer_unavailable', prompt, report: remembered.report || null, state, scope_risk: scopeRisk});
+  }
+  if (typeof showToast === 'function') showToast('Fix findings prompt ready', 2000, 'success');
+  return _browserQaActionResult(true, {action: 'fix_findings', prompt, report: remembered.report || null, state, scope_risk: scopeRisk});
+}
+
+async function browserQaReproToChat() {
+  const remembered = _browserLoadRememberedTestReport();
+  const report = remembered && remembered.report ? remembered.report : null;
+  const reportText = String((remembered && remembered.text) || '').trim();
+  const actionUi = _browserQaActionUi(reportText, report, _browserState, {kind: 'repro'});
+  if (actionUi.disabled) {
+    if (typeof showToast === 'function') showToast(actionUi.title, 2600, actionUi.reason === 'clean-pass' ? 'info' : 'warning');
+    return _browserQaActionResult(false, {action: 'qa_repro', reason: actionUi.reason || 'disabled', title: actionUi.title, report});
+  }
+  if (!reportText || !report) {
+    if (typeof showToast === 'function') showToast('Run Browser QA first', 2200, 'error');
+    return _browserQaActionResult(false, {action: 'qa_repro', reason: 'missing_report', report});
+  }
+  if (_browserReportIsCleanPass(report)) {
+    if (typeof showToast === 'function') showToast('No browser findings to reproduce; retest if the page changed', 2400, 'info');
+    return _browserQaActionResult(false, {action: 'qa_repro', reason: 'clean_pass', report});
+  }
+  const scopeRisk = _browserQaScopeRisk(report, _browserState);
+  if (scopeRisk.risk) {
+    const message = scopeRisk.stale
+      ? 'Retest first: QA report URL differs from the current browser URL'
+      : 'Retest first: current browser URL was not observed';
+    if (typeof showToast === 'function') showToast(message, 2600, 'warning');
+    return _browserQaActionResult(false, {action: 'qa_repro', reason: scopeRisk.stale ? 'stale_report' : 'unobserved_url', message, report, scope_risk: scopeRisk});
+  }
+  const findings = _browserReportFindings(report);
+  const visual = Array.isArray(report.visual_findings) ? report.visual_findings : [];
+  const layout = Array.isArray(report.layout_findings) ? report.layout_findings : [];
+  const page = report.page && typeof report.page === 'object' ? report.page : {};
+  const permission = report.permission && typeof report.permission === 'object' ? report.permission : {};
+  const scopeLines = _browserBuildQaScopeLines(report, _browserState);
+  const lines = [
+    'Browser Repro Brief',
+    '',
+    'Target:',
+    '- URL: ' + String(report.url || _browserVisibleUrl() || 'about:blank'),
+    '- Status: ' + String(report.status || 'unknown'),
+    '- Browser permission: ' + String(permission.mode || 'none') + (permission.granted ? ' granted' : ' locked'),
+    '',
+    scopeLines.join('\n'),
+    '',
+    'Repro steps:',
+    '1. Open the URL in the Sidekick browser drawer.',
+    '2. Run Browser QA / Test current page.',
+    '3. Compare the visible browser frame, QA card, console/network evidence, and layout findings below.',
+    '',
+    'Observed findings:',
+  ];
+  if (findings.length) findings.slice(0, 10).forEach(function(item) { lines.push('- ' + String(item).slice(0, 260)); });
+  else lines.push('- No findings in latest report.');
+  lines.push('', 'Visual/Layout evidence:');
+  if (visual.length) visual.slice(0, 6).forEach(function(item) { lines.push('- Visual: ' + String(item).slice(0, 220)); });
+  if (layout.length) layout.slice(0, 6).forEach(function(item) { lines.push('- Layout: ' + String(item).slice(0, 220)); });
+  if (!visual.length && !layout.length) lines.push('- No visual/layout risks reported.');
+  lines.push(
+    '',
+    'Page evidence:',
+    '- Text length: ' + String(page.text_length || 0),
+    '- Interactive controls: ' + String(page.interactive_count || 0),
+    '',
+    'Expected fix loop:',
+    '- Patch the root cause.',
+    '- Run Retest current page.',
+    '- If Evidence freshness is old, refresh QA before treating this brief as final proof.',
+    '- Confirm Delta/Retest details show fixed findings and no new risks.',
+    '',
+    _browserBuildAgentQaProtocol()
+  );
+  if (typeof switchPanel === 'function') await switchPanel('chat', {bypassSettingsGuard: true});
+  const text = lines.join('\n');
+  if (!_browserSetComposerText(text)) {
+    if (typeof showToast === 'function') showToast('Chat composer unavailable', 2200, 'error');
+    return _browserQaActionResult(false, {action: 'qa_repro', reason: 'composer_unavailable', text, report, scope_risk: scopeRisk, findings});
+  }
+  if (typeof showToast === 'function') showToast('Browser repro brief ready', 2000, 'success');
+  return _browserQaActionResult(true, {action: 'qa_repro', text, report, scope_risk: scopeRisk, findings});
+}
+
+async function browserCopyQaReport() {
+  const remembered = _browserLoadRememberedTestReport();
+  const report = remembered && remembered.report ? remembered.report : null;
+  const rawText = String((remembered && remembered.text) || _browserCurrentComposerReportText() || '').trim();
+  const text = _browserReportIsCleanPass(report) ? _browserStripCleanPassFixPrompt(rawText) : rawText;
+  if (!text) {
+    if (typeof showToast === 'function') showToast('Run Browser QA first', 2200, 'error');
+    return;
+  }
+  const scopedText = [
+    _browserBuildQaScopeLines(report, _browserState).join('\n'),
+    '',
+    text,
+  ].join('\n');
+  let copied = false;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(scopedText);
+      copied = true;
+    }
+  } catch (_) {}
+  try {
+    const helper = document.createElement('textarea');
+    helper.value = scopedText;
+    helper.setAttribute('readonly', 'readonly');
+    helper.style.position = 'fixed';
+    helper.style.left = '-9999px';
+    helper.style.top = '0';
+    document.body.appendChild(helper);
+    helper.focus();
+    helper.select();
+    helper.setSelectionRange(0, helper.value.length);
+    copied = document.execCommand('copy') || copied;
+    helper.remove();
+  } catch (_) {}
+  if (copied) {
+    if (typeof showToast === 'function') showToast('Browser QA report copied', 1800, 'success');
+    return;
+  }
+  if (_browserSetComposerText(scopedText) && typeof showToast === 'function') showToast('Clipboard blocked; report placed in composer', 2400, 'info');
+  else if (typeof showToast === 'function') showToast('Could not copy Browser QA report', 2200, 'error');
 }
 
 function _browserResearchRenderQuickAnswer(text, meta = {}) {
@@ -1074,6 +2987,19 @@ function _browserSetSessionLabel(state) {
   el.textContent = _browserSessionLabel(state);
 }
 
+function _browserActiveGoalForCurrentSession(sessionId) {
+  const sid = String(sessionId || _browserCurrentSessionId() || '');
+  const context = _browserAgentContext && (!sid || _browserAgentContext.session_id === sid)
+    ? _browserAgentContext
+    : null;
+  const contextGoal = context && context.active_goal && typeof context.active_goal === 'object' ? context.active_goal : null;
+  if (contextGoal && String(contextGoal.goal || '').trim()) return contextGoal;
+  const localGoalState = (typeof window !== 'undefined' && window._goalState && typeof window._goalState === 'object') ? window._goalState : null;
+  const localGoalSession = String((localGoalState && localGoalState.session_id) || '');
+  const localGoalMatchesSession = !!localGoalState && (!localGoalSession || !sid || localGoalSession === sid);
+  return localGoalMatchesSession ? localGoalState : null;
+}
+
 function _browserUpdateHeaderBadge() {
   const badge = _browserEl('browserStatusBadge');
   const value = _browserEl('browserStatusValue');
@@ -1087,19 +3013,44 @@ function _browserUpdateHeaderBadge() {
   if (_browserExploreMode) extraStates.push('explore');
   if (_browserSplitScreen) extraStates.push('split');
   if (_browserFullscreen) extraStates.push('fullscreen');
+  const agentContext = _browserAgentContext && _browserAgentContext.session_id === _browserCurrentSessionId()
+    ? _browserAgentContext
+    : null;
+  const recommended = String((agentContext && agentContext.recommended_action) || '').trim();
+  const approvalMode = String((typeof window !== 'undefined' && window._approvalMode) || (agentContext && agentContext.approval_mode) || '').trim().toLowerCase();
+  const approvalLabel = ['manual', 'smart', 'off'].includes(approvalMode) ? approvalMode : '';
+  const activeGoal = _browserActiveGoalForCurrentSession();
+  const activeGoalText = String((activeGoal && activeGoal.goal) || '').trim();
+  const activeGoalLabel = activeGoalText ? 'goal active' : '';
+  const recommendedLabelMap = {
+    request_read_permission: 'allow read',
+    request_control_permission: 'allow control',
+    navigate: 'navigate',
+    wait_for_idle: 'wait',
+    qa: 'run QA',
+    none: 'idle',
+  };
+  const recommendedLabel = recommended ? (recommendedLabelMap[recommended] || recommended.replace(/_/g, ' ')) : '';
+  const blockedReasons = Array.isArray(agentContext && agentContext.blocked_reasons)
+    ? agentContext.blocked_reasons.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
 
   badge.classList.remove('browser-state-open', 'browser-state-closed', 'browser-state-control', 'browser-state-read', 'browser-state-locked', 'browser-state-explore', 'browser-state-split', 'browser-state-fullscreen');
   badge.classList.add('browser-state-' + openState);
   badge.classList.add('browser-state-' + modeState);
   extraStates.forEach(stateName => badge.classList.add('browser-state-' + stateName));
 
-  value.textContent = 'browser ' + openState + ' · ' + modeState;
+  value.textContent = 'browser ' + openState + ' · ' + modeState + (approvalLabel ? ' · approval ' + approvalLabel : '') + (activeGoalLabel ? ' · ' + activeGoalLabel : '') + (recommendedLabel ? ' · next: ' + recommendedLabel : '');
 
   const parts = [
     'Browser drawer ' + openState,
     modeState === 'control' ? 'agent control enabled' : (modeState === 'read' ? 'agent watch mode' : 'agent locked')
   ];
   if (_browserState && _browserState.status) parts.push(String(_browserState.status));
+  if (approvalLabel) parts.push('approval mode ' + approvalLabel);
+  if (activeGoalText) parts.push('active goal: ' + activeGoalText);
+  if (recommendedLabel) parts.push('recommended next action: ' + recommendedLabel);
+  if (blockedReasons.length) parts.push('blocked: ' + blockedReasons.slice(0, 4).join(', '));
   if (_browserExploreMode) parts.push('explore mode');
   if (_browserSplitScreen) parts.push('split view');
   if (_browserFullscreen) parts.push('fullscreen');
@@ -1108,6 +3059,119 @@ function _browserUpdateHeaderBadge() {
   badge.setAttribute('aria-label', label);
   _browserRefreshHeaderMenu();
   if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
+}
+
+function _browserAgentAction(actionId) {
+  const ctx = _browserAgentContext && _browserAgentContext.session_id === _browserCurrentSessionId()
+    ? _browserAgentContext
+    : null;
+  const actions = ctx && ctx.available_actions && typeof ctx.available_actions === 'object'
+    ? ctx.available_actions
+    : {};
+  return actions[actionId] && typeof actions[actionId] === 'object' ? actions[actionId] : null;
+}
+
+function _browserApplyAgentActionButton(button, actionId, fallbackText) {
+  if (!button) return;
+  const action = _browserAgentAction(actionId);
+  const text = fallbackText || (button.textContent || '');
+  const blocked = action && Array.isArray(action.blocked_reasons)
+    ? action.blocked_reasons.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const permissionSteps = action && Array.isArray(action.permission_steps)
+    ? action.permission_steps.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const permissionStepLabels = action && Array.isArray(action.permission_step_labels)
+    ? action.permission_step_labels.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const approvalMode = String((action && action.approval_mode) || (_browserAgentContext && _browserAgentContext.approval_mode) || (typeof window !== 'undefined' && window._approvalMode) || '').trim().toLowerCase();
+  const approvalLabel = ['manual', 'smart', 'off'].includes(approvalMode) ? approvalMode : '';
+  const activeGoal = _browserActiveGoalForCurrentSession();
+  const activeGoalText = String((activeGoal && activeGoal.goal) || '').trim();
+  const available = action ? !!action.available : true;
+  button.textContent = !available && blocked.length ? text + ' (blocked)' : text;
+  button.dataset.agentActionAvailable = available ? '1' : '0';
+  button.setAttribute('aria-disabled', available ? 'false' : 'true');
+  const titleParts = [];
+  if (action && action.label) titleParts.push(String(action.label));
+  if (action && action.required_permission) titleParts.push('permission: ' + String(action.required_permission));
+  if (approvalLabel) titleParts.push('approval: ' + approvalLabel);
+  if (activeGoalText) titleParts.push('goal: ' + activeGoalText);
+  const readableSteps = permissionStepLabels.length ? permissionStepLabels : permissionSteps.map(_browserPermissionStepLabel);
+  if (readableSteps.length) titleParts.push('steps: ' + readableSteps.slice(0, 4).join(' -> '));
+  if (blocked.length) titleParts.push('blocked: ' + blocked.slice(0, 4).join(', '));
+  if (!titleParts.length) titleParts.push(text);
+  button.title = titleParts.join(' · ');
+  button.setAttribute('aria-label', button.title);
+}
+
+function _browserPermissionStepLabel(step) {
+  const value = String(step || '').trim();
+  const labels = {
+    enable_browser_watch: 'Enable browser watch',
+    enable_browser_control: 'Enable browser control',
+    request_read_permission: 'Enable browser watch',
+    request_control_permission: 'Enable browser control',
+  };
+  return labels[value] || value.replace(/_/g, ' ');
+}
+
+function _browserErrorData(err) {
+  const data = err && err.data && typeof err.data === 'object' ? err.data : {};
+  const nested = data && data.error && typeof data.error === 'object' ? data.error : {};
+  return Object.assign({}, nested, data, err || {});
+}
+
+function _browserIsStaleFrameError(err) {
+  const data = _browserErrorData(err);
+  const code = String((data && data.code) || '').trim();
+  const text = String((data && (data.error || data.message)) || '').trim();
+  return code === 'browser_frame_stale' || /browser frame changed since inspection/i.test(text);
+}
+
+function _browserStaleFrameMessage(err) {
+  const data = _browserErrorData(err);
+  const expected = data && data.expected_frame_rev != null ? String(data.expected_frame_rev) : '';
+  const current = data && data.current_frame_rev != null ? String(data.current_frame_rev) : '';
+  const revs = expected || current ? ' (expected rev ' + (expected || '?') + ', current rev ' + (current || '?') + ')' : '';
+  return 'Browser frame changed since inspection' + revs + '. Refresh snapshot and retry.';
+}
+
+function _browserFrameBoundControlPayload(action, payload) {
+  const next = Object.assign({}, payload || {});
+  const act = String(action || '').trim().toLowerCase();
+  const state = _browserState || {};
+  if ((act === 'click' || act === 'scroll' || act === 'move') && next.expected_frame_rev == null && state.frame_rev != null) {
+    next.expected_frame_rev = state.frame_rev;
+  }
+  return next;
+}
+
+function _browserWarnAgentActionBlocked(actionId) {
+  const action = _browserAgentAction(actionId);
+  if (!action || action.available) return false;
+  const blocked = Array.isArray(action.blocked_reasons)
+    ? action.blocked_reasons.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const permissionSteps = Array.isArray(action.permission_steps)
+    ? action.permission_steps.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const permissionStepLabels = Array.isArray(action.permission_step_labels)
+    ? action.permission_step_labels.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+  const approvalMode = String(action.approval_mode || (_browserAgentContext && _browserAgentContext.approval_mode) || (typeof window !== 'undefined' && window._approvalMode) || '').trim().toLowerCase();
+  const approvalLabel = ['manual', 'smart', 'off'].includes(approvalMode) ? approvalMode : '';
+  const activeGoal = _browserActiveGoalForCurrentSession();
+  const activeGoalText = String((activeGoal && activeGoal.goal) || '').trim();
+  if (!blocked.length) return false;
+  const label = String(action.label || actionId || 'Browser action').trim();
+  const readableSteps = permissionStepLabels.length ? permissionStepLabels : permissionSteps.map(_browserPermissionStepLabel);
+  const message = label + ' blocked: ' + blocked.slice(0, 4).join(', ')
+    + (approvalLabel ? ' · approval: ' + approvalLabel : '')
+    + (activeGoalText ? ' · goal: ' + activeGoalText : '')
+    + (readableSteps.length ? ' · steps: ' + readableSteps.slice(0, 4).join(' -> ') : '');
+  if (typeof showToast === 'function') showToast(message, 3200, 'warning');
+  return true;
 }
 
 function _browserRefreshHeaderMenu() {
@@ -1126,13 +3190,58 @@ function _browserRefreshHeaderMenu() {
   const pageContextBtn = _browserEl('browserHeaderPageContextAction');
   const fullPageContextBtn = _browserEl('browserHeaderFullPageContextAction');
   const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
+  const qaBtn = _browserEl('browserHeaderQaAction');
+  const webuiSmokeBtn = _browserEl('browserHeaderWebuiSmokeAction');
+  const testBtn = _browserEl('browserHeaderTestPageAction');
+  const retestBtn = _browserEl('browserHeaderRetestPageAction');
+  const fixBtn = _browserEl('browserHeaderFixFindingsAction');
+  const reproBtn = _browserEl('browserHeaderReproAction');
   const menuBtn = _browserEl('browserStatusMenuBtn');
+  const rememberedQa = _browserLoadRememberedTestReport();
+  const qaCard = _browserEl('browserQaCard');
+  const hasRenderedQaCard = !!(qaCard && !qaCard.hidden);
+  const renderedScopeRisk = {
+    risk: hasRenderedQaCard && (qaCard.dataset.stale === '1' || qaCard.dataset.scopeUnknown === '1'),
+    stale: hasRenderedQaCard && qaCard.dataset.stale === '1',
+    unknown: hasRenderedQaCard && qaCard.dataset.scopeUnknown === '1',
+  };
+  const rememberedScopeRisk = hasRenderedQaCard ? renderedScopeRisk : _browserQaScopeRisk(rememberedQa && rememberedQa.report ? rememberedQa.report : null, _browserState);
+  const rememberedAge = rememberedQa && rememberedQa.report ? _browserQaEvidenceAgeMinutes(rememberedQa.report) : null;
+  const rememberedOld = !!(rememberedQa && rememberedQa.report && rememberedQa.report.qa_recorded_at_inferred) || (typeof rememberedAge === 'number' && rememberedAge >= 30);
+  const retestUi = _browserQaRetestUi(rememberedScopeRisk, rememberedOld);
+  const rememberedText = String((rememberedQa && rememberedQa.text) || '').trim();
+  const rememberedReport = rememberedQa && rememberedQa.report ? rememberedQa.report : null;
+  const fixUi = _browserQaActionUi(rememberedText, rememberedReport, _browserState, {kind: 'fix'});
+  const reproUi = _browserQaActionUi(rememberedText, rememberedReport, _browserState, {kind: 'repro'});
+  if (rememberedScopeRisk.risk) {
+    const staleReason = rememberedScopeRisk.stale ? 'stale' : 'unknown-scope';
+    const staleFixTitle = 'Retest before fixing. QA scope is stale or the current browser URL was not observed.';
+    const staleReproTitle = 'Retest before creating a repro. QA scope is stale or the current browser URL was not observed.';
+    Object.assign(fixUi, {
+      disabled: true,
+      reason: staleReason,
+      text: 'Retest first',
+      title: staleFixTitle,
+      aria: staleFixTitle,
+      scopeRisk: rememberedScopeRisk,
+    });
+    Object.assign(reproUi, {
+      disabled: true,
+      reason: staleReason,
+      text: 'Retest first',
+      title: staleReproTitle,
+      aria: staleReproTitle,
+      scopeRisk: rememberedScopeRisk,
+    });
+  }
+  _browserApplySharedRetestUi(retestUi);
+  _browserApplySharedFixReproUi(fixUi, reproUi);
 
   if (drawerBtn) drawerBtn.textContent = _browserDrawerOpen ? 'Close drawer' : 'Open drawer';
   if (permissionBtn) {
     permissionBtn.textContent = _browserPermissionMode === 'control'
-      ? 'Pause agent control'
-      : (_browserPermissionMode === 'read' ? 'Resume agent control' : 'Enable agent control');
+      ? 'Pause to watch-only'
+      : (_browserPermissionMode === 'read' ? 'Enable agent control' : 'Enable browser watch');
   }
   if (exploreBtn) {
     exploreBtn.textContent = _browserExploreMode ? 'Switch to Follow mode' : 'Switch to Explore mode';
@@ -1147,14 +3256,18 @@ function _browserRefreshHeaderMenu() {
   if (forwardBtn) forwardBtn.textContent = 'Go forward';
   if (reloadBtn) reloadBtn.textContent = 'Reload page';
   if (stopBtn) stopBtn.textContent = 'Stop loading';
-  if (navigateBtn) navigateBtn.textContent = 'Navigate to URL...';
+  _browserApplyAgentActionButton(navigateBtn, 'navigate', 'Navigate to URL...');
   if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
   if (copyUrlBtn) copyUrlBtn.textContent = 'Copy current URL';
-  if (pageContextBtn) pageContextBtn.textContent = 'Send readable page text to chat';
-  if (fullPageContextBtn) fullPageContextBtn.textContent = 'Send full page context to chat';
-  if (screenshotBtn) {
-    screenshotBtn.textContent = 'Send screenshot to chat';
-  }
+  _browserApplyAgentActionButton(pageContextBtn, 'snapshot', 'Send readable page text to chat');
+  _browserApplyAgentActionButton(fullPageContextBtn, 'snapshot', 'Send full page context to chat');
+  _browserApplyAgentActionButton(screenshotBtn, 'snapshot', 'Send screenshot to chat');
+  _browserApplyAgentActionButton(qaBtn, 'qa', 'Run browser QA');
+  if (webuiSmokeBtn) webuiSmokeBtn.textContent = 'Run WebUI smoke';
+  _browserApplyAgentActionButton(testBtn, 'qa', 'Test current page');
+  if (retestBtn) retestBtn.textContent = retestUi.menuText;
+  _browserSetActionButtonUi(fixBtn, fixUi, {text: 'menu'});
+  _browserSetActionButtonUi(reproBtn, reproUi, {text: 'menu'});
   if (menuBtn) {
     menuBtn.setAttribute('aria-expanded', _browserHeaderMenuOpen ? 'true' : 'false');
   }
@@ -1255,17 +3368,52 @@ function browserRunHeaderAction(action) {
       browserToggleFullscreen();
       break;
     case 'screenshot':
+      _browserWarnAgentActionBlocked('snapshot');
       browserSendScreenshotToChat();
       break;
+    case 'qa':
+    case 'browser-qa':
+      _browserWarnAgentActionBlocked('qa');
+      return browserRunBrowserQaToChat();
+    case 'webui-smoke':
+    case 'browser-webui-smoke':
+      return browserRunWebuiSmokeToChat();
+    case 'test-page':
+    case 'test':
+      _browserWarnAgentActionBlocked('qa');
+      return browserTestCurrentPageToChat();
+    case 'retest-page':
+    case 'retest':
+      return browserRetestCurrentPageToChat();
+    case 'fix-findings':
+    case 'fix': {
+      const actionUi = _browserCurrentQaActionUi('fix');
+      if (actionUi.disabled) {
+        if (typeof showToast === 'function') showToast(actionUi.title, 2600, actionUi.reason === 'clean-pass' ? 'info' : 'warning');
+        return _browserQaActionResult(false, {action: 'fix_findings', reason: actionUi.reason || 'disabled', title: actionUi.title});
+      }
+      return browserFixFindingsToChat();
+    }
+    case 'repro':
+    case 'qa-repro': {
+      const actionUi = _browserCurrentQaActionUi('repro');
+      if (actionUi.disabled) {
+        if (typeof showToast === 'function') showToast(actionUi.title, 2600, actionUi.reason === 'clean-pass' ? 'info' : 'warning');
+        return _browserQaActionResult(false, {action: 'qa_repro', reason: actionUi.reason || 'disabled', title: actionUi.title});
+      }
+      return browserQaReproToChat();
+    }
     case 'copyurl':
       browserCopyCurrentUrl();
       break;
     case 'pagecontext':
+      _browserWarnAgentActionBlocked('snapshot');
       browserSendPageContextToChat();
       break;
     case 'fullpagecontext':
     case 'pagecontext-full':
     case 'extract':
+      _browserWarnAgentActionBlocked('snapshot');
       browserSendFullPageContextToChat();
       break;
     case 'back':
@@ -1281,6 +3429,7 @@ function browserRunHeaderAction(action) {
       browserStop();
       break;
     case 'navigate': {
+      _browserWarnAgentActionBlocked('navigate');
       const current = (_browserState && _browserState.url) ? String(_browserState.url) : String((_browserEl('browserUrlInput') || {}).value || '');
       const next = typeof window !== 'undefined' && typeof window.prompt === 'function'
         ? window.prompt('Navigate browser to URL', current || 'https://')
@@ -1299,6 +3448,9 @@ function browserRunHeaderAction(action) {
 function browserRenderPermission(permission) {
   const mode = permission && permission.mode ? String(permission.mode) : 'none';
   _browserPermissionMode = mode;
+  if (!permission || permission.persist !== false) {
+    _browserPersistPermissionMode(mode);
+  }
   const status = _browserEl('browserPermissionStatus');
   const granted = mode === 'control' || mode === 'read';
   if (status) {
@@ -1307,12 +3459,12 @@ function browserRenderPermission(permission) {
   }
   const btn = _browserEl('browserPermissionBtn');
   if (btn) {
-    const nextAction = mode === 'control' ? 'Pause' : 'Resume';
+    const nextAction = mode === 'none' ? 'Allow read' : (mode === 'read' ? 'Allow control' : 'Pause control');
     const tooltip = mode === 'none'
-      ? 'Allow Nova agent browser control'
+      ? 'Allow Nova agent to watch and run browser QA'
       : (mode === 'control'
-        ? 'Pause Nova agent browser control'
-        : 'Resume Nova agent browser control');
+        ? 'Pause Nova agent browser control back to watch-only'
+        : 'Allow Nova agent browser control');
     btn.classList.toggle('is-active', mode === 'control');
     btn.setAttribute('aria-pressed', mode === 'control' ? 'true' : 'false');
     btn.setAttribute('aria-label', tooltip);
@@ -1322,11 +3474,15 @@ function browserRenderPermission(permission) {
   }
   const stopBtn = _browserEl('browserAgentStopBtn');
   if (stopBtn) {
-    stopBtn.disabled = mode === 'none';
-    stopBtn.classList.toggle('is-active', mode !== 'none');
-    stopBtn.setAttribute('aria-pressed', mode !== 'none' ? 'true' : 'false');
-    stopBtn.setAttribute('aria-label', mode === 'none' ? 'Stop Nova agent browser handoff' : 'Stop Nova agent browser handoff');
-    stopBtn.dataset.tooltip = mode === 'none' ? 'Stop Nova agent browser handoff' : 'Stop Nova agent browser handoff';
+    const canStop = mode !== 'none';
+    const stopTooltip = canStop ? 'Stop Nova agent browser handoff' : 'Agent browser control is locked';
+    stopBtn.disabled = !canStop;
+    stopBtn.classList.toggle('is-active', canStop);
+    stopBtn.setAttribute('aria-pressed', canStop ? 'true' : 'false');
+    stopBtn.setAttribute('aria-disabled', canStop ? 'false' : 'true');
+    stopBtn.setAttribute('tabindex', canStop ? '0' : '-1');
+    stopBtn.setAttribute('aria-label', stopTooltip);
+    stopBtn.dataset.tooltip = stopTooltip;
   }
   _browserUpdateHeaderBadge();
 }
@@ -1382,29 +3538,45 @@ async function browserToggleWebBackend() {
   return false;
 }
 
+let _browserPermissionRefreshSid = '';
+let _browserPermissionRefreshPromise = null;
+
 async function browserRefreshPermission() {
   const sid = _browserCurrentSessionId();
   if (!sid) {
-    browserRenderPermission({mode: 'none'});
+    browserRenderPermission({mode: _browserRememberedPermissionMode(), persist: false});
     return;
   }
+  if (_browserPermissionRefreshPromise && _browserPermissionRefreshSid === sid) {
+    return _browserPermissionRefreshPromise;
+  }
+  _browserPermissionRefreshSid = sid;
+  _browserPermissionRefreshPromise = (async () => {
   try {
     const data = await api('/api/browser/permission?session_id=' + encodeURIComponent(sid));
     if (_browserCurrentSessionId() !== sid) return;
     browserRenderPermission(data && data.permission ? data.permission : {mode: 'none'});
   } catch (_) {
     if (_browserCurrentSessionId() !== sid) return;
-    browserRenderPermission({mode: 'none'});
+    browserRenderPermission({mode: _browserRememberedPermissionMode(), persist: false});
+  } finally {
+    if (_browserPermissionRefreshSid === sid) {
+      _browserPermissionRefreshSid = '';
+      _browserPermissionRefreshPromise = null;
+    }
   }
+  })();
+  return _browserPermissionRefreshPromise;
 }
 
 async function browserTogglePermission() {
   const sid = _browserCurrentSessionId();
   if (!sid) {
-    if (typeof showToast === 'function') showToast('Open a chat before granting browser control', 2400, 'error');
+    if (typeof showToast === 'function') showToast('Open a chat before granting browser permission', 2400, 'error');
     return false;
   }
-  const nextMode = _browserPermissionMode === 'control' ? 'read' : 'control';
+  const previousMode = _browserRememberedPermissionMode();
+  const nextMode = _browserPermissionMode === 'none' ? 'read' : (_browserPermissionMode === 'read' ? 'control' : 'read');
   try {
     const data = await api('/api/browser/permission', {
       method: 'POST',
@@ -1414,11 +3586,15 @@ async function browserTogglePermission() {
     if (_browserCurrentSessionId() !== sid) return false;
     browserRenderPermission(data && data.permission ? data.permission : {mode: 'none'});
     if (typeof showToast === 'function') {
-      showToast(nextMode === 'control' ? 'Nova agent browser control enabled' : 'Nova agent browser control paused', 2200, nextMode === 'control' ? 'success' : 'info');
+      showToast(
+        nextMode === 'control' ? 'Nova agent browser control enabled' : 'Nova agent browser watch mode enabled',
+        2200,
+        nextMode === 'control' ? 'success' : 'info'
+      );
     }
   } catch (e) {
     if (_browserCurrentSessionId() !== sid) return false;
-    browserRenderPermission({mode: 'none'});
+    browserRenderPermission({mode: previousMode, persist: false});
     if (typeof showToast === 'function') showToast('Browser permission update failed', 2400, 'error');
   }
   return false;
@@ -1438,7 +3614,7 @@ async function browserStopPermission() {
     if (typeof showToast === 'function') showToast('Nova agent browser handoff stopped', 2200, 'info');
   } catch (e) {
     if (_browserCurrentSessionId() !== sid) return false;
-    browserRenderPermission({mode: 'none'});
+    browserRenderPermission({mode: _browserRememberedPermissionMode(), persist: false});
     if (typeof showToast === 'function') showToast('Browser handoff stop failed', 2400, 'error');
   }
   return false;
@@ -1477,11 +3653,18 @@ function _browserRecordActionTrace(state) {
     return;
   }
   _browserActionTraceKey = key;
+  const approvalMode = String((typeof window !== 'undefined' && window._approvalMode) || '').trim().toLowerCase();
+  const approvalLabel = ['manual', 'smart', 'off'].includes(approvalMode) ? approvalMode : '';
+  const activeGoal = _browserActiveGoalForCurrentSession(sid);
+  const goalText = String((activeGoal && activeGoal.goal) || '').trim();
   const item = {
     step: _browserActionTrace.length + 1,
     status: String((state && state.status) || 'idle'),
     text: actionText,
     meta: String((state && state.target_label) || (state && state.target_selector) || (state && state.active_element_label) || '').trim(),
+    frameRev: state && state.frame_rev != null ? String(state.frame_rev) : '',
+    approvalMode: approvalLabel,
+    activeGoal: goalText,
     frameUrl: _browserFrameObjectUrl || '',
   };
   _browserActionTrace.unshift(item);
@@ -1507,10 +3690,16 @@ function _browserRecordActionTrace(state) {
     main.textContent = entry.text;
     row.appendChild(step);
     row.appendChild(main);
-    if (entry.meta) {
-      const meta = document.createElement('div');
-      meta.className = 'browser-trace-meta';
-      meta.textContent = entry.meta;
+    const metaParts = [
+      entry.meta,
+      entry.frameRev ? ('rev ' + entry.frameRev) : '',
+      entry.approvalMode ? ('approval ' + entry.approvalMode) : '',
+      entry.activeGoal ? ('goal ' + entry.activeGoal) : '',
+    ].filter(Boolean);
+    if (metaParts.length) {
+    const meta = document.createElement('div');
+    meta.className = 'browser-trace-meta';
+    meta.textContent = metaParts.join(' · ');
       row.appendChild(meta);
     }
     el.appendChild(row);
@@ -1532,16 +3721,19 @@ function _browserSetTarget(state) {
     box.classList.remove('visible');
     return;
   }
-  const w = Math.max(Number(state.viewport_width || 1440) || 1440, 1);
-  const h = Math.max(Number(state.viewport_height || 900) || 900, 1);
   const x = Number(state.target_x || 0) || 0;
   const y = Number(state.target_y || 0) || 0;
   const tw = Math.max(Number(state.target_width || 0) || 0, 1);
   const th = Math.max(Number(state.target_height || 0) || 0, 1);
-  box.style.left = ((x / w) * 100) + '%';
-  box.style.top = ((y / h) * 100) + '%';
-  box.style.width = ((tw / w) * 100) + '%';
-  box.style.height = ((th / h) * 100) + '%';
+  const point = _browserFramePointToStagePercent(state, x, y);
+  if (!point || !point.frame) {
+    box.classList.remove('visible');
+    return;
+  }
+  box.style.left = point.left + '%';
+  box.style.top = point.top + '%';
+  box.style.width = ((tw / point.frame.viewportWidth) * point.frame.width / point.frame.stageWidth * 100) + '%';
+  box.style.height = ((th / point.frame.viewportHeight) * point.frame.height / point.frame.stageHeight * 100) + '%';
   if (label) {
     label.textContent = String(state.target_label || state.target_selector || state.target_kind || '').trim();
   }
@@ -1556,27 +3748,108 @@ function _browserSetStageRatio(state) {
   if (w > 0 && h > 0) stage.style.aspectRatio = String(w) + ' / ' + String(h);
 }
 
+function _browserVisibleFrameRect(state) {
+  const stage = _browserEl('browserStage');
+  if (!stage || !state || typeof stage.getBoundingClientRect !== 'function') return null;
+  const overlay = _browserEl('browserOverlay') || stage;
+  const stageRect = stage.getBoundingClientRect();
+  const containerRect = overlay.getBoundingClientRect();
+  const containerW = Number(containerRect.width || 0);
+  const containerH = Number(containerRect.height || 0);
+  if (!containerW || !containerH) return null;
+  const viewportW = Math.max(Number(state.viewport_width || 1440) || 1440, 1);
+  const viewportH = Math.max(Number(state.viewport_height || 900) || 900, 1);
+  const img = _browserEl('browserFrameImage');
+  const objectFit = img && window.getComputedStyle ? String(window.getComputedStyle(img).objectFit || '') : '';
+  const imgRect = img && typeof img.getBoundingClientRect === 'function' ? img.getBoundingClientRect() : stageRect;
+  const imgW = Number(imgRect.width || stageRect.width || 0);
+  const imgH = Number(imgRect.height || stageRect.height || 0);
+  const imgLeft = Number(imgRect.left || stageRect.left || 0) - Number(containerRect.left || 0);
+  const imgTop = Number(imgRect.top || stageRect.top || 0) - Number(containerRect.top || 0);
+  if (objectFit !== 'contain') {
+    return {
+      left: imgLeft,
+      top: imgTop,
+      width: imgW,
+      height: imgH,
+      stageWidth: containerW,
+      stageHeight: containerH,
+      containerLeft: Number(containerRect.left || 0),
+      containerTop: Number(containerRect.top || 0),
+      viewportWidth: viewportW,
+      viewportHeight: viewportH,
+    };
+  }
+  const scale = Math.min(imgW / viewportW, imgH / viewportH);
+  const frameW = viewportW * scale;
+  const frameH = viewportH * scale;
+  return {
+    left: imgLeft + (imgW - frameW) / 2,
+    top: imgTop + (imgH - frameH) / 2,
+    width: frameW,
+    height: frameH,
+    stageWidth: containerW,
+    stageHeight: containerH,
+    containerLeft: Number(containerRect.left || 0),
+    containerTop: Number(containerRect.top || 0),
+    viewportWidth: viewportW,
+    viewportHeight: viewportH,
+  };
+}
+
+function _browserFramePointToStagePercent(state, x, y) {
+  const frame = _browserVisibleFrameRect(state);
+  if (!frame) return null;
+  const px = frame.left + (Number(x || 0) / frame.viewportWidth) * frame.width;
+  const py = frame.top + (Number(y || 0) / frame.viewportHeight) * frame.height;
+  return {
+    left: (px / frame.stageWidth) * 100,
+    top: (py / frame.stageHeight) * 100,
+    frame: frame,
+  };
+}
+
+function _browserApplyFrameHitBounds(state) {
+  const hitLayer = _browserEl('browserHitLayer');
+  if (!hitLayer) return;
+  const frame = state ? _browserVisibleFrameRect(state) : null;
+  if (!frame) {
+    hitLayer.style.left = '0';
+    hitLayer.style.top = '0';
+    hitLayer.style.width = '100%';
+    hitLayer.style.height = '100%';
+    hitLayer.dataset.frameBounds = 'stage';
+    return;
+  }
+  hitLayer.style.left = frame.left + 'px';
+  hitLayer.style.top = frame.top + 'px';
+  hitLayer.style.width = frame.width + 'px';
+  hitLayer.style.height = frame.height + 'px';
+  hitLayer.dataset.frameBounds = 'frame';
+}
+
 function _browserSetCursor(state) {
   const cursor = _browserEl('browserCursor');
   if (!cursor || !state) return;
-  const w = Number(state.viewport_width || 1440) || 1440;
-  const h = Number(state.viewport_height || 900) || 900;
   const x = Number(state.cursor_x || 0) || 0;
   const y = Number(state.cursor_y || 0) || 0;
-  const left = (x / Math.max(w, 1)) * 100;
-  const top = (y / Math.max(h, 1)) * 100;
-  cursor.style.left = left + '%';
-  cursor.style.top = top + '%';
+  const point = _browserFramePointToStagePercent(state, x, y);
+  if (!point) {
+    cursor.classList.remove('visible');
+    return;
+  }
+  cursor.style.left = point.left + '%';
+  cursor.style.top = point.top + '%';
   cursor.classList.toggle('visible', !!state && !!state.session_id);
 }
 
 function _browserFlashClick(state) {
   const flash = _browserEl('browserClickFlash');
   if (!flash || !state || state.click_x == null || state.click_y == null) return;
-  const w = Number(state.viewport_width || 1440) || 1440;
-  const h = Number(state.viewport_height || 900) || 900;
-  flash.style.left = ((Number(state.click_x || 0) || 0) / Math.max(w, 1)) * 100 + '%';
-  flash.style.top = ((Number(state.click_y || 0) || 0) || 0) / Math.max(h, 1) * 100 + '%';
+  const point = _browserFramePointToStagePercent(state, Number(state.click_x || 0) || 0, Number(state.click_y || 0) || 0);
+  if (!point) return;
+  flash.style.left = point.left + '%';
+  flash.style.top = point.top + '%';
   flash.classList.remove('visible');
   void flash.offsetWidth;
   flash.classList.add('visible');
@@ -1608,6 +3881,7 @@ function _browserSetImage(state) {
         _browserFrameObjectUrl = objectUrl;
         img.src = objectUrl;
         img.style.visibility = 'visible';
+        _browserApplyFrameHitBounds(_browserState || state);
         // Trigger diff overlay if frame changed
         if (_browserPrevFrameRev && _browserPrevFrameRev !== rev) {
           _browserTriggerDiffOverlay();
@@ -1620,13 +3894,17 @@ function _browserSetImage(state) {
           img.removeAttribute('src');
           img.style.visibility = 'hidden';
         }
-        try { console.warn('browser frame image load failed', err); } catch (_) {}
+        // Frame image fetches can race against session/frame refreshes. Retry
+        // quietly instead of surfacing a noisy console warning for an expected
+        // transient failure.
+        if (!_browserSyncRetryTimer) _browserScheduleSyncRetry(1200);
       });
   }
 }
 
 function _browserRender(state, opts = {}) {
   if (!state) return;
+  if (!_browserShouldAcceptState(state)) return;
   if (_browserSyncRetryTimer) {
     clearTimeout(_browserSyncRetryTimer);
     _browserSyncRetryTimer = null;
@@ -1639,6 +3917,7 @@ function _browserRender(state, opts = {}) {
   state.can_go_back = canGoBack;
   state.can_go_forward = canGoForward;
   _browserSetStageRatio(state);
+  _browserApplyFrameHitBounds(state);
   _browserSetImage(state);
   _browserSetCursor(state);
   if (state.click_ts != null) _browserFlashClick(state);
@@ -1667,7 +3946,17 @@ function _browserRender(state, opts = {}) {
   if (input && document.activeElement !== input && !draftFresh && state.url) {
     input.value = state.url;
   }
-  _browserSetEmptyVisible(!state.session_id || (!state.frame_rev && !state.url));
+  if (_browserLastTestReportText || _browserLastTestReport) {
+    _browserRenderQaCard(_browserLastTestReportText, _browserLastTestReport);
+  }
+  const showEmpty = !state.session_id || (!state.frame_rev && !state.url);
+  _browserSetEmptyVisible(showEmpty, !state.session_id ? {
+    title: 'Browser not attached',
+    text: 'Open a chat session to attach the browser runtime.',
+  } : {
+    title: 'Loading browser',
+    text: 'Waiting for a browser frame from this session.',
+  });
   const stage = _browserEl('browserStage');
   if (stage) {
     stage.style.opacity = state.session_id ? '1' : '.65';
@@ -1729,6 +4018,9 @@ function browserPrepareSessionSwitch() {
   _browserRequestRev += 1;
   _browserActiveSessionId = null;
   _browserState = null;
+  _browserAgentContext = null;
+  _browserAgentContextSid = '';
+  _browserAgentContextPromise = null;
   _browserFrameLoaded = false;
   _browserPendingSessionSwitch = true;
   _browserResetActionTrace('');
@@ -1740,9 +4032,12 @@ function browserPrepareSessionSwitch() {
   _browserSetPill('idle', 'Loading');
   _browserSetStatusUrl('Switching session...');
   _browserSetActionSummary('');
-  _browserSetEmptyVisible(true);
+  _browserSetEmptyVisible(true, {
+    title: 'Switching browser session',
+    text: 'Clearing the previous page while the new session attaches.',
+  });
   _browserSetButtonsDisabled(true, null);
-  browserRenderPermission({mode: 'none'});
+  browserRenderPermission({mode: _browserRememberedPermissionMode(), persist: false});
   _browserUpdateHeaderBadge();
   _browserScheduleSyncRetry(1200);
 }
@@ -1754,6 +4049,9 @@ function browserSetDrawerOpen(open, opts = {}) {
   _browserDrawerOpen = nextOpen;
   localStorage.setItem('sidekick-browser-drawer-open', nextOpen ? '1' : '0');
   document.body.classList.toggle('browser-drawer-open', nextOpen);
+  if (!nextOpen && typeof flushPendingWorkspaceTreeRefresh === 'function') {
+    setTimeout(flushPendingWorkspaceTreeRefresh, 0);
+  }
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
   _browserUpdateHeaderBadge();
@@ -1769,6 +4067,15 @@ function browserSetDrawerOpen(open, opts = {}) {
     }
     _browserCloseStream();
     const browserDrawer = _browserEl('browserDrawer');
+    if (browserDrawer) {
+      browserDrawer.style.left = '';
+      browserDrawer.style.top = '';
+      browserDrawer.style.right = '';
+      browserDrawer.style.bottom = '';
+      browserDrawer.style.transform = '';
+      browserDrawer.classList.remove('is-dragging');
+    }
+    _browserDrawerDragState = null;
     if (document.activeElement && browserDrawer && browserDrawer.contains(document.activeElement)) {
       const toggle = _browserEl('btnBrowserDrawerToggle');
       if (toggle && typeof toggle.focus === 'function') toggle.focus();
@@ -1787,9 +4094,10 @@ function browserSetDrawerOpen(open, opts = {}) {
   }
 }
 
-function browserToggleDrawer() {
+function browserToggleDrawer(open) {
   _browserCloseHeaderMenu();
-  browserSetDrawerOpen(!_browserDrawerOpen, {force: true});
+  const nextOpen = typeof open === 'boolean' ? open : !_browserDrawerOpen;
+  browserSetDrawerOpen(nextOpen, {force: true});
 }
 
 function browserToggleSplit() {
@@ -1806,9 +4114,51 @@ if (typeof window !== 'undefined') {
   window.browserToggleSplit = browserToggleSplit;
 }
 
+let _browserStateFetchSid = '';
+let _browserStateFetchPromise = null;
+
+async function browserRefreshAgentContext(sessionId) {
+  const sid = String(sessionId || _browserCurrentSessionId() || '').trim();
+  if (!sid) {
+    _browserAgentContext = null;
+    _browserAgentContextSid = '';
+    return null;
+  }
+  if (_browserAgentContextPromise && _browserAgentContextSid === sid) {
+    return _browserAgentContextPromise;
+  }
+  _browserAgentContextSid = sid;
+  _browserAgentContextPromise = (async () => {
+    try {
+      const data = await api('/api/browser/agent-context?session_id=' + encodeURIComponent(sid));
+      const context = data && data.context ? data.context : null;
+      if (context && String(context.session_id || '') === sid) {
+        _browserAgentContext = context;
+        _browserUpdateHeaderBadge();
+        return context;
+      }
+    } catch (e) {
+      try { console.warn('browser agent context refresh failed', e); } catch (_) {}
+    }
+    return null;
+  })();
+  try {
+    return await _browserAgentContextPromise;
+  } finally {
+    if (_browserAgentContextSid === sid) {
+      _browserAgentContextPromise = null;
+    }
+  }
+}
+
 async function _browserFetchState(sessionId) {
   const sid = String(sessionId || '').trim();
   if (!sid) return null;
+  if (_browserStateFetchPromise && _browserStateFetchSid === sid) {
+    return _browserStateFetchPromise;
+  }
+  _browserStateFetchSid = sid;
+  _browserStateFetchPromise = (async () => {
   const rev = ++_browserRequestRev;
   try {
     const data = await api('/api/browser/state?session_id=' + encodeURIComponent(sid));
@@ -1816,6 +4166,8 @@ async function _browserFetchState(sessionId) {
     const state = data && (data.state || data);
     if (state && state.session_id === sid) {
       _browserRender(state);
+      void browserRefreshAgentContext(sid);
+      void browserRefreshPermission();
       return state;
     }
   } catch (e) {
@@ -1827,6 +4179,15 @@ async function _browserFetchState(sessionId) {
     _browserSetSessionControlsReady(sid, text);
   }
   return null;
+  })();
+  try {
+    return await _browserStateFetchPromise;
+  } finally {
+    if (_browserStateFetchSid === sid) {
+      _browserStateFetchSid = '';
+      _browserStateFetchPromise = null;
+    }
+  }
 }
 
 function _browserHandleStreamPayload(payload) {
@@ -1835,6 +4196,7 @@ function _browserHandleStreamPayload(payload) {
   if (!state || !state.session_id) return;
   if (_browserActiveSessionId && state.session_id !== _browserActiveSessionId) return;
   _browserRender(state);
+  void browserRefreshAgentContext(state.session_id);
 }
 
 function _browserStartStream(sessionId) {
@@ -1883,7 +4245,10 @@ async function browserSyncToCurrentSession(opts = {}) {
     if (visible) {
       _browserSetPill('idle', 'Loading');
       _browserSetStatusUrl('Switching session...');
-      _browserSetEmptyVisible(true);
+      _browserSetEmptyVisible(true, {
+        title: 'Switching browser session',
+        text: 'Waiting for the active chat session to attach.',
+      });
       _browserSetButtonsDisabled(true, null);
     }
     _browserScheduleSyncRetry();
@@ -1894,10 +4259,15 @@ async function browserSyncToCurrentSession(opts = {}) {
     if (visible) {
       browserPrepareSessionSwitch();
       _browserSetStatusUrl('Open a chat session to attach the browser runtime.');
+      _browserSetEmptyVisible(true, {
+        title: 'Browser not attached',
+        text: 'Open a chat session to attach the browser runtime.',
+      });
     }
     return null;
   }
   void browserRefreshPermission();
+  void browserRefreshAgentContext(sessionId);
   const changed = sessionId !== _browserActiveSessionId;
   if (changed || opts.force) {
     _browserActiveSessionId = sessionId;
@@ -1908,7 +4278,10 @@ async function browserSyncToCurrentSession(opts = {}) {
     }
     _browserSetPill('idle', 'Loading');
     _browserSetStatusUrl('Loading browser state...');
-    _browserSetEmptyVisible(true);
+      _browserSetEmptyVisible(true, {
+        title: 'Loading browser state',
+        text: 'Fetching the current page and controls for this session.',
+      });
     _browserSetButtonsDisabled(true, null);
     const state = await _browserFetchState(sessionId);
     if (state && visible) {
@@ -1933,9 +4306,10 @@ function _browserSendControl(action, payload = {}) {
     if (typeof showToast === 'function') showToast('No chat session selected', 2000, 'error');
     return Promise.resolve(null);
   }
+  const controlPayload = _browserFrameBoundControlPayload(action, payload);
   return api('/api/browser/control', {
     method: 'POST',
-    body: JSON.stringify(Object.assign({session_id: sessionId, action: action}, payload)),
+    body: JSON.stringify(Object.assign({session_id: sessionId, action: action}, controlPayload)),
   }).then(data => {
     const state = data && (data.state || data);
     if (state && state.session_id === sessionId) {
@@ -1943,10 +4317,17 @@ function _browserSendControl(action, payload = {}) {
     }
     return state;
   }).catch(err => {
-    const text = err && err.error ? err.error : (err && err.message ? err.message : 'Browser control failed');
+    const staleFrame = _browserIsStaleFrameError(err);
+    const text = staleFrame
+      ? _browserStaleFrameMessage(err)
+      : (err && err.error ? err.error : (err && err.message ? err.message : 'Browser control failed'));
     _browserSetPill('error', 'Error');
     _browserSetStatusUrl(text);
+    if (staleFrame) _browserSetActionSummary('Blocked: ' + text);
     if (typeof showToast === 'function') showToast(text, 3000, 'error');
+    if (staleFrame && typeof browserSyncToCurrentSession === 'function') {
+      void browserSyncToCurrentSession({force: true, allowPending: true});
+    }
     return null;
   });
 }
@@ -1991,14 +4372,38 @@ function browserSubmitUrl(event) {
   return false;
 }
 
-function browserNavigateUrl(url) {
+function _browserDelay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function browserWaitForStableState(previousState, opts = {}) {
+  const timeoutMs = Number(opts.timeoutMs || 3500);
+  const started = Date.now();
+  const previousUrl = String(previousState && previousState.url || '');
+  const previousRev = previousState && previousState.frame_rev;
+  while (Date.now() - started < timeoutMs) {
+    const live = browserGetState();
+    const liveUrl = String(live.url || '');
+    const revChanged = previousRev == null || live.frame_rev == null ? false : live.frame_rev !== previousRev;
+    const usableUrl = liveUrl && liveUrl !== 'about:blank';
+    const recovered = usableUrl && (!previousUrl || liveUrl !== previousUrl || revChanged || live.status !== 'error');
+    if (recovered && live.frame_complete && live.frame_width > 0) return live;
+    await _browserDelay(200);
+  }
+  return browserGetState();
+}
+
+async function browserNavigateUrl(url) {
   const next = _browserNormalizeSubmittedUrl(url);
-  if (!next) return false;
+  if (!next) return null;
   const input = _browserEl('browserUrlInput');
   if (input) input.value = next;
   _browserClearUrlDraft();
-  void _browserSendControl('navigate', {url: next});
-  return true;
+  const state = await _browserSendControl('navigate', {url: next});
+  if (state && (state.status === 'error' || state.url === 'about:blank')) {
+    return browserWaitForStableState(state, {timeoutMs: 4000});
+  }
+  return state;
 }
 
 function _browserCoordsFromEvent(event) {
@@ -2007,13 +4412,21 @@ function _browserCoordsFromEvent(event) {
   if (!stage || !state) return null;
   const rect = stage.getBoundingClientRect();
   if (!rect.width || !rect.height) return null;
-  const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
-  const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
-  const scaleX = Number(state.viewport_width || 1440) / rect.width;
-  const scaleY = Number(state.viewport_height || 900) / rect.height;
+  const frame = _browserVisibleFrameRect(state);
+  if (!frame || !frame.width || !frame.height) return null;
+  const stageX = event.clientX - frame.containerLeft;
+  const stageY = event.clientY - frame.containerTop;
+  if (stageX < frame.left || stageY < frame.top || stageX > frame.left + frame.width || stageY > frame.top + frame.height) {
+    return null;
+  }
+  const x = Math.max(0, Math.min(frame.width, stageX - frame.left));
+  const y = Math.max(0, Math.min(frame.height, stageY - frame.top));
+  const scaleX = Number(state.viewport_width || 1440) / frame.width;
+  const scaleY = Number(state.viewport_height || 900) / frame.height;
   return {
     x: x * scaleX,
     y: y * scaleY,
+    expected_frame_rev: state.frame_rev != null ? state.frame_rev : undefined,
   };
 }
 
@@ -2523,16 +4936,31 @@ window.browserReload = browserReload;
 window.browserStop = browserStop;
 window.browserSubmitUrl = browserSubmitUrl;
 window.browserNavigateUrl = browserNavigateUrl;
+window.browserGetState = browserGetState;
+window.browserGetQaState = browserGetQaState;
+window.browserGetAgentContext = browserGetAgentContext;
+window.browserWaitForStableState = browserWaitForStableState;
 window.browserToggleExploreMode = browserToggleExploreMode;
 window.browserSendScreenshotToChat = browserSendScreenshotToChat;
 window.browserSendPageContextToChat = browserSendPageContextToChat;
 window.browserSendFullPageContextToChat = browserSendFullPageContextToChat;
+window.browserRunBrowserQaToChat = browserRunBrowserQaToChat;
+window.browserTestCurrentPageToChat = browserTestCurrentPageToChat;
+window.browserRetestCurrentPageToChat = browserRetestCurrentPageToChat;
+window.browserFixFindingsToChat = browserFixFindingsToChat;
+window.browserQaReproToChat = browserQaReproToChat;
+window.browserCopyQaReport = browserCopyQaReport;
+window.browserToggleQaDetails = browserToggleQaDetails;
+window.browserClearQaReports = browserClearQaReports;
+window.browserOpenQaHistoryUrl = browserOpenQaHistoryUrl;
 
 function _browserInitializeRuntime() {
   if (_browserRuntimeInitialized) return;
   _browserRuntimeInitialized = true;
   _browserEnsureSplitStyles();
   _browserAttachUrlDraftHandlers();
+  _browserRenderRememberedQaCard();
+  browserRenderPermission({mode: _browserRememberedPermissionMode(), persist: false});
   _browserSyncFullscreenButton(_browserFullscreen);
   _browserSyncSplitButton(_browserSplitScreen);
   if (_browserDrawerOpen) {
@@ -3014,4 +5442,13 @@ if (typeof window !== 'undefined') {
   if (typeof browserSendScreenshotToChat === 'function') window.browserSendScreenshotToChat = browserSendScreenshotToChat;
   if (typeof browserSendPageContextToChat === 'function') window.browserSendPageContextToChat = browserSendPageContextToChat;
   if (typeof browserSendFullPageContextToChat === 'function') window.browserSendFullPageContextToChat = browserSendFullPageContextToChat;
+  if (typeof browserRunBrowserQaToChat === 'function') window.browserRunBrowserQaToChat = browserRunBrowserQaToChat;
+  if (typeof browserTestCurrentPageToChat === 'function') window.browserTestCurrentPageToChat = browserTestCurrentPageToChat;
+  if (typeof browserRetestCurrentPageToChat === 'function') window.browserRetestCurrentPageToChat = browserRetestCurrentPageToChat;
+  if (typeof browserFixFindingsToChat === 'function') window.browserFixFindingsToChat = browserFixFindingsToChat;
+  if (typeof browserQaReproToChat === 'function') window.browserQaReproToChat = browserQaReproToChat;
+  if (typeof browserCopyQaReport === 'function') window.browserCopyQaReport = browserCopyQaReport;
+  if (typeof browserToggleQaDetails === 'function') window.browserToggleQaDetails = browserToggleQaDetails;
+  if (typeof browserClearQaReports === 'function') window.browserClearQaReports = browserClearQaReports;
+  if (typeof browserOpenQaHistoryUrl === 'function') window.browserOpenQaHistoryUrl = browserOpenQaHistoryUrl;
 }

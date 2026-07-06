@@ -15,7 +15,7 @@ import os
 import sys
 
 from sidekick_cli import __version__ as __version__  # single source of truth
-__release_date__ = "2026.6.11"
+__release_date__ = "2026.7.7"
 __all__ = ["__version__", "__release_date__"]
 
 
