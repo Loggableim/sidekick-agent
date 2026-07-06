@@ -733,9 +733,9 @@ function _ensureHubCastConnected({interactive=false}={}){
 function _startHubCastMonitor(){
   const btn=document.getElementById('btnCastToggle');
   if(btn)btn.style.display='';
-  _refreshHubCastStatus();
+  void _ensureHubCastConnected({interactive:false});
   if(_castStatusTimer)clearInterval(_castStatusTimer);
-  _castStatusTimer=setInterval(_refreshHubCastStatus,CAST_RECONNECT_INTERVAL_MS);
+  _castStatusTimer=setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_startHubCastMonitor,{once:true});
 else _startHubCastMonitor();

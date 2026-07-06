@@ -40,8 +40,12 @@ if (_urlActiveSpace) {
   try { localStorage.setItem('sidekick-active-workspace', _urlActiveSpace); } catch (_) {}
 }
 let _spacesCache = [];
+let _spacesLoadPromise = null;
+let _spacesLoadedAt = 0;
+const SPACES_CACHE_TTL_MS = 5000;
 window._hermesSpaceSwitchRev = Number(window._hermesSpaceSwitchRev || 0);
 let _spacesPanelRenderRev = 0;
+let _spaceSessionsAbortController = null;
 
 // â”€â”€ Workspace color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SPACE_COLORS = [
@@ -56,6 +60,25 @@ function spaceEsc(str) {
 
 function safeSpaceColor(color) {
   return /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : SPACE_COLORS[0];
+}
+
+function spaceActiveSessionCount(ws) {
+  return Number(
+    ws && typeof ws.active_session_count === 'number'
+      ? ws.active_session_count
+      : (ws && typeof ws.session_count === 'number' ? ws.session_count : 0)
+  );
+}
+
+function spaceArchivedSessionCount(ws) {
+  return Number(ws && typeof ws.archived_session_count === 'number' ? ws.archived_session_count : 0);
+}
+
+function spaceSessionCountText(ws) {
+  const active = spaceActiveSessionCount(ws);
+  const archived = spaceArchivedSessionCount(ws);
+  const activeText = active + ' active chat' + (active === 1 ? '' : 's');
+  return archived > 0 ? activeText + ' · ' + archived + ' archived' : activeText;
 }
 
 function getActiveSpaceQuery() {
@@ -162,6 +185,15 @@ function isActiveSpaceLoadKey(key) {
   return key === _activeSpaceLoadKey();
 }
 
+function _deferSpaceSelect(slug) {
+  const runSelect = () => selectSpace(slug);
+  setTimeout(runSelect, 20);
+}
+
+function _yieldSpaceUi() {
+  return new Promise(resolve => setTimeout(resolve, 0));
+}
+
 function _startSpaceSwitchTiming(slug, rev) {
   const record = { slug, rev, started_at: Date.now(), marks: [] };
   try { window._lastSpaceSwitchTiming = record; } catch (_) {}
@@ -181,27 +213,42 @@ function _markSpaceSwitchTiming(slug, rev, name) {
 
 // â”€â”€ Load spaces from API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-async function loadSpaces() {
-  try {
-    const data = await _withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces');
-    _spacesCache = data.spaces || [];
-    if (data.default_space) {
-      DEFAULT_SPACE_SLUG = String(data.default_space || 'nova').toLowerCase() || 'nova';
-      window.DEFAULT_SPACE_SLUG = DEFAULT_SPACE_SLUG;
-    }
-    if (_spacesCache.length && !_spacesCache.some(s => s && s.slug === _activeSpace)) {
-      const preferred = _spacesCache.find(s => s && s.slug === DEFAULT_SPACE_SLUG) || _spacesCache[0];
-      if (preferred && preferred.slug) {
-        _activeSpace = preferred.slug;
-        try { localStorage.setItem('sidekick-active-workspace', _activeSpace); } catch (_) {}
-      }
-    }
+async function loadSpaces(options = {}) {
+  const force = !!(options && options.force);
+  const hasCache = Array.isArray(_spacesCache) && _spacesCache.length > 0;
+  const isFresh = hasCache && _spacesLoadedAt && (Date.now() - _spacesLoadedAt) < SPACES_CACHE_TTL_MS;
+  if (!force && isFresh) {
     updateTitlebarSpace();
     return _spacesCache;
-  } catch (e) {
-    console.warn('loadSpaces', e);
-    return _spacesCache;
   }
+  if (!force && _spacesLoadPromise) return _spacesLoadPromise;
+
+  _spacesLoadPromise = (async () => {
+    try {
+      const data = await _withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces');
+      _spacesCache = data.spaces || [];
+      _spacesLoadedAt = Date.now();
+      if (data.default_space) {
+        DEFAULT_SPACE_SLUG = String(data.default_space || 'nova').toLowerCase() || 'nova';
+        window.DEFAULT_SPACE_SLUG = DEFAULT_SPACE_SLUG;
+      }
+      if (_spacesCache.length && !_spacesCache.some(s => s && s.slug === _activeSpace)) {
+        const preferred = _spacesCache.find(s => s && s.slug === DEFAULT_SPACE_SLUG) || _spacesCache[0];
+        if (preferred && preferred.slug) {
+          _activeSpace = preferred.slug;
+          try { localStorage.setItem('sidekick-active-workspace', _activeSpace); } catch (_) {}
+        }
+      }
+      updateTitlebarSpace();
+      return _spacesCache;
+    } catch (e) {
+      console.warn('loadSpaces', e);
+      return _spacesCache;
+    } finally {
+      _spacesLoadPromise = null;
+    }
+  })();
+  return _spacesLoadPromise;
 }
 
 // â”€â”€ Switch active space â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -344,11 +391,7 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
     if (!currentSid || !hasCurrentInSpace) {
       if ((sessionsInSpace || []).length && typeof loadSession === 'function') {
         const targetSid = sessionsInSpace[0].session_id;
-        await _withSpaceTimeout(Promise.resolve(loadSession(targetSid, {expectedSpace: slug})), 12000, 'load session');
-        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-        if ((!S || !S.session || S.session.session_id !== targetSid || !Array.isArray(S.messages) || !S.messages.length) && typeof loadSession === 'function') {
-          await _withSpaceTimeout(Promise.resolve(loadSession(targetSid, {expectedSpace: slug})), 12000, 'reload session');
-        }
+        await _withSpaceTimeout(Promise.resolve(loadSession(targetSid, {expectedSpace: slug, skipSidebarRender: true})), 12000, 'load session');
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
         _markSpaceSwitchTiming(slug, switchRev, 'session-loaded');
       } else if (typeof newSession === 'function') {
@@ -365,7 +408,6 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
     if (typeof S !== 'undefined' && S && S.session && S.session.session_id && _spaceSessionMatchesSlug(S.session, slug)) {
       try {
         if (typeof syncTopbar === 'function') syncTopbar();
-        if (typeof renderMessages === 'function') renderMessages({preserveScroll:true});
         if (typeof browserSyncToCurrentSession === 'function') browserSyncToCurrentSession({force:true, allowPending:true});
         if ((!Array.isArray(S.messages) || !S.messages.length) && typeof _ensureMessagesLoaded === 'function') {
           void _ensureMessagesLoaded(S.session.session_id).catch(() => {});
@@ -378,6 +420,52 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
   } catch (e) {
     if (_isCurrentSpaceSwitch(switchRev, slug)) console.warn('continue space session selection:', e);
   }
+}
+
+async function _loadSpaceSessionsForSwitch(slug, switchRev) {
+  const params = new URLSearchParams();
+  params.set('fields', 'sidebar');
+  if (slug) params.set('workspace', slug);
+  try {
+    if (typeof _showAllProfiles !== 'undefined' && _showAllProfiles) params.set('all_profiles', '1');
+  } catch (_) {}
+  try {
+    if (_spaceSessionsAbortController) _spaceSessionsAbortController.abort();
+  } catch (_) {}
+  const controller = new AbortController();
+  _spaceSessionsAbortController = controller;
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch (_) {}
+  }, 8000);
+  let data;
+  try {
+    data = await api('/api/sessions' + (params.toString() ? '?' + params.toString() : ''), {
+      signal: controller.signal,
+      logError: false,
+    });
+  } finally {
+    clearTimeout(timer);
+    if (_spaceSessionsAbortController === controller) _spaceSessionsAbortController = null;
+  }
+  if (!_isCurrentSpaceSwitch(switchRev, slug)) return [];
+  const sessions = Array.isArray(data && data.sessions) ? data.sessions : [];
+  try { if (typeof _otherProfileCount !== 'undefined') _otherProfileCount = (data && data.other_profile_count) || 0; } catch (_) {}
+  try {
+    if (typeof _allSessions !== 'undefined') {
+      _allSessions = sessions.filter(s => _spaceSessionMatchesSlug(s, slug));
+    }
+  } catch (_) {}
+  try {
+    if (typeof _serverTimeDelta !== 'undefined' && typeof data.server_time === 'number' && data.server_time > 0) {
+      _serverTimeDelta = Date.now() - (data.server_time * 1000);
+    }
+    if (typeof _serverTz !== 'undefined' && typeof data.server_tz === 'string') {
+      _serverTz = data.server_tz;
+    }
+  } catch (_) {}
+  return (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions))
+    ? _allSessions.slice()
+    : sessions.filter(s => _spaceSessionMatchesSlug(s, slug));
 }
 
 function _refreshActiveSpaceScopedPanel() {
@@ -401,10 +489,25 @@ function _refreshActiveSpaceScopedPanel() {
   }
 }
 
+function _scheduleActiveSpaceScopedPanelRefresh(slug, switchRev) {
+  const panel = (typeof _currentPanel !== 'undefined') ? _currentPanel : 'chat';
+  if (!panel || panel === 'chat') return;
+  const run = () => {
+    if (typeof _isCurrentSpaceSwitch === 'function' && !_isCurrentSpaceSwitch(switchRev, slug)) return;
+    try { _refreshActiveSpaceScopedPanel(); } catch (e) { console.warn('space panel refresh failed', e); }
+  };
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, {timeout: 1200});
+  } else {
+    setTimeout(run, 250);
+  }
+}
+
 function closeSpaceDropdowns() {
   for (const id of ['titlebarSpaceDropdown', 'sidebarSpaceDropdown', 'spaceSelectorDropdown']) {
     const dd = document.getElementById(id);
     if (dd) {
+      _removeSpaceDropdownCloser(dd);
       dd.hidden = true;
       dd.innerHTML = '';
     }
@@ -414,6 +517,11 @@ function closeSpaceDropdowns() {
   if (titlebarBtn) titlebarBtn.setAttribute('aria-expanded', 'false');
   if (sidebarBtn) sidebarBtn.setAttribute('aria-expanded', 'false');
 }
+
+document.addEventListener('keydown', (ev) => {
+  if (!ev || ev.key !== 'Escape') return;
+  try { closeSpaceDropdowns(); } catch (_) {}
+});
 
 async function selectSpace(slug) {
   if (!slug) return;
@@ -467,22 +575,37 @@ async function selectSpace(slug) {
     if (typeof _allSessions !== 'undefined') {
       try { _allSessions = []; } catch (_) {}
     }
-    let sessionsInSpace = [];
-    if (typeof renderSessionList === 'function') {
-      await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
-      if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-      _markSpaceSwitchTiming(slug, switchRev, 'session-list-rendered');
+    const sessionsPromise = _loadSpaceSessionsForSwitch(slug, switchRev);
+    void (async () => {
+      let sessionsInSpace = [];
       try {
-        if (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)) {
-          // Client-side safety filter: only keep sessions matching the active space.
-          // Backend also filters, but this catches edge cases from stale index data.
-          sessionsInSpace = _allSessions.filter(s => _spaceSessionMatchesSlug(s, slug));
+        sessionsInSpace = await _withSpaceTimeout(Promise.resolve(sessionsPromise), 8000, 'load space sessions');
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        _markSpaceSwitchTiming(slug, switchRev, 'session-metadata-loaded');
+        try {
+          await _yieldSpaceUi();
+          if (typeof renderSessionListFromCache === 'function') renderSessionListFromCache();
+          await _yieldSpaceUi();
+        } catch (_) {}
+      } catch (e) {
+        if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+        console.warn('space session metadata unavailable, falling back to full list render', e);
+        if (typeof renderSessionList === 'function') {
+          await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
+          if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+          try {
+            if (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)) {
+              sessionsInSpace = _allSessions.filter(s => _spaceSessionMatchesSlug(s, slug));
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
-    }
-    void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise);
+      }
+      _markSpaceSwitchTiming(slug, switchRev, 'session-list-rendered');
+      if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+      void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise);
+    })();
     _markSpaceSwitchTiming(slug, switchRev, 'background-session-load-started');
-    _refreshActiveSpaceScopedPanel();
+    _scheduleActiveSpaceScopedPanelRefresh(slug, switchRev);
     // Refresh spaces panel UI if currently visible
     const spacesPanel = document.getElementById('panelWorkspaces');
     if (startedInSpacesPanel || (typeof _currentPanel !== 'undefined' && _currentPanel === 'workspaces') || (spacesPanel && spacesPanel.style.display !== 'none')) {
@@ -636,10 +759,10 @@ function renderSpacesPanel() {
       item.appendChild(info);
 
       // Session count badge
-      if (typeof ws.session_count === 'number' && ws.session_count > 0) {
+      if (spaceActiveSessionCount(ws) > 0) {
         const badge = document.createElement('span');
         badge.className = 'space-item-badge';
-        badge.textContent = ws.session_count;
+        badge.textContent = spaceActiveSessionCount(ws);
         item.appendChild(badge);
       }
 
@@ -805,7 +928,8 @@ function renderSpaceDetail(space) {
         <button class="space-primary-action" type="button" onclick="switchPanel('chat')">Open chat</button>
       </section>
       <section class="space-stat-grid">
-        <div class="space-stat"><span>Chats</span><strong>${Number(space.session_count || 0)}</strong></div>
+        <div class="space-stat"><span>Active chats</span><strong>${spaceActiveSessionCount(space)}</strong></div>
+        <div class="space-stat"><span>Archived</span><strong>${spaceArchivedSessionCount(space)}</strong></div>
         <div class="space-stat"><span>Agents</span><strong>${Array.isArray(space.agents) ? space.agents.length : 0}</strong></div>
         <div class="space-stat"><span>Model</span><strong>${spaceEsc(model)}</strong></div>
         <div class="space-stat"><span>Provider</span><strong>${spaceEsc(provider)}</strong></div>
@@ -932,7 +1056,7 @@ function renderSpacesPanel() {
         <span class="space-item-icon">${spaceEsc(_spaceEmoji(ws))}</span>
         <span class="space-item-info">
           <span class="space-item-name">${spaceEsc(ws.name || ws.slug)}</span>
-          <span class="space-item-meta">${spaceEsc(ws.slug)} · ${Number(ws.session_count || 0)} chats · ${spaceEsc(modelStr)}</span>
+          <span class="space-item-meta">${spaceEsc(ws.slug)} · ${spaceEsc(spaceSessionCountText(ws))} · ${spaceEsc(modelStr)}</span>
         </span>
         ${ws.slug === _activeSpace ? '<span class="space-item-active">Active</span>' : ''}`;
       list.appendChild(item);
@@ -1262,7 +1386,9 @@ function _renderSpaceDropdownItems(dd, spaces) {
     if (ws.slug === _activeSpace) item.classList.add('active');
     const itemColor = safeSpaceColor(ws.color);
     item.style.setProperty('--item-color', itemColor);
+    item.dataset.titlebarSpaceSlug = ws.slug;
     item.dataset.spaceSlug = ws.slug;
+    item.dataset.testid = 'titlebar-space-option';
     item.setAttribute('role', 'menuitem');
     item.setAttribute('aria-current', ws.slug === _activeSpace ? 'true' : 'false');
     item.innerHTML = `<span class="titlebar-space-dd-swatch"></span><span class="tdd-emoji">${spaceEsc(_spaceEmoji(ws))}</span><span class="tdd-name" style="color:${itemColor}">${spaceEsc(ws.name || ws.slug)}</span>`;
@@ -1270,9 +1396,7 @@ function _renderSpaceDropdownItems(dd, spaces) {
       ev.preventDefault();
       ev.stopPropagation();
       closeSpaceDropdowns();
-      const runSelect = () => selectSpace(ws.slug);
-      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runSelect);
-      else setTimeout(runSelect, 0);
+      _deferSpaceSelect(ws.slug);
     };
     dd.appendChild(item);
   }
@@ -1284,6 +1408,7 @@ function _renderSpaceDropdownItems(dd, spaces) {
   newItem.type = 'button';
   newItem.className = 'titlebar-space-dd-item titlebar-space-dd-new';
   newItem.dataset.action = 'new-space';
+  newItem.dataset.testid = 'titlebar-new-space-option';
   newItem.setAttribute('role', 'menuitem');
   newItem.innerHTML = '<span style="opacity:0.7">+</span><span>New space...</span>';
   newItem.onclick = (ev) => {
@@ -1322,7 +1447,7 @@ function _openSpaceDropdown(dd, btn, className) {
   } else {
     _showSpaceDropdownLoading(dd, btn);
   }
-  const refresh = () => {
+  const runSelect = () => {
     loadSpaces().then(spaces => {
       if (dd.hidden) return;
       if (className) dd.className = className;
@@ -1333,8 +1458,8 @@ function _openSpaceDropdown(dd, btn, className) {
       if (!cachedSpaces.length) _showSpaceDropdownError(dd, e && e.message);
     });
   };
-  if (cachedSpaces.length) setTimeout(refresh, 0);
-  else refresh();
+  if (cachedSpaces.length) requestAnimationFrame(runSelect);
+  else runSelect();
 }
 
 function _bindSpaceDropdownSelection(dd) {
@@ -1348,22 +1473,38 @@ function _bindSpaceDropdownSelection(dd) {
     ev.preventDefault();
     ev.stopPropagation();
     closeSpaceDropdowns();
-    const runSelect = () => selectSpace(slug);
-    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(runSelect);
-    else setTimeout(runSelect, 0);
+    _deferSpaceSelect(slug);
   });
 }
 
 function _installSpaceDropdownCloser(dd, btn) {
+  _removeSpaceDropdownCloser(dd);
   const closer = (e) => {
     if (!dd.parentElement || !dd.parentElement.contains(e.target)) {
+      _removeSpaceDropdownCloser(dd);
       dd.hidden = true;
       dd.innerHTML = '';
       if (btn) btn.setAttribute('aria-expanded', 'false');
-      document.removeEventListener('click', closer);
     }
   };
-  setTimeout(() => document.addEventListener('click', closer), 0);
+  dd._sidekickSpaceDropdownCloser = closer;
+  dd._sidekickSpaceDropdownCloserTimer = setTimeout(() => {
+    dd._sidekickSpaceDropdownCloserTimer = null;
+    if (dd._sidekickSpaceDropdownCloser === closer && !dd.hidden) {
+      document.addEventListener('click', closer);
+    }
+  }, 0);
+}
+
+function _removeSpaceDropdownCloser(dd) {
+  if (dd && dd._sidekickSpaceDropdownCloserTimer) {
+    clearTimeout(dd._sidekickSpaceDropdownCloserTimer);
+    dd._sidekickSpaceDropdownCloserTimer = null;
+  }
+  const closer = dd && dd._sidekickSpaceDropdownCloser;
+  if (!closer) return;
+  document.removeEventListener('click', closer);
+  dd._sidekickSpaceDropdownCloser = null;
 }
 
 function toggleTitlebarSpaceDropdown() {
@@ -1371,6 +1512,7 @@ function toggleTitlebarSpaceDropdown() {
   const btn = document.getElementById('titlebarSpaceBtn');
   if (!dd) return;
   if (!dd.hidden) {
+    _removeSpaceDropdownCloser(dd);
     dd.hidden = true;
     dd.innerHTML = '';
     if (btn) btn.setAttribute('aria-expanded', 'false');
@@ -1418,6 +1560,7 @@ function toggleSidebarSpaceDropdown() {
   const btn = document.getElementById('sidebarSpaceBtn');
   if (!dd) return;
   if (!dd.hidden) {
+    _removeSpaceDropdownCloser(dd);
     dd.hidden = true;
     dd.innerHTML = '';
     if (btn) btn.setAttribute('aria-expanded', 'false');

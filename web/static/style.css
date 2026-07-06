@@ -7128,8 +7128,8 @@ body.browser-drawer-open:not(.browser-maximized) .browser-drawer {
   bottom: calc(12px + env(safe-area-inset-bottom,0px));
   top: auto;
   width: min(760px, calc(100vw - 32px));
-  height: min(78vh, 760px);
-  max-height: 760px !important;
+  height: min(52vh, 560px);
+  max-height: 560px !important;
   opacity: 1 !important;
   visibility: visible !important;
   pointer-events: auto;
@@ -7563,16 +7563,16 @@ body.browser-drawer-open .browser-drawer .browser-stage.has-empty-state {
     right: 0 !important;
     top: 38px !important;
     bottom: 0 !important;
-    width: 100vw !important;
-    height: calc(100vh - 38px) !important;
-    max-height: calc(100vh - 38px) !important;
+    width: 100vw;
+    height: min(46vh, 380px) !important;
+    max-height: 380px !important;
     transform: none !important;
   }
   .browser-drawer-shell {
     height: 100%;
   }
   body.browser-drawer-open:not(.browser-maximized) .browser-drawer-shell {
-    height: 100%;
+    height: min(46vh, 380px);
     border-radius: 14px 14px 0 0;
   }
   .browser-research-form {
@@ -9320,7 +9320,8 @@ body.focus-mode aside.rightpanel {
   .titlebar-space{flex:0 1 auto;min-width:0;max-width:112px;margin-right:0;}
   .titlebar-space-btn{min-width:0;max-width:100%;margin:0;padding:3px 8px 3px 6px;}
   .titlebar-space-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
-  .titlebar-actions{display:inline-flex!important;flex:1 1 auto;min-width:0;max-width:calc(100vw - 80px);align-items:center;gap:2px;margin-right:0;overflow:hidden;}
+  .titlebar-actions{display:inline-flex!important;flex:0 0 auto;align-items:center;gap:2px;margin-right:0;}
+  .titlebar-actions{min-width:0;max-width:calc(100vw - 80px);overflow:hidden;}
   .titlebar-actions .titlebar-status-cluster{flex:1 1 auto;min-width:0;max-width:100%;overflow:hidden;}
   .titlebar-actions #btnRebootSidekick,
   .titlebar-actions #btnShutdownSidekick{display:none!important;}
