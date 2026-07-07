@@ -11030,7 +11030,11 @@ function getFlagForLocale(code) {
 function toggleLangDropdown(event) {
   if (event) event.stopPropagation();
   const dd = document.getElementById('langDropdown');
-  if (dd) dd.hidden = !dd.hidden;
+  const btn = document.getElementById('btnLangSelector');
+  if (dd) {
+    dd.hidden = !dd.hidden;
+    if (btn) btn.setAttribute('aria-expanded', dd.hidden ? 'false' : 'true');
+  }
 }
 
 function switchLang(code) {
@@ -11039,7 +11043,9 @@ function switchLang(code) {
   const flagEl = document.getElementById('currentLangFlag');
   if (flagEl) flagEl.textContent = getFlagForLocale(code);
   const dd = document.getElementById('langDropdown');
+  const btn = document.getElementById('btnLangSelector');
   if (dd) dd.hidden = true;
+  if (btn) btn.setAttribute('aria-expanded', 'false');
   // Notify dynamic components to refresh their i18n
   document.dispatchEvent(new CustomEvent('sidekick-locale-change', { detail: { lang: code } }));
 }
@@ -11053,6 +11059,9 @@ document.addEventListener('DOMContentLoaded', function() {
   const saved = localStorage.getItem('sidekick-lang') || 'en';
   const flagEl = document.getElementById('currentLangFlag');
   if (flagEl) flagEl.textContent = getFlagForLocale(saved);
+  const dd = document.getElementById('langDropdown');
+  const btn = document.getElementById('btnLangSelector');
+  if (btn && dd) btn.setAttribute('aria-expanded', dd.hidden ? 'false' : 'true');
 });
 
 // Close dropdown on outside click
@@ -11061,5 +11070,6 @@ document.addEventListener('click', function(e) {
   const btn = document.getElementById('btnLangSelector');
   if (dd && !dd.hidden && dd !== e.target && !dd.contains(e.target) && btn !== e.target && !btn.contains(e.target)) {
     dd.hidden = true;
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 });

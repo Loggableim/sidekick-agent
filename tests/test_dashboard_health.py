@@ -2006,6 +2006,8 @@ def test_visible_static_ui_text_is_not_mojibake():
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+    assert "btn.setAttribute('aria-expanded', dd.hidden ? 'false' : 'true')" in i18n_js
+    assert "btn.setAttribute('aria-expanded', 'false')" in i18n_js
 
     assert ">▶</button>" in index_html
     assert "← Zurück" in index_html
@@ -2675,6 +2677,11 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     cast_start = index_html.index("btnCastToggle", lang_start)
     titlebar_actions = index_html[titlebar_start:cast_start]
 
+    assert re.search(
+        r'id="btnLangSelector"[^>]+aria-label="Language"[^>]+aria-haspopup="menu"[^>]+aria-expanded="false"[^>]+aria-controls="langDropdown"[^>]+onclick="toggleLangDropdown\(event\)"',
+        titlebar_actions,
+        re.S,
+    )
     assert 'id="btnGameModeToggle"' in titlebar_actions
     assert "toggleGameMode()" in titlebar_actions
     assert "game_mode_toggle" in titlebar_actions
