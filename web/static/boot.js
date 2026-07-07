@@ -1815,7 +1815,8 @@ function _bootTimeout(promise, ms, label) {
   // Load send key preference
   let _bootSettings={};
   try{
-    const s=await _bootTimeout(api('/api/settings'),5000,'settings');
+    // Settings can be slow during startup on cold/backlogged instances.
+    const s=await _bootTimeout(api('/api/settings'),20000,'settings');
     _bootSettings=s;
     window._sendKey=s.send_key||'enter';
     window._showTokenUsage=!!s.show_token_usage;
@@ -1900,7 +1901,7 @@ function _bootTimeout(promise, ms, label) {
   // Fetch active profile. This endpoint is useful metadata, but must never
   // block first paint/session rendering if the backend is busy.
   try{
-    const p=await _bootTimeout(api('/api/profile/active'),5000,'active profile');
+    const p=await _bootTimeout(api('/api/profile/active'),20000,'active profile');
     S.activeProfile=p.name||'default';
   }catch(e){
     S.activeProfile='default';

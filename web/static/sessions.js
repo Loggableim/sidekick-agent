@@ -3964,6 +3964,9 @@ async function _confirmDeleteProject(proj){
   showToast('Project deleted');
 }
 
+window.renderSessionList = window.renderSessionList || renderSessionList;
+window.renderSessionListFromCache = window.renderSessionListFromCache || renderSessionListFromCache;
+
 // Re-render session list on language switch so dynamic strings update
 document.addEventListener('sidekick-locale-change', () => {
   renderSessionListFromCache();

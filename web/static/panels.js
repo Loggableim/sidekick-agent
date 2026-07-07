@@ -9043,8 +9043,8 @@ function loadMcpTools(){
 function loadGatewayStatus(){
   const card=$('gatewayStatusCard');
   if(!card) return;
-  const request=typeof _apiWithTimeout==='function'
-    ? _apiWithTimeout('/api/gateway/status', 6000)
+  const request=typeof window._workspaceApiWithTimeout==='function'
+    ? window._workspaceApiWithTimeout('/api/gateway/status', 6000)
     : api('/api/gateway/status');
   request.then(r=>{
     if(!r) return;
@@ -9152,8 +9152,8 @@ function loadSubagentStatus(targetId='subagentStatusCard'){
   const card=$(targetId);
   if(!card) return;
   card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
-  const request=typeof _apiWithTimeout==='function'
-    ? _apiWithTimeout('/api/subagents', 6000)
+  const request=typeof window._workspaceApiWithTimeout==='function'
+    ? window._workspaceApiWithTimeout('/api/subagents', 6000)
     : api('/api/subagents');
   request.then(r=>{
     const active=(r&&r.active)||[];

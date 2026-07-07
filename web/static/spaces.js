@@ -183,7 +183,7 @@ function _markSpaceSwitchTiming(slug, rev, name) {
 
 async function loadSpaces() {
   try {
-    const data = await _withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces');
+    const data = await _withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces');
     _spacesCache = data.spaces || [];
     if (data.default_space) {
       DEFAULT_SPACE_SLUG = String(data.default_space || 'nova').toLowerCase() || 'nova';

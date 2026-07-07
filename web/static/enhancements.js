@@ -26,6 +26,8 @@
   const SVG = (path, size = 16) =>
     `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
 
+  const _t = (...args) => (typeof window.t === 'function' ? window.t(...args) : String(args[0] || ''));
+
   function _setPlainStatus(el, text, color) {
     if (!el) return;
     el.textContent = String(text || '');
@@ -81,11 +83,17 @@
     themeGridOpen: false,
   };
   let _enhancementsSessionRetryTimer = null;
+  let _sessionEnhancementObserver = null;
+  let _sessionEnhancementDebounceTimer = null;
 
   function _cleanupEnhancementTimers() {
     if (_enhancementsSessionRetryTimer) {
       clearInterval(_enhancementsSessionRetryTimer);
       _enhancementsSessionRetryTimer = null;
+    }
+    if (_sessionEnhancementDebounceTimer) {
+      clearTimeout(_sessionEnhancementDebounceTimer);
+      _sessionEnhancementDebounceTimer = null;
     }
   }
   window.addEventListener('pagehide', _cleanupEnhancementTimers, { once: true });
@@ -371,7 +379,7 @@
     }, [
       EL('button', {
         className: `filter-btn${state.showFavoritesOnly ? ' active' : ''}`,
-        innerHTML: ICONS.star + '<span data-i18n-key="favorites">' + t('favorites') + '</span>',
+        innerHTML: ICONS.star + '<span data-i18n-key="favorites">' + _t('favorites') + '</span>',
         style: {
           background: state.showFavoritesOnly ? 'var(--accent-bg, rgba(184,134,11,0.15))' : 'none',
           border: '1px solid ' + (state.showFavoritesOnly ? 'var(--accent, #B8860B)' : 'var(--border, rgba(255,255,255,0.08))'),
@@ -399,7 +407,7 @@
       }),
       EL('button', {
         className: 'filter-btn bulk-btn',
-        innerHTML: ICONS.check + '<span data-i18n-key="' + (state.bulkMode ? 'done' : 'select') + '">' + (state.bulkMode ? t('done') : t('select')) + '</span>',
+        innerHTML: ICONS.check + '<span data-i18n-key="' + (state.bulkMode ? 'done' : 'select') + '">' + (state.bulkMode ? _t('done') : _t('select')) + '</span>',
         style: {
           background: state.bulkMode ? 'var(--accent-bg, rgba(184,134,11,0.15))' : 'none',
           border: '1px solid var(--border, rgba(255,255,255,0.08))',
@@ -414,7 +422,7 @@
 
     if (state.selectedSessions.size > 0 && state.bulkMode) {
       filterBar.appendChild(EL('button', {
-        innerHTML: ICONS.trash + '<span data-i18n-key="delete_batch">' + t('delete_batch') + '</span> ' + state.selectedSessions.size,
+        innerHTML: ICONS.trash + '<span data-i18n-key="delete_batch">' + _t('delete_batch') + '</span> ' + state.selectedSessions.size,
         style: {
           background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
           borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px',
@@ -424,10 +432,12 @@
       }));
     }
 
-    const existing = sessionList.querySelector('.session-filter-bar');
+    const parent = sessionList.parentElement;
+    const existing = (parent && parent.querySelector('.session-filter-bar')) || sessionList.querySelector('.session-filter-bar');
     if (existing) existing.remove();
     if (!state.showFavoritesOnly || state.bulkMode) {
-      sessionList.insertBefore(filterBar, sessionList.firstChild);
+      if (parent) parent.insertBefore(filterBar, sessionList);
+      else sessionList.insertBefore(filterBar, sessionList.firstChild);
     }
 
     // Add star toggle to each session item
@@ -484,6 +494,27 @@
     }
   }
 
+  function _ensureSessionEnhancementObserver() {
+    if (_sessionEnhancementObserver) return;
+    const sessionList = document.getElementById('sessionList');
+    const root = sessionList?.parentElement || document.body;
+    if (!root) return;
+    _sessionEnhancementObserver = new MutationObserver(() => {
+      if (_sessionEnhancementDebounceTimer) clearTimeout(_sessionEnhancementDebounceTimer);
+      _sessionEnhancementDebounceTimer = setTimeout(() => {
+        _sessionEnhancementDebounceTimer = null;
+        const currentList = document.getElementById('sessionList');
+        if (!currentList) return;
+        const hasFilterBar = !!document.querySelector('.session-filter-bar');
+        const hasStars = !!currentList.querySelector('.fav-star-btn');
+        if (!hasFilterBar || !hasStars) {
+          enhanceSessionList();
+        }
+      }, 50);
+    });
+    _sessionEnhancementObserver.observe(root, { childList: true, subtree: true });
+  }
+
   function toggleFavorite(id) {
     if (state.favoriteSessions.has(id)) {
       state.favoriteSessions.delete(id);
@@ -537,6 +568,11 @@
       // Check if already grouped by looking for date-group elements
       if (list.querySelector('.date-group-header')) return;
 
+      const preservedNodes = Array.from(list.children).filter(child =>
+        !child.classList.contains('session-item') &&
+        !child.classList.contains('date-group-header') &&
+        !child.classList.contains('date-group-items')
+      );
       const items = list.querySelectorAll('.session-item');
       if (items.length === 0) return;
 
@@ -594,6 +630,7 @@
       });
 
       list.innerHTML = '';
+      preservedNodes.forEach(node => list.appendChild(node));
       list.appendChild(fragment);
     });
 
@@ -750,6 +787,20 @@
 
     wrapper.appendChild(diffContent);
     block.parentElement?.insertBefore(wrapper, block.nextSibling);
+  }
+
+  function _wrapSessionListRenderHooks() {
+    const render = window.renderSessionListFromCache;
+    if (typeof render !== 'function' || render.__sidekickEnhancementsWrapped) return;
+    const wrapped = function (...args) {
+      const result = render.apply(this, args);
+      if (document.getElementById('sessionList')) {
+        enhanceSessionList();
+      }
+      return result;
+    };
+    wrapped.__sidekickEnhancementsWrapped = true;
+    window.renderSessionListFromCache = wrapped;
   }
 
   function showApplyDialog(code, block) {
@@ -1111,10 +1162,14 @@
     // Sessions features (need sessionList to exist)
     const trySessions = () => {
       if (document.getElementById('sessionList')) {
+        _ensureSessionEnhancementObserver();
+        _wrapSessionListRenderHooks();
         enhanceSessionList();   // #22 + #23
         enhanceDateGrouping();  // #28
         setupInfiniteScroll();  // #29
-        _cleanupEnhancementTimers();
+        if (window.renderSessionListFromCache && window.renderSessionListFromCache.__sidekickEnhancementsWrapped) {
+          _cleanupEnhancementTimers();
+        }
       }
     };
     _cleanupEnhancementTimers();

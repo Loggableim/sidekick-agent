@@ -171,6 +171,8 @@ async function _apiWithTimeout(path, timeoutMs) {
   }
 }
 
+window._workspaceApiWithTimeout = window._workspaceApiWithTimeout || _apiWithTimeout;
+
 function _isCurrentLoadDir(loadRev, sessionId) {
   return loadRev === _loadDirRev && S.session && S.session.session_id === sessionId;
 }

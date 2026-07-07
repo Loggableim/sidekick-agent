@@ -2022,11 +2022,12 @@ def test_boot_uses_realistic_metadata_timeouts():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
 
-    assert "_bootTimeout(api('/api/profile/active'),5000,'active profile')" in boot_js
+    assert "_bootTimeout(api('/api/settings'),20000,'settings')" in boot_js
+    assert "_bootTimeout(api('/api/profile/active'),20000,'active profile')" in boot_js
     assert "_bootTimeout(loadWorkspaceList(),10000,'workspace list')" in boot_js
     assert "_bootTimeout(_loadActiveSpaceConfig(),8000,'space config')" in boot_js
     assert "_bootTimeout(loadOnboardingWizard(),8000,'onboarding')" in boot_js
-    assert "_withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces')" in spaces_js
+    assert "_withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces')" in spaces_js
 
 
 def test_visible_static_ui_text_is_not_mojibake():
