@@ -806,6 +806,7 @@ def _list_boards_payload(parsed):
         current = kb.get_current_board()
     except Exception:
         current = "default"
+    current_source = "explicit"
     visible_slugs = {(_board_meta_dict(meta).get("slug")) for meta in boards}
     default_slug = getattr(kb, "DEFAULT_BOARD", "default")
     if current not in visible_slugs:
@@ -818,6 +819,7 @@ def _list_boards_payload(parsed):
         except Exception:
             pass
         current = default_slug
+        current_source = "fallback"
     out = []
     for raw_meta in boards:
         meta = _board_meta_dict(raw_meta)
@@ -828,7 +830,7 @@ def _list_boards_payload(parsed):
         meta["counts"] = _board_counts_for_slug(slug)
         meta["total"] = sum(meta["counts"].values()) if meta["counts"] else 0
         out.append(meta)
-    return {"boards": out, "current": current, "read_only": False}
+    return {"boards": out, "current": current, "current_source": current_source, "read_only": False}
 
 
 def _create_board_payload(body):

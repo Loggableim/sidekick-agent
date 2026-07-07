@@ -1646,9 +1646,9 @@ async function loadKanban(animate){
     // requests fire. The previous tail-of-function refresh has been removed
     // to avoid doubling /api/kanban/boards traffic during SSE-driven
     // refreshes (debounced at 250ms via _scheduleKanbanRefresh). The
-    // 30-second poll started by _kanbanStartPolling() picks up any board
-    // state changes that arrive after this render.
-    _kanbanStartPolling();
+    // Keep live updates active without reopening an already healthy stream
+    // on every render refresh.
+    _kanbanEnsurePollingActive();
     _kanbanRenderBoard();
   } catch(e) {
     if (!stillCurrentSpace()) return;
@@ -1698,6 +1698,11 @@ function _kanbanStartPolling(){
     return;
   }
   _kanbanStartEventStream();
+}
+
+function _kanbanEnsurePollingActive(){
+  if (_kanbanPollTimer || _kanbanEventSource) return;
+  _kanbanStartPolling();
 }
 
 function _kanbanStopPolling(){
@@ -2725,17 +2730,24 @@ async function loadKanbanBoards(spaceLoadKey){
   if (!stillCurrentSpace()) return false;
   const boards = (data && data.boards) || [];
   const serverCurrent = (data && data.current) || 'default';
+  const currentSource = (data && data.current_source) || 'explicit';
   _kanbanBoardsList = boards;
   // Resolution chain for the active board:
-  //   localStorage hint → server's `current` → 'default'.
-  // The localStorage hint is honoured ONLY if it points at a board that
-  // still exists; otherwise we fall back to the server's pointer.
+  //   server's `current` → localStorage hint only when the API reports a
+  //   fallback current (stale/archived pointer fell back to default).
+  // The on-disk/current-board pointer stays the source of truth; the
+  // browser cache only keeps the last viewed board alive when the server
+  // could not preserve an explicit non-default pointer.
   const saved = _kanbanGetSavedBoard();
+  const savedExists = !!(saved && boards.some(b => b.slug === saved));
   let active = serverCurrent;
-  if (saved && boards.some(b => b.slug === saved)) {
+  if (currentSource === 'fallback' && savedExists) {
     active = saved;
-  } else if (saved) {
-    _kanbanSetSavedBoard('default');
+  }
+  if (active === 'default') {
+    if (saved) _kanbanSetSavedBoard('default');
+  } else if (saved !== active) {
+    _kanbanSetSavedBoard(active);
   }
   _kanbanCurrentBoard = (active === 'default') ? null : active;
   // The switcher is visible whenever ≥1 non-default board exists OR the
@@ -2853,9 +2865,6 @@ async function switchKanbanBoard(slug){
     if (menu) menu.hidden = true;
     return;
   }
-  _kanbanCurrentBoard = newBoard;
-  _kanbanSetSavedBoard(slug);
-  _kanbanLatestEventId = 0;  // reset cursor — new board has its own event sequence
   _kanbanBoardMenuOpen = false;
   const menu = document.getElementById('kanbanBoardSwitcherMenu');
   if (menu) menu.hidden = true;
@@ -2863,14 +2872,21 @@ async function switchKanbanBoard(slug){
   try {
     await api('/api/kanban/boards/' + encodeURIComponent(slug) + '/switch' + _kanbanBoardQuery(), {method: 'POST'});
   } catch(e) {
-    // Local UI switch still happens — the on-disk pointer is for cross-process
-    // consistency, not for our own rendering.
+    // Keep the current board pinned to the server's last confirmed state.
+    // A failed switch should not make the UI render a board that the shared
+    // on-disk pointer never accepted.
+    await loadKanbanBoards();
+    showToast((t('kanban_unavailable') || 'Kanban unavailable') + ': ' + (e.message || e), 'error');
+    return;
   }
+  _kanbanCurrentBoard = newBoard;
+  _kanbanSetSavedBoard(slug);
+  _kanbanLatestEventId = 0;  // reset cursor — new board has its own event sequence
   // Re-open the SSE stream on the new board.
   _kanbanStopPolling();
   await loadKanban(true);
   await loadKanbanBoards();
-  _kanbanStartPolling();
+  _kanbanEnsurePollingActive();
 }
 
 // ── Create / rename / archive board modals ──────────────────────────────────
@@ -2991,7 +3007,7 @@ async function submitKanbanBoardModal(){
       _kanbanStopPolling();
       await loadKanban(true);
       await loadKanbanBoards();
-      _kanbanStartPolling();
+      _kanbanEnsurePollingActive();
     } catch(e) {
       errEl.textContent = (e && (e.message || e.error)) || String(e);
     } finally {
@@ -3043,7 +3059,7 @@ async function archiveKanbanBoard(){
     _kanbanLatestEventId = 0;
     await loadKanban(true);
     await loadKanbanBoards();
-    _kanbanStartPolling();
+    _kanbanEnsurePollingActive();
     showToast(t('kanban_board_archived') || 'Board archived');
   } catch(e) {
     // Restart the stream on failure so the UI doesn't go stale.

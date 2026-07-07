@@ -4249,6 +4249,27 @@ def handle_get(handler, parsed) -> bool:
                             _persisted_cl = _fb_cl
                     except Exception:
                         pass
+            try:
+                from web.api.profiles import get_hermes_home_for_profile
+
+                profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+            except Exception:
+                profile_home = None
+            try:
+                from web.api.goals import goal_state_for_session
+
+                goal_state = goal_state_for_session(
+                    sid,
+                    profile_home=profile_home,
+                    space_slug=(
+                        query.get("workspace", [None])[0]
+                        or getattr(s, "workspace_slug", None)
+                        or getattr(s, "space_slug", None)
+                        or getattr(s, "space", None)
+                    ),
+                )
+            except Exception:
+                goal_state = None
             raw = s.compact() | {
                 "messages": _truncated_msgs,
                 "tool_calls": getattr(s, "tool_calls", []) if load_messages else [],
@@ -4260,6 +4281,7 @@ def handle_get(handler, parsed) -> bool:
                 "threshold_tokens": getattr(s, "threshold_tokens", 0) or 0,
                 "last_prompt_tokens": getattr(s, "last_prompt_tokens", 0) or 0,
             }
+            raw["goal"] = goal_state
             if cli_meta and _is_messaging_session_record(cli_meta):
                 raw = _merge_cli_sidebar_metadata(raw, cli_meta)
             # Signal to the frontend that older messages were omitted.
@@ -10141,6 +10163,29 @@ def _start_chat_stream_for_session(
     if not goal_related and s.session_id in PENDING_GOAL_CONTINUATION:
         goal_related = True
         PENDING_GOAL_CONTINUATION.discard(s.session_id)
+    if not goal_related:
+        try:
+            from web.api.goals import has_active_goal
+
+            try:
+                from web.api.profiles import get_hermes_home_for_profile
+
+                profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+            except Exception:
+                profile_home = None
+            goal_space_slug = str(
+                getattr(s, "workspace_slug", None)
+                or getattr(s, "space_slug", None)
+                or getattr(s, "space", None)
+                or ""
+            ).strip().lower() or None
+            goal_related = has_active_goal(
+                s.session_id,
+                profile_home=profile_home,
+                space_slug=goal_space_slug,
+            )
+        except Exception:
+            pass
 
     stream_id = uuid.uuid4().hex
     session_lock = _get_session_agent_lock(s.session_id)
@@ -10280,6 +10325,15 @@ def _handle_goal_command(handler, body):
         profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
     except Exception:
         profile_home = None
+    space_slug = str(
+        body.get("workspace_slug")
+        or body.get("space_slug")
+        or body.get("space")
+        or getattr(s, "workspace_slug", None)
+        or getattr(s, "space_slug", None)
+        or getattr(s, "space", None)
+        or ""
+    ).strip().lower() or None
 
     from web.api.goals import goal_command_payload, goal_state_snapshot, restore_goal_state
 
@@ -10307,13 +10361,14 @@ def _handle_goal_command(handler, body):
             requested_model,
             requested_provider,
         )
-        previous_goal_state = goal_state_snapshot(s.session_id, profile_home=profile_home)
+        previous_goal_state = goal_state_snapshot(s.session_id, profile_home=profile_home, space_slug=space_slug)
 
     payload = goal_command_payload(
         s.session_id,
         goal_args,
         stream_running=stream_running,
         profile_home=profile_home,
+        space_slug=space_slug,
     )
     if not payload.get("ok", True):
         status = 409 if payload.get("error") == "agent_running" else 400
@@ -10350,7 +10405,7 @@ def _handle_goal_command(handler, body):
         status = int(stream_response.pop("_status", 200) or 200)
         payload.update(stream_response)
         if status >= 400:
-            restore_goal_state(s.session_id, previous_goal_state, profile_home=profile_home)
+            restore_goal_state(s.session_id, previous_goal_state, profile_home=profile_home, space_slug=space_slug)
             payload["ok"] = False
             return j(handler, payload, status=status)
 
@@ -10402,6 +10457,32 @@ def _handle_chat_start(handler, body, diag=None):
             workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace))
         except ValueError as e:
             return bad(handler, str(e))
+        space_slug = str(
+            body.get("workspace_slug")
+            or body.get("space_slug")
+            or body.get("space")
+            or getattr(s, "workspace_slug", None)
+            or getattr(s, "space_slug", None)
+            or getattr(s, "space", None)
+            or ""
+        ).strip().lower() or None
+        goal_related = False
+        try:
+            from web.api.goals import has_active_goal
+
+            try:
+                from web.api.profiles import get_hermes_home_for_profile
+
+                profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+            except Exception:
+                profile_home = None
+            goal_related = has_active_goal(
+                s.session_id,
+                profile_home=profile_home,
+                space_slug=space_slug,
+            )
+        except Exception:
+            goal_related = False
         requested_model = body.get("model") or s.model
         requested_provider = (
             body.get("model_provider")
@@ -10453,6 +10534,7 @@ def _handle_chat_start(handler, body, diag=None):
             model_provider=model_provider,
             normalized_model=normalized_model,
             diag=diag,
+            goal_related=goal_related,
             mode=mode,
             sandbox_disabled=sandbox_disabled,
         )

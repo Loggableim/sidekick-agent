@@ -825,19 +825,25 @@ async function cmdStop(){
   else showToast(t('cancel_unavailable'));
 }
 
+function _goalCommandRequestBody(args){
+  return {
+    session_id: S.session.session_id,
+    args: args || '',
+    workspace: S.session.workspace,
+    workspace_slug: S.session.workspace_slug || S.session.space_slug || S.session.space || null,
+    space: S.session.space || S.session.space_slug || S.session.workspace_slug || null,
+    model: S.session.model || ($('modelSelect') && $('modelSelect').value) || '',
+    model_provider: S.session.model_provider || null,
+    profile: S.activeProfile || S.session.profile || 'default',
+  };
+}
+
 async function cmdGoal(args){
   if(!S.session){await newSession();await renderSessionList();}
   if(!S.session||!S.session.session_id){showToast(t('no_active_session'));return;}
   const activeSid=S.session.session_id;
   try{
-    const r=await api('/api/goal',{method:'POST',body:JSON.stringify({
-      session_id:activeSid,
-      args:args||'',
-      workspace:S.session.workspace,
-      model:S.session.model||($('modelSelect')&&$('modelSelect').value)||'',
-      model_provider:S.session.model_provider||null,
-      profile:S.activeProfile||S.session.profile||'default',
-    })});
+    const r=await api('/api/goal',{method:'POST',body:JSON.stringify(_goalCommandRequestBody(args))});
     const msg = (() => {
       const raw = String((r && r.message) || '').trim();
       const key = String((r && r.message_key) || '').trim();
@@ -3066,14 +3072,7 @@ async function cmdGoal(args){
   if(!S.session||!S.session.session_id){showToast(t('no_active_session'));return;}
   const activeSid=S.session.session_id;
   try{
-    const r=await api('/api/goal',{method:'POST',body:JSON.stringify({
-      session_id:activeSid,
-      args:args||'',
-      workspace:S.session.workspace,
-      model:S.session.model||($('modelSelect')&&$('modelSelect').value)||'',
-      model_provider:S.session.model_provider||null,
-      profile:S.activeProfile||S.session.profile||'default',
-    })});
+    const r=await api('/api/goal',{method:'POST',body:JSON.stringify(_goalCommandRequestBody(args))});
     const msg = (() => {
       const raw = String((r && r.message) || '').trim();
       const key = String((r && r.message_key) || '').trim();

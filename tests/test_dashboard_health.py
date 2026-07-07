@@ -676,6 +676,440 @@ def test_space_session_detail_repairs_stale_stream_state(monkeypatch, tmp_path):
     assert index[0]["is_streaming"] is False
 
 
+def test_sessiondb_state_meta_roundtrips(tmp_path):
+    from runtime._compat.shim_state import SessionDB
+
+    db_path = tmp_path / "home" / "state.db"
+    db = SessionDB(db_path=db_path)
+
+    db.set_meta("goal:test-session", '{"goal":"Ship it","status":"active"}')
+    assert db.get_meta("goal:test-session") == '{"goal":"Ship it","status":"active"}'
+    assert db.get_meta("goal:missing") is None
+
+    reopened = SessionDB(db_path=db_path)
+    assert reopened.get_meta("goal:test-session") == '{"goal":"Ship it","status":"active"}'
+
+
+def test_session_detail_includes_persisted_goal_state(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    from runtime._compat.shim_state import SessionDB
+    from web.api.models import Session
+
+    space_sessions = tmp_path / "home" / "spaces" / "color" / "sessions"
+    space_sessions.mkdir(parents=True)
+    db = SessionDB(db_path=tmp_path / "home" / "spaces" / "color" / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    session = Session(session_id="goal-session", profile="default", workspace=r"C:\\workspace")
+    session.messages = []
+    session.tool_calls = []
+    session_payload = session.compact()
+    session_payload.update(
+        {
+            "profile": "default",
+            "workspace_slug": "color",
+            "messages": [],
+            "tool_calls": [],
+        }
+    )
+    (space_sessions / "goal-session.json").write_text(json.dumps(session_payload), encoding="utf-8")
+
+    monkeypatch.setattr("web.api.routes._clear_stale_stream_state", lambda s: None)
+    monkeypatch.setattr("web.api.routes._lookup_cli_session_metadata", lambda sid: None)
+    monkeypatch.setattr("web.api.routes._is_messaging_session_record", lambda record: False)
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+            self.sessions_dir = root / "sessions"
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(tmp_path / "home" / "spaces" / slug) if slug == "color" else None,
+    )
+
+    response = TestClient(web_server.app).get(
+        "/api/session?session_id=goal-session&workspace=color&messages=0&resolve_model=0",
+        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["session"]
+    assert payload["session_id"] == "goal-session"
+    assert payload["goal"]["goal"] == "Ship it"
+    assert payload["goal"]["status"] == "active"
+    assert payload["goal"]["turns_used"] == 2
+    assert payload["goal"]["max_turns"] == 12
+    assert payload["goal"]["session_id"] == "goal-session"
+    assert payload["goal"]["space"] == "color"
+
+
+def test_goal_command_payload_uses_space_goal_store(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api.goals import goal_command_payload
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(space_root) if slug == "color" else None,
+    )
+
+    payload = goal_command_payload("goal-session", "status", space_slug="color")
+
+    assert payload["goal"]["goal"] == "Ship it"
+    assert payload["goal"]["status"] == "active"
+    assert payload["goal"]["turns_used"] == 2
+    assert payload["goal"]["max_turns"] == 12
+    assert payload["goal"]["space"] == "color"
+
+
+def test_goal_state_for_session_omits_cleared_goal(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api.goals import goal_state_for_session
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "cleared",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(space_root) if slug == "color" else None,
+    )
+
+    assert goal_state_for_session("goal-session", space_slug="color") is None
+
+
+def test_goal_command_status_omits_cleared_goal(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api.goals import goal_command_payload
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "cleared",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(space_root) if slug == "color" else None,
+    )
+
+    payload = goal_command_payload("goal-session", "status", space_slug="color")
+
+    assert payload["goal"] is None
+    assert payload["message_key"] == "goal_status_none"
+
+
+def test_goal_route_uses_workspace_slug_from_request_body(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api import routes
+    from web.api.models import Session
+    import io
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    session = Session(session_id="goal-session", profile="default", workspace=r"C:\\workspace")
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: type("WS", (), {"root": space_root})() if slug == "color" else None,
+    )
+
+    class _FakeHandler:
+        def __init__(self):
+            self.headers = {}
+            self.status = None
+            self.sent_headers = {}
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, key, value):
+            self.sent_headers[key] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _FakeHandler()
+    routes._handle_goal_command(
+        handler,
+        {
+            "session_id": "goal-session",
+            "args": "status",
+            "workspace_slug": "color",
+            "workspace": r"C:\\workspace",
+            "profile": "default",
+        },
+    )
+
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))["goal"]
+    assert payload["goal"] == "Ship it"
+    assert payload["status"] == "active"
+    assert payload["space"] == "color"
+
+
+def test_goal_route_accepts_legacy_space_field_from_request_body(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    from runtime._compat.shim_state import SessionDB
+    from web.api import routes
+    from web.api.models import Session
+    import io
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    session = Session(session_id="goal-session", profile="default", workspace=r"C:\\workspace")
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: type("WS", (), {"root": space_root})() if slug == "color" else None,
+    )
+
+    class _FakeHandler:
+        def __init__(self):
+            self.headers = {}
+            self.status = None
+            self.sent_headers = {}
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, key, value):
+            self.sent_headers[key] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _FakeHandler()
+    routes._handle_goal_command(
+        handler,
+        {
+            "session_id": "goal-session",
+            "args": "status",
+            "space": "color",
+            "workspace": r"C:\\workspace",
+            "profile": "default",
+        },
+    )
+
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))["goal"]
+    assert payload["goal"] == "Ship it"
+    assert payload["status"] == "active"
+    assert payload["space"] == "color"
+
+
+def test_chat_start_marks_active_goal_turns_as_goal_related(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    from web.api import routes
+
+    captured = {}
+
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        model="gpt-4o",
+        model_provider="openai",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.routes.resolve_trusted_workspace", lambda value: r"C:\\workspace")
+    monkeypatch.setattr(
+        "web.api.routes._resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("gpt-4o", "openai", False),
+    )
+    monkeypatch.setattr(
+        "web.api.routes.resolve_active_provider_context",
+        lambda: {"provider": "openai", "model": "gpt-4o"},
+    )
+    monkeypatch.setattr("web.api.routes._game_mode_guard_payload_for_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: True)
+    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+
+    routes._handle_chat_start(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "message": "implement the feature",
+            "workspace": r"C:\\workspace",
+            "model": "gpt-4o",
+            "model_provider": "openai",
+        },
+    )
+
+    assert captured["goal_related"] is True
+
+
+def test_start_chat_stream_marks_turns_goal_related_when_goal_is_active(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    import threading
+    from contextlib import nullcontext
+    from web.api import routes
+
+    captured = {}
+    started = threading.Event()
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        workspace_slug="color",
+        model="gpt-4o",
+        model_provider="openai",
+        active_stream_id=None,
+        pending_started_at=0.0,
+        pending_user_message=None,
+        pending_attachments=[],
+        messages=[],
+        save=lambda: None,
+    )
+
+    monkeypatch.setattr(
+        "web.api.routes._get_session_agent_lock",
+        lambda sid: nullcontext(),
+    )
+    monkeypatch.setattr("web.api.routes._prepare_chat_start_session_for_stream", lambda *args, **kwargs: None)
+    monkeypatch.setattr("web.api.routes.create_stream_channel", lambda: object())
+    monkeypatch.setattr("web.api.routes.set_last_workspace", lambda workspace: None)
+    monkeypatch.setattr("web.api.routes._run_agent_streaming", lambda *args, **kwargs: captured.update(kwargs) or started.set())
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: True)
+
+    response = routes._start_chat_stream_for_session(
+        session,
+        msg="implement the feature",
+        attachments=[],
+        workspace=r"C:\\workspace",
+        model="gpt-4o",
+        model_provider="openai",
+    )
+
+    assert response["stream_id"]
+    assert started.wait(1), "stream thread did not start"
+    assert captured["goal_related"] is True
+    assert response["stream_id"] in routes.STREAM_GOAL_RELATED
+
+
 def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -776,6 +1210,83 @@ def test_expected_api_failures_do_not_pollute_webui_error_log():
     assert sessions_js.count("logError: false") >= 3
 
 
+def test_session_load_hydrates_goal_banner_from_server_state():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    assert "Object.prototype.hasOwnProperty.call(data.session, 'goal')" in sessions_js
+    assert "data.session.goal && typeof _updateGoalState === 'function'" in sessions_js
+    assert "typeof _clearGoalState === 'function'" in sessions_js
+    assert sessions_js.index("if (data.session && Object.prototype.hasOwnProperty.call(data.session, 'goal')) {") < sessions_js.index("const activeStreamId=S.session.active_stream_id||null;")
+
+
+def test_goal_command_sends_workspace_slug_for_space_sessions():
+    commands_js = Path("web/static/commands.js").read_text(encoding="utf-8")
+
+    assert "function _goalCommandRequestBody(args)" in commands_js
+    assert "workspace_slug: S.session.workspace_slug || S.session.space_slug || S.session.space || null" in commands_js
+    assert "space: S.session.space || S.session.space_slug || S.session.workspace_slug || null" in commands_js
+    assert commands_js.count("_goalCommandRequestBody(args)") == 3
+
+
+def test_switch_kanban_board_does_not_restart_polling_twice():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function switchKanbanBoard(slug){")
+    end = panels_js.index("// ── Create / rename / archive board modals ─", start)
+    body = panels_js[start:end]
+
+    assert body.count("_kanbanStartPolling();") == 0
+    assert "_kanbanEnsurePollingActive();" in body
+
+
+def test_switch_kanban_board_commits_local_state_after_server_confirmation():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function switchKanbanBoard(slug){")
+    end = panels_js.index("function openKanbanCreateBoard()", start)
+    body = panels_js[start:end]
+
+    assert body.index("await api('/api/kanban/boards/'") < body.index("_kanbanCurrentBoard = newBoard;")
+    assert body.index("await api('/api/kanban/boards/'") < body.index("_kanbanSetSavedBoard(slug);")
+    assert "showToast((t('kanban_unavailable') || 'Kanban unavailable') + ': ' + (e.message || e), 'error');" in body
+
+
+def test_load_kanban_ensures_polling_without_restarting_an_active_stream():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function loadKanban(animate){")
+    end = panels_js.index("function filterKanban()", start)
+    body = panels_js[start:end]
+
+    assert "_kanbanEnsurePollingActive();" in body
+    assert "_kanbanStartPolling();" not in body
+
+
+def test_kanban_board_resolution_uses_saved_hint_only_for_fallback_current():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function loadKanbanBoards(spaceLoadKey){")
+    end = panels_js.index("// Restrict board.color", start)
+    body = panels_js[start:end]
+
+    assert "const currentSource = (data && data.current_source) || 'explicit';" in body
+    assert "const savedExists = !!(saved && boards.some(b => b.slug === saved));" in body
+    assert "if (currentSource === 'fallback' && savedExists) {" in body
+    assert "if (serverCurrent === 'default' && savedExists) {" not in body
+
+
+def test_kanban_board_create_and_archive_do_not_restart_polling_after_reload():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+
+    create_start = panels_js.index("if (mode === 'create') {")
+    create_end = panels_js.index("} else if (mode === 'rename') {", create_start)
+    create_body = panels_js[create_start:create_end]
+    assert create_body.count("_kanbanStartPolling();") == 0
+    assert "_kanbanEnsurePollingActive();" in create_body
+
+    archive_start = panels_js.index("async function archiveKanbanBoard(){")
+    archive_end = panels_js.index("function _selectedLogsFile()", archive_start)
+    archive_body = panels_js[archive_start:archive_end]
+    assert archive_body.count("_kanbanStartPolling();") == 1
+    assert "_kanbanEnsurePollingActive();" in archive_body
+
+
 def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
 
@@ -805,6 +1316,98 @@ def test_api_auth_script_loads_before_app_fetches():
     assert index_html.index("static/api-auth.js") < index_html.index("static/ui.js")
     assert index_html.index("static/api-auth.js") < index_html.index("static/boot.js")
     assert "'./static/api-auth.js' + VQ" in sw_js
+
+
+def test_kanban_db_missing_env_vars_fall_back_to_default_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    for name in (
+        "HERMES_HOME",
+        "SIDEKICK_KANBAN_HOME",
+        "SIDEKICK_KANBAN_BOARD",
+        "SIDEKICK_KANBAN_DB",
+        "SIDEKICK_KANBAN_WORKSPACES_ROOT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from cli import kanban_db
+
+    assert kanban_db.kanban_home() == tmp_path / "home"
+    assert kanban_db.kanban_db_path() == tmp_path / "home" / "kanban.db"
+    assert kanban_db.workspaces_root() == tmp_path / "home" / "kanban" / "workspaces"
+    assert kanban_db.get_current_board() == "default"
+
+    boards = kanban_db.list_boards(include_archived=False)
+    assert boards and boards[0]["slug"] == "default"
+
+
+def test_kanban_board_list_reports_fallback_current_source(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import kanban_bridge
+
+    class _FakeKB:
+        DEFAULT_BOARD = "default"
+
+        def __init__(self):
+            self.cleared = False
+
+        def list_boards(self, include_archived=False):
+            return [
+                {"slug": "default", "name": "Default"},
+                {"slug": "blog-sprint", "name": "Blog Sprint"},
+            ]
+
+        def get_current_board(self):
+            return "ghost-board"
+
+        def clear_current_board(self):
+            self.cleared = True
+
+    fake = _FakeKB()
+    monkeypatch.setattr(kanban_bridge, "_kb", lambda: fake)
+    monkeypatch.setattr(kanban_bridge, "_board_counts_for_slug", lambda slug: {})
+
+    payload = kanban_bridge._list_boards_payload(SimpleNamespace(query=""))
+
+    assert fake.cleared is True
+    assert payload["current"] == "default"
+    assert payload["current_source"] == "fallback"
+    assert payload["boards"][0]["is_current"] is True
+    assert payload["boards"][1]["is_current"] is False
+
+
+def test_kanban_board_list_preserves_explicit_current_source(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import kanban_bridge
+
+    class _FakeKB:
+        DEFAULT_BOARD = "default"
+
+        def __init__(self):
+            self.cleared = False
+
+        def list_boards(self, include_archived=False):
+            return [
+                {"slug": "default", "name": "Default"},
+                {"slug": "blog-sprint", "name": "Blog Sprint"},
+            ]
+
+        def get_current_board(self):
+            return "blog-sprint"
+
+        def clear_current_board(self):
+            self.cleared = True
+
+    fake = _FakeKB()
+    monkeypatch.setattr(kanban_bridge, "_kb", lambda: fake)
+    monkeypatch.setattr(kanban_bridge, "_board_counts_for_slug", lambda slug: {})
+
+    payload = kanban_bridge._list_boards_payload(SimpleNamespace(query=""))
+
+    assert fake.cleared is False
+    assert payload["current"] == "blog-sprint"
+    assert payload["current_source"] == "explicit"
+    assert payload["boards"][0]["is_current"] is False
+    assert payload["boards"][1]["is_current"] is True
 
 
 def test_mobile_settings_has_main_section_switcher():
@@ -2903,6 +3506,7 @@ def test_launcher_stops_orphan_stdlib_backends():
 def test_goal_continuation_auto_starts_after_delivery():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
     goals_py = Path("cli/goals.py").read_text(encoding="utf-8")
+    routes_py = Path("web/api/routes.py").read_text(encoding="utf-8")
 
     assert "function _startGoalContinuation(goalNext, attempt=0)" in messages_js
     assert "api(_ownerScopedApiPath('/api/chat/start')" in messages_js
@@ -2910,6 +3514,8 @@ def test_goal_continuation_auto_starts_after_delivery():
     assert "already has an active stream" in messages_js
     assert "merely reports progress" in goals_py
     assert "If any required work remains" in goals_py
+    assert "goal_related = has_active_goal(" in routes_py
+    assert "goal_related=goal_related" in routes_py
 
 
 def test_proxy_response_keeps_safe_stdlib_headers(monkeypatch):

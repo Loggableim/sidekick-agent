@@ -49,7 +49,7 @@ def _meta_key(session_id: str) -> str:
     return f"goal:{session_id}"
 
 
-def _profile_db(profile_home: str | Path):
+def _profile_db(profile_home: str | Path, *, space_slug: str | None = None):
     """Return a SessionDB pinned to *profile_home*, without reading HERMES_HOME.
 
     The upstream Hermes GoalManager persists through hermes_cli.goals.load_goal(),
@@ -59,7 +59,7 @@ def _profile_db(profile_home: str | Path):
     When in a space context, returns a space-scoped goals.db instead.
     """
     # 1. space-scoped
-    sp = _space_goals_path()
+    sp = _space_goals_path(space_slug)
     if sp:
         key = str(sp)
         cached = _DB_CACHE.get(key)
@@ -92,12 +92,19 @@ def _profile_db(profile_home: str | Path):
     return db
 
 
-def _space_goals_path() -> Path | None:
+def _space_goals_path(space_slug: str | None = None) -> Path | None:
     """Return path to space-scoped goals.db, or None if not in a space context."""
     try:
-        from web.api.space_engine import resolve_active_space
+        from web.api.space_engine import DEFAULT_SPACE_SLUG, get_workspace, resolve_active_space
 
-        space = resolve_active_space()
+        if space_slug:
+            space = get_workspace(space_slug)
+            if space is None and space_slug == "default":
+                space = get_workspace(DEFAULT_SPACE_SLUG)
+            if space is None:
+                return None
+        else:
+            space = resolve_active_space()
         p = space.root / "goals.db"
         return p
     except Exception:
@@ -107,11 +114,12 @@ def _space_goals_path() -> Path | None:
 class _ProfileGoalManager:
     """Small WebUI-local GoalManager adapter with explicit profile persistence."""
 
-    def __init__(self, session_id: str, *, profile_home: str | Path, default_max_turns: int = 20):
+    def __init__(self, session_id: str, *, profile_home: str | Path, default_max_turns: int = 20, space_slug: str | None = None):
         if GoalState is None:
             raise RuntimeError("Sidekick goal state unavailable")
         self.session_id = session_id
         self.profile_home = Path(profile_home).expanduser().resolve()
+        self.space_slug = str(space_slug or "").strip().lower() or None
         self.default_max_turns = int(default_max_turns or DEFAULT_MAX_TURNS or 20)
         self._state = self._load()
 
@@ -120,7 +128,7 @@ class _ProfileGoalManager:
         return self._state
 
     def _load(self):
-        db = _profile_db(self.profile_home)
+        db = _profile_db(self.profile_home, space_slug=self.space_slug)
         if db is None or not self.session_id:
             return None
         try:
@@ -137,7 +145,7 @@ class _ProfileGoalManager:
             return None
 
     def _save(self, state) -> None:
-        db = _profile_db(self.profile_home)
+        db = _profile_db(self.profile_home, space_slug=self.space_slug)
         if db is None or not self.session_id or state is None:
             return
         try:
@@ -272,15 +280,24 @@ class _ProfileGoalManager:
         return CONTINUATION_PROMPT_TEMPLATE.format(goal=self._state.goal)
 
 
-def _manager(session_id: str, *, profile_home: str | Path | None = None):
+def _manager(session_id: str, *, profile_home: str | Path | None = None, space_slug: str | None = None):
     if GoalManager is None:
         return None
-    if profile_home and GoalManager is _NativeGoalManager and GoalState is not None:
+    if (profile_home or space_slug) and GoalManager is _NativeGoalManager and GoalState is not None:
         try:
+            effective_profile_home = profile_home
+            if effective_profile_home is None:
+                try:
+                    from runtime._compat.shim_constants import get_sidekick_home as _get_sidekick_home
+
+                    effective_profile_home = _get_sidekick_home()
+                except Exception:
+                    effective_profile_home = Path(".")
             return _ProfileGoalManager(
                 session_id=session_id,
-                profile_home=profile_home,
+                profile_home=effective_profile_home,
                 default_max_turns=_default_max_turns(),
+                space_slug=space_slug,
             )
         except Exception as exc:
             logger.debug("Profile-scoped GoalManager unavailable: %s", exc)
@@ -288,9 +305,15 @@ def _manager(session_id: str, *, profile_home: str | Path | None = None):
     return GoalManager(session_id=session_id, default_max_turns=_default_max_turns())
 
 
-def _state_payload(state: Any, session_id: str = "") -> Optional[Dict[str, Any]]:
+def _state_payload(
+    state: Any,
+    session_id: str = "",
+    *,
+    space_slug: str | None = None,
+) -> Optional[Dict[str, Any]]:
     if state is None:
         return None
+    space = str(space_slug or getattr(state, "space", "") or getattr(state, "space_slug", "") or "").strip().lower()
     return {
         "goal": getattr(state, "goal", "") or "",
         "status": getattr(state, "status", "") or "",
@@ -300,6 +323,7 @@ def _state_payload(state: Any, session_id: str = "") -> Optional[Dict[str, Any]]
         "last_reason": getattr(state, "last_reason", None),
         "paused_reason": getattr(state, "paused_reason", None),
         "session_id": str(session_id).strip() if session_id else "",
+        **({"space": space} if space else {}),
     }
 
 
@@ -309,6 +333,7 @@ def _payload(
     action: str,
     message: str,
     state: Any = None,
+    space_slug: str | None = None,
     error: str | None = None,
     kickoff_prompt: str | None = None,
     decision: Dict[str, Any] | None = None,
@@ -319,7 +344,7 @@ def _payload(
         "ok": bool(ok),
         "action": action,
         "message": message,
-        "goal": _state_payload(state),
+        "goal": _state_payload(state, space_slug=space_slug),
     }
     if error:
         body["error"] = error
@@ -429,17 +454,28 @@ def _goal_decision_payload(
     }
 
 
-def goal_state_snapshot(session_id: str, *, profile_home: str | Path | None = None) -> Any:
+def goal_state_snapshot(
+    session_id: str,
+    *,
+    profile_home: str | Path | None = None,
+    space_slug: str | None = None,
+) -> Any:
     """Return a deep copy of current goal state for rollback before kickoff."""
-    mgr = _manager(str(session_id or ""), profile_home=profile_home)
+    mgr = _manager(str(session_id or ""), profile_home=profile_home, space_slug=space_slug)
     if mgr is None:
         return None
     return copy.deepcopy(getattr(mgr, "state", None))
 
 
-def restore_goal_state(session_id: str, snapshot: Any, *, profile_home: str | Path | None = None) -> None:
+def restore_goal_state(
+    session_id: str,
+    snapshot: Any,
+    *,
+    profile_home: str | Path | None = None,
+    space_slug: str | None = None,
+) -> None:
     """Restore a prior goal state after kickoff stream creation fails."""
-    mgr = _manager(str(session_id or ""), profile_home=profile_home)
+    mgr = _manager(str(session_id or ""), profile_home=profile_home, space_slug=space_slug)
     if mgr is None:
         return
     if snapshot is None:
@@ -460,12 +496,31 @@ def restore_goal_state(session_id: str, snapshot: Any, *, profile_home: str | Pa
         logger.debug("Goal state restore failed for %s: %s", session_id, exc)
 
 
+def goal_state_for_session(
+    session_id: str,
+    *,
+    profile_home: str | Path | None = None,
+    space_slug: str | None = None,
+) -> Optional[Dict[str, Any]]:
+    """Return the persisted goal payload for a session, if any."""
+    mgr = _manager(str(session_id or ""), profile_home=profile_home, space_slug=space_slug)
+    if mgr is None:
+        return None
+    state = getattr(mgr, "state", None)
+    if state is None:
+        return None
+    if str(getattr(state, "status", "") or "").strip() == "cleared":
+        return None
+    return _state_payload(state, str(session_id or ""), space_slug=space_slug)
+
+
 def goal_command_payload(
     session_id: str,
     args: str = "",
     *,
     stream_running: bool = False,
     profile_home: str | Path | None = None,
+    space_slug: str | None = None,
 ) -> Dict[str, Any]:
     """Return the WebUI response payload for a /goal command.
 
@@ -479,11 +534,11 @@ def goal_command_payload(
     """
     sid = str(session_id or "").strip()
     if not sid:
-        return _payload(ok=False, action="error", error="missing_session", message="session_id required")
+        return _payload(ok=False, action="error", error="missing_session", message="session_id required", space_slug=space_slug)
 
-    mgr = _manager(sid, profile_home=profile_home)
+    mgr = _manager(sid, profile_home=profile_home, space_slug=space_slug)
     if mgr is None:
-        return _payload(ok=False, action="error", error="unavailable", message="Goals unavailable on this session.")
+        return _payload(ok=False, action="error", error="unavailable", message="Goals unavailable on this session.", space_slug=space_slug)
 
     text = str(args or "").strip()
     lower = text.lower()
@@ -491,7 +546,9 @@ def goal_command_payload(
     if not text or lower == "status":
         state = getattr(mgr, "state", None)
         status_payload = _goal_status_payload(state)
-        return _payload(action="status", state=state, **status_payload)
+        state_status = str(getattr(state, "status", "") or "").strip()
+        visible_state = None if state_status == "cleared" else state
+        return _payload(action="status", state=visible_state, space_slug=space_slug, **status_payload)
 
     if lower == "pause":
         state = mgr.pause(reason="user-paused")
@@ -502,6 +559,7 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal set.",
                 message_key="goal_no_goal",
+                space_slug=space_slug,
             )
         return _payload(
             action="pause",
@@ -509,6 +567,7 @@ def goal_command_payload(
             message_key="goal_paused",
             message_args=[str(state.goal)],
             state=state,
+            space_slug=space_slug,
         )
 
     if lower == "resume":
@@ -520,6 +579,7 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal to resume.",
                 message_key="goal_no_goal",
+                space_slug=space_slug,
             )
         return _payload(
             action="resume",
@@ -530,6 +590,7 @@ def goal_command_payload(
             message_key="goal_resumed",
             message_args=[str(state.goal)],
             state=state,
+            space_slug=space_slug,
         )
 
     if lower in ("clear", "stop", "done"):
@@ -540,6 +601,7 @@ def goal_command_payload(
             message="Goal cleared." if had else "No active goal.",
             message_key="goal_cleared" if had else "goal_no_goal",
             state=getattr(mgr, "state", None),
+            space_slug=space_slug,
         )
 
     if stream_running:
@@ -551,12 +613,13 @@ def goal_command_payload(
                 "Agent is running — use /goal status / pause / clear mid-run, "
                 "or /stop before setting a new goal."
             ),
+            space_slug=space_slug,
         )
 
     try:
         state = mgr.set(text)
     except ValueError as exc:
-        return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}")
+        return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}", space_slug=space_slug)
 
     return _payload(
         action="set",
@@ -569,6 +632,7 @@ def goal_command_payload(
         message_args=[state.max_turns, state.goal],
         state=state,
         kickoff_prompt=state.goal,
+        space_slug=space_slug,
     )
 
 
@@ -576,12 +640,13 @@ def has_active_goal(
     session_id: str,
     *,
     profile_home: str | Path | None = None,
+    space_slug: str | None = None,
 ) -> bool:
     """Return True when the session has an active standing goal to evaluate."""
     sid = str(session_id or "").strip()
     if not sid:
         return False
-    mgr = _manager(sid, profile_home=profile_home)
+    mgr = _manager(sid, profile_home=profile_home, space_slug=space_slug)
     if mgr is None:
         return False
     try:
@@ -597,6 +662,7 @@ def evaluate_goal_after_turn(
     *,
     user_initiated: bool = True,
     profile_home: str | Path | None = None,
+    space_slug: str | None = None,
 ) -> Dict[str, Any]:
     """Evaluate a completed turn against the standing goal, if any."""
     sid = str(session_id or "").strip()
@@ -609,7 +675,7 @@ def evaluate_goal_after_turn(
             "reason": "missing session_id",
             "message": "",
         }
-    mgr = _manager(sid, profile_home=profile_home)
+    mgr = _manager(sid, profile_home=profile_home, space_slug=space_slug)
     if mgr is None:
         return {
             "status": None,

@@ -45,3 +45,37 @@ def test_gateway_restart_drain_timeout_handles_unset_env(monkeypatch):
     monkeypatch.setattr(gateway, "read_raw_config", lambda: {})
 
     assert gateway._get_restart_drain_timeout() == gateway.DEFAULT_GATEWAY_RESTART_DRAIN_TIMEOUT
+
+
+def test_openrouter_cache_headers_handle_unset_env(monkeypatch):
+    monkeypatch.delenv("SIDEKICK_OPENROUTER_CACHE", raising=False)
+    monkeypatch.delenv("SIDEKICK_OPENROUTER_CACHE_TTL", raising=False)
+
+    from runtime.auxiliary_client import build_or_headers
+
+    headers = build_or_headers(
+        {
+            "response_cache": True,
+            "response_cache_ttl": 600,
+        }
+    )
+
+    assert headers["X-OpenRouter-Cache"] == "true"
+    assert headers["X-OpenRouter-Cache-TTL"] == "600"
+
+
+def test_shell_hooks_accept_env_handles_unset_env(monkeypatch):
+    monkeypatch.delenv("SIDEKICK_ACCEPT_HOOKS", raising=False)
+
+    from runtime.shell_hooks import _resolve_effective_accept
+
+    assert _resolve_effective_accept({"hooks_auto_accept": False}, False) is False
+    assert _resolve_effective_accept({"hooks_auto_accept": True}, False) is True
+
+
+def test_voice_debug_handles_unset_env(monkeypatch):
+    monkeypatch.delenv("SIDEKICK_VOICE_DEBUG", raising=False)
+
+    from cli.voice import _debug
+
+    _debug("noop")

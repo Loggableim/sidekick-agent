@@ -151,6 +151,11 @@ class SessionDB:
                 token_count INTEGER DEFAULT 0,
                 reasoning_content TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS state_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT ''
+            );
             """
         )
         self._repair_missing_parent_session_refs()
@@ -523,6 +528,27 @@ class SessionDB:
             if session_col != "session_id" and session_col in row:
                 row["session_id"] = row[session_col]
         return rows
+
+    def get_meta(self, key: str) -> str | None:
+        if not key:
+            return None
+        row = self._conn.execute(
+            "SELECT value FROM state_meta WHERE key = ?",
+            (str(key),),
+        ).fetchone()
+        if row is None:
+            return None
+        value = row[0]
+        return None if value is None else str(value)
+
+    def set_meta(self, key: str, value: Any) -> None:
+        if not key:
+            return
+        text = "" if value is None else str(value)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO state_meta (key, value) VALUES (?, ?)",
+            (str(key), text),
+        )
 
     def delete_session(self, session_id: str) -> bool:
         sid = self.resolve_session_id(session_id)

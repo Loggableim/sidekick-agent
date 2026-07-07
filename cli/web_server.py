@@ -1633,6 +1633,12 @@ async def get_space_session_detail(request: Request):
     payload["_messages_offset"] = offset
     _repair_space_session_slug(payload, slug, path)
     payload["has_pending_user_message"] = bool(payload.get("pending_user_message"))
+    try:
+        from web.api.goals import goal_state_for_session
+
+        payload["goal"] = goal_state_for_session(sid, space_slug=slug or payload.get("workspace_slug") or payload.get("space_slug") or payload.get("space"))
+    except Exception:
+        payload["goal"] = None
     return {"session": payload}
 
 

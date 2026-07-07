@@ -739,6 +739,11 @@ def _command_script_path(command: str) -> str:
 # Helpers for accept-hooks resolution
 # ---------------------------------------------------------------------------
 
+def _env_trim(name: str) -> str:
+    """Return a trimmed env var value, treating unset values as empty."""
+    return str(os.environ.get(name) or "").strip()
+
+
 def _resolve_effective_accept(
     cfg: Dict[str, Any], accept_hooks_arg: bool,
 ) -> bool:
@@ -751,7 +756,7 @@ def _resolve_effective_accept(
     """
     if accept_hooks_arg:
         return True
-    env = (os.environ.get("SIDEKICK_ACCEPT_HOOKS")).strip().lower()
+    env = _env_trim("SIDEKICK_ACCEPT_HOOKS").lower()
     if env in {"1", "true", "yes", "on"}:
         return True
     cfg_val = cfg.get("hooks_auto_accept", False)

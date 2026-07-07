@@ -801,6 +801,15 @@ async function loadSession(sid, options){
     return;
   }
   S.session=data.session;
+  // Rehydrate the goal banner immediately so any live-stream reattach or
+  // SSE goal event sees the current goal state instead of a stale banner from
+  // the previously viewed session.
+  if (data.session && Object.prototype.hasOwnProperty.call(data.session, 'goal')) {
+    if (data.session.goal && typeof _updateGoalState === 'function') _updateGoalState(data.session.goal);
+    else if (typeof _clearGoalState === 'function') _clearGoalState();
+  } else if (typeof _renderGoalBanner === 'function') {
+    _renderGoalBanner();
+  }
   // Only clear the previous transcript after this load is confirmed current.
   // Fast conversation switches can leave stale requests resolving late; clearing
   // global message state before this point makes the active pane appear empty or
@@ -1046,9 +1055,6 @@ async function loadSession(sid, options){
   if (_draft && (typeof _restoreComposerDraft === 'function')) {
     _restoreComposerDraft(_draft, sid);
   }
-
-  // Re-evaluate goal banner for the new session
-  if(typeof _renderGoalBanner==='function')_renderGoalBanner();
 
   _resolveSessionModelForDisplaySoon(sid);
   if (typeof browserSyncToCurrentSession === 'function') {

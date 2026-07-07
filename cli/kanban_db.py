@@ -131,6 +131,11 @@ DEFAULT_BOARD = "default"
 _BOARD_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]{0,63}$")
 
 
+def _env_override(name: str) -> str:
+    """Return a trimmed env var value, treating unset values as empty."""
+    return str(os.environ.get(name) or "").strip()
+
+
 def _normalize_board_slug(slug: Optional[str]) -> Optional[str]:
     """Lowercase + strip a slug; validate; return ``None`` for empty."""
     if slug is None:
@@ -162,7 +167,7 @@ def kanban_home() -> Path:
     profile's ``HERMES_HOME`` would silently fork the board per profile,
     which breaks the dispatcher / worker handoff.
     """
-    override = (os.environ.get("SIDEKICK_KANBAN_HOME")).strip()
+    override = _env_override("SIDEKICK_KANBAN_HOME")
     if override:
         return Path(override).expanduser()
     from runtime._compat.shim_constants import get_default_hermes_root
@@ -205,7 +210,7 @@ def get_current_board() -> str:
     with a best-effort warning — the dispatcher must never crash because a
     user hand-edited a file or removed a board directory.
     """
-    env = (os.environ.get("SIDEKICK_KANBAN_BOARD")).strip()
+    env = _env_override("SIDEKICK_KANBAN_BOARD")
     if env:
         try:
             normed = _normalize_board_slug(env)
@@ -296,7 +301,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
     3. Board ``default`` → ``<root>/kanban.db`` (back-compat path).
        Other boards → ``<root>/kanban/boards/<slug>/kanban.db``.
     """
-    override = (os.environ.get("SIDEKICK_KANBAN_DB")).strip()
+    override = _env_override("SIDEKICK_KANBAN_DB")
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -318,7 +323,7 @@ def workspaces_root(board: Optional[str] = None) -> Path:
     that existing scratch workspaces from before the boards feature are
     preserved. Other boards use ``<root>/kanban/boards/<slug>/workspaces/``.
     """
-    override = (os.environ.get("SIDEKICK_KANBAN_WORKSPACES_ROOT")).strip()
+    override = _env_override("SIDEKICK_KANBAN_WORKSPACES_ROOT")
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)

@@ -4084,7 +4084,9 @@ def _run_agent_streaming(
             try:
                 from web.api.goals import evaluate_goal_after_turn, has_active_goal
 
-                if not goal_related or not has_active_goal(session_id, profile_home=_profile_home):
+                _goal_space_slug = str(getattr(s, 'workspace_slug', '') or getattr(s, 'space_slug', '') or getattr(s, 'space', '') or '').strip().lower() or None
+
+                if not goal_related or not has_active_goal(session_id, profile_home=_profile_home, space_slug=_goal_space_slug):
                     _goal_decision = {}
                 else:
                     _last_goal_response = ''
@@ -4114,6 +4116,7 @@ def _run_agent_streaming(
                         _last_goal_response,
                         user_initiated=True,
                         profile_home=_profile_home,
+                        space_slug=_goal_space_slug,
                     )
                 decision = _goal_decision or {}
                 _goal_message = str(decision.get('message') or '').strip()

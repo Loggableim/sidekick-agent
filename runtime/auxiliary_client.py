@@ -322,6 +322,11 @@ _OR_HEADERS_BASE = {
 _TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
+def _env_trim(name: str) -> str:
+    """Return a trimmed env var value, treating unset values as empty."""
+    return str(os.environ.get(name) or "").strip()
+
+
 def build_or_headers(or_config: dict | None = None) -> dict:
     """Build OpenRouter headers, optionally including response-cache headers.
 
@@ -348,7 +353,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
             or_config = {}
 
     # Determine cache enabled: env var overrides config.
-    env_cache = (os.environ.get("SIDEKICK_OPENROUTER_CACHE")).strip().lower()
+    env_cache = _env_trim("SIDEKICK_OPENROUTER_CACHE").lower()
     if env_cache:
         cache_enabled = env_cache in _TRUTHY_ENV_VALUES
     else:
@@ -360,7 +365,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
     headers["X-OpenRouter-Cache"] = "true"
 
     # Determine TTL: env var overrides config.
-    env_ttl = (os.environ.get("SIDEKICK_OPENROUTER_CACHE_TTL")).strip()
+    env_ttl = _env_trim("SIDEKICK_OPENROUTER_CACHE_TTL")
     if env_ttl:
         if env_ttl.isdigit():
             ttl = int(env_ttl)

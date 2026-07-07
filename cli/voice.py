@@ -223,6 +223,11 @@ from tools.voice_mode import (
 logger = logging.getLogger(__name__)
 
 
+def _env_trim(name: str) -> str:
+    """Return a trimmed env var value, treating unset values as empty."""
+    return str(os.environ.get(name) or "").strip()
+
+
 def _debug(msg: str) -> None:
     """Emit a debug breadcrumb when HERMES_VOICE_DEBUG=1.
 
@@ -236,7 +241,7 @@ def _debug(msg: str) -> None:
     broken stderr pipe must not kill the whole gateway — the main
     command pipe (stdin+stdout) is what actually matters.
     """
-    if (os.environ.get("SIDEKICK_VOICE_DEBUG")).strip() != "1":
+    if _env_trim("SIDEKICK_VOICE_DEBUG") != "1":
         return
     try:
         print(f"[voice] {msg}", file=sys.stderr, flush=True)
