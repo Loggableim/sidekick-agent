@@ -520,7 +520,7 @@
 
     <div class="rail-spacer"></div>
     <button class="rail-btn has-tooltip" id="railSidebarToggle" onclick="toggleSidebar()" data-tooltip="Sidebar ein-/ausklappen" aria-label="Sidebar ein-/ausklappen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
-    <button class="rail-btn nav-tab has-tooltip" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    <button class="rail-btn nav-tab has-tooltip" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" data-i18n-aria-label="tab_settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </nav>
   <div class="codex-split-layout">
   <div class="codex-split-pane">
@@ -545,7 +545,7 @@
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="discord" data-label="Discord" onclick="switchPanel('discord',{fromRailClick:true})" data-tooltip="Discord" data-i18n-title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.66V19a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1.66"/></svg></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="appstore" data-label="Appstore" onclick="switchPanel('appstore',{fromRailClick:true})" data-tooltip="Appstore" aria-label="Appstore"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.3 2.1 7L12 16.2 5.4 20.3l2.1-7L2 9h7z"/><circle cx="12" cy="12" r="2" fill="currentColor" opacity=".4"/></svg></button>
       <!-- Settings button mirrored here for mobile (rail is desktop-only via @media >=768px). Keep in sync with rail entry. -->
-      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" data-label="Settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" data-label="Settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" data-i18n-aria-label="tab_settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
       <!-- Sidebar Space Selector -->
       <button class="nav-tab nav-tab-space has-tooltip has-tooltip--bottom" id="sidebarSpaceBtn" type="button" onclick="openSidebarSpaceSelector()" data-tooltip="Switch space" aria-label="Switch space">
         <span class="nav-tab-space-emoji" id="sidebarSpaceEmoji">📁</span>
@@ -953,15 +953,15 @@
       <div class="side-menu" id="settingsMenu">
         <button type="button" class="side-menu-item active" data-settings-section="conversation" onclick="switchSettingsSection('conversation')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span>Conversation</span>
+          <span data-i18n="settings_section_switcher_conversation">Conversation</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="appearance" onclick="switchSettingsSection('appearance')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          <span>Appearance</span>
+          <span data-i18n="settings_section_switcher_appearance">Appearance</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="preferences" onclick="switchSettingsSection('preferences')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-          <span>Preferences</span>
+          <span data-i18n="settings_section_switcher_preferences">Preferences</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="providers" onclick="switchSettingsSection('providers')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
@@ -969,11 +969,11 @@
         </button>
         <button type="button" class="side-menu-item" data-settings-section="plugins" onclick="switchSettingsSection('plugins')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.3 2.1 7L12 16.2 5.4 20.3l2.1-7L2 9h7z"/></svg>
-          <span>Plugins</span>
+          <span data-i18n="plugins_tab_title">Plugins</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="system" onclick="switchSettingsSection('system')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>
-          <span>System</span>
+          <span data-i18n="settings_section_switcher_system">System</span>
         </button>
       </div>
     </div>
@@ -1900,14 +1900,14 @@
     <div id="mainSettings" class="main-view">
       <div class="settings-main">
         <div class="settings-section-switcher">
-          <label for="settingsSectionDropdown">Settings section</label>
+          <label for="settingsSectionDropdown" data-i18n="settings_section_switcher_label">Settings section</label>
           <select id="settingsSectionDropdown" onchange="switchSettingsSection(this.value)">
-            <option value="conversation">Conversation</option>
-            <option value="appearance">Appearance</option>
-            <option value="preferences">Preferences</option>
-            <option value="providers">Providers</option>
-            <option value="plugins">Plugins</option>
-            <option value="system">System</option>
+            <option value="conversation" data-i18n="settings_section_switcher_conversation">Conversation</option>
+            <option value="appearance" data-i18n="settings_section_switcher_appearance">Appearance</option>
+            <option value="preferences" data-i18n="settings_section_switcher_preferences">Preferences</option>
+            <option value="providers" data-i18n="settings_section_switcher_providers">Providers</option>
+            <option value="plugins" data-i18n="settings_section_switcher_plugins">Plugins</option>
+            <option value="system" data-i18n="settings_section_switcher_system">System</option>
           </select>
         </div>
         <div class="settings-pane active" id="settingsPaneConversation">
@@ -2228,35 +2228,35 @@
           <div class="settings-pane" id="settingsPanePlugins">
             <div class="settings-section-head">
               <div>
-                <div class="settings-section-title">Plugins</div>
-                <div class="settings-section-meta">Installed Apps und Plugin-Settings. Gmail kann hier pro Space verbunden werden.</div>
+                <div class="settings-section-title" data-i18n="plugins_section_title">Plugins</div>
+                <div class="settings-section-meta" data-i18n="plugins_section_meta">Installed apps and plugin settings. Gmail can be connected per space here.</div>
               </div>
             </div>
             <div class="settings-field" style="margin-bottom:12px;">
-              <label>Gmail App</label>
+              <label data-i18n="plugins_gmail_app_label">Gmail App</label>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface);">
                 <div>
                   <div style="font-weight:700;color:var(--text);">📧 Gmail</div>
-                  <div style="font-size:12px;color:var(--muted);">App-Passwörter speichern und Space-Zugriff verwalten.</div>
+                  <div style="font-size:12px;color:var(--muted);" data-i18n="plugins_gmail_app_desc">Store app passwords and manage space access.</div>
                 </div>
-                <button class="settings-action-btn" type="button" onclick="_appstoreOpenGmailSettings()">App Settings</button>
+                <button class="settings-action-btn" type="button" onclick="_appstoreOpenGmailSettings()" data-i18n="plugins_app_settings">App Settings</button>
               </div>
             </div>
             <div class="settings-field" style="margin-bottom:12px;">
-              <label>Discord App</label>
+              <label data-i18n="plugins_discord_app_label">Discord App</label>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface);">
                 <div>
                   <div style="font-weight:700;color:var(--text);">💬 Discord</div>
-                  <div style="font-size:12px;color:var(--muted);">Bot-Zugang speichern und Space-Zugriff verwalten.</div>
+                  <div style="font-size:12px;color:var(--muted);" data-i18n="plugins_discord_app_desc">Store bot credentials and manage space access.</div>
                 </div>
-                <button class="settings-action-btn" type="button" onclick="_appstoreOpenDiscordSettings()">App Settings</button>
+                <button class="settings-action-btn" type="button" onclick="_appstoreOpenDiscordSettings()" data-i18n="plugins_app_settings">App Settings</button>
               </div>
             </div>
             <div id="pluginsList" style="display:flex;flex-direction:column;margin-top:4px">
               <!-- Populated dynamically by loadPluginsPanel() -->
             </div>
             <div id="pluginsEmpty" style="display:none;text-align:center;padding:32px 0;color:var(--muted);font-size:13px">
-              No Sidekick plugins are currently visible. Install or enable plugins from the Sidekick CLI/config to see them here.
+              <span data-i18n="plugins_empty">No Sidekick plugins are currently visible. Install or enable plugins from the Sidekick CLI/config to see them here.</span>
             </div>
           </div>
           <div class="settings-pane" id="settingsPaneSystem">
@@ -2281,28 +2281,28 @@
             <button class="sm-btn" id="btnDisableAuth" onclick="disableAuth()" style="margin-top:6px;width:100%;padding:8px;font-weight:600;color:#e8a030;border-color:rgba(232,160,48,.3);display:none" data-i18n="disable_auth">Disable Auth</button>
             <button class="sm-btn" id="btnSignOut" onclick="signOut()" style="margin-top:6px;width:100%;padding:8px;font-weight:600;color:var(--accent);border-color:rgba(233,69,96,.3);display:none" data-i18n="sign_out">Sign Out</button>
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-              <label for="settingsDashboardMode">Official Nova Dashboard</label>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Show a nav-rail link when the official <code>sidekick dashboard</code> is reachable. Overrides are restricted to loopback URLs.</div>
+              <label for="settingsDashboardMode" data-i18n="settings_dashboard_mode_label">Official Nova Dashboard</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="settings_dashboard_mode_desc">Show a nav-rail link when the official sidekick dashboard is reachable. Overrides are restricted to loopback URLs.</div>
               <select id="settingsDashboardMode" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px">
-                <option value="auto">Auto-detect</option>
-                <option value="always">Always show</option>
-                <option value="never">Never show</option>
+                <option value="auto" data-i18n="settings_dashboard_mode_auto">Auto-detect</option>
+                <option value="always" data-i18n="settings_dashboard_mode_always">Always show</option>
+                <option value="never" data-i18n="settings_dashboard_mode_never">Never show</option>
               </select>
               <input type="text" id="settingsDashboardUrl" placeholder="http://127.0.0.1:9119" style="margin-top:8px;width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px;font-size:13px">
-              <button class="sm-btn" onclick="saveDashboardSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600">Save dashboard link settings</button>
+              <button class="sm-btn" onclick="saveDashboardSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600" data-i18n="settings_dashboard_link_save">Save dashboard link settings</button>
               <div id="settingsDashboardStatus" class="settings-autosave-status" aria-live="polite"></div>
             </div>
             <!-- Gateway Status Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-              <label>Gateway Status</label>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Status of the Nova gateway (Telegram, Discord, Slack, etc.)</div>
-              <div id="gatewayStatusCard"><span style="color:var(--muted);font-size:12px">Loading…</span></div>
+              <label data-i18n="settings_gateway_status_label">Gateway Status</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="settings_gateway_status_desc">Status of the Nova gateway (Telegram, Discord, Slack, etc.)</div>
+              <div id="gatewayStatusCard"><span style="color:var(--muted);font-size:12px" data-i18n="loading">Loading…</span></div>
             </div>
             <!-- Subagent Status Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-              <label>Subagents</label>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Active delegate_task workers and the spawn pause switch.</div>
-              <div id="subagentStatusCard"><span style="color:var(--muted);font-size:12px">Loading…</span></div>
+              <label data-i18n="settings_subagents_label">Subagents</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="settings_subagents_desc">Active delegate_task workers and the spawn pause switch.</div>
+              <div id="subagentStatusCard"><span style="color:var(--muted);font-size:12px" data-i18n="loading">Loading…</span></div>
             </div>
             <!-- MCP Servers Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">

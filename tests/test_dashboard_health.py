@@ -819,6 +819,36 @@ def test_mobile_settings_has_main_section_switcher():
     assert "const dd=$('settingsSectionDropdown')" in panels_js
 
 
+def test_settings_navigation_and_locale_labels_are_i18n_driven():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
+
+    assert 'data-i18n="settings_section_switcher_label"' in index_html
+    assert 'data-i18n="settings_section_switcher_conversation"' in index_html
+    assert 'data-i18n="settings_section_switcher_appearance"' in index_html
+    assert 'data-i18n="settings_section_switcher_preferences"' in index_html
+    assert 'data-i18n="settings_section_switcher_providers"' in index_html
+    assert 'data-i18n="settings_section_switcher_plugins"' in index_html
+    assert 'data-i18n="settings_section_switcher_system"' in index_html
+    assert 'data-i18n="plugins_tab_title"' in index_html
+    assert 'data-i18n="settings_dashboard_mode_label"' in index_html
+    assert 'data-i18n="settings_dashboard_link_save"' in index_html
+    assert 'data-i18n="settings_gateway_status_label"' in index_html
+    assert 'data-i18n="settings_subagents_label"' in index_html
+
+    assert "settings_section_switcher_label: 'Settings section'" in i18n_js
+    assert "settings_section_switcher_label: 'Bereich auswählen'" in i18n_js
+    assert "settings_section_switcher_providers: 'Providers'" in i18n_js
+    assert "settings_section_switcher_providers: 'Anbieter'" in i18n_js
+    assert "plugins_section_meta: 'Installed apps and plugin settings. Gmail can be connected per space here.'" in i18n_js
+    assert "plugins_section_meta: 'Installierte Apps und Plugin-Einstellungen. Gmail kann hier pro Space verbunden werden.'" in i18n_js
+    assert "settings_dashboard_mode_desc: 'Show a nav-rail link when the official sidekick dashboard is reachable. Overrides are restricted to loopback URLs.'" in i18n_js
+    assert "settings_dashboard_mode_desc: 'Zeige einen Link in der Navigationsleiste an, wenn das offizielle Sidekick-Dashboard erreichbar ist. Überschreibungen sind auf Loopback-URLs beschränkt.'" in i18n_js
+    assert "settings_tab_appearance: 'Darstellung'" in i18n_js
+    assert "settings_tab_conversation: 'Konversation'" in i18n_js
+    assert "settings_tab_preferences: 'Einstellungen'" in i18n_js
+
+
 def test_mobile_sidebar_is_forced_out_of_flex_flow():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
