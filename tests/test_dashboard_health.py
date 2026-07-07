@@ -2001,6 +2001,7 @@ def test_boot_uses_realistic_metadata_timeouts():
 
 def test_visible_static_ui_text_is_not_mojibake():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    assert "????" not in index_html
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
