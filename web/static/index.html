@@ -4,15 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sidekick</title>
-<link rel="icon" type="image/svg+xml" href="static/favicon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32.png">
-<link rel="shortcut icon" href="static/favicon.ico">
-<link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="shortcut icon" href="/static/favicon.ico">
+<link rel="manifest" href="/manifest.json" crossorigin="use-credentials">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Sidekick">
-<link rel="apple-touch-icon" sizes="512x512" href="static/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/static/apple-touch-icon.png">
 <!-- base href enables subpath mount support; all static paths must stay relative (no leading slash) -->
 <script>(function(){var path=location.pathname,marker='/session/',i=path.indexOf(marker),p;i>=0?p=(path.slice(0,i+1)||'/'):p=(path.endsWith('/')?path:(path.replace(/\/[^\/]*$/,'/')||'/'));document.write('<base href="'+location.origin+p+'">');})()</script>
 <script>(function(){var themes={light:1,dark:1,system:1},skins={default:1,ares:1,mono:1,slate:1,poseidon:1,sisyphus:1,charizard:1,sienna:1,matrix:1},legacy={slate:['dark','slate'],solarized:['dark','poseidon'],monokai:['dark','sisyphus'],nord:['dark','slate'],oled:['dark','default']},t=(localStorage.getItem('sidekick-theme')||'dark').toLowerCase(),s=(localStorage.getItem('sidekick-skin')||'').toLowerCase(),m=legacy[t],theme=m?m[0]:(themes[t]?t:'dark'),skin=skins[s]?s:(m?m[1]:'default');localStorage.setItem('sidekick-theme',theme);localStorage.setItem('sidekick-skin',skin);if(theme==='system')theme=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(theme==='dark')document.documentElement.classList.add('dark');if(skin!=='default')document.documentElement.dataset.skin=skin;})()</script>
@@ -24,14 +24,14 @@
 <script>(function(){try{var t=localStorage.getItem('sidekick-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#0D0D1A':'#FEFCF7';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('sidekick-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('sidekick-webui-rail-expanded')==='1')document.documentElement.dataset.railExpanded='1';}catch(e){}})()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/gmail-panel.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/discord-panel.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/discord-chat.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/xterm.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/agents.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/agents-dashboard.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/spaces.css?v=__WEBUI_VERSION__">
+<link rel="stylesheet" href="/static/style.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/gmail-panel.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/discord-panel.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/discord-chat.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/xterm.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/agents.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/agents-dashboard.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/spaces.css?v=__WEBUI_VERSION__">
   <!-- KaTeX math rendering CSS (loaded eagerly to prevent layout shift) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" integrity="sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP" crossorigin="anonymous">
   <!-- streaming-markdown: incremental DOM-building markdown parser for live streams -->
@@ -40,7 +40,7 @@
   <!-- ES module imports do not support the integrity= attribute (W3C limitation);    -->
   <!-- version is pinned in the vendored file path; hash documented above for audit. -->
   <script type="module">
-    import * as smd from './static/vendor/smd.min.js';
+    import * as smd from '/static/vendor/smd.min.js';
     // SRI verification happens at the ES module level via importmap or SW; pinning version in URL.
     // sha384 of smd.min.js @0.2.15: sha384-T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa
     window.smd = smd;
@@ -62,7 +62,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__').catch(function(err) {
+        navigator.serviceWorker.register('/sw.js?v=__WEBUI_VERSION__').catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });
@@ -75,7 +75,7 @@
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
   <div class="app-titlebar-inner">
-    <span class="app-titlebar-icon" aria-hidden="true"><img src="static/favicon.svg" width="16" height="16" alt=""></span>
+    <span class="app-titlebar-icon" aria-hidden="true"><img src="/static/favicon.svg" width="16" height="16" alt=""></span>
     <span class="app-titlebar-title" id="appTitlebarTitle">Sidekick</span>
     <span class="app-titlebar-sub" id="appTitlebarSub" hidden></span>
   </div>
@@ -1036,7 +1036,7 @@
       <button id="jumpToSessionStartBtn" style="display:none"></button>
       <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label">▶</button>
       <div class="empty-state" id="emptyState">
-        <div class="empty-logo"><img src="static/favicon.svg" width="80" height="80" alt="Sidekick logo"></div>
+        <div class="empty-logo"><img src="/static/favicon.svg" width="80" height="80" alt="Sidekick logo"></div>
         <h2 data-i18n="empty_title">What can I help with?</h2>
         <p data-i18n="empty_subtitle">Ask anything, run commands, explore files, or manage your scheduled tasks.</p>
         <div class="suggestion-grid">
@@ -2525,15 +2525,15 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="static/api-auth.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/i18n.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/icons.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/workspace.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/terminal.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/sessions.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/api-auth.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/i18n.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/icons.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ui.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/workspace.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/terminal.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/sessions.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/commands.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/messages.js?v=__WEBUI_VERSION__" defer></script>
 <script>
   (function() {
     function _setBodyBrowserSplit(open) {
@@ -2575,17 +2575,17 @@
     };
   })();
 </script>
-<script src="static/browser.js?v=__WEBUI_VERSION__&split=5" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/spaces.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/gmail.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/power.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/discord.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/agents.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/browser.js?v=__WEBUI_VERSION__&split=5" defer></script>
+<script src="/static/panels.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/spaces.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/boot.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/gmail.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/power.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/discord.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/agents.js?v=__WEBUI_VERSION__" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">

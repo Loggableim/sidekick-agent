@@ -5720,6 +5720,7 @@ function switchSettingsSection(name){
   // Lazy-load integration panels when their tabs are opened
   if(section==='providers') loadProvidersPanel();
   if(section==='plugins') loadPluginsPanel();
+  if(section==='system'){loadMcpServers();loadMcpTools();loadGatewayStatus();loadSubagentStatus();}
 }
 
 function _syncSidekickPanelSessionActions(){
@@ -5907,7 +5908,9 @@ function syncGameModeButton(){
   if(btn){
     btn.classList.toggle('active',enabled);
     btn.setAttribute('aria-pressed',String(enabled));
-    const label=t(enabled?'game_mode_on':'game_mode_off');
+    const label=typeof t==='function'
+      ? t(enabled?'game_mode_on':'game_mode_off')
+      : (enabled ? 'Game mode on' : 'Game mode off');
     btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off');
     btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off');
     btn.setAttribute('data-tooltip',label);
@@ -8157,6 +8160,16 @@ async function _appstoreUninstall(appKey) {
 
 const _providerCardEls = new Map(); // providerId → {card, statusDot, input, saveBtn, removeBtn}
 
+function _providerText(key, fallback, ...args){
+  try{
+    if(typeof t === 'function'){
+      const value = t(key, ...args);
+      if(value && value !== key) return value;
+    }
+  }catch(_){}
+  return typeof fallback === 'function' ? fallback(...args) : fallback;
+}
+
 async function loadProvidersPanel(){
   const list=$('providersList');
   const empty=$('providersEmpty');
@@ -8292,10 +8305,10 @@ function _buildProviderCard(p){
     ? p.models_total
     : (Array.isArray(p.models) ? p.models.length : 0);
   const sourceLabel=p.key_source==='oauth'
-    ? t('providers_status_oauth')
+    ? _providerText('providers_status_oauth', 'OAuth')
     : p.key_source==='config_yaml'
-      ? t('providers_status_configured')||'Configured'
-      : (p.has_key ? t('providers_status_api_key') : t('providers_status_not_configured_label'));
+      ? _providerText('providers_status_configured', 'Configured')
+      : (p.has_key ? _providerText('providers_status_api_key', 'API key') : _providerText('providers_status_not_configured_label', 'Not configured'));
   const metaParts=[];
   if(modelCount>0) metaParts.push(modelCount+(modelCount===1?' model':' models'));
   metaParts.push(sourceLabel);
@@ -8310,7 +8323,7 @@ function _buildProviderCard(p){
       <div class="provider-card-name">${esc(p.display_name)}</div>
       <div class="provider-card-meta">${esc(metaText)}</div>
     </div>
-    ${p.has_key?`<span class="provider-card-badge">${esc(t('providers_status_configured'))}</span>`:''}
+    ${p.has_key?`<span class="provider-card-badge">${esc(_providerText('providers_status_configured', 'Configured'))}</span>`:''}
     <svg class="provider-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16"><path d="M6 9l6 6 6-6"/></svg>
   `;
   card.appendChild(header);
@@ -8322,14 +8335,14 @@ function _buildProviderCard(p){
     const hint=document.createElement('div');
     hint.className='provider-card-hint';
     if(p.key_source==='config_yaml'){
-      hint.textContent=t('providers_oauth_config_yaml_hint')||'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run sidekick auth.';
+      hint.textContent=_providerText('providers_oauth_config_yaml_hint', 'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run sidekick auth.');
     } else if(p.auth_error){
       hint.textContent=p.auth_error;
       hint.style.color='var(--accent)';
     } else if(p.has_key){
-      hint.textContent=t('providers_oauth_hint');
+      hint.textContent=_providerText('providers_oauth_hint', 'Authenticated via OAuth. No API key needed.');
     } else {
-      hint.textContent=t('providers_oauth_not_configured_hint')||'Not authenticated. Run sidekick auth in the terminal to configure this provider.';
+      hint.textContent=_providerText('providers_oauth_not_configured_hint', 'Not authenticated. Run sidekick auth in the terminal to configure this provider.');
       hint.style.color='var(--muted)';
     }
     body.appendChild(hint);
@@ -8342,7 +8355,7 @@ function _buildProviderCard(p){
   field.className='provider-card-field';
   const label=document.createElement('label');
   label.className='provider-card-label';
-  label.textContent=t('providers_status_api_key');
+  label.textContent=_providerText('providers_status_api_key', 'API key');
   field.appendChild(label);
 
   const row=document.createElement('div');
@@ -8350,7 +8363,9 @@ function _buildProviderCard(p){
   const input=document.createElement('input');
   input.type='password';
   input.className='provider-card-input';
-  input.placeholder=p.has_key?t('providers_key_placeholder_replace'):t('providers_key_placeholder_new');
+  input.placeholder=p.has_key
+    ? _providerText('providers_key_placeholder_replace', 'Enter new key to replace…')
+    : _providerText('providers_key_placeholder_new', 'sk-...');
   input.autocomplete='off';
   const toggleBtn=document.createElement('button');
   toggleBtn.type='button';
@@ -8364,7 +8379,7 @@ function _buildProviderCard(p){
   const saveBtn=document.createElement('button');
   saveBtn.type='button';
   saveBtn.className='provider-card-btn provider-card-btn-primary';
-  saveBtn.textContent=t('providers_save');
+  saveBtn.textContent=_providerText('providers_save', 'Save');
   saveBtn.onclick=()=>_saveProviderKey(p.id);
   saveBtn.disabled=true;
   row.appendChild(input);
@@ -8374,7 +8389,7 @@ function _buildProviderCard(p){
     const removeBtn=document.createElement('button');
     removeBtn.type='button';
     removeBtn.className='provider-card-btn provider-card-btn-danger';
-    removeBtn.textContent=t('providers_remove');
+    removeBtn.textContent=_providerText('providers_remove', 'Remove');
     removeBtn.onclick=()=>_removeProviderKey(p.id);
     row.appendChild(removeBtn);
   }
@@ -8427,7 +8442,7 @@ function _buildProviderCard(p){
   refreshBtn.style.display='flex';
   refreshBtn.style.alignItems='center';
   refreshBtn.style.gap='5px';
-  refreshBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${t('providers_refresh_models')||'Refresh Models'}`;
+  refreshBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${_providerText('providers_refresh_models', 'Refresh models')}`;
   refreshBtn.onclick=()=>_refreshProviderModels(p.id, refreshBtn);
   refreshRow.appendChild(refreshBtn);
   body.appendChild(refreshRow);
@@ -8449,11 +8464,11 @@ async function _saveProviderKey(providerId){
   if(!els) return;
   const key=els.input.value.trim();
   if(!key){
-    showToast(t('providers_enter_key'));
+    showToast(_providerText('providers_enter_key', 'Please enter an API key'));
     return;
   }
   els.saveBtn.disabled=true;
-  els.saveBtn.textContent=t('providers_saving');
+  els.saveBtn.textContent=_providerText('providers_saving', 'Saving…');
   try{
     const res=await api('/api/providers',{method:'POST',body:JSON.stringify({provider:providerId,api_key:key})});
     if(res.ok){
@@ -8468,23 +8483,23 @@ async function _saveProviderKey(providerId){
     }else{
       showToast(res.error||'Failed to save key');
       els.saveBtn.disabled=false;
-      els.saveBtn.textContent=t('providers_save');
+      els.saveBtn.textContent=_providerText('providers_save', 'Save');
     }
   }catch(e){
     showToast('Error: '+e.message);
     els.saveBtn.disabled=false;
-    els.saveBtn.textContent=t('providers_save');
+    els.saveBtn.textContent=_providerText('providers_save', 'Save');
   }
 }
 
 async function _removeProviderKey(providerId){
   const els=_providerCardEls.get(providerId);
   if(!els) return;
-  if(els.saveBtn){els.saveBtn.disabled=true;els.saveBtn.textContent=t('providers_removing');}
+  if(els.saveBtn){els.saveBtn.disabled=true;els.saveBtn.textContent=_providerText('providers_removing', 'Removing…');}
   try{
     const res=await api('/api/providers/delete',{method:'POST',body:JSON.stringify({provider:providerId})});
     if(res.ok){
-      showToast(res.provider+' key '+t('providers_key_removed').toLowerCase());
+      showToast(res.provider+' key '+_providerText('providers_key_removed', 'API key removed').toLowerCase());
       // Drop the removed provider from every cached dropdown surface so it
       // disappears immediately — composer picker, /model slash command,
       // Settings → Default Model, configured-model badges (#1539).
@@ -8494,11 +8509,11 @@ async function _removeProviderKey(providerId){
       await loadProvidersPanel(); // refresh list
     }else{
       showToast(res.error||'Failed to remove key');
-      if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=t('providers_save');}
+      if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=_providerText('providers_save', 'Save');}
     }
   }catch(e){
     showToast('Error: '+e.message);
-    if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=t('providers_save');}
+    if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=_providerText('providers_save', 'Save');}
   }
 }
 
@@ -8527,11 +8542,11 @@ function _refreshModelDropdownsAfterProviderChange(){
 async function _refreshProviderModels(providerId, btn){
   btn.disabled=true;
   const orig=btn.innerHTML;
-  btn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${t('providers_refreshing')||'Refreshing...'}`;
+  btn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${_providerText('providers_refreshing', 'Refreshing...')}`;
   try{
     const res=await api('/api/models/refresh',{method:'POST',body:JSON.stringify({provider:providerId})});
     if(res.ok){
-      showToast(t('providers_models_refreshed')||('Models refreshed for '+res.provider));
+      showToast(_providerText('providers_models_refreshed', 'Models refreshed for ' + res.provider));
     }else{
       showToast(res.error||'Failed to refresh models');
     }
@@ -9028,7 +9043,10 @@ function loadMcpTools(){
 function loadGatewayStatus(){
   const card=$('gatewayStatusCard');
   if(!card) return;
-  api('/api/gateway/status').then(r=>{
+  const request=typeof _apiWithTimeout==='function'
+    ? _apiWithTimeout('/api/gateway/status', 6000)
+    : api('/api/gateway/status');
+  request.then(r=>{
     if(!r) return;
     if(!r.configured){
       card.innerHTML=`<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span>Gateway not configured</div>`;
@@ -9134,7 +9152,10 @@ function loadSubagentStatus(targetId='subagentStatusCard'){
   const card=$(targetId);
   if(!card) return;
   card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
-  api('/api/subagents').then(r=>{
+  const request=typeof _apiWithTimeout==='function'
+    ? _apiWithTimeout('/api/subagents', 6000)
+    : api('/api/subagents');
+  request.then(r=>{
     const active=(r&&r.active)||[];
     const paused=!!(r&&r.spawn_paused);
     _renderSubagentStatus(active, paused, targetId);

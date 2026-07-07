@@ -848,7 +848,7 @@ const LOCALES = {
     providers_key_placeholder_replace: 'Enter new key to replace?',
     providers_refresh_models: 'Refresh models',
     providers_refreshing: 'Refreshing...',
-    providers_models_refreshed: 'Models refreshed'
+    providers_models_refreshed: 'Models refreshed',
     cancel: 'Cancel',
     create_job: 'Create job',
     save_skill: 'Save skill',
@@ -11128,6 +11128,12 @@ function switchLang(code) {
   document.dispatchEvent(new CustomEvent('sidekick-locale-change', { detail: { lang: code } }));
 }
 
+window.resolveLocale = resolveLocale;
+window.resolvePreferredLocale = resolvePreferredLocale;
+window.t = t;
+window.setLocale = setLocale;
+window.loadLocale = loadLocale;
+window.applyLocaleToDOM = applyLocaleToDOM;
 window.toggleLangDropdown = toggleLangDropdown;
 window.switchLang = switchLang;
 window.getFlagForLocale = getFlagForLocale;
