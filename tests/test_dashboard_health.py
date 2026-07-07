@@ -2001,13 +2001,36 @@ def test_boot_uses_realistic_metadata_timeouts():
 
 def test_visible_static_ui_text_is_not_mojibake():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
-    assert "????" not in index_html
+    assert "??" not in index_html
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+    commands_js = Path("web/static/commands.js").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    assert "📺" in index_html
+    assert "📁" in index_html
+    assert "🎯 Set Goal" in index_html
+    assert 'yolo-pill-icon" aria-hidden="true">⚡<' in index_html
+    assert "🤖 Eigenen Agenten erstellen" in index_html
+    assert "✉️ Verfassen" in index_html
+    assert "📧 Mail" in index_html
+    assert "💬 Discord" in index_html
     assert "btn.setAttribute('aria-expanded', dd.hidden ? 'false' : 'true')" in i18n_js
     assert "btn.setAttribute('aria-expanded', 'false')" in i18n_js
+    assert "return `  /${c.name}${usage} — ${c.desc}`;" in commands_js
+    assert "const bullet=trimmed.match(/^(?:[-*•]|\\\\d+\\\\.)\\\\s+(.*)$/);" in commands_js
+    assert commands_js.count("Running execute_code…") == 2
+    assert commands_js.count("Generating image…") == 2
+    assert commands_js.count("↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}") == 2
+    assert commands_js.count("meta.join(' · ')") == 2
+    assert commands_js.count("const BRAIN='🧠';") == 2
+    assert commands_js.count(" · display: ") == 2
+    assert "Reasoning effort set to " in ui_js
+    assert "Failed to set effort" in ui_js
+    assert "?? Reasoning effort set to " not in ui_js
+    assert "?? Failed to set effort" not in ui_js
+    assert " · allowed: " in ui_js
 
     assert ">▶</button>" in index_html
     assert "← Zurück" in index_html

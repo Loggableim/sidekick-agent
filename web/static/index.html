@@ -468,7 +468,7 @@
         <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>
         <div id="workflowHeaderMenuFooter" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px 2px;margin-top:2px;font-size:11px;color:var(--muted);border-top:1px solid var(--border2);">
           <span id="workflowHeaderMenuSelection">Enter to run</span>
-          <span id="workflowHeaderMenuShortcuts">Esc to close · ?? to move</span>
+          <span id="workflowHeaderMenuShortcuts">Enter to run · Esc to close · ↑↓ to move</span>
         </div>
       </div>
     </div>
@@ -476,7 +476,7 @@
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 18v2"/><path d="M18 18v2"/></svg>
     </button>
     <button class="titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable" id="btnCastToggle" type="button" data-tooltip="Hub Cast" aria-label="Hub Cast" onclick="toggleHubCast()">
-      <span id="castStatusIcon">??</span>
+      <span id="castStatusIcon">📺</span>
     </button>
     <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="btnRebootSidekick" onclick="confirmReboot()" type="button" data-tooltip="Neustarten (Browser+Caches+Server)" aria-label="Neustarten">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -548,7 +548,7 @@
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" data-label="Settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
       <!-- Sidebar Space Selector -->
       <button class="nav-tab nav-tab-space has-tooltip has-tooltip--bottom" id="sidebarSpaceBtn" type="button" onclick="openSidebarSpaceSelector()" data-tooltip="Switch space" aria-label="Switch space">
-        <span class="nav-tab-space-emoji" id="sidebarSpaceEmoji">??</span>
+        <span class="nav-tab-space-emoji" id="sidebarSpaceEmoji">📁</span>
         <span class="nav-tab-space-name" id="sidebarSpaceName">default</span>
       </button>
       <div class="sidebar-space-dropdown" id="sidebarSpaceDropdown" hidden></div>
@@ -654,16 +654,16 @@
         <div class="agents-wizard hidden" id="agentsWizard">
           <!-- Step 1: Welcome -->
           <div class="agents-wizard-step" id="wizardStep1">
-            <div class="agents-wizard-icon">??</div>
+            <div class="agents-wizard-icon">🤖</div>
             <h1 class="agents-wizard-title">Willkommen bei deinen KI-Agenten</h1>
             <p class="agents-wizard-desc">Deine persönlichen Assistenten für jede Aufgabe. Wähle aus vorgefertigten Spezialisten oder erstelle eigene Agenten – ganz nach deinem Bedarf.</p>
             <div class="agents-wizard-features">
-              <div class="agents-wizard-feature"><span>??</span> Chatte mit jedem Agenten wie mit einem Freund</div>
-              <div class="agents-wizard-feature"><span>??</span> Jeder Agent hat eigene Persönlichkeit & Erinnerungen</div>
-              <div class="agents-wizard-feature"><span>?</span> Agenten arbeiten autonom im Terminal & Workspace</div>
-              <div class="agents-wizard-feature"><span>??</span> Spezialisiert auf Code, Social Media, Recherche & mehr</div>
+              <div class="agents-wizard-feature"><span>💬</span> Chatte mit jedem Agenten wie mit einem Freund</div>
+              <div class="agents-wizard-feature"><span>🧠</span> Jeder Agent hat eigene Persönlichkeit & Erinnerungen</div>
+              <div class="agents-wizard-feature"><span>⚙️</span> Agenten arbeiten autonom im Terminal & Workspace</div>
+              <div class="agents-wizard-feature"><span>🔧</span> Spezialisiert auf Code, Social Media, Recherche & mehr</div>
             </div>
-            <button class="agents-wizard-btn primary" onclick="wizardNext()">Los geht's ?</button>
+            <button class="agents-wizard-btn primary" onclick="wizardNext()">Los geht's →</button>
           </div>
           <!-- Step 2: Agent Selection -->
           <div class="agents-wizard-step hidden" id="wizardStep2">
@@ -697,7 +697,7 @@
               <button class="agents-chat-back" onclick="closeAgentChat()" title="Back" style="border:none;background:none;color:var(--muted);cursor:pointer;padding:4px;margin-right:4px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
               </button>
-              <span class="agents-chat-avatar" id="agentsChatAvatar" style="font-size:20px;margin-right:6px">??</span>
+              <span class="agents-chat-avatar" id="agentsChatAvatar" style="font-size:20px;margin-right:6px">🤖</span>
               <div style="flex:1">
                 <div class="agents-chat-name" id="agentsChatName" style="font-size:13px;font-weight:600">Agent</div>
                 <div class="agents-chat-sub" id="agentsChatSub" style="font-size:11px;color:var(--muted)">0 messages</div>
@@ -717,7 +717,7 @@
           <div class="agents-workspace-view hidden" id="agentsWorkspaceView" style="flex:1;display:flex;flex-direction:column;min-width:400px;background:var(--bg);border-left:1px solid var(--border)">
             <!-- Workspace Toolbar -->
             <div class="agents-workspace-toolbar">
-              <span class="agents-chat-avatar" id="agentsWsAvatar" style="font-size:18px">??</span>
+              <span class="agents-chat-avatar" id="agentsWsAvatar" style="font-size:18px">🤖</span>
               <span style="font-size:12px;font-weight:600" id="agentsWsName">Agent</span>
               <span style="font-size:11px;color:var(--muted);margin:0 4px">·</span>
               <span style="font-size:11px;color:var(--muted)" id="agentsWsWorkdir">~</span>
@@ -858,7 +858,7 @@
                   style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);cursor:pointer;"></select>
         </div>
         <!-- Gmail-style compose button (red pill) -->
-        <button class="gmail-compose-btn" onclick="gmailOpenCompose()" style="margin:8px 12px;padding:10px 16px;background:#c62828;color:#fff;border:none;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:box-shadow .2s,transform .15s;">?? Verfassen</button>
+        <button class="gmail-compose-btn" onclick="gmailOpenCompose()" style="margin:8px 12px;padding:10px 16px;background:#c62828;color:#fff;border:none;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:box-shadow .2s,transform .15s;">✉️ Verfassen</button>
         <!-- Mailbox navigation -->
         <nav class="gmail-nav" id="gmailNav" style="display:flex;flex-direction:column;gap:0;padding:4px 0;">
           <div class="gmail-nav-item active" data-folder="INBOX" onclick="gmailNavSelect('INBOX')" style="display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:13px;border-radius:0 24px 24px 0;margin-right:12px;transition:background .12s;">
@@ -872,12 +872,12 @@
             <span class="gmail-nav-count" id="gmailNavCountSent" style="margin-left:auto;font-size:11px;background:var(--border);padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;display:none;"></span>
           </div>
           <div class="gmail-nav-item" data-folder="[Gmail]/Entwürfe" onclick="gmailNavSelect('[Gmail]/Entwürfe')" style="display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:13px;border-radius:0 24px 24px 0;margin-right:12px;transition:background .12s;">
-            <span style="width:20px;text-align:center;">??</span>
+            <span style="width:20px;text-align:center;">📝</span>
             <span>Entwürfe</span>
             <span class="gmail-nav-count" id="gmailNavCountDrafts" style="margin-left:auto;font-size:11px;background:var(--border);padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;display:none;"></span>
           </div>
           <div class="gmail-nav-item" data-folder="[Gmail]/Spam" onclick="gmailNavSelect('[Gmail]/Spam')" style="display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:13px;border-radius:0 24px 24px 0;margin-right:12px;transition:background .12s;">
-            <span style="width:20px;text-align:center;">??</span>
+            <span style="width:20px;text-align:center;">🚫</span>
             <span>Spam</span>
             <span class="gmail-nav-count" id="gmailNavCountSpam" style="margin-left:auto;font-size:11px;background:var(--border);padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;display:none;"></span>
           </div>
@@ -1144,13 +1144,13 @@
       </div>
       <!-- -- Goal Banner -- -->
       <div id="goalBanner" class="goal-banner" style="display:none" role="status" aria-live="polite">
-        <span class="goal-banner-icon" id="goalBannerIcon">?</span>
+        <span class="goal-banner-icon" id="goalBannerIcon">⊙</span>
         <span class="goal-banner-text" id="goalBannerText"></span>
         <span class="goal-banner-turns" id="goalBannerTurns"></span>
         <span class="goal-banner-actions" id="goalBannerActions">
-          <button type="button" class="goal-banner-btn goal-btn-pause" id="goalBtnPause" onclick="cmdGoal('pause')" title="Pause goal" aria-label="Pause goal">?</button>
-          <button type="button" class="goal-banner-btn goal-btn-resume" id="goalBtnResume" onclick="cmdGoal('resume')" title="Resume goal" aria-label="Resume goal" style="display:none">?</button>
-          <button type="button" class="goal-banner-btn goal-btn-clear" id="goalBtnClear" onclick="cmdGoal('clear')" title="Clear goal" aria-label="Clear goal">?</button>
+          <button type="button" class="goal-banner-btn goal-btn-pause" id="goalBtnPause" onclick="cmdGoal('pause')" title="Pause goal" aria-label="Pause goal">⏸</button>
+          <button type="button" class="goal-banner-btn goal-btn-resume" id="goalBtnResume" onclick="cmdGoal('resume')" title="Resume goal" aria-label="Resume goal" style="display:none">▶</button>
+          <button type="button" class="goal-banner-btn goal-btn-clear" id="goalBtnClear" onclick="cmdGoal('clear')" title="Clear goal" aria-label="Clear goal">🗑️</button>
         </span>
       </div>
       <!-- Queue pill outer: same positioning wrapper as .queue-card (max-width + padding) -->
@@ -1180,14 +1180,14 @@
         <div class="plan-banner" id="planBanner" style="display:none">
           <span class="plan-banner-icon">&#129504;</span>
           <span class="plan-banner-label">Plan Mode &mdash; Nur Planung, keine Ausf&uuml;hrung. Schalte zur&uuml;ck f&uuml;r Action Mode.</span>
-          <button type="button" class="goal-exit-btn plan-banner-exit" onclick="_togglePlanMode()" title="Exit Plan Mode" aria-label="Exit Plan Mode">?</button>
+          <button type="button" class="goal-exit-btn plan-banner-exit" onclick="_togglePlanMode()" title="Exit Plan Mode" aria-label="Exit Plan Mode">✕</button>
         </div>
         <!-- -- Goal Input Row (visible in goal-mode) -- -->
         <div class="goal-input-row" id="goalInputRow">
-          <span class="goal-input-icon">??</span>
+          <span class="goal-input-icon">🎯</span>
           <textarea class="goal-input-field" id="goalInputField" rows="1" placeholder="Define a goal for Nova…" data-i18n-placeholder="goal_input_placeholder"></textarea>
-          <button type="button" class="goal-send-btn" id="goalSendBtn" onclick="_submitGoal()" title="Set goal and start" aria-label="Set goal and start">? Set Goal</button>
-          <button type="button" class="goal-exit-btn" id="goalExitBtn" onclick="_exitGoalMode()" title="Cancel goal mode" aria-label="Cancel goal mode">?</button>
+          <button type="button" class="goal-send-btn" id="goalSendBtn" onclick="_submitGoal()" title="Set goal and start" aria-label="Set goal and start">🎯 Set Goal</button>
+          <button type="button" class="goal-exit-btn" id="goalExitBtn" onclick="_exitGoalMode()" title="Cancel goal mode" aria-label="Cancel goal mode">✕</button>
         </div>
         <textarea id="msg" rows="1" placeholder="Message Nova…"></textarea>
         <div class="msg-expand-bar is-collapsed" id="msgExpandBar">
@@ -1235,7 +1235,7 @@
               </svg>
             </button>
             <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" title="YOLO mode — click to disable" data-i18n-title="yolo_pill_title_active">
-              <span class="yolo-pill-icon" aria-hidden="true">?</span>
+              <span class="yolo-pill-icon" aria-hidden="true">⚡</span>
               <span class="yolo-pill-label" data-i18n="yolo_pill_label">YOLO</span>
             </button>
             <div id="profileChipWrap" class="composer-profile-wrap">
@@ -1410,7 +1410,7 @@
                 <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Terminal</span></span>
               </button>
               <button class="composer-mobile-config-action" type="button" onclick="const s=document.getElementById('sandboxToggle'); if(s){s.checked=!s.checked; s.dispatchEvent(new Event('change',{bubbles:true}));}" title="Toggle sandbox restrictions">
-                <span aria-hidden="true">??</span>
+                <span aria-hidden="true">🛡️</span>
                 <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Sandbox</span></span>
               </button>
             </div>
@@ -1760,11 +1760,11 @@
     <!-- Gmail main view -->
     <div id="mainMail" class="mail-main" style="display:none">
       <div class="mail-header">
-        <span>?? Mail</span>
+        <span>📧 Mail</span>
         <select id="mailInboxSelector" onchange="_mailSwitchInbox(this.value)">
           <option value="">— Keine Inbox ausgewählt —</option>
         </select>
-        <button onclick="_mailOpenConfig()" title="Mail-Konfiguration">??</button>
+        <button onclick="_mailOpenConfig()" title="Mail-Konfiguration">⚙️</button>
       </div>
       <div class="mail-content" id="mailContent">
         <div class="mail-loading">Lade Posteingang…</div>
@@ -2236,7 +2236,7 @@
               <label>Gmail App</label>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface);">
                 <div>
-                  <div style="font-weight:700;color:var(--text);">?? Gmail</div>
+                  <div style="font-weight:700;color:var(--text);">📧 Gmail</div>
                   <div style="font-size:12px;color:var(--muted);">App-Passwörter speichern und Space-Zugriff verwalten.</div>
                 </div>
                 <button class="settings-action-btn" type="button" onclick="_appstoreOpenGmailSettings()">App Settings</button>
@@ -2246,7 +2246,7 @@
               <label>Discord App</label>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface);">
                 <div>
-                  <div style="font-weight:700;color:var(--text);">?? Discord</div>
+                  <div style="font-weight:700;color:var(--text);">💬 Discord</div>
                   <div style="font-size:12px;color:var(--muted);">Bot-Zugang speichern und Space-Zugriff verwalten.</div>
                 </div>
                 <button class="settings-action-btn" type="button" onclick="_appstoreOpenDiscordSettings()">App Settings</button>
@@ -2397,41 +2397,41 @@
             <!-- AI Summary Card -->
             <div class="gmail-ai-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
                 <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;">
-                    <span>?? Zusammenfassung</span>
+                    <span>🤖 Zusammenfassung</span>
                 </div>
                 <div class="gmail-ai-card-body" id="gmailAISummaryBody" style="padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">
                     <div style="text-align:center;padding:12px 0;">
-                        <span style="font-size:36px;display:block;margin-bottom:8px;">??</span>
+                        <span style="font-size:36px;display:block;margin-bottom:8px;">🤖</span>
                         <span style="color:var(--muted);">Wähle eine E-Mail aus</span>
                     </div>
                 </div>
             </div>
             <!-- Smart Actions Card -->
             <div class="gmail-ai-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
-                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">?? Smart Actions</div>
+                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">🤖 Smart Actions</div>
                 <div class="gmail-ai-card-body" style="padding:4px;">
-                    <button class="gmail-ai-action" onclick="gmailCreateTask()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">?? Task erstellen</button>
-                    <button class="gmail-ai-action" onclick="gmailToast('Zusammenfassung gespeichert','success')" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">?? Zusammenfassung speichern</button>
-                    <button class="gmail-ai-action" onclick="gmailAISetReminder()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">?? Follow-up in 3 Tagen</button>
+                    <button class="gmail-ai-action" onclick="gmailCreateTask()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">📋 Task erstellen</button>
+                    <button class="gmail-ai-action" onclick="gmailToast('Zusammenfassung gespeichert','success')" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">💾 Zusammenfassung speichern</button>
+                    <button class="gmail-ai-action" onclick="gmailAISetReminder()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">🔄 Follow-up in 3 Tagen</button>
                 </div>
             </div>
             <!-- AI Reply Draft Card -->
             <div class="gmail-ai-card" id="gmailAIReply" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
                 <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;">
-                    <span>?? Antwortentwurf</span>
-                    <button class="gmail-ai-refresh" onclick="gmailAIRegenerate()" title="Neu generieren" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;">??</button>
+                    <span>✉️ Antwortentwurf</span>
+                    <button class="gmail-ai-refresh" onclick="gmailAIRegenerate()" title="Neu generieren" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;">🔄</button>
                 </div>
                 <div class="gmail-ai-card-body" id="gmailAIReplyBody" style="padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">
                     <div style="color:var(--muted);font-size:11px;">Wähle eine E-Mail aus...</div>
                 </div>
                 <div class="gmail-ai-card-actions" id="gmailAIReplyActions" style="display:none;gap:4px;padding:6px 12px;border-top:1px solid var(--border2);">
-                    <button class="gmail-ai-use" onclick="gmailAIUseDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:11px;">?? Übernehmen</button>
-                    <button class="gmail-ai-edit" onclick="gmailAIEditDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:11px;">?? Bearbeiten</button>
+                    <button class="gmail-ai-use" onclick="gmailAIUseDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:11px;">📋 Übernehmen</button>
+                    <button class="gmail-ai-edit" onclick="gmailAIEditDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:11px;">✏️ Bearbeiten</button>
                 </div>
             </div>
             <!-- Related Emails Card -->
             <div class="gmail-ai-card" id="gmailAIRelated" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
-                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">?? Verwandt</div>
+                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">🔗 Verwandt</div>
                 <div class="gmail-ai-card-body" id="gmailAIRelatedBody" style="padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">
                     <div style="color:var(--muted);font-size:11px;">Verwandte E-Mails erscheinen hier...</div>
                 </div>
@@ -2608,7 +2608,7 @@
     <div class="kanban-modal-row-inline">
       <div class="kanban-modal-row">
         <label for="kanbanBoardModalIcon" data-i18n="kanban_board_icon">Icon (emoji, optional)</label>
-        <input type="text" id="kanbanBoardModalIcon" maxlength="4" placeholder="??" autocomplete="off">
+        <input type="text" id="kanbanBoardModalIcon" maxlength="4" placeholder="🎨" autocomplete="off">
       </div>
       <div class="kanban-modal-row">
         <label for="kanbanBoardModalColor" data-i18n="kanban_board_color">Color (optional)</label>
@@ -2672,7 +2672,7 @@
 <!-- Agents Creator Dialog (Custom Agent via LLM) -->
 <div class="agents-edit-modal hidden" id="agentsCreatorModal" onclick="if(event.target===this)closeAgentCreator()">
   <div class="agents-edit-modal-content" style="max-width:600px" role="dialog" aria-modal="true" aria-labelledby="agentsCreatorTitle">
-    <div class="agents-edit-modal-title" id="agentsCreatorTitle">?? Eigenen Agenten erstellen</div>
+    <div class="agents-edit-modal-title" id="agentsCreatorTitle">🤖 Eigenen Agenten erstellen</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.5">
       Beantworte einfach die Fragen – eine KI hilft dir, den perfekten Agenten für deine Bedürfnisse zu designen.
     </div>
@@ -2704,7 +2704,7 @@
     </div>
     <div class="agents-edit-field">
       <label for="agentsEditEmoji">Avatar (Emoji)</label>
-      <input type="text" id="agentsEditEmoji" placeholder="??" maxlength="4">
+      <input type="text" id="agentsEditEmoji" placeholder="🤖" maxlength="4">
     </div>
     <div class="agents-edit-field">
       <label for="agentsEditColor">Farbe</label>

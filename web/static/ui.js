@@ -1878,7 +1878,7 @@ function _applyReasoningChip(eff, status){
   const text=_formatReasoningEffortLabel(effort);
   const allowedSet=allowed?new Set(allowed):null;
   const supported=!allowedSet||!effort||effort==='none'||allowedSet.has(effort);
-  const allowedText=allowed&&allowed.length?' ? allowed: '+allowed.join(' | '):'';
+  const allowedText=allowed&&allowed.length?' · allowed: '+allowed.join(' | '):'';
   const title='Reasoning effort: '+text+allowedText+(supported ? '' : ' (not supported by the selected model)');
   label.textContent=text;
   if(mobileLabel) mobileLabel.textContent=text;
@@ -2869,9 +2869,9 @@ document.addEventListener('click',function(e){
         .then(function(st){
           _currentReasoningContextKey=ctx.query;
           _applyReasoningChip((st&&st.reasoning_effort)||effort, st||{});
-          showToast('?? Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
+          showToast('✓ Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
         })
-        .catch(function(){showToast('?? Failed to set effort');});
+        .catch(function(){showToast('❌ Failed to set effort');});
       closeReasoningDropdown();
     }
   }
