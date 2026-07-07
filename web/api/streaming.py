@@ -564,20 +564,13 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     env.update({
         'TERMINAL_CWD': str(workspace),
         'SIDEKICK_EXEC_ASK': '1',
-        'SIDEKICK_EXEC_ASK': '1',
-        'SIDEKICK_SESSION_KEY': session_id,
         'SIDEKICK_SESSION_KEY': session_id,
         'SIDEKICK_HOME': profile_home,
-        'SIDEKICK_HOME': profile_home,
-        'SIDEKICK_WEBUI_BROWSER_SESSION_ID': session_id,
         'SIDEKICK_WEBUI_BROWSER_SESSION_ID': session_id,
         'SIDEKICK_WEBUI_BROWSER_BASE_URL': _browser_base_url,
-        'SIDEKICK_WEBUI_BROWSER_BASE_URL': _browser_base_url,
-        'SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE': _browser_permission_mode,
+        'SIDEKICK_WEBUI_BROWSER_AGENT_CONTEXT_URL': f"{_browser_base_url}/api/browser/agent-context?session_id={session_id}",
         'SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE': _browser_permission_mode,
         'SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN': _browser_permission_token,
-        'SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN': _browser_permission_token,
-        'SIDEKICK_WEBUI_ACTIVE_WORKSPACE': os.path.basename(str(workspace).rstrip('/\\')).strip().lower(),
         'SIDEKICK_WEBUI_ACTIVE_WORKSPACE': os.path.basename(str(workspace).rstrip('/\\')).strip().lower(),
     })
     return env
@@ -3329,6 +3322,34 @@ def _run_agent_streaming(
             _nova_cognitive_block = _nova_cognitive_system_block(_ws_slug, str(s.workspace), msg_text)
             if _nova_cognitive_block:
                 workspace_system_msg += _nova_cognitive_block
+            _model_family_hint = f"{resolved_provider or ''} {resolved_model or ''}".lower()
+            _copilot_protocol_lines = [
+                "Sidekick Copilot protocol:",
+                "- Work evidence-first: clearly separate observed facts, inferences, and assumptions.",
+                "- Be precise and methodical: inspect the relevant current state before proposing or applying fixes.",
+                "- For code or browser issues, identify likely affected files and root cause before editing.",
+                "- For browser/WebUI issues, treat the live browser page as shared state: cite the visible URL/page state when available, use screenshot or QA evidence for visual claims, and call out if evidence is missing.",
+                "- Before browser control, browser QA, or visual fix claims, inspect SIDEKICK_WEBUI_BROWSER_AGENT_CONTEXT_URL when available and follow its recommended_action/available_actions instead of guessing permissions or endpoints.",
+                "- When browser agent-context exposes active_goal, align browser inspection, fixes, and verification with that goal; do not silently switch to a narrower success condition.",
+                "- If a browser action is blocked, report the required_mode and the permission_step_labels/permission_steps exactly; do not retry control actions until the user has completed the required browser watch/control step.",
+                "- For browser click/type/scroll/press/back/forward/reload sequences, include the current expected_frame_rev from browser agent-context/action payloads so control fails safely if the user-visible frame changed since inspection.",
+                "- If a browser control call returns HTTP 409 or code browser_frame_stale, refresh browser agent-context or snapshot first, then retry at most once using the new frame revision.",
+                "- When browser agent-context exposes approval_mode, treat it as the current user-control mode (manual/smart/off) and mention it before control-sensitive browser actions.",
+                "- When operating browser tools, respect the current approval mode and describe user-visible actions before taking control-sensitive steps.",
+                "- For WebUI fixes, prefer a tight loop: reproduce or inspect, patch the smallest root cause, retest the same flow, then report fixed/still failing/new issues.",
+                "- If browser QA evidence is stale or belongs to a different URL than the visible page, navigate/retest before using it for current-page fix claims.",
+                "- If browser QA evidence is old, treat it as weaker evidence and retest before using it as final proof of a fix.",
+                "- For local code review, lead with concrete findings ordered by severity, include file/line references when available, then summarize changed behavior and missing tests.",
+                "- Prefer small, reversible changes and preserve user control; ask for approval before risky or external side effects.",
+                "- After a fix, report concrete verification evidence: command output, browser QA status, retest delta, remaining risks, or the reason verification is not available.",
+                "- Do not claim success only because a change looks plausible.",
+                "- If verification was not run, say so explicitly and treat the result as unverified with remaining risk.",
+            ]
+            if any(_token in _model_family_hint for _token in ("deepseek", "glm", "zai", "z.ai", "z-ai")):
+                _copilot_protocol_lines.append(
+                    "- DeepSeek/GLM mode: use short explicit checklists, avoid vague success claims, and restate the final evidence succinctly."
+                )
+            _copilot_protocol = "\n".join(_copilot_protocol_lines)
             # Resolve personality prompt from config.yaml agent.personalities
             # (matches hermes-agent CLI behavior — passes via ephemeral_system_prompt)
             _personality_prompt = None
@@ -3347,9 +3368,16 @@ def _run_agent_streaming(
                         _personality_prompt = '\n'.join(p for p in _parts if p)
                     else:
                         _personality_prompt = str(_pval)
-            # Pass personality via ephemeral_system_prompt (agent's own mechanism)
+            # Pass personality and WebUI copilot protocol via ephemeral_system_prompt
+            # (agent's own mechanism). Keep this additive so profile/personality
+            # behavior still wins on tone while WebUI turns remain evidence-led.
+            _ephemeral_prompt_parts = []
             if _personality_prompt:
-                agent.ephemeral_system_prompt = _personality_prompt
+                _ephemeral_prompt_parts.append(_personality_prompt)
+            if _copilot_protocol:
+                _ephemeral_prompt_parts.append(_copilot_protocol)
+            if _ephemeral_prompt_parts:
+                agent.ephemeral_system_prompt = "\n\n".join(_ephemeral_prompt_parts)
             _pending_started_at = getattr(s, 'pending_started_at', None)
             # Normal chat-start sets pending_started_at before spawning this thread;
             # fallback to now only for recovered/legacy flows where that marker is absent

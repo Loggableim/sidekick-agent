@@ -8147,11 +8147,21 @@ class SidekickCLI:
             if state is None:
                 _cprint(f"  {_DIM}No goal to resume.{_RST}")
             else:
+                prompt = None
+                try:
+                    prompt = mgr.next_continuation_prompt()
+                    if prompt:
+                        self._pending_input.put(prompt)
+                except Exception as exc:
+                    logging.debug("goal resume enqueue failed: %s", exc)
                 _cprint(f"  ▶ Goal resumed: {state.goal}")
-                _cprint(
-                    f"  {_DIM}Send any message (or press Enter on an empty prompt "
-                    f"is a no-op; type 'continue' to kick it off).{_RST}"
-                )
+                if prompt:
+                    _cprint(f"  {_DIM}Continuing now.{_RST}")
+                else:
+                    _cprint(
+                        f"  {_DIM}Send any message (or press Enter on an empty prompt "
+                        f"is a no-op; type 'continue' to kick it off).{_RST}"
+                    )
             return
 
         if lower in {"clear", "stop", "done"}:

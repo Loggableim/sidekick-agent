@@ -405,17 +405,52 @@ def read_importable_agent_session_rows(
             )
             return []
 
-        params: tuple[object, ...]
-        exclude_clause = ""
+        excluded: tuple[str, ...] = ()
         if exclude_sources:
             excluded = tuple(str(source) for source in exclude_sources if source)
-            if excluded:
-                exclude_clause = "AND s.source NOT IN (SELECT value FROM json_each(?))"
-                params = (json.dumps(excluded),)
-            else:
-                params = ()
-        else:
-            params = ()
+        exclude_param = json.dumps(excluded) if excluded else "[]"
+
+        if limit is not None and 'started_at' in session_cols and 'role' in message_cols and 'timestamp' in message_cols:
+            try:
+                requested_limit = max(0, int(limit))
+            except (TypeError, ValueError):
+                requested_limit = 0
+            if requested_limit <= 0:
+                return []
+            fast_limit = max(100, requested_limit * 10)
+            fast_sql = """
+                WITH recent_sessions AS (
+                    SELECT s.*
+                    FROM sessions s
+                    WHERE s.source IS NOT NULL
+                      AND s.source NOT IN (SELECT value FROM json_each(?))
+                    ORDER BY s.started_at DESC
+                    LIMIT ?
+                ),
+                message_stats AS (
+                    SELECT m.session_id,
+                           COUNT(*) AS actual_message_count,
+                           SUM(CASE WHEN LOWER(m.role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                           MAX(m.timestamp) AS last_activity
+                    FROM messages m
+                    JOIN recent_sessions rs ON rs.id = m.session_id
+                    GROUP BY m.session_id
+                )
+                SELECT rs.*,
+                       COALESCE(ms.actual_message_count, 0) AS actual_message_count,
+                       COALESCE(ms.actual_user_message_count, 0) AS actual_user_message_count,
+                       COALESCE(ms.last_activity, rs.ended_at, rs.started_at) AS last_activity
+                FROM recent_sessions rs
+                LEFT JOIN message_stats ms ON ms.session_id = rs.id
+                ORDER BY rs.started_at DESC
+            """
+            cur.execute(fast_sql, (exclude_param, fast_limit))
+            fast_rows = [_with_session_defaults(dict(row), session_cols) for row in cur.fetchall()]
+            fast_projected = _project_agent_session_rows(fast_rows)
+            fast_projected = [_with_normalized_source(row) for row in fast_projected]
+            fast_projected = [row for row in fast_projected if is_cli_session_row_visible(row)]
+            if len(fast_projected) >= requested_limit or len(fast_rows) < fast_limit:
+                return fast_projected[:requested_limit]
 
         if 'role' in message_cols and 'timestamp' in message_cols:
             sql = """
@@ -434,6 +469,8 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
         elif 'role' in message_cols:
             sql = """
@@ -452,6 +489,8 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
         elif 'timestamp' in message_cols:
             sql = """
@@ -470,6 +509,8 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
         else:
             sql = """
@@ -488,12 +529,11 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
-        if exclude_clause:
-            sql += "\n                " + exclude_clause
-        sql += "\n                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC"
 
-        cur.execute(sql, params)
+        cur.execute(sql, (exclude_param,))
         projected = _project_agent_session_rows([
             _with_session_defaults(dict(row), session_cols) for row in cur.fetchall()
         ])

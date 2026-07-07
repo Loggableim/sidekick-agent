@@ -452,6 +452,345 @@ function closeLiveStream(sessionId, streamId){
 
 // ── Goal State (global, shared across sessions) ──
 window._goalState=null;
+let _goalSyncTimer=null;
+let _goalSyncInFlight=false;
+let _goalSyncApplying=false;
+let _goalLastSyncAt=0;
+const _GOAL_CONTINUATION_STORAGE_PREFIX='sidekick-webui-goal-continuation-';
+let _pendingGoalContinuation=null;
+let _pendingGoalContinuationRetryTimer=null;
+let _pendingGoalContinuationStartTimer=null;
+let _pendingGoalContinuationLaunchInFlight=false;
+
+function _goalActiveSession(){
+  try{
+    const session = typeof S!=='undefined'&&S&&S.session?S.session:null;
+    const sessionId = String((session && session.session_id) || '').trim();
+    const locationSessionId = (function(){
+      try{
+        if(typeof _sessionIdFromLocation==='function'){
+          return String(_sessionIdFromLocation() || '').trim();
+        }
+      }catch(_){}
+      try{
+        const match=String(window.location&&window.location.pathname||'').match(/^\/session\/([^/?#]+)/);
+        if(match&&match[1]) return String(decodeURIComponent(match[1]||'')).trim();
+      }catch(_){}
+      return '';
+    })();
+    const currentSid = locationSessionId || sessionId || '';
+    if(session && sessionId && (!locationSessionId || sessionId === locationSessionId)) return session;
+    if(!currentSid) return null;
+    return {
+      session_id: currentSid,
+      workspace: (session && session.workspace) || '',
+      profile: (session && session.profile) || _goalActiveProfile(),
+      active_stream_id: session && session.active_stream_id || null,
+      busy: !!(session && session.busy),
+    };
+  }catch(_){}
+  return null;
+}
+
+function _goalActiveSpace(){
+  try{
+    if(typeof _activeSpace!=='undefined'&&_activeSpace)return _activeSpace;
+  }catch(_){}
+  try{
+    const slug=localStorage.getItem('sidekick-active-workspace');
+    if(slug)return slug;
+  }catch(_){}
+  try{
+    const qs=new URLSearchParams(window.location&&window.location.search||'');
+    const slug=String(qs.get('workspace')||'').trim().toLowerCase();
+    if(slug)return slug;
+  }catch(_){}
+  return null;
+}
+
+function _goalActiveProfile(){
+  try{
+    if(typeof S!=='undefined'&&S&&(S.activeProfile||(S.session&&S.session.profile))){
+      return S.activeProfile||(S.session&&S.session.profile)||'default';
+    }
+  }catch(_){}
+  return 'default';
+}
+
+function _goalContinuationStorageKey(sid){
+  return _GOAL_CONTINUATION_STORAGE_PREFIX+String(sid||'').trim();
+}
+
+function _storePendingGoalContinuation(goalNext){
+  if(!goalNext||!goalNext.sid||!goalNext.text) return null;
+  const payload={
+    sid:String(goalNext.sid||'').trim(),
+    text:String(goalNext.text||'').trim(),
+    goal:String(goalNext.goal||'').trim(),
+    model:String(goalNext.model||'').trim(),
+    model_provider:goalNext.model_provider||null,
+    profile:String(goalNext.profile||'default').trim()||'default',
+    workspace:String(goalNext.workspace||'').trim(),
+    workspace_slug:String(goalNext.workspace_slug||'').trim(),
+    queued_at:Date.now(),
+  };
+  try{
+    sessionStorage.setItem(_goalContinuationStorageKey(payload.sid),JSON.stringify(payload));
+  }catch(_){}
+  return payload;
+}
+
+function _loadPendingGoalContinuation(sessionId){
+  const sid=String(sessionId||'').trim();
+  if(!sid) return null;
+  try{
+    const raw=sessionStorage.getItem(_goalContinuationStorageKey(sid));
+    if(!raw) return null;
+    const parsed=JSON.parse(raw);
+    if(!parsed||String(parsed.sid||'').trim()!==sid||!String(parsed.text||'').trim()){
+      sessionStorage.removeItem(_goalContinuationStorageKey(sid));
+      return null;
+    }
+    return parsed;
+  }catch(_){
+    try{sessionStorage.removeItem(_goalContinuationStorageKey(sid));}catch(_2){}
+    return null;
+  }
+}
+
+function _clearPendingGoalContinuation(sessionId){
+  const sid=String(sessionId||'').trim();
+  if(!sid) return;
+  try{sessionStorage.removeItem(_goalContinuationStorageKey(sid));}catch(_){}
+  _clearPendingGoalContinuationRetryTimer();
+  _clearPendingGoalContinuationLaunchState();
+}
+
+function _clearPendingGoalContinuationRetryTimer(){
+  if(_pendingGoalContinuationRetryTimer){
+    clearTimeout(_pendingGoalContinuationRetryTimer);
+    _pendingGoalContinuationRetryTimer=null;
+  }
+}
+
+function _clearPendingGoalContinuationLaunchState(){
+  if(_pendingGoalContinuationStartTimer){
+    clearTimeout(_pendingGoalContinuationStartTimer);
+    _pendingGoalContinuationStartTimer=null;
+  }
+  _pendingGoalContinuationLaunchInFlight=false;
+}
+
+function _goalContinuationApiPath(path, workspaceSlug){
+  const slug=String(workspaceSlug||'').trim();
+  if(!slug) return path;
+  try{
+    const url=new URL(String(path||'').replace(/^\//,''),document.baseURI||location.href);
+    url.searchParams.set('workspace',slug);
+    return url.pathname.replace(/^\//,'')+url.search;
+  }catch(_){
+    const sep=String(path||'').includes('?')?'&':'?';
+    return String(path||'')+sep+'workspace='+encodeURIComponent(slug);
+  }
+}
+
+function _goalContinuationRequestBody(goalNext){
+  return {
+    session_id:goalNext.sid,
+    message:goalNext.text,
+    model:goalNext.model||undefined,
+    model_provider:goalNext.model_provider||null,
+    profile:goalNext.profile||'default',
+    workspace:goalNext.workspace||undefined,
+    mode:'action',
+    chat_mode:S.mode||'chat',
+    attachments:[],
+    sandbox_disabled:window._sandboxDisabled||false,
+  };
+}
+
+function _launchGoalContinuation(goalNext, attempt=0){
+  if(_pendingGoalContinuationLaunchInFlight) return;
+  if(!goalNext||!goalNext.sid||!goalNext.text) return;
+  _clearPendingGoalContinuationRetryTimer();
+  const workspaceSlug=String(goalNext.workspace_slug||goalNext.workspace||_goalActiveSpace()||'').trim();
+  const visible=!!(S.session&&S.session.session_id===goalNext.sid);
+  if(visible&&S.busy){
+    _queueDrainSid=goalNext.sid;
+    queueSessionMessage(goalNext.sid,{
+      text:goalNext.text,
+      files:[],
+      model:goalNext.model,
+      model_provider:goalNext.model_provider,
+      profile:goalNext.profile,
+    });
+    if(typeof updateQueueBadge==='function')updateQueueBadge(goalNext.sid);
+    return;
+  }
+  _pendingGoalContinuationLaunchInFlight=true;
+  api(_goalContinuationApiPath('/api/chat/start',workspaceSlug),{
+    method:'POST',
+    body:JSON.stringify(_goalContinuationRequestBody(goalNext)),
+  }).then((startData)=>{
+    const nextStreamId=startData&&startData.stream_id;
+    if(!nextStreamId){
+      _pendingGoalContinuationLaunchInFlight=false;
+      return;
+    }
+    _clearPendingGoalContinuation(goalNext.sid);
+    if(typeof markInflight==='function') markInflight(goalNext.sid,nextStreamId);
+    if(typeof saveInflightState==='function'){
+      saveInflightState(goalNext.sid,{
+        streamId:nextStreamId,
+        messages:[],
+        uploaded:[],
+        toolCalls:[],
+        workspace_slug:goalNext.workspace_slug||workspaceSlug||'',
+      });
+    }
+    attachLiveStream(goalNext.sid,nextStreamId,[],{
+      reconnecting:true,
+      workspace_slug:goalNext.workspace_slug||workspaceSlug||'',
+      workspace:goalNext.workspace||'',
+      model:goalNext.model||'',
+      model_provider:goalNext.model_provider||null,
+      profile:goalNext.profile||'default',
+    });
+    if(typeof renderSessionList==='function') void renderSessionList();
+    _pendingGoalContinuationLaunchInFlight=false;
+  }).catch((e)=>{
+    _pendingGoalContinuationLaunchInFlight=false;
+    const msg=String((e&&e.message)||'');
+    if(/already has an active stream/i.test(msg)&&attempt<8){
+      setTimeout(()=>_launchGoalContinuation(goalNext,attempt+1),500+attempt*250);
+      return;
+    }
+    queueSessionMessage(goalNext.sid,{
+      text:goalNext.text,
+      files:[],
+      model:goalNext.model,
+      model_provider:goalNext.model_provider,
+      profile:goalNext.profile,
+    });
+    if(typeof updateQueueBadge==='function')updateQueueBadge(goalNext.sid);
+    if(typeof showToast==='function')showToast('Goal continuation queued; it will continue when this session is opened.',3500,'warning');
+  });
+}
+
+function _restorePendingGoalContinuationForSession(sessionId){
+  const sid=String(sessionId||'').trim();
+  if(!sid) return null;
+  const stored=_loadPendingGoalContinuation(sid);
+  if(!stored) return null;
+  const currentGoal=String(window._goalState&&window._goalState.goal||'').trim();
+  if(currentGoal&&stored.goal&&currentGoal!==stored.goal){
+    _clearPendingGoalContinuation(sid);
+    return null;
+  }
+  _pendingGoalContinuation={
+    sid,
+    text:String(stored.text||'').trim(),
+    goal:String(stored.goal||currentGoal||'').trim(),
+    model:String(stored.model||'').trim(),
+    model_provider:stored.model_provider||null,
+    profile:String(stored.profile||_goalActiveProfile()||'default').trim()||'default',
+    workspace:String(stored.workspace||'').trim(),
+    workspace_slug:String(stored.workspace_slug||'').trim(),
+  };
+  _maybeStartPendingGoalContinuation();
+  return _pendingGoalContinuation;
+}
+
+function _maybeStartPendingGoalContinuation(){
+  const session=_goalActiveSession();
+  const sid=session&&session.session_id;
+  if(!sid||!_pendingGoalContinuation||_pendingGoalContinuation.sid!==sid) return false;
+  const goalState=String(window._goalState&&window._goalState.goal||'').trim();
+  if(!window._goalState||String(window._goalState.status||'').trim()!=='active') return false;
+  if(goalState&&_pendingGoalContinuation.goal&&goalState!==_pendingGoalContinuation.goal) return false;
+  if(_pendingGoalContinuationStartTimer||_pendingGoalContinuationLaunchInFlight) return false;
+  if(typeof S!=='undefined'&&S&&(S.activeStreamId||(S.session&&S.session.active_stream_id))) return false;
+  if(typeof S!=='undefined'&&S&&S.busy){
+    if(!_pendingGoalContinuationRetryTimer){
+      _pendingGoalContinuationRetryTimer=setTimeout(()=>{
+        _pendingGoalContinuationRetryTimer=null;
+        _maybeStartPendingGoalContinuation();
+      },180);
+    }
+    return false;
+  }
+  _pendingGoalContinuationStartTimer=setTimeout(()=>{
+    _pendingGoalContinuationStartTimer=null;
+    try{
+      const currentSession=_goalActiveSession();
+      const currentSid=currentSession&&currentSession.session_id;
+      if(currentSid!==sid) return;
+      if(!window._goalState||String(window._goalState.status||'').trim()!=='active') return;
+      if(String(window._goalState.goal||'').trim()&&_pendingGoalContinuation&&_pendingGoalContinuation.goal&&String(window._goalState.goal||'').trim()!==_pendingGoalContinuation.goal) return;
+      if(typeof S!=='undefined'&&S&&(S.busy||S.activeStreamId||(S.session&&S.session.active_stream_id))) return;
+      _clearPendingGoalContinuationRetryTimer();
+      if(typeof _launchGoalContinuation==='function'&&_pendingGoalContinuation&&_pendingGoalContinuation.sid===sid){
+        _launchGoalContinuation(_pendingGoalContinuation);
+      }
+    }catch(_){}
+  },0);
+  return true;
+}
+
+function _scheduleGoalStateSync(delay){
+  if(_goalSyncTimer)clearTimeout(_goalSyncTimer);
+  _goalSyncTimer=setTimeout(function(){
+    _goalSyncTimer=null;
+    _syncGoalStateFromServer();
+  },typeof delay==='number'?delay:80);
+}
+
+async function _syncGoalStateFromServer(){
+  if(_goalSyncInFlight)return;
+  const session=_goalActiveSession();
+  const sid=session&&session.session_id;
+  if(!sid)return;
+  const workspace=String((session&&session.workspace)||_goalActiveSpace()||'').trim();
+  _goalSyncInFlight=true;
+  _goalLastSyncAt=Date.now();
+  try{
+    const body={
+      session_id:sid,
+      args:'status',
+      workspace,
+      profile:_goalActiveProfile(),
+    };
+    let r=null;
+    if(typeof api==='function'){
+      r=await api('/api/goal',{method:'POST',body:JSON.stringify(body)});
+    }else{
+      const resp=await fetch('/api/goal',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body),
+      });
+      r=await resp.json().catch(()=>null);
+      if(!resp.ok)throw new Error((r&&r.error)||resp.statusText||'goal status failed');
+    }
+    const currentSession=_goalActiveSession();
+    const currentSid=currentSession&&currentSession.session_id;
+    if(currentSid!==sid)return;
+    if(r&&r.goal&&r.goal.session_id&&r.goal.session_id!==sid)return;
+    _goalSyncApplying=true;
+    if(r&&r.goal&&r.goal.goal){
+      _updateGoalState(Object.assign({},r.goal,{
+        session_id:r.goal.session_id||sid,
+        space:r.goal.space||_goalActiveSpace(),
+      }));
+    }else{
+      _clearGoalState();
+    }
+  }catch(_){
+  }finally{
+    _goalSyncApplying=false;
+    _goalSyncInFlight=false;
+  }
+}
 
 function _renderGoalBanner(){
   const banner=$('goalBanner');
@@ -467,21 +806,24 @@ function _renderGoalBanner(){
   if(!gs||!gs.goal||gs.status==='cleared'||gs.status==='none'){
     banner.style.display='none';
     if(toggleBtn)toggleBtn.classList.remove('active');
+    if(!_goalSyncApplying&&Date.now()-_goalLastSyncAt>1500)_scheduleGoalStateSync(120);
     return;
   }
   // Space-scoping: nur anzeigen wenn Goal in diesem Space gesetzt wurde
   if(gs.space){
-    const currentSpace=typeof _activeSpace!=='undefined'?_activeSpace:
-      localStorage.getItem('sidekick-active-workspace')||'nova';
+    const currentSpace=_goalActiveSpace()||'nova';
     if(gs.space!==currentSpace){
       banner.style.display='none';
+      if(!_goalSyncApplying&&Date.now()-_goalLastSyncAt>1500)_scheduleGoalStateSync(120);
       return;
     }
   }
   // Session-scoping: nur anzeigen wenn Goal in dieser Session gesetzt wurde
-  const activeSid=S&&S.session&&S.session.session_id;
+  const activeSession=_goalActiveSession();
+  const activeSid=activeSession&&activeSession.session_id;
   if(gs.session_id&&activeSid&&gs.session_id!==activeSid){
     banner.style.display='none';
+    if(!_goalSyncApplying&&Date.now()-_goalLastSyncAt>1500)_scheduleGoalStateSync(120);
     return;
   }
   const status=gs.status||'active';
@@ -499,6 +841,7 @@ function _renderGoalBanner(){
   resumeBtn.style.display=(status==='paused')?'':'none';
   clearBtn.style.display='';
   if(toggleBtn)toggleBtn.classList.remove('active');
+  if(!_goalSyncApplying&&Date.now()-_goalLastSyncAt>1500)_scheduleGoalStateSync(120);
 }
 
 function _updateGoalState(state){
@@ -507,7 +850,8 @@ function _updateGoalState(state){
     _renderGoalBanner();
     return;
   }
-  const activeSid=S&&S.session&&S.session.session_id;
+  const activeSession=_goalActiveSession();
+  const activeSid=activeSession&&activeSession.session_id;
   const gs={
     goal:String(state.goal||'').trim(),
     status:String(state.status||'').trim(),
@@ -517,15 +861,23 @@ function _updateGoalState(state){
     last_reason:state.last_reason||null,
     paused_reason:state.paused_reason||null,
     session_id:state.session_id||activeSid||null,
-    space:state.space||(typeof _activeSpace!=='undefined'?_activeSpace:
-      localStorage.getItem('sidekick-active-workspace')||null),
+    space:state.space||_goalActiveSpace(),
   };
   window._goalState=gs;
   try{localStorage.setItem('sidekick-webui-goal-state',JSON.stringify(gs));}catch(_){}
   _renderGoalBanner();
+  if(gs.status==='active'){
+    _maybeStartPendingGoalContinuation();
+  }
 }
 
 function _clearGoalState(){
+  const activeSession=_goalActiveSession();
+  if(activeSession&&activeSession.session_id){
+    _clearPendingGoalContinuation(activeSession.session_id);
+  }
+  _clearPendingGoalContinuationRetryTimer();
+  _clearPendingGoalContinuationLaunchState();
   window._goalState=null;
   try{localStorage.removeItem('sidekick-webui-goal-state');}catch(_){}
   _renderGoalBanner();
@@ -597,6 +949,7 @@ function _submitGoal(){
   // Banner mit Verzögerung rendern — _activeSpace aus spaces.js muss geladen sein
   setTimeout(function(){
     _renderGoalBanner();
+    _scheduleGoalStateSync(60);
   },100);
 })();
 
@@ -604,9 +957,16 @@ function _submitGoal(){
 window._renderGoalBanner=_renderGoalBanner;
 window._updateGoalState=_updateGoalState;
 window._clearGoalState=_clearGoalState;
+window._storePendingGoalContinuation=_storePendingGoalContinuation;
+window._loadPendingGoalContinuation=_loadPendingGoalContinuation;
+window._clearPendingGoalContinuation=_clearPendingGoalContinuation;
+window._restorePendingGoalContinuationForSession=_restorePendingGoalContinuationForSession;
+window._launchGoalContinuation=_launchGoalContinuation;
 window._toggleGoalMode=_toggleGoalMode;
 window._exitGoalMode=_exitGoalMode;
 window._submitGoal=_submitGoal;
+window._syncGoalStateFromServer=_syncGoalStateFromServer;
+window._scheduleGoalStateSync=_scheduleGoalStateSync;
 window._togglePlanMode=_togglePlanMode;
 
 // ── Goal: keydown handler for goal input field ──
@@ -722,7 +1082,6 @@ let assistantText='';
   let reasoningText='';
   let liveReasoningText='';
 let _latestGoalStatus=null;
-  let _pendingGoalContinuation=null;
 
   // Task progress tracking (from 'progress' SSE events)
   let _progressData=null;  // {current, total, label, done}
@@ -867,6 +1226,7 @@ let _latestGoalStatus=null;
   }
   function _startGoalContinuation(goalNext, attempt=0){
     if(!goalNext||!goalNext.sid||!goalNext.text) return;
+    _clearPendingGoalContinuationRetryTimer();
     const visible=!!(S.session&&S.session.session_id===goalNext.sid);
     if(visible&&S.busy){
       _queueDrainSid=goalNext.sid;
@@ -886,6 +1246,7 @@ let _latestGoalStatus=null;
     }).then((startData)=>{
       const nextStreamId=startData&&startData.stream_id;
       if(!nextStreamId) return;
+      _clearPendingGoalContinuation(goalNext.sid);
       if(typeof markInflight==='function') markInflight(goalNext.sid,nextStreamId);
       if(typeof saveInflightState==='function'){
         saveInflightState(goalNext.sid,{
@@ -1636,6 +1997,12 @@ source.addEventListener('goal',e=>{
             paused_reason:d.decision.paused_reason||null,
             space:window._goalState&&window._goalState.space||null,
           });
+          const _decisionStatus=String(d.decision.status||'').trim();
+          if(_decisionStatus&&_decisionStatus!=='active'){
+            _clearPendingGoalContinuation((window._goalState&&window._goalState.session_id)||d.session_id||activeSid);
+          }else if(!d.decision.should_continue){
+            _clearPendingGoalContinuation((window._goalState&&window._goalState.session_id)||d.session_id||activeSid);
+          }
         }
       }catch(_){}
     });
@@ -1649,12 +2016,14 @@ source.addEventListener('goal',e=>{
         _pendingGoalContinuation={
           sid,
           text:continuation_prompt,
+          goal:String(window._goalState&&window._goalState.goal||'').trim(),
           model:(S.session&&S.session.session_id===sid&&S.session.model)||options.model||'',
           model_provider:(S.session&&S.session.session_id===sid&&S.session.model_provider)||options.model_provider||null,
           profile:options.profile||S.activeProfile||'default',
           workspace:(S.session&&S.session.session_id===sid&&S.session.workspace)||options.workspace||'',
           workspace_slug:ownerWorkspaceSlug||'',
         };
+        _storePendingGoalContinuation(_pendingGoalContinuation);
         const toast=t('goal_continuing_toast');
         const cmsg=_resolveGoalMessage(d);
         showToast((toast&&cmsg&&cmsg!==toast)?cmsg.split('\n')[0]:toast,2200);
@@ -1837,7 +2206,7 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
         if(isSessionViewed) _markSessionViewed(completedSid, completedSession.message_count ?? S.messages.length);
         syncTopbar();renderMessages({preserveScroll:true});
         if(shouldFollowOnDone&&typeof scrollToBottom==='function') scrollToBottom();
-        loadDir('.');
+        void loadDir('.', {auto:true});
         // TTS auto-read: speak the last assistant response if enabled (#499)
         if(typeof autoReadLastAssistant==='function') setTimeout(()=>autoReadLastAssistant(), 300);
       }
@@ -1847,7 +2216,9 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
         setTimeout(()=>_startGoalContinuation(_goalNext),250);
       }
       if(isActiveSession) _queueDrainSid=activeSid;
-      renderSessionList();
+      if(typeof renderSessionList==='function'){
+        setTimeout(()=>{void renderSessionList();},0);
+      }
       _setActivePaneIdleIfOwner();
       playNotificationSound();
       sendBrowserNotification('Response complete',assistantText?assistantText.slice(0,100):'Task finished');

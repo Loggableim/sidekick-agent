@@ -162,7 +162,7 @@ def kanban_home() -> Path:
     profile's ``HERMES_HOME`` would silently fork the board per profile,
     which breaks the dispatcher / worker handoff.
     """
-    override = (os.environ.get("SIDEKICK_KANBAN_HOME")).strip()
+    override = (os.environ.get("SIDEKICK_KANBAN_HOME", "")).strip()
     if override:
         return Path(override).expanduser()
     from runtime._compat.shim_constants import get_default_hermes_root
@@ -205,7 +205,7 @@ def get_current_board() -> str:
     with a best-effort warning — the dispatcher must never crash because a
     user hand-edited a file or removed a board directory.
     """
-    env = (os.environ.get("SIDEKICK_KANBAN_BOARD")).strip()
+    env = (os.environ.get("SIDEKICK_KANBAN_BOARD", "")).strip()
     if env:
         try:
             normed = _normalize_board_slug(env)
@@ -296,7 +296,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
     3. Board ``default`` → ``<root>/kanban.db`` (back-compat path).
        Other boards → ``<root>/kanban/boards/<slug>/kanban.db``.
     """
-    override = (os.environ.get("SIDEKICK_KANBAN_DB")).strip()
+    override = (os.environ.get("SIDEKICK_KANBAN_DB", "")).strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -318,7 +318,7 @@ def workspaces_root(board: Optional[str] = None) -> Path:
     that existing scratch workspaces from before the boards feature are
     preserved. Other boards use ``<root>/kanban/boards/<slug>/workspaces/``.
     """
-    override = (os.environ.get("SIDEKICK_KANBAN_WORKSPACES_ROOT")).strip()
+    override = (os.environ.get("SIDEKICK_KANBAN_WORKSPACES_ROOT", "")).strip()
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)

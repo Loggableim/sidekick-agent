@@ -1897,6 +1897,9 @@ function _bootTimeout(promise, ms, label) {
     const _checkUrl='api/updates/check'+(_testUpdates?'?simulate=1':'');
     api(_checkUrl).then(d=>{if(!_testUpdates)sessionStorage.setItem('sidekick-update-checked','1');if((d.webui&&d.webui.behind>0)||(d.agent&&d.agent.behind>0))_showUpdateBanner(d);}).catch(()=>{});
   }
+  if (typeof renderSessionListLoadingState === 'function') {
+    try { renderSessionListLoadingState('Loading conversations...'); } catch (_) {}
+  }
   // Fetch active profile. This endpoint is useful metadata, but must never
   // block first paint/session rendering if the backend is busy.
   try{
@@ -1949,8 +1952,10 @@ function _bootTimeout(promise, ms, label) {
     window._activeSpaceConfig=null;
     console.warn('[boot] active space config unavailable, continuing', e);
   });
-  await _bootTimeout(loadOnboardingWizard(),8000,'onboarding').catch((e)=>{
-    console.warn('[boot] onboarding unavailable, continuing', e);
+  void _bootTimeout(loadOnboardingWizard(),8000,'onboarding').catch((e)=>{
+    if(window && window.localStorage && window.localStorage.getItem('sidekick-debug-boot')==='1'){
+      console.debug('[boot] onboarding unavailable, continuing', e);
+    }
   });
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
   const urlWorkspace = (() => {

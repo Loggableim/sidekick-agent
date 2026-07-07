@@ -10,8 +10,8 @@ import importlib
 import sys
 import types
 
-__version__ = "0.8.5"
-__release_date__ = "2026.6.11"
+__version__ = "0.8.83"
+__release_date__ = "2026.7.7"
 
 _ROUTE_MAP: dict[str, str] = {
     "config": "cli.config",

@@ -4324,6 +4324,7 @@ window.toggleFileTreePanel = function(){
     const saved = parseInt(localStorage.getItem('sidekick-file-tree-w')) || 260;
     root.style.setProperty('--file-tree-width', saved + 'px');
     panel.classList.remove('file-tree-panel--minimized');
+    if(typeof flushPendingWorkspaceTreeRefresh === 'function') setTimeout(flushPendingWorkspaceTreeRefresh, 0);
   }else{
     // Save current width before collapsing
     const curW = parseInt(root.style.getPropertyValue('--file-tree-width')) || panel.getBoundingClientRect().width || 260;

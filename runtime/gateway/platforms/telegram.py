@@ -194,15 +194,11 @@ class TelegramAdapter(BasePlatformAdapter):
             from faster_whisper import WhisperModel
             # Try GPU (Vulkan/CUDA) first, fall back to CPU
             try:
-                self._whisper_model = WhisperModel(
-                    "large-v3-turbo", device="cuda", compute_type="float16"
-                )
+                self._whisper_model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
                 logger.info("Whisper STT loaded on CUDA")
             except Exception:
                 try:
-                    self._whisper_model = WhisperModel(
-                        "large-v3-turbo", device="cpu", compute_type="int8"
-                    )
+                    self._whisper_model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
                     logger.info("Whisper STT loaded on CPU (int8)")
                 except Exception as e:
                     logger.error(f"Whisper STT model load failed: {e}")

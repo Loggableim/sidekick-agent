@@ -24,7 +24,18 @@
 <script>(function(){try{var t=localStorage.getItem('sidekick-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#0D0D1A':'#FEFCF7';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('sidekick-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('sidekick-webui-rail-expanded')==='1')document.documentElement.dataset.railExpanded='1';}catch(e){}})()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__">
+<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__&layout=17">
+<style id="workflowHeaderCompactOverride">
+  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group {
+    display: inline-flex !important;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group > #browserStatusBadge {
+    display: none !important;
+  }
+</style>
   <link rel="stylesheet" href="static/gmail-panel.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="static/discord-panel.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="static/discord-chat.css?v=__WEBUI_VERSION__">
@@ -55,9 +66,7 @@
   <!-- Prism line-numbers plugin (loaded after autoloader) -->
   <link id="prism-line-numbers-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.css" crossorigin="anonymous">
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.js" integrity="sha384-6QJu8apxMmB9TiPVWzYKF5pRgKcz7snO0/QU+MrWmgBLECQjoa6erxX2VQ5t41Jd" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js" integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js" integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js" integrity="sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl" crossorigin="anonymous" defer></script>
+  <!-- xterm.js is lazy-loaded by terminal.js only when the terminal opens. -->
   <!-- PWA service worker registration -->
   <script>
     if ('serviceWorker' in navigator) {
@@ -161,6 +170,16 @@
         if (typeof browserToggleSplit === 'function') return browserToggleSplit();
         return false;
       }
+      if (String(action || '') === 'fix-findings' || String(action || '') === 'fix') {
+        if (window.browserQaFixFindingsDisabled) return false;
+        if (typeof browserFixFindingsToChat === 'function') return browserFixFindingsToChat();
+        return false;
+      }
+      if (String(action || '') === 'repro' || String(action || '') === 'qa-repro') {
+        if (window.browserQaReproDisabled) return false;
+        if (typeof browserQaReproToChat === 'function') return browserQaReproToChat();
+        return false;
+      }
       if (String(action || '') === 'fullscreen') return false;
       if (String(action || '') === 'back' && typeof history.back === 'function') history.back();
       if (String(action || '') === 'forward' && typeof history.forward === 'function') history.forward();
@@ -184,6 +203,20 @@
       if (String(action || '') === 'model') return toggleModelDropdown();
       if (String(action || '') === 'reasoning') return toggleReasoningDropdown();
       if (String(action || '') === 'browser-toggle') return browserToggleDrawer();
+      if (String(action || '') === 'browser-webui-smoke') {
+        if (typeof browserRunHeaderAction === 'function') return browserRunHeaderAction('webui-smoke');
+        return false;
+      }
+      if (String(action || '') === 'browser-fix-findings') {
+        if (window.browserQaFixFindingsDisabled) return false;
+        if (typeof browserRunHeaderAction === 'function') return browserRunHeaderAction('fix-findings');
+        return false;
+      }
+      if (String(action || '') === 'browser-repro') {
+        if (window.browserQaReproDisabled) return false;
+        if (typeof browserRunHeaderAction === 'function') return browserRunHeaderAction('repro');
+        return false;
+      }
       return false;
     }
 
@@ -249,6 +282,8 @@
         if (value) value.textContent = normalized;
         window._approvalMode = normalized;
         if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
+        if (typeof _browserUpdateHeaderBadge === 'function') _browserUpdateHeaderBadge();
+        if (typeof browserRefreshAgentContext === 'function') browserRefreshAgentContext();
         return normalized;
       }
 
@@ -325,47 +360,48 @@
       }
     })();
   </script>
-  <div class="titlebar-space" id="titlebarSpace">
-    <button class="titlebar-space-btn" id="titlebarSpaceBtn" type="button" title="Switch space" aria-haspopup="menu" aria-expanded="false">
-      <span class="titlebar-space-emoji" id="titlebarSpaceEmoji">&#128193;</span>
-      <span class="titlebar-space-name" id="titlebarSpaceName">default</span>
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
-    </button>
-    <div class="titlebar-space-dropdown" id="titlebarSpaceDropdown" hidden></div>
-  </div>
-  <script>
-    (function initInitialSpaceLabel(){
-      var slug = '';
-      try { slug = (new URLSearchParams(window.location.search || '').get('workspace') || '').trim().toLowerCase(); } catch (_) {}
-      if (!slug) {
-        try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
-      }
-      if (!slug) slug = 'nova';
-      if (!slug) return;
-      var name = document.getElementById('titlebarSpaceName');
-      var btn = document.getElementById('titlebarSpaceBtn');
-      if (name) name.textContent = slug;
-      if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
-    })();
-  </script>
-  <div class="titlebar-actions" id="titlebarActions">
-    <div class="titlebar-status-cluster">
+  <div class="titlebar-actions titlebar-actions--workflow-compact" id="titlebarActions">
+    <div class="titlebar-space" id="titlebarSpace">
+      <button class="titlebar-space-btn" id="titlebarSpaceBtn" type="button" title="Switch space" aria-haspopup="menu" aria-expanded="false" data-testid="titlebar-space-button">
+        <span class="titlebar-space-emoji" id="titlebarSpaceEmoji">&#128193;</span>
+        <span class="titlebar-space-name" id="titlebarSpaceName">default</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+      </button>
+      <div class="titlebar-space-dropdown" id="titlebarSpaceDropdown" hidden></div>
+    </div>
+    <div class="titlebar-lang-selector" id="titlebarLangSelector">
+      <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
+        <span id="currentLangFlag">🇬🇧</span>
+      </button>
+      <div class="lang-dropdown" id="langDropdown" role="menu" hidden>
+        <button class="lang-option" data-lang="en" role="menuitem" aria-label="English" onclick="switchLang('en')">🇬🇧</button>
+        <button class="lang-option" data-lang="de" role="menuitem" aria-label="Deutsch" onclick="switchLang('de')">🇩🇪</button>
+        <button class="lang-option" data-lang="es" role="menuitem" aria-label="Español" onclick="switchLang('es')">🇪🇸</button>
+        <button class="lang-option" data-lang="it" role="menuitem" aria-label="Italiano" onclick="switchLang('it')">🇮🇹</button>
+        <button class="lang-option" data-lang="pt" role="menuitem" aria-label="Português" onclick="switchLang('pt')">🇵🇹</button>
+        <button class="lang-option" data-lang="ru" role="menuitem" aria-label="Русский" onclick="switchLang('ru')">🇷🇺</button>
+        <button class="lang-option" data-lang="ja" role="menuitem" aria-label="日本語" onclick="switchLang('ja')">🇯🇵</button>
+        <button class="lang-option" data-lang="ko" role="menuitem" aria-label="한국어" onclick="switchLang('ko')">🇰🇷</button>
+        <button class="lang-option" data-lang="zh" role="menuitem" aria-label="中文" onclick="switchLang('zh')">🇨🇳</button>
+      </div>
+    </div>
+    <div class="titlebar-status-cluster titlebar-status-cluster--compact">
       <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle." title="Approval mode: manual. Click to cycle.">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
       </button>
       <div class="titlebar-browser-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-        <button class="titlebar-approval-badge titlebar-browser-badge browser-state-closed browser-state-locked" id="browserStatusBadge" type="button" aria-live="polite" aria-label="Browser drawer closed, agent locked. Click to toggle." title="Browser drawer closed, agent locked. Click to toggle." onclick="browserToggleDrawer()">
+        <button class="titlebar-approval-badge titlebar-browser-badge browser-state-closed browser-state-locked" id="browserStatusBadge" type="button" aria-live="polite" aria-label="Browser drawer closed, agent locked. Click to toggle." title="Browser drawer closed, agent locked. Click to toggle." onclick="browserToggleDrawer()" data-testid="browser-status-badge">
           <span class="titlebar-approval-dot" aria-hidden="true"></span>
           <span class="titlebar-approval-value" id="browserStatusValue">browser closed · locked</span>
         </button>
-        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="browserStatusMenuBtn" type="button" data-tooltip="Browser actions" aria-label="Browser actions" aria-haspopup="menu" aria-controls="browserStatusMenu" aria-expanded="false" onclick="browserToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
+        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="browserStatusMenuBtn" type="button" data-tooltip="Browser actions" aria-label="Browser actions" aria-haspopup="menu" aria-controls="browserStatusMenu" aria-expanded="false" onclick="browserToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;" data-testid="browser-actions-button">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
         </button>
         <div class="browser-header-menu" id="browserStatusMenu" role="menu" aria-label="Browser actions" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:240px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
           <div style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Browser actions</div>
-          <button class="titlebar-action-btn" id="browserHeaderDrawerAction" type="button" role="menuitem" onclick="browserRunHeaderAction('drawer-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle drawer</button>
-          <button class="titlebar-action-btn" id="browserHeaderPermissionAction" type="button" role="menuitem" onclick="browserRunHeaderAction('permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Enable agent control</button>
+          <button class="titlebar-action-btn" id="browserHeaderDrawerAction" type="button" role="menuitem" onclick="browserRunHeaderAction('drawer-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="browser-header-drawer-action">Toggle drawer</button>
+          <button class="titlebar-action-btn" id="browserHeaderPermissionAction" type="button" role="menuitem" onclick="browserRunHeaderAction('permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="browser-header-permission-action">Enable browser watch</button>
           <button class="titlebar-action-btn" id="browserHeaderExploreAction" type="button" role="menuitem" onclick="browserRunHeaderAction('explore')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Switch to Explore mode</button>
           <button class="titlebar-action-btn" id="browserHeaderSplitAction" type="button" role="menuitem" onclick="browserRunHeaderAction('split')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Split browser and chat</button>
           <button class="titlebar-action-btn" id="browserHeaderFullscreenAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullscreen')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Maximize browser</button>
@@ -377,6 +413,12 @@
           <button class="titlebar-action-btn" id="browserHeaderNavigateAction" type="button" role="menuitem" onclick="browserRunHeaderAction('navigate')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Navigate to URL...</button>
           <button class="titlebar-action-btn" id="browserHeaderNewTabAction" type="button" role="menuitem" onclick="browserRunHeaderAction('newtab')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open current in new tab</button>
           <button class="titlebar-action-btn" id="browserHeaderCopyUrlAction" type="button" role="menuitem" onclick="browserRunHeaderAction('copyurl')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy current URL</button>
+          <button class="titlebar-action-btn" id="browserHeaderQaAction" type="button" role="menuitem" onclick="browserRunHeaderAction('qa')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Run browser QA</button>
+          <button class="titlebar-action-btn" id="browserHeaderWebuiSmokeAction" type="button" role="menuitem" onclick="browserRunHeaderAction('webui-smoke')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="browser-header-webui-smoke-action">Run WebUI smoke</button>
+          <button class="titlebar-action-btn" id="browserHeaderTestPageAction" type="button" role="menuitem" onclick="browserRunHeaderAction('test-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Test current page</button>
+          <button class="titlebar-action-btn" id="browserHeaderRetestPageAction" type="button" role="menuitem" onclick="browserRunHeaderAction('retest-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Retest current page</button>
+          <button class="titlebar-action-btn" id="browserHeaderFixFindingsAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fix-findings')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Fix browser findings</button>
+          <button class="titlebar-action-btn" id="browserHeaderReproAction" type="button" role="menuitem" onclick="browserRunHeaderAction('repro')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Create browser repro</button>
           <button class="titlebar-action-btn" id="browserHeaderPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
           <button class="titlebar-action-btn" id="browserHeaderFullPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
           <button class="titlebar-action-btn" id="browserHeaderScreenshotAction" type="button" role="menuitem" onclick="browserRunHeaderAction('screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
@@ -410,11 +452,19 @@
           <span class="titlebar-approval-dot" aria-hidden="true"></span>
           <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
         </button>
-        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="workflowStatusMenuBtn" type="button" data-tooltip="Workflow palette (Cmd/Ctrl+Shift+K)" aria-label="Workflow palette. Shortcut Cmd/Ctrl+Shift+K." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
+        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="workflowStatusMenuBtn" type="button" data-tooltip="Status menu (Cmd/Ctrl+Shift+K)" aria-label="Status menu. Shortcut Cmd/Ctrl+Shift+K." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;" data-testid="workflow-status-menu-button">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
         </button>
-        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
-          <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
+        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Status menu" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+          <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Status menu</div>
+          <div id="workflowHeaderMenuSummary" class="workflow-header-menu-summary" role="img" aria-label="Workflow status overview" title="Workflow status overview" data-tooltip="Workflow status overview">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3.5" y="3.5" width="7" height="7" rx="1.8"></rect>
+              <rect x="13.5" y="3.5" width="7" height="7" rx="1.8"></rect>
+              <rect x="3.5" y="13.5" width="7" height="7" rx="1.8"></rect>
+              <rect x="13.5" y="13.5" width="7" height="7" rx="1.8"></rect>
+            </svg>
+          </div>
           <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
             <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="approval" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('approval')">Approval</button>
@@ -440,8 +490,14 @@
         <button class="titlebar-action-btn" id="workflowHeaderThinkingAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('thinking')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open thinking models</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserToggleAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle browser drawer</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserPermissionAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle browser control</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserPermissionAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Enable browser watch</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserMenuAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-menu')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open browser actions</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserQaAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-qa')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Run browser QA</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserWebuiSmokeAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-webui-smoke')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="workflow-browser-webui-smoke-action">Run WebUI smoke</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserTestPageAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-test-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Test current page</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserRetestPageAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-retest-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Retest current page</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserFixFindingsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-fix-findings')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Fix browser findings</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserReproAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-repro')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Create browser repro</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserScreenshotAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserFullPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
@@ -457,26 +513,21 @@
       </div>
     </div>
     </div>
-      <div class="titlebar-lang-selector" id="titlebarLangSelector">
-        <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
-          <span id="currentLangFlag">????</span>
-        </button>
-      <div class="lang-dropdown" id="langDropdown" role="menu" hidden>
-        <button class="lang-option" data-lang="en" role="menuitem" onclick="switchLang('en')">????</button>
-        <button class="lang-option" data-lang="de" role="menuitem" onclick="switchLang('de')">????</button>
-        <button class="lang-option" data-lang="es" role="menuitem" onclick="switchLang('es')">????</button>
-        <button class="lang-option" data-lang="it" role="menuitem" onclick="switchLang('it')">????</button>
-        <button class="lang-option" data-lang="pt" role="menuitem" onclick="switchLang('pt')">????</button>
-        <button class="lang-option" data-lang="ru" role="menuitem" onclick="switchLang('ru')">????</button>
-        <button class="lang-option" data-lang="ja" role="menuitem" onclick="switchLang('ja')">????</button>
-        <button class="lang-option" data-lang="ko" role="menuitem" onclick="switchLang('ko')">????</button>
-        <button class="lang-option" data-lang="zh" role="menuitem" onclick="switchLang('zh')">????</button>
-      </div>
     <button class="titlebar-action-btn game-mode-toggle-btn has-tooltip has-tooltip--bottom" id="btnGameModeToggle" onclick="toggleGameMode()" type="button" data-tooltip="Game Mode" data-i18n-title="game_mode_toggle" data-i18n-aria-label="game_mode_toggle" aria-label="Game Mode" aria-pressed="false">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 18v2"/><path d="M18 18v2"/></svg>
     </button>
     <button class="titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable" id="btnCastToggle" type="button" data-tooltip="Hub Cast" aria-label="Hub Cast" onclick="toggleHubCast()">
-      <span id="castStatusIcon">??</span>
+      <span id="castStatusIcon" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="2.2"/>
+          <circle cx="5.5" cy="6.5" r="1.4"/>
+          <circle cx="18.5" cy="6.5" r="1.4"/>
+          <circle cx="12" cy="18.5" r="1.4"/>
+          <path d="M6.8 7.6 10.1 10.4"/>
+          <path d="M17.2 7.6 13.9 10.4"/>
+          <path d="M12 14.4v2.1"/>
+        </svg>
+      </span>
     </button>
     <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="btnRebootSidekick" onclick="confirmReboot()" type="button" data-tooltip="Neustarten (Browser+Caches+Server)" aria-label="Neustarten">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -496,6 +547,21 @@
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
     </button>
   </div>
+  <script>
+    (function initInitialSpaceLabel(){
+      var slug = '';
+      try { slug = (new URLSearchParams(window.location.search || '').get('workspace') || '').trim().toLowerCase(); } catch (_) {}
+      if (!slug) {
+        try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
+      }
+      if (!slug) slug = 'nova';
+      if (!slug) return;
+      var name = document.getElementById('titlebarSpaceName');
+      var btn = document.getElementById('titlebarSpaceBtn');
+      if (name) name.textContent = slug;
+      if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
+    })();
+  </script>
 </header>
 <div class="layout">
   <nav class="rail" aria-label="Primary navigation">
@@ -1226,7 +1292,7 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
             </button>
             <div class="composer-divider" aria-hidden="true"></div>
-            <button type="button" class="icon-btn has-tooltip browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" data-tooltip="Browser drawer" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer">
+            <button type="button" class="icon-btn has-tooltip browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" data-tooltip="Browser drawer" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer" data-testid="composer-browser-drawer-button">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="4" width="18" height="16" rx="2"/>
                 <path d="M3 8h18"/>
@@ -1449,7 +1515,7 @@
             <button type="button" class="browser-backend-status" id="browserBackendStatus" data-tooltip="Toggle web backend" aria-label="Toggle web backend" onclick="browserToggleWebBackend()">Web auto</button>
             <span class="browser-permission-status" id="browserPermissionStatus">Agent locked</span>
             <div class="panel-actions">
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserPermissionBtn" data-tooltip="Allow Nova agent browser control" aria-label="Allow Nova agent browser control" aria-pressed="false" onclick="browserTogglePermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.5-2.2"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserPermissionBtn" data-tooltip="Allow Nova agent to watch and run browser QA" aria-label="Allow Nova agent to watch and run browser QA" aria-pressed="false" onclick="browserTogglePermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.5-2.2"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserExploreBtn" data-tooltip="Switch to Explore mode" aria-label="Switch to Explore mode" aria-pressed="false" onclick="browserToggleExploreMode()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserAgentStopBtn" data-tooltip="Stop Nova agent browser handoff" aria-label="Stop Nova agent browser handoff" onclick="browserStopPermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnBack" data-tooltip="Back" aria-label="Back" onclick="browserGoBack()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
@@ -1460,6 +1526,11 @@
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnOpenTab" data-tooltip="Maximize browser" aria-label="Maximize browser" aria-pressed="false" onclick="browserToggleFullscreen()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendPageContextBtn" data-tooltip="Send readable page text to chat" aria-label="Send readable page text to chat" onclick="browserSendPageContextToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendFullPageContextBtn" data-tooltip="Send full page context to chat" aria-label="Send full page context to chat" onclick="browserSendFullPageContextToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/><path d="M8 11h8"/><path d="M8 15h8"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserQaBtn" data-tooltip="Run browser QA" aria-label="Run browser QA" onclick="browserRunBrowserQaToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z"/><path d="M9 12l2 2 4-5"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserWebuiSmokeBtn" data-tooltip="Run WebUI smoke" aria-label="Run WebUI smoke" onclick="browserRunWebuiSmokeToChat()" data-testid="browser-drawer-webui-smoke-button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 20h10"/><path d="M10 18v2"/><path d="M14 18v2"/><path d="M8 11l2 2 5-5"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserTestPageBtn" data-tooltip="Test current page" aria-label="Test current page" onclick="browserTestCurrentPageToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2 2 4-4"/><path d="M20 6L9 17l-5-5"/><path d="M4 20h16"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserRetestPageBtn" data-tooltip="Retest current page" aria-label="Retest current page" onclick="browserRetestCurrentPageToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserFixFindingsBtn" data-tooltip="Fix browser findings" aria-label="Fix browser findings" onclick="browserFixFindingsToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5l-2.2 2.2-3-3 2.2-2.2z"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendToChatBtn" data-tooltip="Send screenshot to chat" aria-label="Send screenshot to chat" onclick="browserSendScreenshotToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom browser-drawer-close-btn" id="browserBtnCloseDrawer" data-tooltip="Close browser drawer" aria-label="Close browser drawer" onclick="browserPanelDeactivated()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
@@ -1477,6 +1548,22 @@
           </div>
           <div class="browser-status-detail" id="browserActionSummary" aria-live="polite"></div>
           <div class="browser-action-trace" id="browserActionTrace" aria-label="Browser action trace" aria-live="polite"></div>
+          <div class="browser-qa-card" id="browserQaCard" hidden aria-live="polite">
+            <div class="browser-qa-main">
+              <span class="browser-qa-status" id="browserQaCardStatus">QA</span>
+              <span class="browser-qa-url" id="browserQaCardUrl">No browser QA report yet</span>
+            </div>
+            <div class="browser-qa-metrics" id="browserQaCardMetrics"></div>
+            <div class="browser-qa-actions">
+              <button type="button" class="browser-qa-action-btn" id="browserQaFixBtn" onclick="browserFixFindingsToChat()">Fix</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaRetestBtn" onclick="browserRetestCurrentPageToChat()">Retest</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaReproBtn" onclick="browserQaReproToChat()">Repro</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaCopyBtn" onclick="browserCopyQaReport()">Copy</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaDetailsBtn" aria-expanded="false" onclick="browserToggleQaDetails()">Details</button>
+              <button type="button" class="browser-qa-action-btn browser-qa-clear-btn" id="browserQaClearBtn" onclick="browserClearQaReports()">Clear</button>
+            </div>
+            <div class="browser-qa-details" id="browserQaDetails" hidden></div>
+          </div>
           <div class="browser-stage-wrap" id="browserStageWrap">
             <div class="browser-stage" id="browserStage" aria-label="Browser viewport" role="application">
               <img id="browserFrameImage" class="browser-frame-image" alt="Browser screenshot" src="" draggable="false">
@@ -1488,7 +1575,7 @@
                 <div class="browser-diff-overlay" id="browserDiffOverlay" aria-hidden="true">Change detected</div>
               </div>
             </div>
-            <div class="browser-empty-state" id="browserEmptyState">
+            <div class="browser-empty-state" id="browserEmptyState" aria-hidden="true">
               <div class="browser-empty-title">Browser not attached</div>
               <div class="browser-empty-text">Open a chat session to attach the browser runtime.</div>
             </div>
@@ -2528,10 +2615,10 @@
 <script src="static/api-auth.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/i18n.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/icons.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/workspace.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/ui.js?v=__WEBUI_VERSION__&workflow=5" defer></script>
+<script src="static/workspace.js?v=__WEBUI_VERSION__&defer=2" defer></script>
 <script src="static/terminal.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/sessions.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/sessions.js?v=__WEBUI_VERSION__&perf=11" defer></script>
 <script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
 <script>
@@ -2575,13 +2662,13 @@
     };
   })();
 </script>
-<script src="static/browser.js?v=__WEBUI_VERSION__&split=5" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/browser.js?v=__WEBUI_VERSION__&split=70" defer></script>
+<script src="static/panels.js?v=__WEBUI_VERSION__&filetree=1" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/spaces.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/spaces.js?v=__WEBUI_VERSION__&perf=5" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/gmail.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/enhancements.js?v=__WEBUI_VERSION__&sessions=2" defer></script>
 <script src="static/power.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/discord.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>

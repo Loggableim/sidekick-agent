@@ -12,7 +12,9 @@ from pathlib import Path
 
 
 def get_nova_space_root() -> Path:
-    raw_home = (os.getenv("SIDEKICK_HOME") or "").strip()
+    # Prefer the active Sidekick home, but keep the legacy HERMES_HOME
+    # fallback so older installs and tests continue to resolve correctly.
+    raw_home = (os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME") or "").strip()
     if raw_home:
         return Path(raw_home).expanduser() / "spaces" / "nova"
     return Path(__file__).resolve().parents[2] / "home" / "spaces" / "nova"

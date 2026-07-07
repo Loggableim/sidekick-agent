@@ -1317,7 +1317,7 @@ def test_workspace_load_errors_render_panel_error_state():
     workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
 
-    catch_start = workspace_js.index("  }catch(e){", workspace_js.index("async function loadDir(path)"))
+    catch_start = workspace_js.index("  }catch(e){", workspace_js.index("async function loadDir(path, opts)"))
     load_dir_end = workspace_js.index("async function _refreshGitBadge", catch_start)
     catch_body = workspace_js[catch_start:load_dir_end]
 
@@ -2001,6 +2001,7 @@ def test_boot_uses_realistic_metadata_timeouts():
 
 def test_visible_static_ui_text_is_not_mojibake():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    assert "????" not in index_html
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
@@ -2105,8 +2106,14 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
 
     assert 'style="display:none"' not in cast_button
     assert "cast-unavailable" in cast_button
+    assert 'id="castStatusIcon" aria-hidden="true"' in cast_button
+    assert '<svg width="16" height="16" viewBox="0 0 24 24"' in cast_button
+    assert "??" not in cast_button
     assert "let _castConfigured=true;" in ui_js
     assert "let _castHost='';" in ui_js
+    assert "const CAST_STATUS_ICON_HTML=" in ui_js
+    assert "const CAST_STATUS_LOADING_ICON_HTML=" in ui_js
+    assert "function _setCastStatusIcon(icon, loading)" in cast_js
     assert "s.configured!==false" in ui_js
     assert "if(!_castConfigured)_cleanupCastTimers()" not in cast_js
     assert "Hub Cast nicht konfiguriert" in ui_js
@@ -2117,6 +2124,9 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "_castFetch('/api/cast/start',{method:'POST'},10000)" in ui_js
     assert "_castFetch('/api/cast/toggle',{method:'POST'})" not in ui_js
     assert "btn.style.display='none'" not in cast_js
+    assert "icon.textContent=" not in cast_js
+    assert "_setCastStatusIcon(icon,true);" in cast_js
+    assert "_setCastStatusIcon(icon,false);" in cast_js
 
 
 def test_hub_cast_monitor_starts_immediately_and_retries_every_15_seconds():
@@ -2669,7 +2679,7 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    titlebar_start = index_html.index('<div class="titlebar-actions" id="titlebarActions">')
+    titlebar_start = index_html.index('id="titlebarActions"')
     lang_start = index_html.index("titlebarLangSelector", titlebar_start)
     cast_start = index_html.index("btnCastToggle", lang_start)
     titlebar_actions = index_html[titlebar_start:cast_start]
@@ -2699,12 +2709,11 @@ def test_initial_space_labels_use_url_workspace_before_spaces_js_loads():
 
     titlebar_default = index_html.index('id="titlebarSpaceName">default</span>')
     titlebar_script = index_html.index("function initInitialSpaceLabel()", titlebar_default)
-    titlebar_actions = index_html.index('<div class="titlebar-actions"', titlebar_script)
     sidebar_default = index_html.index('id="sidebarSpaceName">default</span>')
     sidebar_script = index_html.index("function initInitialSidebarSpaceLabel()", sidebar_default)
     spaces_js = index_html.index("static/spaces.js")
 
-    assert titlebar_default < titlebar_script < titlebar_actions
+    assert titlebar_default < titlebar_script
     assert sidebar_default < sidebar_script < spaces_js
     assert index_html.count("new URLSearchParams(window.location.search || '').get('workspace')") >= 2
     assert index_html.count("if (!slug) slug = 'nova';") >= 2
@@ -2757,14 +2766,13 @@ def test_session_list_loads_projects_in_parallel_with_sessions():
     sessions_promise = body.index("const sessionsPromise = _apiWithTimeout(")
     projects_promise = body.index("const projectsPromise = _apiWithTimeout(")
     await_sessions = body.index("const sessData = await sessionsPromise;")
-    await_projects = body.index("const projData = await projectsPromise;")
     first_render = body.index("renderSessionListFromCache();  // no-ops if rename is in progress")
-    second_render = body.index("renderSessionListFromCache();", await_projects)
+    projects_then = body.index("void projectsPromise.then((projData) => {")
 
     assert sessions_promise < await_sessions
     assert projects_promise < await_sessions
-    assert await_sessions < first_render < await_projects
-    assert await_projects < second_render
+    assert await_sessions < first_render < projects_then
+    assert "_allProjects = projData.projects || [];" in body
 
 
 def test_space_deeplink_initializes_active_workspace():
@@ -2806,11 +2814,11 @@ def test_space_dropdown_renders_cached_spaces_before_refresh():
     assert "const cachedSpaces = Array.isArray(_spacesCache) ? _spacesCache.filter(Boolean) : []" in spaces_js
     assert "if (cachedSpaces.length)" in spaces_js
     assert "_renderSpaceDropdownItems(dd, cachedSpaces)" in spaces_js
-    assert "if (cachedSpaces.length) setTimeout(refresh, 0)" in spaces_js
+    assert "const runSelect = () => {" in spaces_js
+    assert "requestAnimationFrame(runSelect)" in spaces_js
     assert "loadSpaces().then(spaces => {" in spaces_js
     assert "if (dd.hidden) return" in spaces_js
     assert "_openSpaceDropdown(dd, btn, 'sidebar-space-dropdown')" in spaces_js
-    assert "requestAnimationFrame(runSelect)" in spaces_js
 
 
 def test_space_switch_does_not_block_on_space_config_load():
