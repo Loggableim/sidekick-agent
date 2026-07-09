@@ -281,3 +281,119 @@ def test_gateway_adapter_fatal_error_contract_is_boolean_property():
     assert telegram.fatal_error_retryable is False
     assert telegram.fatal_error_code == "InvalidToken"
     assert "rejected" in telegram.fatal_error_message
+
+
+def test_telegram_tls_verify_source_prefers_ssl_cert_file(monkeypatch, tmp_path):
+    from runtime.gateway.platforms import telegram as telegram_mod
+
+    cert_file = tmp_path / "custom-ca.pem"
+    cert_file.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert_file))
+
+    verify_source = telegram_mod._telegram_tls_verify_source()
+
+    assert verify_source == str(cert_file)
+
+
+def test_telegram_tls_verify_source_falls_back_to_certifi(monkeypatch):
+    from runtime.gateway.platforms import telegram as telegram_mod
+    import certifi
+
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+
+    verify_source = telegram_mod._telegram_tls_verify_source()
+
+    assert verify_source == certifi.where()
+
+
+def test_telegram_connect_uses_explicit_ca_bundle_for_polling_requests(monkeypatch, tmp_path):
+    from runtime.gateway.platforms import telegram as telegram_mod
+
+    cert_file = tmp_path / "custom-ca.pem"
+    cert_file.write_text("dummy", encoding="utf-8")
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert_file))
+
+    request_calls = []
+
+    class FakeRequest:
+        def __init__(self, *args, **kwargs):
+            request_calls.append({"args": args, "kwargs": kwargs})
+
+    class FakeUpdater:
+        def __init__(self):
+            self.started = False
+
+        async def start_polling(self):
+            self.started = True
+
+    class FakeApp:
+        def __init__(self, builder_state):
+            self.builder_state = builder_state
+            self.handlers = []
+            self.updater = FakeUpdater()
+            self.initialized = False
+            self.started = False
+
+        def add_handler(self, handler):
+            self.handlers.append(handler)
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def start(self):
+            self.started = True
+
+        async def stop(self):
+            return None
+
+        async def shutdown(self):
+            return None
+
+    class FakeBuilder:
+        def __init__(self):
+            self.state = {"token": None, "request": None, "get_updates_request": None}
+
+        def token(self, token):
+            self.state["token"] = token
+            return self
+
+        def request(self, request):
+            self.state["request"] = request
+            return self
+
+        def get_updates_request(self, request):
+            self.state["get_updates_request"] = request
+            return self
+
+        def build(self):
+            return FakeApp(self.state)
+
+    class FakeApplication:
+        @staticmethod
+        def builder():
+            return FakeBuilder()
+
+    monkeypatch.setattr(telegram_mod, "HTTPXRequest", FakeRequest)
+    monkeypatch.setattr(telegram_mod, "Application", FakeApplication, raising=False)
+
+    async def run_case():
+        adapter = TelegramAdapter(PlatformConfig(token="telegram-token"))
+        import telegram.ext as telegram_ext
+        monkeypatch.setattr(telegram_ext, "Application", FakeApplication)
+
+        result = await adapter.connect()
+        app = adapter._app
+
+        assert result is True
+        assert app.initialized is True
+        assert app.started is True
+        assert app.updater.started is True
+        assert len(app.handlers) == 3
+        assert app.builder_state["token"] == "telegram-token"
+        assert app.builder_state["request"] is not app.builder_state["get_updates_request"]
+        assert request_calls[0]["kwargs"]["httpx_kwargs"]["verify"] == str(cert_file)
+        assert request_calls[1]["kwargs"]["httpx_kwargs"]["verify"] == str(cert_file)
+        assert request_calls[0]["kwargs"]["connection_pool_size"] == 256
+        assert request_calls[1]["kwargs"]["connection_pool_size"] == 1
+
+    asyncio.run(run_case())

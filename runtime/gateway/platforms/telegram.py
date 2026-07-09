@@ -13,6 +13,11 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+try:
+    from telegram.request import HTTPXRequest
+except Exception:  # pragma: no cover - optional dependency guard
+    HTTPXRequest = None  # type: ignore[assignment]
+
 from runtime.gateway.config import PlatformConfig
 from runtime.gateway.platforms.base import (
     BasePlatformAdapter,
@@ -35,6 +40,51 @@ def check_telegram_requirements() -> bool:
         return True
     except ImportError:
         return False
+
+
+def _telegram_tls_verify_source() -> str | None:
+    """Return a concrete CA bundle path for Telegram HTTPX clients."""
+    candidates: list[str] = []
+
+    env_cert = os.getenv("SSL_CERT_FILE", "").strip()
+    if env_cert:
+        candidates.append(env_cert)
+
+    try:
+        import certifi
+
+        candidates.append(certifi.where())
+    except Exception:
+        pass
+
+    try:
+        import ssl
+
+        paths = ssl.get_default_verify_paths()
+        candidates.extend([
+            str(paths.cafile or "").strip(),
+            str(paths.openssl_cafile or "").strip(),
+        ])
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        if candidate and Path(candidate).expanduser().exists():
+            return str(Path(candidate).expanduser())
+    return None
+
+
+def _build_telegram_httpx_request(connection_pool_size: int):
+    if HTTPXRequest is None:
+        raise RuntimeError("telegram.request.HTTPXRequest is unavailable")
+    httpx_kwargs: dict[str, Any] = {}
+    verify_source = _telegram_tls_verify_source()
+    if verify_source:
+        httpx_kwargs["verify"] = verify_source
+    return HTTPXRequest(
+        connection_pool_size=connection_pool_size,
+        httpx_kwargs=httpx_kwargs or None,
+    )
 
 
 class TelegramAdapter(BasePlatformAdapter):
@@ -80,7 +130,13 @@ class TelegramAdapter(BasePlatformAdapter):
             return False
         try:
             from telegram.ext import Application, MessageHandler, filters
-            self._app = Application.builder().token(self._token).build()
+            self._app = (
+                Application.builder()
+                .token(self._token)
+                .request(_build_telegram_httpx_request(connection_pool_size=256))
+                .get_updates_request(_build_telegram_httpx_request(connection_pool_size=1))
+                .build()
+            )
             self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
             self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
             self._app.add_handler(MessageHandler(filters.COMMAND, self._on_cmd))
