@@ -87,6 +87,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -425,6 +426,19 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
         resolved_env = _prepend_path(resolved_env, command_dir)
 
     return resolved_command, resolved_env
+
+
+def _wrap_stdio_command(command: str, args: list[str]) -> tuple[str, list[str]]:
+    """Wrap a stdio MCP command in the JSON-RPC stdout filter proxy.
+
+    MCP stdio servers are expected to reserve stdout for JSON-RPC only.
+    Some third-party servers still leak banners or token refresh messages
+    onto stdout. The proxy preserves protocol traffic and diverts stray
+    stdout noise to stderr so the MCP SDK never sees it as malformed JSON.
+    """
+    proxy_script = Path(__file__).resolve().with_name("mcp_stdio_proxy.py")
+    proxy_args = [str(proxy_script), str(command), *[str(arg) for arg in (args or [])]]
+    return sys.executable, proxy_args
 
 
 # ---------------------------------------------------------------------------
@@ -1191,6 +1205,9 @@ class MCPServerTask:
 
         safe_env = _build_safe_env(user_env)
         command, safe_env = _resolve_stdio_command(command, safe_env)
+        # Wrap stdio servers so protocol-violating stdout banners don't reach
+        # the MCP SDK and poison the JSON-RPC reader.
+        command, args = _wrap_stdio_command(command, list(args or []))
 
         # Check package against OSV malware database before spawning
         from tools.osv_check import check_package_for_malware
