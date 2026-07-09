@@ -165,3 +165,68 @@ def test_gmail_related_only_strips_reply_or_forward_prefixes(monkeypatch):
     related = gmail_tools._ai_find_related("1", "dominik")
 
     assert [item["id"] for item in related] == ["3"]
+
+
+def test_mail_imap_cache_distinguishes_port_and_ssl_mode(monkeypatch):
+    from tools import mail_imap
+
+    mail_imap.flush_imap_cache()
+    created = []
+
+    class FakeIMAP:
+        def __init__(self, kind, host, port, **kwargs):
+            self.kind = kind
+            self.host = host
+            self.port = port
+            self.kwargs = kwargs
+            self.noop_count = 0
+            self.closed = False
+            created.append(self)
+
+        def noop(self):
+            self.noop_count += 1
+            return "OK", [b"alive"]
+
+        def close(self):
+            self.closed = True
+
+        def logout(self):
+            self.closed = True
+
+        def login(self, user, password):
+            return "OK", [b"logged in"]
+
+    monkeypatch.setattr(
+        mail_imap.imaplib,
+        "IMAP4_SSL",
+        lambda host, port, timeout=None, ssl_context=None: FakeIMAP("ssl", host, port, timeout=timeout, ssl_context=ssl_context),
+    )
+    monkeypatch.setattr(
+        mail_imap.imaplib,
+        "IMAP4",
+        lambda host, port, timeout=None: FakeIMAP("plain", host, port, timeout=timeout),
+    )
+
+    first = mail_imap.get_imap(
+        {
+            "imap_host": "imap.example.org",
+            "imap_port": 993,
+            "imap_user": "user@example.org",
+            "imap_pass": "secret",
+            "use_ssl": True,
+        }
+    )
+    second = mail_imap.get_imap(
+        {
+            "imap_host": "imap.example.org",
+            "imap_port": 1143,
+            "imap_user": "user@example.org",
+            "imap_pass": "secret",
+            "use_ssl": True,
+        }
+    )
+
+    assert first is not second
+    assert len(created) == 2
+    assert created[0].port == 993
+    assert created[1].port == 1143
