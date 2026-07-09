@@ -328,27 +328,53 @@ def test_dream_tick_defers_when_qwen_offline(monkeypatch, tmp_path):
     assert events[0]["steps"][-1] == "qwen_offline_deferred"
 
 
-def test_dream_tick_defers_in_game_mode_before_model_health(monkeypatch, tmp_path):
+def test_dream_tick_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     import web.api.nova_lifecycle as lifecycle
+    import runtime.auxiliary_client as aux
+    from types import SimpleNamespace
 
     monkeypatch.setattr(lifecycle, "_game_mode_enabled", lambda: True)
 
     def fail_local_script(*args, **kwargs):
-        raise AssertionError("Game Mode must not touch local LLM scripts")
+        raise AssertionError("Game Mode should not touch local LLM scripts")
 
     monkeypatch.setattr(lifecycle, "_run_local_script", fail_local_script)
+
+    captured = {}
+
+    def fake_call_llm(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="  Traum aus DeepSeek V4 Flash  ",
+                        reasoning=None,
+                        reasoning_content=None,
+                        reasoning_details=None,
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(aux, "call_llm", fake_call_llm)
 
     result = lifecycle.dream_tick()
     events = lifecycle.load_events(limit=1, include_private=True)
 
     assert result["ok"] is True
-    assert result["deferred"] is True
-    assert result["reason"] == "game_mode_enabled"
     assert result["game_mode_enabled"] is True
-    assert events[0]["status"] == "deferred"
-    assert events[0]["steps"][-1] == "game_mode_deferred"
+    assert result["remote_provider"] == "opencode-go"
+    assert result["remote_model"] == "deepseek-v4-flash"
+    assert "DeepSeek V4 Flash" in result["narrative_preview"]
+    assert captured["provider"] == "opencode-go"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert events[0]["status"] == "completed"
+    assert events[0]["steps"][-1] == "dream_remote_done"
+    assert events[0]["remote_provider"] == "opencode-go"
+    assert events[0]["remote_model"] == "deepseek-v4-flash"
 
 
 def test_game_mode_enabled_uses_current_settings_parent(monkeypatch, tmp_path):

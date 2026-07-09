@@ -959,22 +959,103 @@ def background_tick() -> dict[str, Any]:
         return {"ok": False, "event_id": event["event_id"], "error": repr(exc)}
 
 
+def _game_mode_remote_dream_reflection() -> dict[str, Any]:
+    """Run Nova's dream/reflection tick through the remote DeepSeek path."""
+    recent_events = load_events(limit=3, include_private=True)
+    event_lines = []
+    for item in recent_events:
+        kind = str(item.get("type") or "event")
+        status = str(item.get("status") or "unknown")
+        steps = ", ".join(str(step) for step in (item.get("steps") or [])[:6])
+        suffix = f" [{steps}]" if steps else ""
+        event_lines.append(f"- {kind}: {status}{suffix}")
+    recent_summary = "\n".join(event_lines) if event_lines else "- none"
+    system_prompt = (
+        "You are Nova. Write a concise, vivid, dreamlike German reflection. "
+        "Do not mention local GPU models. Keep it short and expressive."
+    )
+    user_prompt = (
+        "Game Mode is active, so use the remote DeepSeek V4 Flash connection "
+        "via opencode-go instead of any local model.\n\n"
+        "Recent Nova lifecycle events:\n"
+        f"{recent_summary}\n\n"
+        "Respond with a short dream reflection in German."
+    )
+    try:
+        from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
+
+        response = call_llm(
+            provider="opencode-go",
+            model="deepseek-v4-flash",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.9,
+            max_tokens=256,
+            timeout=180,
+        )
+        content = extract_content_or_reasoning(response).strip()
+        if not content:
+            return {
+                "ok": False,
+                "provider": "opencode-go",
+                "model": "deepseek-v4-flash",
+                "error": "remote dream returned empty content",
+            }
+        return {
+            "ok": True,
+            "provider": "opencode-go",
+            "model": "deepseek-v4-flash",
+            "content": content,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "provider": "opencode-go",
+            "model": "deepseek-v4-flash",
+            "error": repr(exc),
+        }
+
+
 def dream_tick() -> dict[str, Any]:
     event = _append_event(_new_event("dream_tick"))
     if _game_mode_enabled():
+        remote = _game_mode_remote_dream_reflection()
+        if remote.get("ok"):
+            _update_event(
+                event,
+                step="dream_remote_done",
+                status="completed",
+                completed_at=_now(),
+                remote_provider=remote.get("provider"),
+                remote_model=remote.get("model"),
+                remote_preview=remote.get("content", "")[:300],
+            )
+            return {
+                "ok": True,
+                "event_id": event["event_id"],
+                "game_mode_enabled": True,
+                "remote_provider": remote.get("provider"),
+                "remote_model": remote.get("model"),
+                "narrative_preview": remote.get("content", "")[:300],
+            }
         _update_event(
             event,
-            step="game_mode_deferred",
-            status="deferred",
-            deferred_reason="game_mode_enabled",
+            step="dream_remote_failed",
+            status="failed",
+            error=remote.get("error"),
             completed_at=None,
+            remote_provider=remote.get("provider"),
+            remote_model=remote.get("model"),
         )
         return {
-            "ok": True,
+            "ok": False,
             "event_id": event["event_id"],
-            "deferred": True,
-            "reason": "game_mode_enabled",
             "game_mode_enabled": True,
+            "error": remote.get("error"),
+            "remote_provider": remote.get("provider"),
+            "remote_model": remote.get("model"),
         }
     model_health = _parse_model_health(_run_local_script("local_llm_bridge.py", "--health", timeout=15))
     if not model_health["models"].get("8082", {}).get("online"):
