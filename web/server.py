@@ -484,7 +484,9 @@ def _release_game_mode_resources_on_startup() -> None:
         return
 
     try:
-        from web.api.game_mode import release_game_mode_resources
+        from web.api.game_mode import release_game_mode_resources, sync_game_mode_runtime_state
+
+        sync_game_mode_runtime_state(True, action="blocked", details={"source": "startup"})
 
         result = release_game_mode_resources()
         cancelled = len(result.get("cancelled_local_streams") or [])

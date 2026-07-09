@@ -5,6 +5,8 @@ import logging
 import os
 import socket
 import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -194,6 +196,81 @@ def _unload_ollama_models() -> dict:
             result.setdefault("base_url", base_url)
             unloaded.append(result)
     return {"checked": checked, "unloaded": unloaded}
+
+
+def _game_mode_lock_paths() -> tuple[Path, ...]:
+    try:
+        lock_paths = tuple(cfg._game_mode_lock_paths())
+        if lock_paths:
+            return lock_paths
+    except Exception:
+        pass
+    try:
+        state_dir = Path(cfg.SETTINGS_FILE).parent
+        legacy_lock = state_dir.parent / "game_mode.lock"
+        return (state_dir / "game_mode.lock", legacy_lock)
+    except Exception:
+        return (
+            Path("C:/sidekick/home/state/webui/game_mode.lock"),
+            Path("C:/sidekick/home/state/game_mode.lock"),
+        )
+
+
+def _game_mode_watchdog_state_path() -> Path:
+    try:
+        settings_file = Path(cfg.SETTINGS_FILE)
+        return settings_file.parent.parent / "gpu_watchdog_state.json"
+    except Exception:
+        return Path("C:/sidekick/home/state/gpu_watchdog_state.json")
+
+
+def sync_game_mode_runtime_state(
+    enabled: bool,
+    *,
+    action: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Synchronize the lock file and watchdog state with the desired Game Mode state."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    lock_results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for lock_path in _game_mode_lock_paths():
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            if enabled:
+                lock_path.write_text(timestamp, encoding="utf-8")
+                lock_results.append({"path": str(lock_path), "status": "written"})
+            else:
+                if lock_path.exists():
+                    lock_path.unlink()
+                    lock_results.append({"path": str(lock_path), "status": "removed"})
+                else:
+                    lock_results.append({"path": str(lock_path), "status": "absent"})
+        except Exception as exc:
+            errors.append({"path": str(lock_path), "error": repr(exc)[:240]})
+
+    state_path = _game_mode_watchdog_state_path()
+    state_payload = {
+        "last_game_mode": bool(enabled),
+        "last_action": action or ("blocked" if enabled else "unblocked"),
+        "last_check": timestamp,
+        "last_details": details or {},
+    }
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        errors.append({"path": str(state_path), "error": repr(exc)[:240]})
+
+    return {
+        "ok": not errors,
+        "game_mode_enabled": bool(enabled),
+        "locks": lock_results,
+        "state_file": str(state_path),
+        "state": state_payload,
+        "errors": errors,
+    }
 
 
 def _cancel_stream(stream_id: str) -> bool:

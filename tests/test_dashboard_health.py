@@ -3345,7 +3345,12 @@ def test_settings_post_runs_game_mode_release_when_enabling(monkeypatch, tmp_pat
     from web.api import game_mode
     from web.api import routes
 
-    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    watchdog_state = tmp_path / "home" / "state" / "gpu_watchdog_state.json"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
     cfg.save_settings({"game_mode_enabled": False})
     monkeypatch.setattr(
         game_mode,
@@ -3392,10 +3397,77 @@ def test_settings_post_runs_game_mode_release_when_enabling(monkeypatch, tmp_pat
     assert handler.status_code == 200
     payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
     assert payload["game_mode_enabled"] is True
+    assert payload["game_mode_sync"]["ok"] is True
     assert "game_mode_release" in payload
     assert "cancelled_local_streams" in payload["game_mode_release"]
     assert "ollama" in payload["game_mode_release"]
     assert "local_model_servers" in payload["game_mode_release"]
+    assert active_lock.exists()
+    assert legacy_lock.exists()
+    assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is True
+
+
+def test_settings_post_clears_game_mode_lock_when_disabling(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from web.api import config as cfg
+    from web.api import routes
+
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    watchdog_state = tmp_path / "home" / "state" / "gpu_watchdog_state.json"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
+    cfg.save_settings({"game_mode_enabled": True})
+    active_lock.parent.mkdir(parents=True, exist_ok=True)
+    legacy_lock.parent.mkdir(parents=True, exist_ok=True)
+    active_lock.write_text("stale", encoding="utf-8")
+    legacy_lock.write_text("stale", encoding="utf-8")
+    watchdog_state.parent.mkdir(parents=True, exist_ok=True)
+    watchdog_state.write_text(
+        json.dumps({"last_game_mode": True, "last_action": "blocked"}),
+        encoding="utf-8",
+    )
+
+    body = json.dumps({"game_mode_enabled": False}).encode("utf-8")
+
+    class _Handler:
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+            "Host": "127.0.0.1",
+        }
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_post(handler, urlparse("/api/settings"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["game_mode_enabled"] is False
+    assert payload["game_mode_sync"]["ok"] is True
+    assert not active_lock.exists()
+    assert not legacy_lock.exists()
+    assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is False
 
 
 def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path):
@@ -3752,7 +3824,12 @@ def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch,
     from web.api import game_mode
     from web import server
 
-    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    watchdog_state = tmp_path / "home" / "state" / "gpu_watchdog_state.json"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
     cfg.save_settings({"game_mode_enabled": True})
 
     calls = []
@@ -3765,6 +3842,9 @@ def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch,
     server._release_game_mode_resources_on_startup()
 
     assert calls == ["release"]
+    assert active_lock.exists()
+    assert legacy_lock.exists()
+    assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is True
 
 
 def test_game_mode_titlebar_button_and_settings_ui_are_wired():

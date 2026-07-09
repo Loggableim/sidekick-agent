@@ -7222,19 +7222,32 @@ def handle_post(handler, parsed) -> bool:
 
         saved = save_settings(body)
         saved.pop("password_hash", None)  # never expose hash to client
-        if "game_mode_enabled" in body and saved.get("game_mode_enabled"):
+        if "game_mode_enabled" in body:
             try:
-                from web.api.game_mode import release_game_mode_resources
+                from web.api.game_mode import release_game_mode_resources, sync_game_mode_runtime_state
 
-                saved["game_mode_release"] = release_game_mode_resources()
+                game_mode_enabled = bool(saved.get("game_mode_enabled"))
+                saved["game_mode_sync"] = sync_game_mode_runtime_state(
+                    game_mode_enabled,
+                    action="blocked" if game_mode_enabled else "unblocked",
+                    details={"source": "settings"},
+                )
+                if game_mode_enabled:
+                    saved["game_mode_release"] = release_game_mode_resources()
             except Exception as exc:
-                logger.warning("Game Mode resource release failed", exc_info=True)
-                saved["game_mode_release"] = {
-                    "error": repr(exc)[:240],
-                    "cancelled_local_streams": [],
-                    "ollama": {"checked": [], "unloaded": []},
-                    "local_model_servers": [],
+                logger.warning("Game Mode runtime sync failed", exc_info=True)
+                saved["game_mode_sync"] = {
+                    "ok": False,
+                    "game_mode_enabled": bool(saved.get("game_mode_enabled")),
+                    "errors": [{"error": repr(exc)[:240]}],
                 }
+                if bool(saved.get("game_mode_enabled")):
+                    saved["game_mode_release"] = {
+                        "error": repr(exc)[:240],
+                        "cancelled_local_streams": [],
+                        "ollama": {"checked": [], "unloaded": []},
+                        "local_model_servers": [],
+                    }
 
         auth_enabled_after = is_auth_enabled()
         auth_just_enabled = bool(
