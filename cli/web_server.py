@@ -808,6 +808,8 @@ def _run_git(path: Path, *args: str) -> Optional[str]:
             cwd=str(path),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         if res.returncode == 0:

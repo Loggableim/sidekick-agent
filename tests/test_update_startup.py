@@ -105,6 +105,24 @@ def test_import_web_server_does_not_run_git():
     assert result.returncode == 0, result.stderr
 
 
+def test_web_server_run_git_uses_utf8_decode_guards(monkeypatch, tmp_path):
+    import cli.web_server as web_server
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="status ok")
+
+    monkeypatch.setattr(web_server.subprocess, "run", fake_run)
+
+    assert web_server._run_git(tmp_path, "status") == "status ok"
+    assert captured["cmd"] == ["git", "status"]
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
+
+
 def test_tui_node_bootstrap_uses_hermes_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
     import cli.main as main
 
