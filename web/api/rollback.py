@@ -143,7 +143,7 @@ def _inspect_checkpoint(ckpt_path: Path, git: str) -> dict[str, Any] | None:
     try:
         result = subprocess.run(
             [git, "-C", str(ckpt_path), "log", "--format=%H%n%s%n%aI", "-1"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
@@ -165,7 +165,7 @@ def _inspect_checkpoint(ckpt_path: Path, git: str) -> dict[str, Any] | None:
         # Count files
         files_result = subprocess.run(
             [git, "-C", str(ckpt_path), "ls-files"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         file_count = len(files_result.stdout.strip().split("\n")) if files_result.stdout.strip() else 0
 
@@ -203,7 +203,7 @@ def get_checkpoint_diff(workspace: str, checkpoint: str) -> dict[str, Any]:
     # Get list of files in the checkpoint
     ls_result = subprocess.run(
         [git, "-C", str(ckpt_dir), "ls-files"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     if ls_result.returncode != 0:
         raise ValueError("Failed to list checkpoint files")
@@ -287,7 +287,7 @@ def restore_checkpoint(workspace: str, checkpoint: str) -> dict[str, Any]:
     # Get list of files in the checkpoint
     ls_result = subprocess.run(
         [git, "-C", str(ckpt_dir), "ls-files"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     if ls_result.returncode != 0:
         raise ValueError("Failed to list checkpoint files")

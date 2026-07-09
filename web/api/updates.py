@@ -63,7 +63,7 @@ def _run_git(args, cwd, timeout=10):
     try:
         r = subprocess.run(
             ['git'] + args, cwd=str(cwd), capture_output=True,
-            text=True, timeout=timeout,
+            text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
         stdout = r.stdout.strip()
         stderr = r.stderr.strip()

@@ -354,6 +354,8 @@ def _run_hermes_cli(args: list[str]) -> tuple[int, str]:
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             timeout=30,
         )

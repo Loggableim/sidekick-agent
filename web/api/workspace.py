@@ -859,7 +859,7 @@ def _run_git(args, cwd, timeout=3):
     try:
         r = subprocess.run(
             ['git'] + args, cwd=str(cwd), capture_output=True,
-            text=True, timeout=timeout,
+            text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
         return r.stdout.strip() if r.returncode == 0 else None
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
