@@ -2451,6 +2451,19 @@ def test_appstore_mail_contract_exposes_builtin_mail_app_and_setup_flow():
     assert "_appstoreSyncMailButtons()" in panels_js
 
 
+def test_appstore_mail_setup_prefill_uses_default_inbox_when_present():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    setup_start = panels_js.index("async function _appstoreOpenMailSettings() {")
+    save_start = panels_js.index("async function _appstoreSaveMailSettings(", setup_start)
+    setup_block = panels_js[setup_start:save_start]
+
+    assert re.search(
+        r"currentConfig\.inboxes\.find\(\s*(?:\(inbox\)|inbox)\s*=>\s*(?:inbox\s*&&\s*)?inbox\.default",
+        setup_block,
+    )
+    assert "currentConfig.inboxes.length > 0 ? currentConfig.inboxes[0] : {}" not in setup_block
+
+
 def test_appstore_mail_keeps_special_ui_state_even_when_installed():
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
     setup_start = panels_js.index("async function _appstoreOpenMailSettings() {")

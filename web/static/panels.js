@@ -8000,7 +8000,9 @@ async function _appstoreOpenMailSettings() {
     console.warn('[appstore] failed to load current mail config:', err);
   }
 
-  const inbox = Array.isArray(currentConfig.inboxes) && currentConfig.inboxes.length > 0 ? currentConfig.inboxes[0] : {};
+  const inbox = Array.isArray(currentConfig.inboxes) && currentConfig.inboxes.length > 0
+    ? (currentConfig.inboxes.find(inbox => inbox && inbox.default) || currentConfig.inboxes[0] || {})
+    : {};
   const overlay = document.createElement('div');
   overlay.className = 'appstore-setup-overlay';
   overlay.id = 'mailAppSettingsOverlay';
