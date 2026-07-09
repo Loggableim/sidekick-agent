@@ -37,6 +37,81 @@ def test_oneshot_provider_without_model_handles_unset_model_env(monkeypatch, cap
     assert "--provider requires --model" in capsys.readouterr().err
 
 
+def test_oneshot_blocks_local_model_requests_in_game_mode(monkeypatch, tmp_path, capsys):
+    from web.api import config as web_cfg
+
+    monkeypatch.setattr(web_cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    web_cfg.save_settings({"game_mode_enabled": True})
+
+    import cli.oneshot as oneshot
+    import cli.runtime_provider as runtime_provider
+
+    monkeypatch.setattr(
+        runtime_provider,
+        "resolve_runtime_provider",
+        lambda **kwargs: {
+            "provider": "ollama",
+            "base_url": "http://127.0.0.1:11434",
+            "api_mode": "chat_completions",
+            "api_key": None,
+        },
+    )
+
+    monkeypatch.setattr(
+        "run_agent.AIAgent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("oneshot should not start a local model in Game Mode")),
+    )
+
+    code = oneshot.run_oneshot("hello", model="qwen3:4b", provider="ollama")
+
+    assert code == 1
+    stderr = capsys.readouterr().err
+    assert "Game Mode is active" in stderr
+    assert "local model requests are blocked" in stderr.lower()
+
+
+def test_oneshot_allows_ollama_cloud_deepseek_v4_flash_in_game_mode(monkeypatch, tmp_path, capsys):
+    from web.api import config as web_cfg
+
+    monkeypatch.setattr(web_cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    web_cfg.save_settings({"game_mode_enabled": True})
+
+    import cli.oneshot as oneshot
+    import cli.runtime_provider as runtime_provider
+
+    monkeypatch.setattr(
+        runtime_provider,
+        "resolve_runtime_provider",
+        lambda **kwargs: {
+            "provider": "ollama-cloud",
+            "base_url": "https://ollama.com/v1",
+            "api_mode": "chat_completions",
+            "api_key": "token",
+        },
+    )
+
+    captured = {}
+
+    class FakeAIAgent:
+        def __init__(self, *args, **kwargs):
+            captured["provider"] = kwargs.get("provider")
+            captured["model"] = kwargs.get("model")
+            captured["base_url"] = kwargs.get("base_url")
+
+        def chat(self, prompt):
+            return "remote ok"
+
+    monkeypatch.setattr("run_agent.AIAgent", FakeAIAgent)
+
+    code = oneshot.run_oneshot("hello", model="deepseek-v4-flash", provider="ollama-cloud")
+
+    assert code == 0
+    assert captured["provider"] == "ollama-cloud"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["base_url"] == "https://ollama.com/v1"
+    assert capsys.readouterr().out == "remote ok\n"
+
+
 def test_gateway_detached_mode_handles_unset_env(monkeypatch):
     monkeypatch.delenv("SIDEKICK_GATEWAY_DETACHED", raising=False)
 

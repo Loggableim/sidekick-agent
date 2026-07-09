@@ -121,6 +121,79 @@ def _validate_explicit_toolsets(toolsets: object = None) -> tuple[list[str] | No
     return valid, None
 
 
+def _resolve_oneshot_runtime(
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+) -> tuple[dict, str, dict]:
+    """Resolve the effective oneshot config, model, and runtime provider."""
+    from cli.config import load_config
+    from cli.models import detect_provider_for_model
+    from cli.runtime_provider import resolve_runtime_provider
+
+    cfg = load_config()
+
+    # Resolve effective model: explicit arg → env var → config.
+    model_cfg = cfg.get("model") or {}
+    if isinstance(model_cfg, str):
+        cfg_model = model_cfg
+    else:
+        cfg_model = model_cfg.get("default") or model_cfg.get("model") or ""
+
+    env_model = (os.getenv("SIDEKICK_INFERENCE_MODEL") or "").strip()
+    effective_model = (model or "").strip() or env_model or cfg_model
+
+    # Resolve effective provider: explicit arg → (auto-detect from model if
+    # model was explicit) → env / config (handled inside resolve_runtime_provider).
+    #
+    # When --model is given without --provider, auto-detect the provider that
+    # serves that model — same semantic as `/model <name>` in an interactive
+    # session.  Without this, resolve_runtime_provider() would fall back to
+    # the user's configured default provider, which may not host the model
+    # the caller just asked for.
+    effective_provider = (provider or "").strip() or None
+    explicit_base_url_from_alias: Optional[str] = None
+    if effective_provider is None and (model or env_model):
+        # Only auto-detect when the model was explicitly requested via arg or
+        # env var (not when it came from config — that's the "use my defaults"
+        # path and the configured provider is already correct).
+        explicit_model = (model or "").strip() or env_model
+        if explicit_model:
+            # First check DIRECT_ALIASES populated from config.yaml `model_aliases:`.
+            # These map a user-defined alias to (model, provider, base_url) for
+            # endpoints not in any catalog (local servers, custom proxies, etc.).
+            try:
+                from cli import model_switch as _ms
+
+                _ms._ensure_direct_aliases()
+                direct = _ms.DIRECT_ALIASES.get(explicit_model.strip().lower())
+            except Exception:
+                direct = None
+            if direct is not None:
+                effective_model = direct.model
+                effective_provider = direct.provider
+                if direct.base_url:
+                    explicit_base_url_from_alias = direct.base_url.rstrip("/")
+            else:
+                cfg_provider = ""
+                if isinstance(model_cfg, dict):
+                    cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
+                current_provider = (
+                    cfg_provider
+                    or os.getenv("SIDEKICK_INFERENCE_PROVIDER", "").strip().lower()
+                    or "auto"
+                )
+                detected = detect_provider_for_model(explicit_model, current_provider)
+                if detected:
+                    effective_provider, effective_model = detected
+
+    runtime = resolve_runtime_provider(
+        requested=effective_provider,
+        target_model=effective_model or None,
+        explicit_base_url=explicit_base_url_from_alias,
+    )
+    return cfg, effective_model, runtime
+
+
 def run_oneshot(
     prompt: str,
     model: Optional[str] = None,
@@ -171,6 +244,13 @@ def run_oneshot(
     os.environ["SIDEKICK_YOLO_MODE"] = "1"
     os.environ["SIDEKICK_ACCEPT_HOOKS"] = "1"
 
+    cfg, effective_model, runtime = _resolve_oneshot_runtime(model=model, provider=provider)
+    from web.api.config import game_mode_blocked_payload, game_mode_blocks_local_model_request
+
+    if game_mode_blocks_local_model_request(runtime.get("provider"), runtime.get("base_url")):
+        sys.stderr.write(game_mode_blocked_payload().get("error", {}).get("message", "") + "\n")
+        return 1
+
     # Redirect stderr AND stdout to devnull for the entire call tree.
     # We'll print the final response to the real stdout at the end.
     real_stdout = sys.stdout
@@ -184,6 +264,9 @@ def run_oneshot(
                 provider=provider,
                 toolsets=explicit_toolsets,
                 use_config_toolsets=use_config_toolsets,
+                resolved_cfg=cfg,
+                resolved_effective_model=effective_model,
+                resolved_runtime=runtime,
             )
     finally:
         try:
@@ -221,77 +304,21 @@ def _run_agent(
     provider: Optional[str] = None,
     toolsets: object = None,
     use_config_toolsets: bool = True,
+    resolved_cfg: dict | None = None,
+    resolved_effective_model: Optional[str] = None,
+    resolved_runtime: dict | None = None,
 ) -> str:
     """Build an AIAgent exactly like a normal CLI chat turn would, then
     run a single conversation.  Returns the final response string."""
     # Imports are local so they don't run when sidekick is invoked for
     # other commands (keeps top-level CLI startup cheap).
-    from cli.config import load_config
-    from cli.models import detect_provider_for_model
-    from cli.runtime_provider import resolve_runtime_provider
     from cli.tools_config import _get_platform_tools
     from run_agent import AIAgent
-
-    cfg = load_config()
-
-    # Resolve effective model: explicit arg → env var → config.
-    model_cfg = cfg.get("model") or {}
-    if isinstance(model_cfg, str):
-        cfg_model = model_cfg
-    else:
-        cfg_model = model_cfg.get("default") or model_cfg.get("model") or ""
-
-    env_model = (os.getenv("SIDEKICK_INFERENCE_MODEL") or "").strip()
-    effective_model = (model or "").strip() or env_model or cfg_model
-
-    # Resolve effective provider: explicit arg → (auto-detect from model if
-    # model was explicit) → env / config (handled inside resolve_runtime_provider).
-    #
-    # When --model is given without --provider, auto-detect the provider that
-    # serves that model — same semantic as `/model <name>` in an interactive
-    # session.  Without this, resolve_runtime_provider() would fall back to
-    # the user's configured default provider, which may not host the model
-    # the caller just asked for.
-    effective_provider = (provider or "").strip() or None
-    explicit_base_url_from_alias: Optional[str] = None
-    if effective_provider is None and (model or env_model):
-        # Only auto-detect when the model was explicitly requested via arg or
-        # env var (not when it came from config — that's the "use my defaults"
-        # path and the configured provider is already correct).
-        explicit_model = (model or "").strip() or env_model
-        if explicit_model:
-            # First check DIRECT_ALIASES populated from config.yaml `model_aliases:`.
-            # These map a user-defined alias to (model, provider, base_url) for
-            # endpoints not in any catalog (local servers, custom proxies, etc.).
-            try:
-                from cli import model_switch as _ms
-                _ms._ensure_direct_aliases()
-                direct = _ms.DIRECT_ALIASES.get(explicit_model.strip().lower())
-            except Exception:
-                direct = None
-            if direct is not None:
-                effective_model = direct.model
-                effective_provider = direct.provider
-                if direct.base_url:
-                    explicit_base_url_from_alias = direct.base_url.rstrip("/")
-            else:
-                cfg_provider = ""
-                if isinstance(model_cfg, dict):
-                    cfg_provider = str(model_cfg.get("provider") or "").strip().lower()
-                current_provider = (
-                    cfg_provider
-                    or os.getenv("SIDEKICK_INFERENCE_PROVIDER", "").strip().lower()
-                    or "auto"
-                )
-                detected = detect_provider_for_model(explicit_model, current_provider)
-                if detected:
-                    effective_provider, effective_model = detected
-
-    runtime = resolve_runtime_provider(
-        requested=effective_provider,
-        target_model=effective_model or None,
-        explicit_base_url=explicit_base_url_from_alias,
-    )
+    cfg = resolved_cfg
+    effective_model = resolved_effective_model
+    runtime = resolved_runtime
+    if cfg is None or effective_model is None or runtime is None:
+        cfg, effective_model, runtime = _resolve_oneshot_runtime(model=model, provider=provider)
 
     # Pull in explicit toolsets when provided; otherwise use whatever the user
     # has enabled for "cli". sorted() gives stable ordering for config-derived
