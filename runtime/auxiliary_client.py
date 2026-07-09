@@ -3632,6 +3632,22 @@ def _get_task_extra_body(task: str) -> Dict[str, Any]:
     return {}
 
 
+def _raise_if_game_mode_blocks_local_request(provider: str | None, base_url: str | None = "") -> None:
+    """Raise a Game Mode error when the resolved LLM target is local."""
+    try:
+        from web.api.config import game_mode_blocked_payload, game_mode_blocks_local_model_request
+    except Exception:
+        return
+    if not game_mode_blocks_local_model_request(provider, base_url):
+        return
+    payload = game_mode_blocked_payload("local_model")
+    message = str((payload.get("error") or {}).get("message") or "").strip()
+    raise RuntimeError(
+        message
+        or "Game Mode is active. Local model requests are blocked so GPU/VRAM resources stay available for games."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Anthropic-compatible endpoint detection + image block conversion
 # ---------------------------------------------------------------------------
@@ -3928,6 +3944,8 @@ def call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    _raise_if_game_mode_blocks_local_request(resolved_provider, resolved_base_url)
+
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
@@ -3987,6 +4005,10 @@ def call_llm(
                 f"Run: sidekick setup")
 
     effective_timeout = timeout if timeout is not None else _get_task_timeout(task)
+    _raise_if_game_mode_blocks_local_request(
+        resolved_provider,
+        str(getattr(client, "base_url", "") or "") or resolved_base_url,
+    )
 
     # Log what we're about to do — makes auxiliary operations visible
     _base_info = str(getattr(client, "base_url", resolved_base_url) or "")
@@ -4270,6 +4292,8 @@ async def async_call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    _raise_if_game_mode_blocks_local_request(resolved_provider, resolved_base_url)
+
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
@@ -4321,6 +4345,10 @@ async def async_call_llm(
                 f"Run: sidekick setup")
 
     effective_timeout = timeout if timeout is not None else _get_task_timeout(task)
+    _raise_if_game_mode_blocks_local_request(
+        resolved_provider,
+        str(getattr(client, "base_url", "") or "") or resolved_base_url,
+    )
 
     # Pass the client's actual base_url (not just resolved_base_url) so
     # endpoint-specific temperature overrides can distinguish

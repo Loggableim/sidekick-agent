@@ -2,6 +2,8 @@ import queue
 import importlib
 import subprocess
 import sys
+from types import SimpleNamespace
+from types import SimpleNamespace
 
 
 def test_run_in_terminal_captures_output_on_windows_pipe(tmp_path):
@@ -119,3 +121,45 @@ def test_agent_workspace_uses_active_profile_home_after_import(monkeypatch, tmp_
     assert workspace == str(active_home / "workspaces" / "alpha")
     assert (active_home / "workspaces" / "alpha" / "README.md").exists()
     assert not (import_path_home / "workspaces" / "alpha").exists()
+
+
+def test_agent_workspace_llm_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_path):
+    from web.api import agent_workspace
+    from web.api import config as cfg
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    monkeypatch.setattr(
+        agent_workspace,
+        "_get_llm_config",
+        lambda: {
+            "provider": "ollama",
+            "api_key": "local-key",
+            "model": "qwen3:4b",
+            "base_url": "http://127.0.0.1:11434",
+        },
+    )
+
+    captured = {}
+
+    def fake_call_llm(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content='{"intent":"search","commands":[],"explanation":"ok","needs_confirmation":false}'))
+            ]
+        )
+
+    monkeypatch.setattr("runtime.auxiliary_client.call_llm", fake_call_llm)
+    monkeypatch.setattr(
+        agent_workspace.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("local agent workspace model must not be called in Game Mode")),
+    )
+
+    result = agent_workspace._call_llm([{"role": "user", "content": "find docs"}], timeout=20)
+
+    assert captured["provider"] == "ollama-cloud"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert result == '{"intent":"search","commands":[],"explanation":"ok","needs_confirmation":false}'

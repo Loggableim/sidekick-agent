@@ -951,6 +951,25 @@ def _call_llm(messages: list, timeout: int = 15) -> Optional[str]:
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") or "https://openrouter.ai/api/v1"
 
+    try:
+        from web.api.config import game_mode_blocks_local_model_request
+
+        if game_mode_blocks_local_model_request(config.get("provider"), base_url):
+            from runtime.auxiliary_client import call_llm
+
+            response = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024,
+                timeout=timeout,
+            )
+            text = (response.choices[0].message.content or "").strip()
+            return text or None
+    except Exception:
+        logger.debug("Agent LLM Game Mode remote fallback failed", exc_info=True)
+
     if not api_key or len(api_key) < 10:
         logger.warning("No valid OpenRouter API key found")
         return None

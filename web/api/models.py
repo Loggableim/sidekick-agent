@@ -1393,6 +1393,10 @@ def _generate_title_via_ollama(messages) -> str | None:
     any error/timeout so callers can fall back gracefully.
     """
     try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            return None
         import json
         import urllib.request
 
@@ -1456,6 +1460,14 @@ def _extract_facts_via_llamacpp(messages, session_id: str, title: str = "") -> s
     import json
     import urllib.request
     import urllib.error
+
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            return None
+    except Exception:
+        pass
 
     def _call_llama(port: int) -> str | None:
         """Try llama.cpp on given port, return facts or None."""

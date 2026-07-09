@@ -99,6 +99,25 @@ def _call_llm(messages: list, timeout: int = 30) -> Optional[str]:
     model = config.get("model", "openai/gpt-oss-20b:free")
     base_url = config.get("base_url") or "https://openrouter.ai/api/v1"
 
+    try:
+        from web.api.config import game_mode_blocks_local_model_request
+
+        if game_mode_blocks_local_model_request(config.get("provider"), base_url):
+            from runtime.auxiliary_client import call_llm
+
+            response = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1000,
+                timeout=timeout,
+                extra_body={"response_format": {"type": "json_object"}},
+            )
+            return response.choices[0].message.content
+    except Exception:
+        logger.debug("Agent workspace Game Mode remote fallback failed", exc_info=True)
+
     if not api_key or len(api_key) < 10:
         logger.warning("No valid API key for LLM call")
         return None

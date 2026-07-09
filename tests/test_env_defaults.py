@@ -131,6 +131,56 @@ def test_run_agent_blocks_local_models_in_game_mode(monkeypatch, tmp_path):
         )
 
 
+def test_call_llm_blocks_local_models_in_game_mode(monkeypatch, tmp_path):
+    from web.api import config as web_cfg
+
+    monkeypatch.setattr(web_cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    web_cfg.save_settings({"game_mode_enabled": True})
+
+    import runtime.auxiliary_client as auxiliary_client
+
+    monkeypatch.setattr(
+        auxiliary_client,
+        "_get_cached_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("call_llm should not create a local client in Game Mode")),
+    )
+
+    with pytest.raises(RuntimeError, match="Game Mode is active"):
+        auxiliary_client.call_llm(
+            provider="ollama",
+            base_url="http://127.0.0.1:11434",
+            model="qwen3:4b",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+
+def test_async_call_llm_blocks_local_models_in_game_mode(monkeypatch, tmp_path):
+    from web.api import config as web_cfg
+
+    monkeypatch.setattr(web_cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    web_cfg.save_settings({"game_mode_enabled": True})
+
+    import asyncio
+
+    import runtime.auxiliary_client as auxiliary_client
+
+    monkeypatch.setattr(
+        auxiliary_client,
+        "_get_cached_client",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("async_call_llm should not create a local client in Game Mode")),
+    )
+
+    with pytest.raises(RuntimeError, match="Game Mode is active"):
+        asyncio.run(
+            auxiliary_client.async_call_llm(
+                provider="ollama",
+                base_url="http://127.0.0.1:11434",
+                model="qwen3:4b",
+                messages=[{"role": "user", "content": "hello"}],
+            )
+        )
+
+
 def test_delegate_task_returns_tool_error_for_blocked_game_mode_child(monkeypatch, tmp_path):
     from types import SimpleNamespace
 

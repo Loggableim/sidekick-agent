@@ -11289,6 +11289,31 @@ def _async_ollama_title(session_id: str) -> None:
             return
 
         if is_game_mode_enabled():
+            try:
+                from web.api.streaming import (
+                    _first_exchange_snippets,
+                    _sanitize_generated_title,
+                    generate_title_raw_via_aux,
+                )
+
+                user_text, assistant_text = _first_exchange_snippets(s.messages)
+                raw_title, _status = generate_title_raw_via_aux(
+                    user_text,
+                    assistant_text,
+                    provider="ollama-cloud",
+                    model="deepseek-v4-flash",
+                )
+                remote_title = _sanitize_generated_title(raw_title or "")
+                if remote_title:
+                    s.title = remote_title
+                    s.save()
+                    return
+            except Exception:
+                logger.debug(
+                    "_async_ollama_title: remote Game Mode title generation failed for %s",
+                    session_id,
+                    exc_info=True,
+                )
             s.title = title_from(s.messages, DEFAULT_SESSION_TITLE)
             s.save()
             return
@@ -11311,10 +11336,73 @@ def _async_ollama_title(session_id: str) -> None:
             pass
 
 
-def _async_extract_facts(sid: str) -> None:
-    """Background: extract facts from an archived session via local llama.cpp.
+def _game_mode_remote_extract_facts(messages, session_id: str, title: str = "") -> str | None:
+    """Extract structured facts via Ollama Cloud DeepSeek in Game Mode."""
+    parts = []
+    for m in messages or []:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        text = str(content).strip()
+        if text:
+            parts.append(f"{m.get('role', 'unknown')}: {text}")
 
-    Reads session messages, calls _extract_facts_via_llamacpp(), and
+    conversation = "\n".join(parts)
+    if not conversation:
+        return None
+    if len(conversation) > 6000:
+        conversation = conversation[:6000] + "\n[truncated...]"
+
+    prompt = (
+        "Extract key facts from this conversation.\n"
+        "Sort them into these categories:\n\n"
+        "[PREFERENCE] - User preferences, likes/dislikes, opinions, style choices\n"
+        "[DECISION] - Decisions made, choices, conclusions, agreements\n"
+        "[FACT] - Technical facts, knowledge, discovered information, configuration\n"
+        "[WORKFLOW] - Processes, methods, recurring patterns, commands\n\n"
+        "Rules:\n"
+        "- Write facts in the SAME LANGUAGE as the conversation\n"
+        "- Be specific and concise (max 2 sentences per fact)\n"
+        "- Include version numbers, paths, commands, port numbers where relevant\n"
+        "- Skip greetings, small talk, meta-discussion about the conversation itself\n"
+        "- If nothing useful found, respond with: [NO FACTS]\n\n"
+        f"Conversation:\n{conversation}\n\n"
+        "Facts:"
+    )
+
+    try:
+        from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
+
+        response = call_llm(
+            provider="ollama-cloud",
+            model="deepseek-v4-flash",
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": conversation},
+            ],
+            temperature=0.2,
+            max_tokens=512,
+            timeout=30,
+        )
+        facts = extract_content_or_reasoning(response).strip()
+        if not facts or facts == "[NO FACTS]":
+            return None
+        title_line = f" ({title})" if title else ""
+        return f"§\n[SESSION: {session_id}]{title_line}\n{facts}\n"
+    except Exception:
+        return None
+
+
+def _async_extract_facts(sid: str) -> None:
+    """Background: extract facts from an archived session.
+
+    Reads session messages, calls the local llama.cpp path or the
+    Ollama Cloud DeepSeek path in Game Mode, and
     appends the result to MEMORY.md.  Silent on error — will retry
     when the session is archived again.
     """
@@ -11337,10 +11425,12 @@ def _async_extract_facts(sid: str) -> None:
             return
 
         if is_game_mode_enabled():
-            logger.debug("_async_extract_facts: skipped for %s because Game Mode is active", sid)
-            return
-
-        block = _extract_facts_via_llamacpp(s.messages, sid, s.title or "")
+            block = _game_mode_remote_extract_facts(s.messages, sid, s.title or "")
+            if not block:
+                logger.debug("_async_extract_facts: no remote facts extracted for %s", sid)
+                return
+        else:
+            block = _extract_facts_via_llamacpp(s.messages, sid, s.title or "")
         if not block:
             logger.debug("_async_extract_facts: no facts extracted for %s", sid)
             return

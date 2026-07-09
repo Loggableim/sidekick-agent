@@ -86,6 +86,19 @@ _CONN_MAX_AGE = 120
 _CONN_POOL_MAX_SIZE = 12
 
 
+def _gmail_game_mode_block_message() -> str | None:
+    """Return the Gmail AI Game Mode block message, or None when allowed."""
+    try:
+        from web.api import config as cfg
+
+        if not cfg.is_game_mode_enabled():
+            return None
+    except Exception:
+        logger.debug("Gmail AI Game Mode check failed", exc_info=True)
+        return None
+    return "Game Mode is active. Gmail AI is blocked so local GPU/VRAM stays free."
+
+
 def _decode_rfc2047(val):
     """Decode RFC 2047 encoded words like =?UTF-8?Q?St=C3=A4dte...?="""
     if not val:
@@ -805,6 +818,10 @@ _AGENT_GATEWAY_PORTS = [9119, 9118, 9120]
 
 def _ai_call(prompt, system_prompt="You are a helpful assistant.", max_tokens=300):
     """Try multiple AI backends in order. Returns text or None."""
+    blocked_message = _gmail_game_mode_block_message()
+    if blocked_message:
+        return blocked_message
+
     # 1. Try Nova agent gateway (OpenAI-compatible /chat/completions)
     for port in _AGENT_GATEWAY_PORTS:
         try:
@@ -859,17 +876,10 @@ def _ai_call(prompt, system_prompt="You are a helpful assistant.", max_tokens=30
 
 def _ai_call_stream(prompt, system_prompt="You are a helpful assistant.", model="llama3.2:latest"):
     """Stream tokens from an AI model. Yields (token, done)."""
-    try:
-        from web.api import config as cfg
-
-        if cfg.is_game_mode_enabled():
-            yield (
-                "Game Mode is active. Gmail AI is blocked so local GPU/VRAM stays free.",
-                True,
-            )
-            return
-    except Exception:
-        logger.debug("Gmail AI Game Mode check failed", exc_info=True)
+    blocked_message = _gmail_game_mode_block_message()
+    if blocked_message:
+        yield (blocked_message, True)
+        return
 
     full_prompt = f"{system_prompt}\n\n{prompt}"
     # Try Ollama streaming

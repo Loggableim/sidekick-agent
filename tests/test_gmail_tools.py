@@ -89,6 +89,23 @@ def test_gmail_ai_stream_is_blocked_in_game_mode(monkeypatch, tmp_path):
     ]
 
 
+def test_gmail_ai_call_is_blocked_in_game_mode(monkeypatch, tmp_path):
+    from web.api import config as cfg
+    from web.api import gmail_tools
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+    monkeypatch.setattr(
+        gmail_tools.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Ollama must not be called in Game Mode")),
+    )
+
+    result = gmail_tools._ai_call("Summarize this email")
+
+    assert result == "Game Mode is active. Gmail AI is blocked so local GPU/VRAM stays free."
+
+
 @pytest.mark.parametrize("operation", ["send", "validate"])
 def test_mail_imap_plain_smtp_uses_non_ssl_transport_when_tls_is_disabled(monkeypatch, operation):
     from tools import mail_imap
