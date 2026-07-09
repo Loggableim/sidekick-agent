@@ -1095,6 +1095,130 @@ def test_chat_start_marks_active_goal_turns_as_goal_related(monkeypatch, tmp_pat
     assert captured["goal_related"] is True
 
 
+def test_goal_command_kickoff_routes_nova_local_models_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        workspace_slug="nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.routes.resolve_trusted_workspace", lambda value: r"C:\\workspace")
+    monkeypatch.setattr(
+        "web.api.routes._resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("qwen3:4b", "ollama", False),
+    )
+    monkeypatch.setattr(
+        "web.api.goals.goal_command_payload",
+        lambda *args, **kwargs: {"ok": True, "kickoff_prompt": "kick off the goal"},
+    )
+    monkeypatch.setattr("web.api.goals.goal_state_snapshot", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr("web.api.goals.restore_goal_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
+
+    payload = routes._handle_goal_command(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "args": "Ship it",
+            "workspace": r"C:\\workspace",
+            "workspace_slug": "nova",
+            "profile": "default",
+            "model": "qwen3:4b",
+            "model_provider": "ollama",
+        },
+    )
+
+    assert payload["stream_id"] == "stream-1"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["model_provider"] == "ollama-cloud"
+    assert captured["normalized_model"] is True
+
+
+def test_plan_handlers_route_nova_local_models_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = []
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        workspace_slug="nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.routes.resolve_trusted_workspace", lambda value: r"C:\\workspace")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.append(kwargs) or {"stream_id": f"stream-{len(captured)}"},
+    )
+    monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
+
+    accept_payload = routes._handle_plan_accept(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "workspace": r"C:\\workspace",
+            "model": "qwen3:4b",
+            "model_provider": "ollama",
+        },
+    )
+    revise_payload = routes._handle_plan_revise(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "workspace": r"C:\\workspace",
+            "feedback": "tighten the plan",
+            "model": "qwen3:4b",
+            "model_provider": "ollama",
+        },
+    )
+
+    assert accept_payload["stream_id"] == "stream-1"
+    assert revise_payload["stream_id"] == "stream-2"
+    assert captured[0]["model"] == "deepseek-v4-flash"
+    assert captured[0]["model_provider"] == "ollama-cloud"
+    assert captured[0]["normalized_model"] is True
+    assert captured[1]["model"] == "deepseek-v4-flash"
+    assert captured[1]["model_provider"] == "ollama-cloud"
+    assert captured[1]["normalized_model"] is True
+
+
 def test_start_chat_stream_marks_turns_goal_related_when_goal_is_active(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 

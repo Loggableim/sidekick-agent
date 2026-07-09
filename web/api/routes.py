@@ -10681,7 +10681,7 @@ def _handle_goal_command(handler, body):
             space_slug=space_slug,
         )
         if game_mode_nova_override:
-            model, model_provider, _normalized_model = game_mode_nova_override
+            model, model_provider, normalized_model = game_mode_nova_override
         stream_response = _start_chat_stream_for_session(
             s,
             msg=kickoff_prompt,
@@ -10899,7 +10899,7 @@ def _handle_plan_accept(handler, body):
         ).strip().lower() or None,
     )
     if game_mode_nova_override:
-        model, model_provider, _normalized_model = game_mode_nova_override
+        model, model_provider, normalized_model = game_mode_nova_override
 
     response = _start_chat_stream_for_session(
         s,
@@ -10908,6 +10908,7 @@ def _handle_plan_accept(handler, body):
         workspace=workspace,
         model=model,
         model_provider=model_provider,
+        normalized_model=bool(game_mode_nova_override),
     )
     status = int(response.pop("_status", 200) or 200)
     return j(handler, response, status=status)
@@ -10958,7 +10959,7 @@ def _handle_plan_revise(handler, body):
         ).strip().lower() or None,
     )
     if game_mode_nova_override:
-        model, model_provider, _normalized_model = game_mode_nova_override
+        model, model_provider, normalized_model = game_mode_nova_override
 
     response = _start_chat_stream_for_session(
         s,
@@ -10967,6 +10968,7 @@ def _handle_plan_revise(handler, body):
         workspace=workspace,
         model=model,
         model_provider=model_provider,
+        normalized_model=bool(game_mode_nova_override),
     )
     status = int(response.pop("_status", 200) or 200)
     return j(handler, response, status=status)
