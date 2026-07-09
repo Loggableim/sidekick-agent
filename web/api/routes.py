@@ -3669,13 +3669,17 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
         )
 
         activation_changed = False
+        activation_error = None
         if bool(activate):
             try:
                 from web.api.appstore import _set_space_app_active
 
                 activation_changed = bool(_set_space_app_active(space_slug, "imap-mail", True))
-            except Exception:
+            except Exception as exc:
+                activation_error = str(exc)
                 logger.exception("mail_setup activation failed")
+        if bool(activate) and not activation_changed and not activation_error:
+            activation_error = "Failed to activate Mail in the current space"
 
         payload = dict(result)
         payload.update(
@@ -3686,6 +3690,7 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
                 "mail_path": str(mail_path),
                 "space_active": bool(activate),
                 "activation_changed": activation_changed,
+                "activation_error": activation_error,
                 "installed": bool(install_result.get("success")),
                 "install_error": install_result.get("error"),
             }
@@ -3693,6 +3698,10 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
         if not install_result.get("success", False):
             payload["success"] = False
             payload["error"] = install_result.get("error") or "Failed to record Mail installation"
+            return j(handler, payload, status=500)
+        if bool(activate) and activation_error:
+            payload["success"] = False
+            payload["error"] = activation_error
             return j(handler, payload, status=500)
         return j(handler, payload)
     except Exception as exc:

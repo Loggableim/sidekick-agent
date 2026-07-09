@@ -504,6 +504,52 @@ def test_mail_setup_post_reports_install_recording_failure(monkeypatch, tmp_path
     assert (active_home / "spaces" / "demo" / "mail.json").exists()
 
 
+def test_mail_setup_post_reports_activation_failure(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import sys
+
+    active_home = tmp_path / "active-home"
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.routes", None)
+    routes = importlib.import_module("web.api.routes")
+
+    monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(
+        routes,
+        "j",
+        lambda _handler, payload, status=200, **_kw: {"status": status, "payload": payload},
+    )
+
+    import web.api.appstore as appstore
+
+    monkeypatch.setattr(
+        appstore,
+        "_set_space_app_active",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("activate boom")),
+    )
+
+    response = routes._handle_mail_setup_post(
+        object(),
+        SimpleNamespace(query=""),
+        {
+            "email": "ada@gmail.com",
+            "password": "app-password",
+            "activate": True,
+        },
+    )
+
+    assert response["status"] == 500
+    payload = response["payload"]
+    assert payload["success"] is False
+    assert payload["activation_changed"] is False
+    assert "activate boom" in payload["error"]
+    assert (active_home / "spaces" / "demo" / "mail.json").exists()
+
+
 def test_mail_setup_post_preserves_additional_inboxes(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
