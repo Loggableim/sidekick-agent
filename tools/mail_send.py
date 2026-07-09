@@ -48,8 +48,9 @@ def _handler(args: dict, **kw) -> str:
         Dictionary containing the tool arguments.
     kw:
         Additional keyword arguments.  ``user_task`` may contain the active
-        workspace slug.  If absent, ``HERMES_WEBUI_ACTIVE_WORKSPACE`` is
-        consulted, falling back to ``default``.
+        workspace slug.  If absent, ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` is
+        consulted first, then ``HERMES_WEBUI_ACTIVE_WORKSPACE`` for legacy
+        compatibility, and finally ``default``.
 
     Returns
     -------
@@ -57,8 +58,11 @@ def _handler(args: dict, **kw) -> str:
         JSON string describing the result.
     """
     # Resolve space slug
-    space_slug = kw.get("user_task", "") or os.environ.get(
-        "HERMES_WEBUI_ACTIVE_WORKSPACE", "default"
+    space_slug = (
+        kw.get("user_task", "")
+        or os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "")
+        or os.environ.get("HERMES_WEBUI_ACTIVE_WORKSPACE", "")
+        or "default"
     )
 
     inbox = get_inbox_config(space_slug, args.get("inbox_id"))
@@ -120,5 +124,4 @@ if __name__ == "__main__":
         sys.exit(1)
     args = json.loads(sys.argv[1])
     print(_handler(args))
-
 

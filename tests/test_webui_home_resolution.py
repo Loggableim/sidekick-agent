@@ -427,6 +427,59 @@ def test_mail_imap_prefers_active_profile_home_for_request_scoped_config(monkeyp
     assert config["inboxes"][0]["imap_host"] == "imap.active.example"
 
 
+def test_mail_search_prefers_sidekick_workspace_env_when_user_task_missing(monkeypatch):
+    from tools import mail_search
+
+    captured = {}
+
+    monkeypatch.delenv("HERMES_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "demo")
+
+    def fake_get_inbox_config(space_slug, inbox_id):
+        captured["space_slug"] = space_slug
+        captured["inbox_id"] = inbox_id
+        return None
+
+    monkeypatch.setattr(mail_search, "get_inbox_config", fake_get_inbox_config)
+
+    result = json.loads(mail_search._handler({"inbox_id": "work", "query": "test"}))
+
+    assert captured["space_slug"] == "demo"
+    assert captured["inbox_id"] == "work"
+    assert result["error"] == "Inbox not found"
+
+
+def test_mail_send_prefers_sidekick_workspace_env_when_user_task_missing(monkeypatch):
+    from tools import mail_send
+
+    captured = {}
+
+    monkeypatch.delenv("HERMES_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "demo")
+
+    def fake_get_inbox_config(space_slug, inbox_id):
+        captured["space_slug"] = space_slug
+        captured["inbox_id"] = inbox_id
+        return None
+
+    monkeypatch.setattr(mail_send, "get_inbox_config", fake_get_inbox_config)
+
+    result = json.loads(
+        mail_send._handler(
+            {
+                "inbox_id": "work",
+                "to": "user@example.com",
+                "subject": "Hi",
+                "body": "Hello",
+            }
+        )
+    )
+
+    assert captured["space_slug"] == "demo"
+    assert captured["inbox_id"] == "work"
+    assert result["error"] == "Inbox not found"
+
+
 def test_space_engine_uses_active_profile_home_after_import(monkeypatch, tmp_path):
     import sys
 

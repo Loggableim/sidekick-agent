@@ -37,7 +37,7 @@ def _get_space_slug(kw: dict) -> str:
     """Determine the active space slug.
 
     The caller may pass the slug in ``kw['user_task']``.  If not present, fall back
-    to the ``HERMES_WEBUI_ACTIVE_WORKSPACE`` environment variable, and finally to
+    to the ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` environment variable, and finally to
     ``'default'``.
     """
     slug = kw.get("user_task", "")
