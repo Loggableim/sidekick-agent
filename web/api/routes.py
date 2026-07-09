@@ -10513,6 +10513,41 @@ def _game_mode_guard_payload_for_model(
     return None
 
 
+def _game_mode_nova_remote_model_state(
+    model: str | None,
+    model_provider: str | None,
+    provider_context: dict | None = None,
+    *,
+    space_slug: str | None = None,
+) -> tuple[str, str | None, bool] | None:
+    """Route Nova chat turns to Ollama Cloud when Game Mode blocks local models."""
+    if not is_game_mode_enabled():
+        return None
+    if str(space_slug or "").strip().lower() != "nova":
+        return None
+
+    context = provider_context if isinstance(provider_context, dict) else {}
+    requested_model = str(model or context.get("model") or "").strip()
+    requested_provider = str(model_provider or context.get("provider") or "").strip()
+    requested_base_url = str(context.get("base_url") or "").strip()
+
+    try:
+        resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(
+            model_with_provider_context(requested_model, requested_provider or None)
+        )
+    except Exception:
+        resolved_model = requested_model
+        resolved_provider = requested_provider
+        resolved_base_url = requested_base_url
+
+    if game_mode_blocks_local_model_request(
+        resolved_provider or requested_provider,
+        resolved_base_url or requested_base_url,
+    ):
+        return "deepseek-v4-flash", "ollama-cloud", True
+    return None
+
+
 def _handle_goal_command(handler, body):
     """Handle WebUI /goal command controls and optional kickoff stream."""
     try:
@@ -10640,6 +10675,13 @@ def _handle_goal_command(handler, body):
                 requested_model,
                 requested_provider,
             )
+        game_mode_nova_override = _game_mode_nova_remote_model_state(
+            model,
+            model_provider,
+            space_slug=space_slug,
+        )
+        if game_mode_nova_override:
+            model, model_provider, _normalized_model = game_mode_nova_override
         stream_response = _start_chat_stream_for_session(
             s,
             msg=kickoff_prompt,
@@ -10764,6 +10806,28 @@ def _handle_chat_start(handler, body, diag=None):
                 },
                 status=409,
             )
+        game_mode_nova_override = _game_mode_nova_remote_model_state(
+            model,
+            model_provider,
+            provider_context,
+            space_slug=space_slug,
+        )
+        if game_mode_nova_override:
+            model, model_provider, normalized_model = game_mode_nova_override
+            try:
+                _guard_model, guard_provider, guard_base_url = resolve_model_provider(
+                    model_with_provider_context(model, model_provider)
+                )
+                provider_context = {
+                    "provider": guard_provider,
+                    "model": _guard_model,
+                    "base_url": guard_base_url,
+                }
+            except Exception:
+                provider_context = {
+                    "provider": model_provider,
+                    "model": model,
+                }
         game_mode_payload = _game_mode_guard_payload_for_model(
             model,
             model_provider,
@@ -10824,6 +10888,18 @@ def _handle_plan_accept(handler, body):
     workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace or ""))
     model = body.get("model") or s.model or ""
     model_provider = body.get("model_provider") or getattr(s, "model_provider", None)
+    game_mode_nova_override = _game_mode_nova_remote_model_state(
+        model,
+        model_provider,
+        space_slug=str(
+            getattr(s, "workspace_slug", None)
+            or getattr(s, "space_slug", None)
+            or getattr(s, "space", None)
+            or ""
+        ).strip().lower() or None,
+    )
+    if game_mode_nova_override:
+        model, model_provider, _normalized_model = game_mode_nova_override
 
     response = _start_chat_stream_for_session(
         s,
@@ -10871,6 +10947,18 @@ def _handle_plan_revise(handler, body):
     workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace or ""))
     model = body.get("model") or s.model or ""
     model_provider = body.get("model_provider") or getattr(s, "model_provider", None)
+    game_mode_nova_override = _game_mode_nova_remote_model_state(
+        model,
+        model_provider,
+        space_slug=str(
+            getattr(s, "workspace_slug", None)
+            or getattr(s, "space_slug", None)
+            or getattr(s, "space", None)
+            or ""
+        ).strip().lower() or None,
+    )
+    if game_mode_nova_override:
+        model, model_provider, _normalized_model = game_mode_nova_override
 
     response = _start_chat_stream_for_session(
         s,
@@ -10956,6 +11044,22 @@ def _handle_chat_sync(handler, body):
             _model, _provider, _base_url = resolve_model_provider(
                 model_with_provider_context(s.model, getattr(s, "model_provider", None))
             )
+            game_mode_nova_override = _game_mode_nova_remote_model_state(
+                _model,
+                _provider,
+                {"provider": _provider, "model": _model, "base_url": _base_url},
+                space_slug=str(
+                    getattr(s, "workspace_slug", None)
+                    or getattr(s, "space_slug", None)
+                    or getattr(s, "space", None)
+                    or ""
+                ).strip().lower() or None,
+            )
+            if game_mode_nova_override:
+                _model, _provider, _normalized_model = game_mode_nova_override
+                _model, _provider, _base_url = resolve_model_provider(
+                    model_with_provider_context(_model, _provider)
+                )
             # Resolve API key via Hermes runtime provider (matches gateway behaviour)
             _api_key = None
             try:

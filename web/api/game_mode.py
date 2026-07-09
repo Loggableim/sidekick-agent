@@ -173,6 +173,8 @@ def _unload_ollama_model(base_url: str, model: str) -> dict:
             ["ollama", "stop", model_name],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=8,
         )
         return {
@@ -487,6 +489,8 @@ $byProcess.GetEnumerator() |
             ["powershell", "-NoProfile", "-Command", script],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as exc:
