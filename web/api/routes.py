@@ -12874,6 +12874,7 @@ def _handle_handoff_summary(handler, body):
         resolved_model = None
         resolved_provider = None
         resolved_base_url = None
+        s_obj = None
         try:
             from web.api.models import get_session
             s_obj = get_session(sid)

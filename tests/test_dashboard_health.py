@@ -3756,6 +3756,51 @@ def test_game_mode_handoff_summary_routes_nova_local_model_to_ollama_cloud_deeps
     assert captured["session_id"] == "nova-session"
 
 
+def test_handoff_summary_handles_missing_session_without_crashing(monkeypatch, tmp_path):
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": False})
+
+    messages = [
+        {"role": "user", "content": "hello", "timestamp": 1},
+        {"role": "assistant", "content": "hi", "timestamp": 2},
+    ]
+    captured = {}
+    warnings = []
+
+    monkeypatch.setattr("web.api.models.get_session", lambda sid: (_ for _ in ()).throw(KeyError(sid)))
+    monkeypatch.setattr("web.api.models.get_cli_session_messages", lambda sid: messages)
+    monkeypatch.setattr("web.api.models.count_conversation_rounds", lambda sid, since=None: 4)
+    monkeypatch.setattr("web.api.models.CONVERSATION_ROUND_THRESHOLD", 1, raising=False)
+    monkeypatch.setattr(
+        "web.api.config.resolve_model_provider",
+        lambda model_id: ("qwen3:4b", "ollama", "http://127.0.0.1:11434"),
+    )
+    monkeypatch.setattr(
+        "web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock",
+        lambda resolver, requested=None: {"api_key": "", "provider": requested, "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("web.api.routes._persist_handoff_summary", lambda *args, **kwargs: captured.update({"persisted": True}) or {})
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+    monkeypatch.setattr(routes.logger, "warning", lambda msg, *args, **kwargs: warnings.append(msg))
+
+    payload = routes._handle_handoff_summary(
+        SimpleNamespace(headers={}),
+        {"session_id": "missing-session"},
+    )
+
+    assert payload["ok"] is True
+    assert payload["fallback"] is True
+    assert payload["summary"]
+    assert captured["persisted"] is True
+    assert warnings == []
+
+
 def test_image_generation_tool_returns_game_mode_error(monkeypatch, tmp_path):
     from web.api import config as cfg
     from tools import image_generation_tool as image_tool
