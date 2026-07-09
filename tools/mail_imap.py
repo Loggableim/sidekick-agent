@@ -502,7 +502,7 @@ def send_mail(inbox: dict, to_addrs: list[str], message: str) -> dict:
                 server.login(user, password)
                 server.sendmail(user, to_addrs, message)
         else:
-            with smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT) as server:
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
                 server.login(user, password)
                 server.sendmail(user, to_addrs, message)
 
@@ -535,7 +535,7 @@ def validate_smtp(inbox: dict) -> None:
                 server.starttls(context=context)
                 server.login(user, password)
         else:
-            with smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT) as server:
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
                 server.login(user, password)
     except Exception:
         logger.exception("SMTP validation failed for %s", user)

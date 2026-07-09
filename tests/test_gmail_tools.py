@@ -1,5 +1,7 @@
 import imaplib
 
+import pytest
+
 
 def test_gmail_read_only_helpers_degrade_imap_connection_errors(monkeypatch):
     from web.api import gmail_tools
@@ -85,6 +87,54 @@ def test_gmail_ai_stream_is_blocked_in_game_mode(monkeypatch, tmp_path):
             True,
         )
     ]
+
+
+@pytest.mark.parametrize("operation", ["send", "validate"])
+def test_mail_imap_plain_smtp_uses_non_ssl_transport_when_tls_is_disabled(monkeypatch, operation):
+    from tools import mail_imap
+
+    calls = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            calls.append(("SMTP", host, port, timeout))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def login(self, user, password):
+            calls.append(("login", user, password))
+
+        def sendmail(self, user, to_addrs, message):
+            calls.append(("sendmail", user, tuple(to_addrs), message))
+
+    class FakeSMTPSSL:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("SMTP_SSL must not be used when smtp_use_tls is False")
+
+    monkeypatch.setattr(mail_imap.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(mail_imap.smtplib, "SMTP_SSL", FakeSMTPSSL)
+
+    inbox = {
+        "smtp_host": "127.0.0.1",
+        "smtp_port": 1025,
+        "smtp_use_tls": False,
+        "smtp_user": "user@example.org",
+        "smtp_pass": "secret",
+    }
+
+    if operation == "send":
+        result = mail_imap.send_mail(inbox, ["to@example.org"], "Subject: Test\n\nBody")
+        assert result["success"] is True
+        assert any(call[0] == "sendmail" for call in calls)
+    else:
+        mail_imap.validate_smtp(inbox)
+        assert any(call[0] == "login" for call in calls)
+
+    assert calls[0][0] == "SMTP"
 
 
 def test_gmail_related_only_strips_reply_or_forward_prefixes(monkeypatch):
