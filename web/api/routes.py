@@ -10534,7 +10534,24 @@ def _game_mode_nova_remote_model_state(
             except Exception:
                 inferred_space_slug = ""
     if inferred_space_slug != "nova":
-        return None
+        try:
+            from web.api.space_engine import get_space
+
+            space = get_space(inferred_space_slug) if inferred_space_slug else None
+            if space:
+                nova_cfg = {}
+                try:
+                    loaded_cfg = space.load_config()
+                    if isinstance(loaded_cfg, dict):
+                        nova_cfg = loaded_cfg.get("nova") or {}
+                except Exception:
+                    nova_cfg = {}
+                if not (isinstance(nova_cfg, dict) and nova_cfg.get("enabled")):
+                    return None
+            else:
+                return None
+        except Exception:
+            return None
 
     requested_model = str(model or context.get("model") or "").strip()
     requested_provider = str(model_provider or context.get("provider") or "").strip()

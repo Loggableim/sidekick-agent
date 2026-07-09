@@ -4,6 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from runtime.redact import RedactingFormatter
 from sidekick_constants import get_sidekick_home
 from shared.config import ensure_sidekick_home, load_config
 
@@ -65,7 +66,7 @@ def setup_logging(force: bool = False) -> Path:
                 root.removeHandler(handler)
                 handler.close()
 
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    formatter = RedactingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     agent_handler = SidekickRotatingFileHandler(
         logs_dir / "agent.log",

@@ -238,6 +238,28 @@ def test_setup_logging_creates_log_files(monkeypatch, tmp_path):
     assert (logs_dir / "errors.log").exists()
 
 
+def test_setup_logging_redacts_telegram_tokens_in_file_logs(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(home))
+    logs_dir = setup_logging(force=True)
+    previous_disable = logging.root.manager.disable
+    logging.disable(logging.NOTSET)
+
+    try:
+        httpx_logger = logging.getLogger("httpx")
+        httpx_logger.setLevel(logging.INFO)
+        httpx_logger.info(
+            'HTTP Request: POST https://api.telegram.org/bot123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/getUpdates '
+            '"HTTP/1.1 200 OK"'
+        )
+
+        agent_log = (logs_dir / "agent.log").read_text(encoding="utf-8")
+        assert "bot123456789:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" not in agent_log
+        assert "bot123456789:***" in agent_log
+    finally:
+        logging.disable(previous_disable)
+
+
 def test_setup_logging_ignores_locked_agent_log_rollover(monkeypatch, tmp_path):
     import logging.handlers
 
