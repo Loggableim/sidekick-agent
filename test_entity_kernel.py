@@ -7,8 +7,10 @@ from datetime import datetime
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from entity_kernel import EntityKernel
+import autonomer_tick
 
 
 class EntityKernelTests(unittest.TestCase):
@@ -97,6 +99,42 @@ class EntityKernelTests(unittest.TestCase):
         result = kernel.act(decision)
         self.assertTrue(result["executed"])
         self.assertGreaterEqual(len(kernel.bio.recent()), 1)
+
+    def test_autonomer_tick_evaluates_notification_before_persisting_new_state(self):
+        calls = []
+
+        class FakeGate:
+            def update_emotion(self, emotion):
+                calls.append(("update_emotion", emotion))
+
+            def update_open_threads(self, count):
+                calls.append(("update_open_threads", count))
+
+            def should_notify(self, event):
+                calls.append(("should_notify", dict(event)))
+                return False, "batched", 0.6
+
+            def mark_sent(self, significance):
+                calls.append(("mark_sent", significance))
+
+        with patch.object(autonomer_tick, "NotificationGate", return_value=FakeGate()), \
+             patch.object(autonomer_tick, "run_entity_kernel_tick", return_value={"executed": False}), \
+             patch.object(autonomer_tick, "scan_state", return_value={
+                 "emotion": {"arousal": 0.8, "valence": 0.3, "coherence": 0.9},
+                 "will": {"will": {"drive": 0.2, "desire": 0.4, "boredom_level": 0.1}},
+                 "continuity": {"open_threads": ["alpha", "beta"]},
+                 "memory": {"total_memories": 12},
+             }), \
+             patch.object(autonomer_tick, "decide_action", return_value={"action": "reflect", "reason": "test"}), \
+             patch.object(autonomer_tick, "execute_action", return_value={"action": "reflect", "success": True, "output": "done"}), \
+             patch.object(autonomer_tick, "build_message", return_value="msg"), \
+             patch.object(autonomer_tick, "send_telegram", return_value=True), \
+             patch.object(autonomer_tick, "_run", return_value=None):
+            autonomer_tick.main(silent=True)
+
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertEqual(calls[0][0], "should_notify")
+        self.assertEqual([name for name, _ in calls[1:3]], ["update_emotion", "update_open_threads"])
 
 
 if __name__ == "__main__":

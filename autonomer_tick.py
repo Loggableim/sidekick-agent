@@ -22,6 +22,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 from pathlib import Path
+from notification_gate import NotificationGate
 
 HERE = Path(__file__).parent.resolve()
 PYTHON = sys.executable
@@ -388,6 +389,9 @@ def main(silent: bool = False):
     if not silent:
         print(f"═══ Autonomer Tick — {datetime.now().isoformat()[:19]} ═══")
 
+    # ── Notification Gate ──
+    gate = NotificationGate()
+
     kernel_result = run_entity_kernel_tick(dry_run=False)
     if kernel_result and kernel_result.get("executed"):
         if not silent:
@@ -420,11 +424,49 @@ def main(silent: bool = False):
     # 4. Nachricht bauen
     message = build_message(state, decision, action_result)
     
-    if silent:
-        # Nur die Nachricht ausgeben — für Cron-Job mit no_agent=True
-        print(message)
+    # ── Notification Gate: Soll ich Cid benachrichtigen? ──
+    emotion = state.get("emotion", {})
+    will = state.get("will", {}).get("will", {})
+    event = {
+        "emotion": emotion,
+        "open_threads": open_threads,
+        "action": decision["action"],
+        "success": action_result.get("success", False),
+        "will": will,
+        "summary": action_result.get("output", "")[:100],
+    }
+    should_notify, reason, significance = gate.should_notify(event)
+    
+    if not silent:
+        print(f"\n[Gate] Notify: {should_notify} — {reason} (sig={significance:.2f})")
+
+    # Erst nach der Bewertung den aktuellen Tick als neuen Referenzpunkt speichern.
+    if emotion:
+        gate.update_emotion(emotion)
+    gate.update_open_threads(open_threads)
+    
+    if should_notify:
+        # Batch-Nachrichten anhängen
+        batch = event.get("_batch")
+        if batch:
+            batch_lines = ["📦 **Gebatcht:**"]
+            for b in batch:
+                batch_lines.append(f"  · {b['action']}: {b['summary'][:60]}")
+            message = "\n".join(batch_lines) + "\n\n" + message
+        
+        # Telegram senden (direkt, nicht über Cron-Delivery)
+        send_telegram(message, silent=False)
+        gate.mark_sent(significance)
+        
+        if silent:
+            print(message)
+        else:
+            print(f"\n[4/4] Nachricht:\n{message}")
     else:
-        print(f"\n[4/4] Nachricht:\n{message}")
+        if not silent:
+            print(f"\n[4/4] Keine Nachricht — {reason}")
+        # silent mode: KEIN stdout → Cron delivered nichts
+        # (leerer stdout = silent, keine Notification)
     
     # 5. Im Vektorgedächtnis speichern
     if not silent:
