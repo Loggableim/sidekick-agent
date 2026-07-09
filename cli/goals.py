@@ -490,6 +490,12 @@ class GoalManager:
     def resume(self, *, reset_budget: bool = False) -> Optional[GoalState]:
         if not self._state:
             return None
+        exhausted = (
+            self._state.max_turns is not None
+            and int(self._state.turns_used or 0) >= int(self._state.max_turns or 0)
+        )
+        if exhausted and not reset_budget:
+            return self._state
         self._state.status = "active"
         self._state.paused_reason = None
         if reset_budget:

@@ -24,6 +24,29 @@ def test_cli_goal_resume_preserves_budget_progress_and_resets_parse_failure_coun
     assert resumed.consecutive_parse_failures == 0
 
 
+def test_cli_goal_resume_keeps_paused_when_budget_exhausted(monkeypatch):
+    from cli.goals import GoalManager, GoalState
+
+    monkeypatch.setattr("cli.goals.save_goal", lambda *args, **kwargs: None)
+
+    mgr = GoalManager("goal-session")
+    mgr._state = GoalState(
+        goal="Ship it",
+        status="paused",
+        turns_used=20,
+        max_turns=20,
+        paused_reason="turn budget exhausted (20/20)",
+        consecutive_parse_failures=2,
+    )
+
+    resumed = mgr.resume()
+
+    assert resumed is not None
+    assert resumed.status == "paused"
+    assert resumed.turns_used == 20
+    assert resumed.consecutive_parse_failures == 2
+
+
 def test_cli_goal_budget_defaults_custom_and_unlimited(monkeypatch):
     from cli.goals import GoalManager
 
@@ -72,6 +95,33 @@ def test_webui_goal_resume_preserves_budget_progress_and_resets_parse_failure_co
     assert resumed.turns_used == 4
     assert resumed.consecutive_parse_failures == 0
     assert saved["state"].consecutive_parse_failures == 0
+
+
+def test_webui_goal_resume_keeps_paused_when_budget_exhausted(monkeypatch, tmp_path):
+    from cli.goals import GoalState
+    from web.api.goals import _ProfileGoalManager
+
+    mgr = _ProfileGoalManager("goal-session", profile_home=tmp_path)
+    mgr._state = GoalState(
+        goal="Ship it",
+        status="paused",
+        turns_used=20,
+        max_turns=20,
+        paused_reason="turn budget exhausted (20/20)",
+        consecutive_parse_failures=2,
+    )
+
+    saved = {}
+
+    monkeypatch.setattr(mgr, "_save", lambda state: saved.setdefault("state", state))
+
+    resumed = mgr.resume()
+
+    assert resumed is not None
+    assert resumed.status == "paused"
+    assert resumed.turns_used == 20
+    assert resumed.consecutive_parse_failures == 2
+    assert saved == {}
 
 
 def test_webui_goal_command_passes_custom_and_unlimited_budget(monkeypatch):
@@ -130,3 +180,62 @@ def test_webui_goal_command_passes_custom_and_unlimited_budget(monkeypatch):
     assert captured["kwargs"]["max_turns"] is None
     assert captured["kwargs"]["unlimited"] is True
     assert result["status"] is None
+
+
+def test_webui_goal_command_resume_reports_budget_exhausted(monkeypatch):
+    from cli.goals import GoalState
+    from web.api import goals as goal_api
+
+    class FakeManager:
+        def __init__(self):
+            self.state = GoalState(
+                goal="Ship it",
+                status="paused",
+                turns_used=20,
+                max_turns=20,
+                paused_reason="turn budget exhausted (20/20)",
+                consecutive_parse_failures=0,
+            )
+
+        def resume(self):
+            return self.state
+
+    fake_mgr = FakeManager()
+    monkeypatch.setattr(goal_api, "_manager", lambda *args, **kwargs: fake_mgr)
+
+    payload = goal_api.goal_command_payload("goal-session", "resume")
+
+    assert payload["goal"]["status"] == "paused"
+    assert payload["message_key"] == "goal_status_paused"
+    assert "paused" in payload["message"].lower()
+
+
+def test_cli_goal_command_resume_reports_budget_exhausted(monkeypatch):
+    from cli.goals import GoalState
+    from cli import cli as cli_module
+
+    class FakeManager:
+        def __init__(self):
+            self._state = GoalState(
+                goal="Ship it",
+                status="paused",
+                turns_used=20,
+                max_turns=20,
+                paused_reason="turn budget exhausted (20/20)",
+                consecutive_parse_failures=0,
+            )
+
+        def resume(self):
+            return self._state
+
+        def status_line(self):
+            return "  ⏸ Goal (paused, 20/20 turns used, turn budget exhausted (20/20)): Ship it"
+
+    outputs = []
+    dummy = type("DummyCLI", (), {"_get_goal_manager": lambda self: FakeManager(), "_pending_input": None})()
+    monkeypatch.setattr(cli_module, "_cprint", lambda msg: outputs.append(msg))
+
+    cli_module.SidekickCLI._handle_goal_command(dummy, "/goal resume")
+
+    assert any("paused" in line.lower() for line in outputs)
+    assert all("resumed" not in line.lower() for line in outputs)

@@ -8146,6 +8146,8 @@ class SidekickCLI:
             state = mgr.resume()
             if state is None:
                 _cprint(f"  {_DIM}No goal to resume.{_RST}")
+            elif getattr(state, "status", "") != "active":
+                _cprint(f"  {mgr.status_line()}")
             else:
                 _cprint(f"  ▶ Goal resumed: {state.goal}")
                 _cprint(

@@ -231,6 +231,12 @@ class _ProfileGoalManager:
     def resume(self, *, reset_budget: bool = False):
         if not self._state:
             return None
+        exhausted = (
+            self._state.max_turns is not None
+            and int(self._state.turns_used or 0) >= int(self._state.max_turns or 0)
+        )
+        if exhausted and not reset_budget:
+            return self._state
         self._state.status = "active"
         self._state.paused_reason = None
         if reset_budget:
@@ -648,6 +654,16 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal to resume.",
                 message_key="goal_no_goal",
+                space_slug=space_slug,
+            )
+        if str(getattr(state, "status", "") or "").strip() != "active":
+            status_payload = _goal_status_payload(state, default_message="Goal remains paused.")
+            return _payload(
+                action="resume",
+                message=status_payload["message"],
+                message_key=status_payload.get("message_key"),
+                message_args=status_payload.get("message_args"),
+                state=state,
                 space_slug=space_slug,
             )
         return _payload(
