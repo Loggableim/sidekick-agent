@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import imaplib
 import json
+import hashlib
 import logging
 import os
 import re
@@ -398,8 +399,8 @@ def list_inboxes(space_slug: str) -> list[dict]:
 # IMAP connection helpers
 # ---------------------------------------------------------------------------
 
-# Simple connection cache: { (host, port, user, use_ssl) -> (conn, timestamp) }
-_imap_cache: dict[tuple[str, int, str, bool], tuple[imaplib.IMAP4, float]] = {}
+# Simple connection cache: { (host, port, user, use_ssl, pw_hash) -> (conn, timestamp) }
+_imap_cache: dict[tuple[str, int, str, bool, str], tuple[imaplib.IMAP4, float]] = {}
 _imap_cache_ttl = 300  # 5 minutes
 
 
@@ -416,8 +417,9 @@ def get_imap(inbox: dict) -> imaplib.IMAP4:
     user = inbox["imap_user"]
     password = inbox["imap_pass"]
     use_ssl = inbox.get("use_ssl", True)
+    password_hash = hashlib.sha256(str(password).encode("utf-8")).hexdigest()
 
-    cache_key = (host, port, user, bool(use_ssl))
+    cache_key = (host, port, user, bool(use_ssl), password_hash)
 
     # Check cache
     cached = _imap_cache.get(cache_key)
@@ -462,7 +464,7 @@ def release_imap(conn: imaplib.IMAP4 | None) -> None:
 
 def flush_imap_cache() -> None:
     """Close and clear all cached IMAP connections."""
-    for (_host, _port, _user, _use_ssl), (conn, _) in list(_imap_cache.items()):
+    for (_host, _port, _user, _use_ssl, _pw_hash), (conn, _) in list(_imap_cache.items()):
         try:
             conn.close()
             conn.logout()

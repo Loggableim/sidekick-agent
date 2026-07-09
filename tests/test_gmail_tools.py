@@ -230,3 +230,63 @@ def test_mail_imap_cache_distinguishes_port_and_ssl_mode(monkeypatch):
     assert len(created) == 2
     assert created[0].port == 993
     assert created[1].port == 1143
+
+
+def test_mail_imap_cache_distinguishes_password_changes(monkeypatch):
+    from tools import mail_imap
+
+    mail_imap.flush_imap_cache()
+    created = []
+
+    class FakeIMAP:
+        def __init__(self, host, port, **kwargs):
+            self.host = host
+            self.port = port
+            self.kwargs = kwargs
+            self.noop_count = 0
+            created.append(self)
+
+        def noop(self):
+            self.noop_count += 1
+            return "OK", [b"alive"]
+
+        def close(self):
+            return None
+
+        def logout(self):
+            return None
+
+        def login(self, user, password):
+            self.user = user
+            self.password = password
+            return "OK", [b"logged in"]
+
+    monkeypatch.setattr(
+        mail_imap.imaplib,
+        "IMAP4_SSL",
+        lambda host, port, timeout=None, ssl_context=None: FakeIMAP(host, port, timeout=timeout, ssl_context=ssl_context),
+    )
+
+    first = mail_imap.get_imap(
+        {
+            "imap_host": "imap.example.org",
+            "imap_port": 993,
+            "imap_user": "user@example.org",
+            "imap_pass": "first-secret",
+            "use_ssl": True,
+        }
+    )
+    second = mail_imap.get_imap(
+        {
+            "imap_host": "imap.example.org",
+            "imap_port": 993,
+            "imap_user": "user@example.org",
+            "imap_pass": "second-secret",
+            "use_ssl": True,
+        }
+    )
+
+    assert first is not second
+    assert len(created) == 2
+    assert created[0].password == "first-secret"
+    assert created[1].password == "second-secret"
