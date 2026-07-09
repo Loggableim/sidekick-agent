@@ -137,7 +137,7 @@ async def spawn_async_diagnostic(ctx: Dict[str, Any]) -> Dict[str, Any]:
         # ps aux --forest for parent process tree
         ps_result = subprocess.run(
             ["ps", "aux", "--forest"],
-            capture_output=True, text=True, timeout=5.0,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5.0,
         )
         if ps_result.returncode == 0:
             augmented["ps_aux_output"] = ps_result.stdout

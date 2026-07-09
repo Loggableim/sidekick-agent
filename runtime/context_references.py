@@ -289,6 +289,8 @@ def _expand_git_reference(
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
     except subprocess.TimeoutExpired:
@@ -481,6 +483,8 @@ def _rg_files(path: Path, cwd: Path, limit: int) -> list[Path] | None:
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
