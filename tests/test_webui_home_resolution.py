@@ -278,6 +278,129 @@ def test_routes_use_active_profile_home_after_import(monkeypatch, tmp_path):
     assert routes._cockpit_settings_path() == active_home / "cockpit" / ".cockpit_settings.json"
 
 
+def test_mail_config_get_falls_back_to_legacy_space_yaml_gmail_accounts(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import sys
+
+    active_home = tmp_path / "active-home"
+    space_yaml = active_home / "spaces" / "demo" / "space.yaml"
+    space_yaml.parent.mkdir(parents=True)
+    space_yaml.write_text(
+        json.dumps(
+            {
+                "gmail": {
+                    "accounts": {
+                        "work": {
+                            "email": "ada@gmail.com",
+                            "password": "app-password",
+                            "default": True,
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.routes", None)
+    routes = importlib.import_module("web.api.routes")
+
+    monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(
+        routes,
+        "j",
+        lambda _handler, payload, status=200, **_kw: {"status": status, "payload": payload},
+    )
+
+    response = routes._handle_mail_config_get(object(), SimpleNamespace(query=""))
+
+    assert response["status"] == 200
+    inbox = response["payload"]["config"]["inboxes"][0]
+    assert inbox["id"] == "work"
+    assert inbox["imap_host"] == "imap.gmail.com"
+    assert inbox["smtp_host"] == "smtp.gmail.com"
+    assert inbox["provider"] == "Gmail"
+
+
+def test_mail_setup_post_saves_synthesized_config_and_activates_mail_app(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import sys
+
+    active_home = tmp_path / "active-home"
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.routes", None)
+    routes = importlib.import_module("web.api.routes")
+
+    activations = []
+
+    monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(
+        routes,
+        "j",
+        lambda _handler, payload, status=200, **_kw: {"status": status, "payload": payload},
+    )
+
+    import web.api.appstore as appstore
+
+    monkeypatch.setattr(
+        appstore,
+        "_set_space_app_active",
+        lambda space_slug, app_key, active: activations.append((space_slug, app_key, active)) or True,
+    )
+
+    response = routes._handle_mail_setup_post(
+        object(),
+        SimpleNamespace(query=""),
+        {
+            "email": "ada@gmail.com",
+            "password": "app-password",
+            "account_id": "work",
+            "label": "Arbeitsmail",
+            "activate": True,
+        },
+    )
+
+    assert response["status"] == 200
+    payload = response["payload"]
+    assert payload["success"] is True
+    assert payload["provider"] == "Gmail"
+    assert payload["space_slug"] == "demo"
+    assert payload["space_active"] is True
+    assert activations == [("demo", "imap-mail", True)]
+
+    saved = json.loads((active_home / "spaces" / "demo" / "mail.json").read_text(encoding="utf-8"))
+    inbox = saved["inboxes"][0]
+    assert inbox["id"] == "work"
+    assert inbox["label"] == "Arbeitsmail"
+    assert inbox["imap_host"] == "imap.gmail.com"
+    assert inbox["smtp_host"] == "smtp.gmail.com"
+    assert inbox["default"] is True
+
+
+def test_mail_suggest_config_falls_back_to_generic_imap_and_warns():
+    from tools import mail_imap
+
+    result = mail_imap.suggest_mail_config("user@example.org", "secret", account_id="work")
+
+    assert result["success"] is True
+    assert result["provider"] == "IMAP/SMTP"
+    assert result["domain"] == "example.org"
+    assert result["warnings"]
+    inbox = result["config"]["inboxes"][0]
+    assert inbox["imap_host"] == "imap.example.org"
+    assert inbox["smtp_host"] == "smtp.example.org"
+    assert inbox["confidence"] == "fallback"
+
+
 def test_space_engine_uses_active_profile_home_after_import(monkeypatch, tmp_path):
     import sys
 

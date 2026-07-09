@@ -2439,6 +2439,18 @@ def test_appstore_home_renders_empty_catalog_state():
     assert ".appstore-empty-state-icon{" in style_css
 
 
+def test_appstore_mail_contract_exposes_builtin_mail_app_and_setup_flow():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    appstore_js = panels_js[panels_js.index("const _APPSTORE_FALLBACK_APPS = ["):]
+
+    assert "key: 'imap-mail'" in appstore_js
+    assert "Mail einrichten" in panels_js
+    assert "function _appstoreOpenMailSettings()" in panels_js
+    assert "function _appstoreSaveMailSettings(" in panels_js
+    assert "api('/api/mail/setup'" in panels_js
+    assert "_appstoreSyncMailButtons()" in panels_js
+
+
 def test_insights_panel_bounds_wide_content_responsively():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 

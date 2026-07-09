@@ -93,6 +93,35 @@ def _invalidate_manifest_cache() -> None:
     _MANIFEST_CACHE.clear()
 
 
+def _builtin_mail_manifest() -> dict:
+    """Return the synthetic Mail app that configures IMAP/SMTP mail."""
+    return {
+        "key": "imap-mail",
+        "name": "Mail",
+        "icon": "📧",
+        "cat": "Productivity",
+        "catIcon": "⚡",
+        "dev": "Sidekick Team",
+        "version": "1.0.0",
+        "size": "0.7 MB",
+        "desc": "E-Mails lesen, senden und automatisch einrichten.",
+        "fullDesc": (
+            "Verbinde dein Mail-Konto mit Sidekick. "
+            "Die App erkennt bekannte Anbieter automatisch, schreibt die IMAP/SMTP-Konfiguration "
+            "in den aktiven Space und aktiviert den Mail-Zugriff im Hintergrund."
+        ),
+        "status": "available",
+        "availability": "available",
+        "tags": ["email", "imap", "smtp", "auto-setup"],
+        "screenshots": ["Automatische Einrichtung", "Inbox-Übersicht", "Verbindungsstatus"],
+        "setup_steps": [],
+        "config_changes": [],
+        "env_writes": {},
+        "gateway_restart": False,
+        "tools_enable": [],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Paths (computed relative to this file's location in the repo)
 # ---------------------------------------------------------------------------
@@ -467,6 +496,9 @@ def get_all_status(space_slug: str | None = None) -> dict:
         }
     """
     manifests = discover_manifests()
+    if not any(str(m.get("key", "")).strip() == "imap-mail" for m in manifests):
+        manifests = list(manifests) + [_builtin_mail_manifest()]
+        manifests.sort(key=lambda m: (m.get("name") or m.get("key", "")))
     installed_records = _load_installed()
     space_apps: set[str] = set()
     if space_slug:

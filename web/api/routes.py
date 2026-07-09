@@ -1071,6 +1071,8 @@ from tools.mail_folders import _handler as _folders_handler
 from tools.mail_read import _handler as _read_handler
 from tools.mail_search import _handler as _search_handler
 from tools.mail_send import _handler as _send_handler
+from tools.mail_imap import get_space_config as _mail_get_space_config
+from tools.mail_imap import suggest_mail_config as _mail_suggest_config
 
 
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
@@ -3576,12 +3578,7 @@ def _handle_mail_config_get(handler, parsed) -> bool:
     """GET /api/mail/config — load mail.json for the active space."""
     try:
         space_slug = _workspace_slug_from_request(handler, parsed) or "default"
-        sidekick_home = _routes_active_home()
-        mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
-        if mail_path.exists():
-            config = json.loads(mail_path.read_text(encoding="utf-8"))
-        else:
-            config = {"inboxes": []}
+        config = _mail_get_space_config(space_slug, home=_routes_active_home()) or {"inboxes": []}
         return j(handler, {"success": True, "config": config})
     except Exception as exc:
         logger.exception("mail_config_get failed")
@@ -3608,6 +3605,67 @@ def _handle_mail_config_post(handler, parsed, body) -> bool:
     except Exception as exc:
         logger.exception("mail_config_post failed")
         return j(handler, {"success": False, "error": str(exc)})
+
+
+def _handle_mail_setup_post(handler, parsed, body) -> bool:
+    """POST /api/mail/setup — auto-detect provider and save mail.json."""
+    try:
+        space_slug = _workspace_slug_from_request(handler, parsed) or "default"
+        email = str(body.get("email", "")).strip()
+        password = str(body.get("password", "")).strip()
+        account_id = str(body.get("account_id", "")).strip() or None
+        label = str(body.get("label", "")).strip() or None
+        activate = body.get("activate", True)
+
+        result = _mail_suggest_config(email, password, account_id=account_id, label=label)
+        if not result.get("success"):
+            return j(handler, result, status=400)
+
+        config = result.get("config", {})
+        inboxes = config.get("inboxes") if isinstance(config, dict) else None
+        if not isinstance(inboxes, list) or not inboxes:
+            return j(
+                handler,
+                {
+                    "success": False,
+                    "error": "Mail config synthesis produced no inboxes",
+                    "config": {"inboxes": []},
+                },
+                status=500,
+            )
+
+        sidekick_home = _routes_active_home()
+        mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
+        mail_path.parent.mkdir(parents=True, exist_ok=True)
+        mail_path.write_text(
+            json.dumps(config, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        activation_changed = False
+        if bool(activate):
+            try:
+                from web.api.appstore import _set_space_app_active
+
+                activation_changed = bool(_set_space_app_active(space_slug, "imap-mail", True))
+            except Exception:
+                logger.exception("mail_setup activation failed")
+
+        payload = dict(result)
+        payload.update(
+            {
+                "success": True,
+                "space_slug": space_slug,
+                "config": config,
+                "mail_path": str(mail_path),
+                "space_active": bool(activate),
+                "activation_changed": activation_changed,
+            }
+        )
+        return j(handler, payload)
+    except Exception as exc:
+        logger.exception("mail_setup_post failed")
+        return j(handler, {"success": False, "error": str(exc), "config": {"inboxes": []}}, status=500)
 
 
 def _cockpit_settings_path() -> Path:
@@ -7626,6 +7684,8 @@ def handle_post(handler, parsed) -> bool:
         return _handle_mail_search(handler, parsed, body)
     if parsed.path == "/api/mail/config":
         return _handle_mail_config_post(handler, parsed, body)
+    if parsed.path == "/api/mail/setup":
+        return _handle_mail_setup_post(handler, parsed, body)
 
     # T8 – Bulk-Update
     if parsed.path == "/api/appstore/update-all":

@@ -6555,6 +6555,13 @@ const _APPSTORE_FALLBACK_APPS = [
     status: 'available', tags: ['email', 'google', 'productivity'],
     screenshots: ['Inbox-Ansicht', 'E-Mail-Detail', 'Compose'],
     setup_steps: [], config_changes: [], env_writes: {}, gateway_restart: false, tools_enable: [] },
+  { key: 'imap-mail', name: 'Mail', icon: '📧', cat: 'Productivity', catIcon: '⚡',
+    dev: 'Sidekick Team', version: '1.0.0', size: '0.7 MB',
+    desc: 'IMAP/SMTP-Mail automatisch einrichten und im Space aktivieren.',
+    fullDesc: 'Verbinde dein Mail-Konto mit Sidekick. Die App erkennt bekannte Anbieter automatisch, schreibt die IMAP/SMTP-Konfiguration in den aktiven Space und aktiviert den Mail-Zugriff im Hintergrund.',
+    status: 'available', tags: ['email', 'imap', 'smtp', 'auto-setup'],
+    screenshots: ['Automatische Einrichtung', 'Inbox-Übersicht', 'Verbindungsstatus'],
+    setup_steps: [], config_changes: [], env_writes: {}, gateway_restart: false, tools_enable: [] },
   { key: 'calendar', name: 'Google Calendar', icon: '📅', cat: 'Productivity', catIcon: '⚡',
     dev: 'Community', version: '0.7.0', size: '0.5 MB',
     desc: 'Termine verwalten und Kalender einsehen.',
@@ -6944,6 +6951,7 @@ function _renderAppstoreCategory(container, catKey) {
   for (const app of apps) {
     const isInstalled = app.status && app.status.installed;
     const isActuallyPlanned = app.availability === 'planned';
+    const isMailApp = app.key === 'imap-mail';
     let btnClass, btnLabel, btnAction;
 
     if (isInstalled) {
@@ -6954,6 +6962,10 @@ function _renderAppstoreCategory(container, catKey) {
       btnClass = 'appstore-card-btn appstore-card-btn-disabled';
       btnLabel = 'Demnächst';
       btnAction = 'disabled';
+    } else if (isMailApp) {
+      btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+      btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+      btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
     } else {
       btnClass = 'appstore-card-btn appstore-card-btn-primary';
       btnLabel = 'Installieren';
@@ -7009,6 +7021,7 @@ function _renderAppstoreAppPage(container, app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
   const isSpaceActive = app.space_active === true;
+  const isMailApp = app.key === 'imap-mail';
   let installLabel, installDisabled, installAction, uninstallAction;
 
   if (isInstalled) {
@@ -7020,6 +7033,11 @@ function _renderAppstoreAppPage(container, app) {
     installLabel = 'Demnächst verfügbar';
     installDisabled = 'disabled';
     installAction = '';
+    uninstallAction = '';
+  } else if (isMailApp) {
+    installLabel = isSpaceActive ? 'Mail verwalten' : 'Mail einrichten';
+    installDisabled = '';
+    installAction = 'onclick="_appstoreOpenMailSettings()"';
     uninstallAction = '';
   } else {
     installLabel = 'Installieren';
@@ -7050,7 +7068,7 @@ function _renderAppstoreAppPage(container, app) {
             (isSpaceActive ? '✓ Aktiv' : 'Aktivieren') +
           '</button>' +
         '</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px;">Nur in diesem Space sichtbar. Jeder Space kann Apps unabhängig aktivieren.</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px;">Sidekick schreibt die Mail-Konfiguration in diesen Space und schaltet den Mail-Zugriff hier an oder aus.</div>' +
       '</div>'
     : '';
 
@@ -7074,7 +7092,9 @@ function _renderAppstoreAppPage(container, app) {
           '<button class="appstore-card-btn ' + (isInstalled ? 'appstore-card-btn-success' : (isPlanned ? 'appstore-card-btn-disabled' : 'appstore-card-btn-primary')) + '" style="padding:10px 24px;font-size:14px;width:auto;"' +
             (installDisabled ? ' disabled' : '') + ' ' + installAction + '>' + installLabel +
           '</button>' +
-          (app.key === 'gmail'
+          (app.key === 'imap-mail'
+            ? '<button class="appstore-card-btn appstore-card-btn-outline" style="padding:10px 16px;width:auto;font-size:13px;" onclick="_appstoreOpenMailSettings()">Mail einrichten</button>'
+            : app.key === 'gmail'
             ? '<button class="appstore-card-btn appstore-card-btn-outline" style="padding:10px 16px;width:auto;font-size:13px;" onclick="_appstoreOpenGmailSettings()">App Settings</button>'
             : app.key === 'discord'
               ? '<button class="appstore-card-btn appstore-card-btn-outline" style="padding:10px 16px;width:auto;font-size:13px;" onclick="_appstoreOpenDiscordSettings()">App Settings</button>'
@@ -7202,7 +7222,9 @@ function _renderAppstoreRight(app) {
         ? '<button class="appstore-detail-uninstall-btn" style="border-color:var(--accent);color:var(--accent);" onclick="_appstoreOpenGmailSettings()">App Settings</button>'
         : app.key === 'discord'
           ? '<button class="appstore-detail-uninstall-btn" style="border-color:var(--accent);color:var(--accent);" onclick="_appstoreOpenDiscordSettings()">App Settings</button>'
-        : (app.settings_url
+        : app.key === 'imap-mail'
+          ? ''
+          : (app.settings_url
           ? '<button class="appstore-detail-uninstall-btn" style="border-color:var(--accent);color:var(--accent);" onclick="_appstoreOpenAppSettings(\'' + esc(app.key) + '\',\'' + esc(app.settings_url) + '\')">⚙️ Einstellungen</button>'
           : '')) +
 
@@ -7231,6 +7253,7 @@ function _renderAppstoreRight(app) {
 function _buildAppstoreCardHtml(app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
+  const isMailApp = app.key === 'imap-mail';
   let btnClass, btnLabel, btnAction;
 
   if (isInstalled) {
@@ -7241,6 +7264,10 @@ function _buildAppstoreCardHtml(app) {
     btnClass = 'appstore-card-btn appstore-card-btn-disabled';
     btnLabel = 'Demnächst';
     btnAction = 'disabled';
+  } else if (isMailApp) {
+    btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+    btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+    btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
   } else {
     btnClass = 'appstore-card-btn appstore-card-btn-primary';
     btnLabel = 'Installieren';
@@ -7269,6 +7296,7 @@ function _buildAppstoreCardHtml(app) {
 function _buildAppstoreGridCardHtml(app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
+  const isMailApp = app.key === 'imap-mail';
   let btnClass, btnLabel, btnAction;
   if (isInstalled) {
     btnClass = 'appstore-card-btn appstore-card-btn-success';
@@ -7278,6 +7306,10 @@ function _buildAppstoreGridCardHtml(app) {
     btnClass = 'appstore-card-btn appstore-card-btn-disabled';
     btnLabel = 'Demnächst';
     btnAction = 'disabled';
+  } else if (isMailApp) {
+    btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+    btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+    btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
   } else {
     btnClass = 'appstore-card-btn appstore-card-btn-primary';
     btnLabel = (typeof t === 'function' ? t('appstore_install') : 'Installieren');
@@ -7486,6 +7518,10 @@ let _appstoreSetupInstalling = false;  // true while POST is in flight
 function _appstoreStartInstall(appKey) {
   const app = _appstoreAppsCache.find(a => a.key === appKey);
   if (!app) return;
+  if (app.key === 'imap-mail') {
+    _appstoreOpenMailSettings();
+    return;
+  }
   if (app.status && app.status.installed) {
     alert('Diese App ist bereits installiert.');
     return;
@@ -7951,6 +7987,114 @@ async function _appstoreSaveGmailSettings(btn) {
   }
 }
 
+async function _appstoreOpenMailSettings() {
+  _appstoreCloseOverlay('mailAppSettingsOverlay');
+
+  let currentConfig = { inboxes: [] };
+  try {
+    const res = await api('/api/mail/config');
+    if (res && res.success && res.config && Array.isArray(res.config.inboxes)) {
+      currentConfig = res.config;
+    }
+  } catch (err) {
+    console.warn('[appstore] failed to load current mail config:', err);
+  }
+
+  const inbox = Array.isArray(currentConfig.inboxes) && currentConfig.inboxes.length > 0 ? currentConfig.inboxes[0] : {};
+  const overlay = document.createElement('div');
+  overlay.className = 'appstore-setup-overlay';
+  overlay.id = 'mailAppSettingsOverlay';
+  overlay.innerHTML =
+    '<div class="appstore-setup-modal" style="max-width:760px;">' +
+      '<div class="appstore-setup-header">' +
+        '<div><div class="appstore-setup-title">📧 Mail einrichten</div>' +
+        '<div class="appstore-setup-subtitle">E-Mail und Passwort eingeben. Sidekick erkennt den Anbieter automatisch und aktiviert die Mail-App im aktuellen Space.</div></div>' +
+        '<button class="appstore-modal-close" onclick="var e=document.getElementById(\'mailAppSettingsOverlay\');if(e)e.style.display=\'none\'">✕</button>' +
+      '</div>' +
+      '<div class="appstore-setup-body" style="display:grid;gap:14px;">' +
+        '<div class="appstore-step-hint">Bekannte Anbieter werden automatisch erkannt. Bei unbekannten Domains versucht Sidekick generische IMAP/SMTP-Hostnamen. Du musst normalerweise nur E-Mail und Passwort ausfüllen.</div>' +
+        '<label class="appstore-step-field"><span>Account-ID / Alias</span><input id="mailAppAccountId" class="appstore-step-input" value="' + esc(inbox.id || '') + '" placeholder="mail"></label>' +
+        '<label class="appstore-step-field"><span>E-Mail-Adresse</span><input id="mailAppEmail" class="appstore-step-input" type="email" value="' + esc(inbox.imap_user || inbox.smtp_user || '') + '" placeholder="name@example.com"></label>' +
+        '<label class="appstore-step-field"><span>Passwort</span><input id="mailAppPassword" class="appstore-step-input" type="password" placeholder="App-Passwort oder normales Passwort"></label>' +
+        '<label class="appstore-step-field"><span>Anzeige-Name</span><input id="mailAppLabel" class="appstore-step-input" value="' + esc(inbox.label || inbox.id || '') + '" placeholder="Arbeitsmail"></label>' +
+        '<label class="appstore-step-toggle-wrap" style="margin-top:2px;">' +
+          '<input type="checkbox" id="mailAppActivate" class="appstore-step-toggle" checked>' +
+          '<span class="appstore-step-toggle-slider"></span>' +
+          '<span class="appstore-step-toggle-label">In diesem Space aktivieren</span>' +
+        '</label>' +
+        '<div id="mailAppSettingsStatus" style="font-size:12px;color:var(--muted);line-height:1.5;"></div>' +
+      '</div>' +
+      '<div class="appstore-setup-footer">' +
+        '<button class="appstore-step-btn appstore-step-btn-outline" onclick="var e=document.getElementById(\'mailAppSettingsOverlay\');if(e)e.style.display=\'none\'">Abbrechen</button>' +
+        '<button class="appstore-step-btn appstore-step-btn-primary" onclick="_appstoreSaveMailSettings(this)" style="margin-left:auto;">Mail einrichten</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll('.appstore-modal-close,.appstore-step-btn-outline').forEach(btn => {
+    btn.onclick = function(ev) {
+      ev.preventDefault();
+      _appstoreCloseOverlay('mailAppSettingsOverlay');
+    };
+  });
+}
+
+async function _appstoreSaveMailSettings(btn) {
+  const status = document.getElementById('mailAppSettingsStatus');
+  const email = (document.getElementById('mailAppEmail')?.value || '').trim();
+  const password = document.getElementById('mailAppPassword')?.value || '';
+  const accountId = (document.getElementById('mailAppAccountId')?.value || '').trim();
+  const label = (document.getElementById('mailAppLabel')?.value || '').trim();
+  const activate = !!(document.getElementById('mailAppActivate') && document.getElementById('mailAppActivate').checked);
+
+  if (!email || !password) {
+    if (status) status.textContent = 'Bitte E-Mail-Adresse und Passwort ausfüllen.';
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Einrichten...';
+  }
+  if (status) status.textContent = 'Erkenne Anbieter und schreibe Mail-Konfiguration...';
+
+  try {
+    const result = await api('/api/mail/setup', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email,
+        password: password,
+        account_id: accountId,
+        label: label,
+        activate: activate,
+      }),
+    });
+
+    if (!result || !result.success) {
+      throw new Error((result && result.error) || 'Unbekannter Fehler');
+    }
+
+    if (status) {
+      const warnings = Array.isArray(result.warnings) && result.warnings.length > 0 ? ' ' + result.warnings.join(' ') : '';
+      status.textContent = 'Mail erfolgreich eingerichtet: ' + (result.provider || 'Mail') + '.' + warnings;
+    }
+    if (typeof showToast === 'function') showToast('Mail eingerichtet', 'success');
+    loadAppstorePanel();
+    if (typeof loadMailPanel === 'function') loadMailPanel();
+    setTimeout(function() {
+      _appstoreCloseOverlay('mailAppSettingsOverlay');
+    }, 350);
+  } catch (err) {
+    if (status) status.textContent = 'Mail-Setup fehlgeschlagen: ' + (err && err.message ? err.message : String(err));
+    if (typeof showToast === 'function') showToast('Mail-Setup fehlgeschlagen', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Mail einrichten';
+    }
+  }
+}
+
 async function _appstoreOpenDiscordSettings() {
   _appstoreCloseOverlay('discordAppSettingsOverlay');
   let spaces = [];
@@ -8054,6 +8198,8 @@ function _appstoreCloseOverlay(idOrElement) {
 
 window._appstoreOpenGmailSettings = _appstoreOpenGmailSettings;
 window._appstoreSaveGmailSettings = _appstoreSaveGmailSettings;
+window._appstoreOpenMailSettings = _appstoreOpenMailSettings;
+window._appstoreSaveMailSettings = _appstoreSaveMailSettings;
 window._appstoreOpenDiscordSettings = _appstoreOpenDiscordSettings;
 window._appstoreSaveDiscordSettings = _appstoreSaveDiscordSettings;
 window._appstoreCloseOverlay = _appstoreCloseOverlay;
