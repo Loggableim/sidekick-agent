@@ -2557,6 +2557,7 @@ def _run_agent_streaming(
             old_profile_env = {key: os.environ.get(key) for key in _profile_runtime_env}
             old_cwd = os.environ.get('TERMINAL_CWD')
             old_exec_ask = os.environ.get('SIDEKICK_EXEC_ASK')
+            old_hermes_exec_ask = os.environ.get('HERMES_EXEC_ASK')
             old_session_key = os.environ.get('SIDEKICK_SESSION_KEY')
             old_sidekick_home = os.environ.get('SIDEKICK_HOME')
             old_hermes_home = os.environ.get('HERMES_HOME')
@@ -2567,6 +2568,7 @@ def _run_agent_streaming(
             os.environ.update(_profile_runtime_env)
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['SIDEKICK_EXEC_ASK'] = '1'
+            os.environ['HERMES_EXEC_ASK'] = '1'
             os.environ['SIDEKICK_SESSION_KEY'] = session_id
             os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
             os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
@@ -4218,14 +4220,18 @@ def _run_agent_streaming(
                     else: os.environ[_key] = _old_value
                 if old_cwd is None: os.environ.pop('TERMINAL_CWD', None)
                 else: os.environ['TERMINAL_CWD'] = old_cwd
-                if old_exec_ask is None:
-                    os.environ.pop('SIDEKICK_EXEC_ASK', None)
-                else:
-                    os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
-                if old_session_key is None:
-                    os.environ.pop('SIDEKICK_SESSION_KEY', None)
-                else:
-                    os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
+            if old_exec_ask is None:
+                os.environ.pop('SIDEKICK_EXEC_ASK', None)
+            else:
+                os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
+            if old_hermes_exec_ask is None:
+                os.environ.pop('HERMES_EXEC_ASK', None)
+            else:
+                os.environ['HERMES_EXEC_ASK'] = old_hermes_exec_ask
+            if old_session_key is None:
+                os.environ.pop('SIDEKICK_SESSION_KEY', None)
+            else:
+                os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
                 _restore_streaming_home_env(old_sidekick_home, old_hermes_home)
                 if old_browser_session_id is None:
                     os.environ.pop('SIDEKICK_WEBUI_BROWSER_SESSION_ID', None)

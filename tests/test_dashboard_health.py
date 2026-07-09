@@ -3447,12 +3447,15 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
 
 def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path):
     from types import SimpleNamespace
+    import os
 
     from web.api import config as cfg
     from web.api import routes
 
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": False})
+    monkeypatch.delenv("SIDEKICK_EXEC_ASK", raising=False)
+    monkeypatch.setenv("HERMES_EXEC_ASK", "legacy-ask")
     monkeypatch.setattr(cfg, "resolve_model_provider", lambda model: ("qwen3:4b", "openai", "https://api.openai.com/v1"))
     monkeypatch.setattr(cfg, "resolve_custom_provider_connection", lambda provider: (None, None))
 
@@ -3525,6 +3528,7 @@ def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path
     assert captured["approval_session_key"] == "chat-sync-1"
     assert captured["approval_platform"] == "webui"
     assert captured["is_gateway"] is True
+    assert os.environ["HERMES_EXEC_ASK"] == "legacy-ask"
 
 
 def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):

@@ -11044,15 +11044,15 @@ def _handle_chat_sync(handler, body):
         old_session_platform = os.environ.get("SIDEKICK_SESSION_PLATFORM")
         old_hermes_session_platform = os.environ.get("HERMES_SESSION_PLATFORM")
         old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK")
+        old_hermes_exec_ask = os.environ.get("HERMES_EXEC_ASK")
         old_hermes_session_key = os.environ.get("HERMES_SESSION_KEY")
         old_session_key = os.environ.get("SIDEKICK_SESSION_KEY")
         os.environ["SIDEKICK_PLATFORM"] = "webui"
         os.environ["SIDEKICK_SESSION_PLATFORM"] = "webui"
         os.environ["HERMES_SESSION_PLATFORM"] = "webui"
         os.environ["SIDEKICK_EXEC_ASK"] = "1"
-        os.environ["SIDEKICK_EXEC_ASK"] = "1"
+        os.environ["HERMES_EXEC_ASK"] = "1"
         os.environ["HERMES_SESSION_KEY"] = s.session_id
-        os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
         os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
     try:
         from run_agent import AIAgent
@@ -11179,10 +11179,12 @@ def _handle_chat_sync(handler, body):
                 os.environ["HERMES_SESSION_PLATFORM"] = old_hermes_session_platform
             if old_exec_ask is None:
                 os.environ.pop("SIDEKICK_EXEC_ASK", None)
-                os.environ.pop("HERMES_EXEC_ASK", None)
             else:
                 os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
-                os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
+            if old_hermes_exec_ask is None:
+                os.environ.pop("HERMES_EXEC_ASK", None)
+            else:
+                os.environ["HERMES_EXEC_ASK"] = old_hermes_exec_ask
             if old_hermes_session_key is None:
                 os.environ.pop("HERMES_SESSION_KEY", None)
             else:
@@ -11190,7 +11192,6 @@ def _handle_chat_sync(handler, body):
             if old_session_key is None:
                 os.environ.pop("SIDEKICK_SESSION_KEY", None)
             else:
-                os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
                 os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
     with _get_session_agent_lock(s.session_id):
         _result_messages = result.get("messages") or _previous_context_messages
