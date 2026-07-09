@@ -125,6 +125,34 @@ def _restore_streaming_home_env(old_sidekick_home: str | None, old_hermes_home: 
         os.environ.pop("HERMES_HOME", None)
 
 
+def _restore_streaming_browser_env(
+    old_browser_session_id: str | None,
+    old_browser_base_url: str | None,
+    old_browser_permission_mode: str | None,
+    old_browser_permission_token: str | None,
+) -> None:
+    """Restore browser-scoped env vars after a streaming turn finishes."""
+    if old_browser_session_id is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_SESSION_ID", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_SESSION_ID"] = old_browser_session_id
+
+    if old_browser_base_url is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_BASE_URL", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_BASE_URL"] = old_browser_base_url
+
+    if old_browser_permission_mode is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE"] = old_browser_permission_mode
+
+    if old_browser_permission_token is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN"] = old_browser_permission_token
+
+
 def _load_nova_session_start_module():
     session_start_path = get_nova_session_start_path()
     nova_dir = str(session_start_path.parent)
@@ -4232,23 +4260,13 @@ def _run_agent_streaming(
                 os.environ.pop('SIDEKICK_SESSION_KEY', None)
             else:
                 os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
-                _restore_streaming_home_env(old_sidekick_home, old_hermes_home)
-                if old_browser_session_id is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_SESSION_ID', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = old_browser_session_id
-                if old_browser_base_url is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_BASE_URL', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = old_browser_base_url
-                if old_browser_permission_mode is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = old_browser_permission_mode
-                if old_browser_permission_token is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = old_browser_permission_token
+            _restore_streaming_home_env(old_sidekick_home, old_hermes_home)
+            _restore_streaming_browser_env(
+                old_browser_session_id,
+                old_browser_base_url,
+                old_browser_permission_mode,
+                old_browser_permission_token,
+            )
 
     except Exception as e:
         print('[webui] stream error:\n' + traceback.format_exc(), flush=True)

@@ -1350,6 +1350,37 @@ def test_streaming_thread_env_sets_both_home_vars(monkeypatch, tmp_path):
     assert env["HERMES_SESSION_KEY"] == "session-123"
 
 
+def test_streaming_restore_browser_env_is_independent_of_session_key(monkeypatch):
+    import os
+    import sys
+
+    monkeypatch.setenv("SIDEKICK_HOME", "current-sidekick")
+    monkeypatch.setenv("HERMES_HOME", "current-hermes")
+    monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_SESSION_ID", "current-session")
+    monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_BASE_URL", "http://current")
+    monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE", "current-mode")
+    monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN", "current-token")
+    monkeypatch.delenv("SIDEKICK_SESSION_KEY", raising=False)
+
+    sys.modules.pop("web.api.streaming", None)
+    streaming = importlib.import_module("web.api.streaming")
+
+    streaming._restore_streaming_home_env("old-sidekick", "old-hermes")
+    streaming._restore_streaming_browser_env(
+        "old-session",
+        "http://old",
+        "old-mode",
+        "old-token",
+    )
+
+    assert os.environ["SIDEKICK_HOME"] == "old-sidekick"
+    assert os.environ["HERMES_HOME"] == "old-hermes"
+    assert os.environ["SIDEKICK_WEBUI_BROWSER_SESSION_ID"] == "old-session"
+    assert os.environ["SIDEKICK_WEBUI_BROWSER_BASE_URL"] == "http://old"
+    assert os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE"] == "old-mode"
+    assert os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN"] == "old-token"
+
+
 def test_supermemory_client_uses_active_profile_after_import(monkeypatch, tmp_path):
     import sys
     import types
