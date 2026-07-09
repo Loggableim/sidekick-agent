@@ -513,6 +513,35 @@ def send_mail(inbox: dict, to_addrs: list[str], message: str) -> dict:
         return {"success": False, "error": str(exc)}
 
 
+def validate_smtp(inbox: dict) -> None:
+    """Open and authenticate SMTP for the given inbox config.
+
+    This performs the same network/authentication checks as :func:`send_mail`
+    without actually sending a message. It raises on failure.
+    """
+    host = inbox.get("smtp_host")
+    port = int(inbox.get("smtp_port", 587))
+    user = inbox.get("smtp_user", inbox.get("imap_user", ""))
+    password = inbox.get("smtp_pass", inbox.get("imap_pass", ""))
+    use_tls = inbox.get("smtp_use_tls", True)
+
+    if not host:
+        raise ValueError("SMTP not configured for this inbox")
+
+    try:
+        if use_tls:
+            context = ssl.create_default_context()
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
+                server.starttls(context=context)
+                server.login(user, password)
+        else:
+            with smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT) as server:
+                server.login(user, password)
+    except Exception:
+        logger.exception("SMTP validation failed for %s", user)
+        raise
+
+
 # ---------------------------------------------------------------------------
 # Mail parsing helpers
 # ---------------------------------------------------------------------------

@@ -1075,6 +1075,7 @@ from tools.mail_imap import get_imap as _mail_get_imap
 from tools.mail_imap import get_space_config as _mail_get_space_config
 from tools.mail_imap import release_imap as _mail_release_imap
 from tools.mail_imap import suggest_mail_config as _mail_suggest_config
+from tools.mail_imap import validate_smtp as _mail_validate_smtp
 
 
 def _kanban_unknown_endpoint(handler, parsed, method: str) -> bool:
@@ -3674,6 +3675,22 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
                 {
                     "success": False,
                     "error": f"Mail connection failed: {validation_error}",
+                    "config": config,
+                },
+                status=400,
+            )
+
+        smtp_error = None
+        try:
+            _mail_validate_smtp(config["inboxes"][0])
+        except Exception as exc:
+            smtp_error = str(exc)
+        if smtp_error:
+            return j(
+                handler,
+                {
+                    "success": False,
+                    "error": f"Mail connection failed: {smtp_error}",
                     "config": config,
                 },
                 status=400,
