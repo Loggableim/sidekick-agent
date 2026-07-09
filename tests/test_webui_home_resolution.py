@@ -731,6 +731,74 @@ def test_mail_setup_post_preserves_additional_inboxes(monkeypatch, tmp_path):
     assert saved["inboxes"][1]["imap_user"] == "archive@example.org"
 
 
+def test_mail_setup_post_clears_stale_default_flags_on_existing_inboxes(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import sys
+
+    active_home = tmp_path / "active-home"
+    space_dir = active_home / "spaces" / "demo"
+    space_dir.mkdir(parents=True)
+    (space_dir / "mail.json").write_text(
+        json.dumps(
+            {
+                "inboxes": [
+                    {
+                        "id": "primary",
+                        "label": "Primary",
+                        "imap_host": "imap.old.example",
+                        "imap_user": "old@example.org",
+                        "imap_pass": "old-pass",
+                        "default": False,
+                    },
+                    {
+                        "id": "archive",
+                        "label": "Archive",
+                        "imap_host": "imap.archive.example",
+                        "imap_user": "archive@example.org",
+                        "imap_pass": "archive-pass",
+                        "default": True,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.routes", None)
+    routes = importlib.import_module("web.api.routes")
+
+    monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(routes, "_mail_get_imap", lambda *_args, **_kwargs: object(), raising=False)
+    monkeypatch.setattr(routes, "_mail_release_imap", lambda *_args, **_kwargs: None, raising=False)
+    monkeypatch.setattr(routes, "_mail_validate_smtp", lambda *_args, **_kwargs: None, raising=False)
+    monkeypatch.setattr(
+        routes,
+        "j",
+        lambda _handler, payload, status=200, **_kw: {"status": status, "payload": payload},
+    )
+
+    response = routes._handle_mail_setup_post(
+        object(),
+        SimpleNamespace(query=""),
+        {
+            "email": "ada@gmail.com",
+            "password": "app-password",
+            "activate": True,
+        },
+    )
+
+    assert response["status"] == 200
+    saved = json.loads((space_dir / "mail.json").read_text(encoding="utf-8"))
+    defaults = [inbox for inbox in saved["inboxes"] if inbox.get("default")]
+    assert len(defaults) == 1
+    assert defaults[0]["imap_user"] == "ada@gmail.com"
+    assert saved["inboxes"][1]["default"] is False
+
+
 def test_mail_suggest_config_falls_back_to_generic_imap_and_warns():
     from tools import mail_imap
 

@@ -3657,6 +3657,19 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
                 ]
                 config = merged_config
 
+        inbox_list = config.get("inboxes", []) if isinstance(config, dict) else []
+        if isinstance(inbox_list, list) and inbox_list:
+            normalized_inboxes = []
+            for idx, inbox in enumerate(inbox_list):
+                if not isinstance(inbox, dict):
+                    continue
+                normalized_inbox = dict(inbox)
+                normalized_inbox["default"] = idx == 0
+                normalized_inboxes.append(normalized_inbox)
+            if normalized_inboxes:
+                config = dict(config)
+                config["inboxes"] = normalized_inboxes
+
         validation_error = None
         validation_conn = None
         try:
