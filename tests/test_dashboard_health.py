@@ -317,6 +317,47 @@ def test_agent_profile_creation_uses_utf8_subprocess_capture(monkeypatch):
     assert captured["kwargs"]["errors"] == "replace"
 
 
+def test_apply_patch_fallback_uses_utf8_subprocess_capture(monkeypatch):
+    from types import SimpleNamespace
+    import builtins
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "j", lambda _handler, payload, status=200, extra_headers=None: {"status": status, "payload": payload})
+    monkeypatch.setattr(routes, "bad", lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}})
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tools.patch":
+            raise ImportError("tools.patch unavailable")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="Patch appliziert ✓", stderr="")
+
+    monkeypatch.setattr(routes.subprocess, "run", fake_run)
+
+    response = routes._handle_apply_patch(
+        SimpleNamespace(headers={}),
+        {"patchId": "p1", "action": "accept", "patch_content": "--- a\n+++ b\n"},
+    )
+
+    assert response["status"] == 200
+    assert response["payload"]["ok"] is True
+    assert response["payload"]["action"] == "accepted"
+    assert response["payload"]["result"] == "Patch appliziert ✓"
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
+
+
 def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 

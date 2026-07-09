@@ -5538,6 +5538,8 @@ def _handle_apply_patch(handler, body) -> bool:
                     input=patch_content,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=30,
                 )
                 os.unlink(patch_path)
