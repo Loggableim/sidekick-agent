@@ -10612,18 +10612,33 @@ def _handle_goal_command(handler, body):
     from web.api.goals import goal_command_payload, goal_state_snapshot, restore_goal_state
 
     goal_args = str(body.get("args", "") or body.get("text", "") or "")
-    goal_max_turns = body.get("max_turns", body.get("goal_max_turns", body.get("turns", body.get("goal_steps"))))
     goal_unlimited = bool(body.get("unlimited", body.get("goal_unlimited", False)))
-    if isinstance(goal_max_turns, str):
-        goal_budget_text = goal_max_turns.strip().lower()
-        if goal_budget_text in {"unlimited", "infinite", "inf", "∞", "none"}:
-            goal_unlimited = True
-            goal_max_turns = None
-        elif goal_budget_text:
-            try:
-                goal_max_turns = int(goal_budget_text)
-            except ValueError:
+    goal_max_turns = None
+    for key in ("max_turns", "goal_max_turns", "turns", "goal_steps"):
+        if key not in body:
+            continue
+        candidate = body.get(key)
+        if candidate is None:
+            continue
+        if isinstance(candidate, str):
+            budget_text = candidate.strip().lower()
+            if not budget_text:
+                continue
+            if budget_text in {"unlimited", "infinite", "inf", "∞", "none"}:
+                goal_unlimited = True
                 goal_max_turns = None
+                break
+            try:
+                goal_max_turns = int(budget_text)
+                break
+            except ValueError:
+                continue
+        else:
+            try:
+                goal_max_turns = int(candidate)
+                break
+            except (TypeError, ValueError):
+                continue
     if isinstance(goal_max_turns, (int, float)) and int(goal_max_turns) <= 0:
         goal_unlimited = True
         goal_max_turns = None

@@ -182,6 +182,93 @@ def test_webui_goal_command_passes_custom_and_unlimited_budget(monkeypatch):
     assert result["status"] is None
 
 
+def test_webui_goal_command_ignores_blank_max_turns_when_goal_steps_present(monkeypatch):
+    from web.api import goals as goal_api
+    from web.api import routes
+
+    class Session:
+        session_id = "goal-session"
+        profile = "default"
+        workspace = "workspace"
+        workspace_slug = None
+        space_slug = None
+        space = None
+        active_stream_id = None
+        model = "model"
+        model_provider = "provider"
+
+    captured = {}
+
+    monkeypatch.setattr(routes, "require", lambda body, key: None)
+    monkeypatch.setattr(routes, "get_session", lambda session_id: Session())
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda workspace: workspace)
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model, provider, model))
+    monkeypatch.setattr(goal_api, "goal_state_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(goal_api, "restore_goal_state", lambda *args, **kwargs: None)
+
+    def fake_goal_command_payload(session_id, goal_args, **kwargs):
+        captured["kwargs"] = kwargs
+        return {"ok": True, "message": "ok", "goal": {"goal": goal_args}, "kickoff_prompt": ""}
+
+    monkeypatch.setattr(goal_api, "goal_command_payload", fake_goal_command_payload)
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=None: {"payload": payload, "status": status})
+    monkeypatch.setattr(routes, "bad", lambda handler, message, status=400: {"error": message, "status": status})
+
+    result = routes._handle_goal_command(object(), {
+        "session_id": "goal-session",
+        "args": "Build it",
+        "goal_steps": "37",
+        "max_turns": "",
+    })
+
+    assert captured["kwargs"]["max_turns"] == 37
+    assert captured["kwargs"]["unlimited"] is False
+    assert result["status"] is None
+
+
+def test_webui_goal_command_treats_unlimited_string_as_unlimited(monkeypatch):
+    from web.api import goals as goal_api
+    from web.api import routes
+
+    class Session:
+        session_id = "goal-session"
+        profile = "default"
+        workspace = "workspace"
+        workspace_slug = None
+        space_slug = None
+        space = None
+        active_stream_id = None
+        model = "model"
+        model_provider = "provider"
+
+    captured = {}
+
+    monkeypatch.setattr(routes, "require", lambda body, key: None)
+    monkeypatch.setattr(routes, "get_session", lambda session_id: Session())
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda workspace: workspace)
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model, provider, model))
+    monkeypatch.setattr(goal_api, "goal_state_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(goal_api, "restore_goal_state", lambda *args, **kwargs: None)
+
+    def fake_goal_command_payload(session_id, goal_args, **kwargs):
+        captured["kwargs"] = kwargs
+        return {"ok": True, "message": "ok", "goal": {"goal": goal_args}, "kickoff_prompt": ""}
+
+    monkeypatch.setattr(goal_api, "goal_command_payload", fake_goal_command_payload)
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=None: {"payload": payload, "status": status})
+    monkeypatch.setattr(routes, "bad", lambda handler, message, status=400: {"error": message, "status": status})
+
+    result = routes._handle_goal_command(object(), {
+        "session_id": "goal-session",
+        "args": "Build it",
+        "goal_steps": "unlimited",
+    })
+
+    assert captured["kwargs"]["max_turns"] is None
+    assert captured["kwargs"]["unlimited"] is True
+    assert result["status"] is None
+
+
 def test_webui_goal_command_resume_reports_budget_exhausted(monkeypatch):
     from cli.goals import GoalState
     from web.api import goals as goal_api

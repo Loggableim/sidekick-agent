@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sidekick"
-version = "0.8.47"
+version = "0.8.49"
 description = "Sidekick Agent"
 authors = [{name = "Sidekick"}]
 readme = "README.md"
