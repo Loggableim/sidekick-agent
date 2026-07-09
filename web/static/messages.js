@@ -52,14 +52,24 @@ const _msgEl=document.getElementById('msg');
 if(_msgEl) _msgEl.addEventListener('focus', ()=>{ if('speechSynthesis' in window && speechSynthesis.speaking) speechSynthesis.pause(); });
 if(_msgEl) _msgEl.addEventListener('blur', ()=>{ if('speechSynthesis' in window && speechSynthesis.paused) speechSynthesis.resume(); });
 
-function _gameModeWouldBlockClientModel(model, provider){
+function _gameModeWouldBlockClientModel(model, provider, spaceSlug){
   if(window._gameModeEnabled!==true) return false;
+  if(_gameModeAllowsNovaRemoteFallback(spaceSlug)) return false;
   const p=String(provider||'').trim().toLowerCase();
   const m=String(model||'').trim().toLowerCase();
   const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai']);
   if(localProviders.has(p)) return true;
   if(p.startsWith('custom:')&&localProviders.has(p.slice(7))) return true;
   return m.startsWith('@ollama:')||m.startsWith('ollama:')||m.includes('@ollama:');
+}
+
+function _gameModeAllowsNovaRemoteFallback(spaceSlug){
+  const slug=String(spaceSlug||'').trim().toLowerCase();
+  if(slug==='nova') return true;
+  const activeSpace=String(typeof _activeSpace!=='undefined'&&_activeSpace ? _activeSpace : '').trim().toLowerCase();
+  if(slug&&activeSpace&&slug!==activeSpace) return false;
+  const cfg=window._activeSpaceConfig;
+  return !!(cfg&&typeof cfg==='object'&&cfg.nova&&typeof cfg.nova==='object'&&cfg.nova.enabled);
 }
 
 function _showGameModeClientBlock(){
@@ -244,9 +254,14 @@ async function send(){
   if(uploaded.length&&!msgText)msgText=`I've uploaded ${uploaded.length} file(s): ${uploadedPaths.join(', ')}`;
   else if(uploaded.length)msgText=`${text}\n\n[Attached files: ${uploadedPaths.join(', ')}]`;
   if(!msgText){setComposerStatus('Nothing to send');return;}
+  const selectedWorkspaceSlug=String(
+    (S.session&&(S.session.workspace_slug||S.session.space_slug||S.session.space))||
+    (typeof _activeSpace!=='undefined'&&_activeSpace)||
+    ''
+  ).trim().toLowerCase();
   const selectedModel=S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'';
   const selectedProvider=S.session&&S.session.model_provider||null;
-  if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider)){
+  if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider,selectedWorkspaceSlug)){
     _showGameModeClientBlock();
     return;
   }

@@ -1449,12 +1449,17 @@ def test_kanban_board_create_and_archive_do_not_restart_polling_after_reload():
 def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
 
-    assert "function _gameModeWouldBlockClientModel(model, provider)" in messages_js
+    assert "function _gameModeWouldBlockClientModel(model, provider, spaceSlug)" in messages_js
+    assert "function _gameModeAllowsNovaRemoteFallback(spaceSlug)" in messages_js
     assert "localProviders.has(p)" in messages_js
     assert "p.startsWith('custom:')&&localProviders.has(p.slice(7))" in messages_js
     assert "m.startsWith('@ollama:')" in messages_js
+    assert "const cfg=window._activeSpaceConfig;" in messages_js
+    assert "if(slug&&activeSpace&&slug!==activeSpace) return false;" in messages_js
+    assert "cfg&&typeof cfg==='object'&&cfg.nova&&typeof cfg.nova==='object'&&cfg.nova.enabled" in messages_js
+    assert "const selectedWorkspaceSlug=String(" in messages_js
     assert "selectedProvider=S.session&&S.session.model_provider||null" in messages_js
-    assert "if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider))" in messages_js
+    assert "if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider,selectedWorkspaceSlug))" in messages_js
     assert "ollama-cloud" not in messages_js[messages_js.index("function _gameModeWouldBlockClientModel"):messages_js.index("async function send")]
 
     catch_start = messages_js.index("const gameModeBlocked=!!(e&&e.data&&e.data.error&&e.data.error.code==='game_mode_enabled')")
