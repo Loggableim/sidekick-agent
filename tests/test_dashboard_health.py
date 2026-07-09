@@ -2452,7 +2452,10 @@ def test_appstore_mail_contract_exposes_builtin_mail_app_and_setup_flow():
 
 
 def test_appstore_imap_mail_manifest_matches_auto_setup_contract():
-    manifest = json.loads(Path(r"C:/sidekick/home/appstore/imap-mail.json").read_text(encoding="utf-8"))
+    from web.api._home import get_webui_home
+
+    manifest_path = get_webui_home() / "appstore" / "imap-mail.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     assert manifest["key"] == "imap-mail"
     assert manifest["name"] == "Mail"

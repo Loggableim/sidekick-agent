@@ -257,7 +257,7 @@ def resolve_space_slug(kw: dict[str, Any] | None = None, *, default: str = "defa
     4. ``default`` (usually ``"default"``)
     """
     kw = kw or {}
-    slug = str(kw.get("user_task", "") or "").strip()
+    slug = str(kw.get("user_task", "") or "").strip().lower()
     if slug:
         return slug
     slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()

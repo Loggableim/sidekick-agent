@@ -401,6 +401,12 @@ def test_mail_suggest_config_falls_back_to_generic_imap_and_warns():
     assert inbox["confidence"] == "fallback"
 
 
+def test_mail_resolve_space_slug_normalizes_user_task_case():
+    from tools.mail_imap import resolve_space_slug
+
+    assert resolve_space_slug({"user_task": "Demo"}) == "demo"
+
+
 def test_mail_imap_prefers_active_profile_home_for_request_scoped_config(monkeypatch, tmp_path):
     import sys
 
