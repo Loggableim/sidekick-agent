@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-def test_cli_goal_resume_resets_parse_failure_counter(monkeypatch):
+def test_cli_goal_resume_preserves_budget_progress_and_resets_parse_failure_counter(monkeypatch):
     from cli.goals import GoalManager, GoalState
 
     monkeypatch.setattr("cli.goals.save_goal", lambda *args, **kwargs: None)
@@ -20,7 +20,7 @@ def test_cli_goal_resume_resets_parse_failure_counter(monkeypatch):
 
     assert resumed is not None
     assert resumed.status == "active"
-    assert resumed.turns_used == 0
+    assert resumed.turns_used == 4
     assert resumed.consecutive_parse_failures == 0
 
 
@@ -47,7 +47,7 @@ def test_cli_goal_budget_defaults_custom_and_unlimited(monkeypatch):
         assert decision["should_continue"] is True
 
 
-def test_webui_goal_resume_resets_parse_failure_counter(monkeypatch, tmp_path):
+def test_webui_goal_resume_preserves_budget_progress_and_resets_parse_failure_counter(monkeypatch, tmp_path):
     from cli.goals import GoalState
     from web.api.goals import _ProfileGoalManager
 
@@ -69,7 +69,7 @@ def test_webui_goal_resume_resets_parse_failure_counter(monkeypatch, tmp_path):
 
     assert resumed is not None
     assert resumed.status == "active"
-    assert resumed.turns_used == 0
+    assert resumed.turns_used == 4
     assert resumed.consecutive_parse_failures == 0
     assert saved["state"].consecutive_parse_failures == 0
 

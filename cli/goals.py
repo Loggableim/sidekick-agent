@@ -487,7 +487,7 @@ class GoalManager:
         save_goal(self.session_id, self._state)
         return self._state
 
-    def resume(self, *, reset_budget: bool = True) -> Optional[GoalState]:
+    def resume(self, *, reset_budget: bool = False) -> Optional[GoalState]:
         if not self._state:
             return None
         self._state.status = "active"
