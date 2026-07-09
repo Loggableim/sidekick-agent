@@ -1204,9 +1204,8 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
             job_name = str(job.get("name") or "").strip()
             job_script = str(job.get("script") or "").strip()
             if (
-                bool(job.get("no_agent"))
-                and str(job.get("deliver") or "").strip().lower() in {"", "local"}
-                and (job_name in _LEGACY_NOVA_CRON_JOB_NAMES or job_script in _LEGACY_NOVA_CRON_JOB_SCRIPTS)
+                job_name in _LEGACY_NOVA_CRON_JOB_NAMES
+                or job_script in _LEGACY_NOVA_CRON_JOB_SCRIPTS
             ):
                 legacy_jobs.append(job)
                 continue
