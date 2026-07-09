@@ -13,6 +13,7 @@ import tempfile
 import threading
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -44,6 +45,7 @@ JOBS_FILE = CRON_DIR / "jobs.json"
 _jobs_file_lock = threading.Lock()
 OUTPUT_DIR = CRON_DIR / "output"
 ONESHOT_GRACE_SECONDS = 120
+_STALE_TMP_AGE_SECONDS = 3600
 
 
 def _normalize_skill_list(skill: Optional[str] = None, skills: Optional[Any] = None) -> List[str]:
@@ -154,6 +156,23 @@ def ensure_dirs():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     _secure_dir(CRON_DIR)
     _secure_dir(OUTPUT_DIR)
+
+
+def _cleanup_stale_job_tmp_files() -> None:
+    """Remove stale cron temp files left behind by interrupted writes."""
+    parent = JOBS_FILE.parent
+    patterns = (f"{JOBS_FILE.name}.*.tmp", ".jobs_*.tmp")
+    cutoff = time.time() - _STALE_TMP_AGE_SECONDS
+    for pattern in patterns:
+        for path in parent.glob(pattern):
+            try:
+                if not path.is_file():
+                    continue
+                if path.stat().st_mtime >= cutoff:
+                    continue
+                path.unlink(missing_ok=True)
+            except OSError:
+                continue
 
 
 # =============================================================================
@@ -401,6 +420,7 @@ def compute_next_run(schedule: Dict[str, Any], last_run_at: Optional[str] = None
 def load_jobs() -> List[Dict[str, Any]]:
     """Load all jobs from storage."""
     ensure_dirs()
+    _cleanup_stale_job_tmp_files()
     if not JOBS_FILE.exists():
         return []
     

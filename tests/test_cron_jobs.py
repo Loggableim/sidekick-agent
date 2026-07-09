@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import importlib
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -43,3 +44,30 @@ def test_cron_scheduler_script_runs_outside_repo_cwd(tmp_path):
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_load_jobs_removes_stale_tmp_files(monkeypatch, tmp_path):
+    import runtime.cron.jobs as cron_jobs
+
+    monkeypatch.setattr(cron_jobs, "HERMES_DIR", tmp_path)
+    monkeypatch.setattr(cron_jobs, "CRON_DIR", tmp_path / "cron")
+    monkeypatch.setattr(cron_jobs, "OUTPUT_DIR", tmp_path / "cron" / "output")
+    monkeypatch.setattr(cron_jobs, "JOBS_FILE", tmp_path / "cron" / "jobs.json")
+
+    cron_jobs.CRON_DIR.mkdir(parents=True, exist_ok=True)
+    cron_jobs.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cron_jobs.JOBS_FILE.write_text('{"jobs": []}', encoding="utf-8")
+
+    stale_paths = [
+        cron_jobs.JOBS_FILE.with_name("jobs.json.aaaa1111.tmp"),
+        cron_jobs.JOBS_FILE.with_name("jobs.json.bbbb2222.tmp"),
+    ]
+    for path in stale_paths:
+        path.write_text("stale", encoding="utf-8")
+        old_ts = 1_600_000_000
+        os.utime(path, (old_ts, old_ts))
+
+    jobs = cron_jobs.load_jobs()
+
+    assert jobs == []
+    assert all(not path.exists() for path in stale_paths)
