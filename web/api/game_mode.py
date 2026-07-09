@@ -85,7 +85,11 @@ def _ollama_base_urls() -> list[str]:
         if allow_env or "ollama" in hint_text or "ollama" in normalized.lower():
             urls.add(normalized)
 
-    consider(os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"), allow_env=True)
+    # Always keep the canonical local default in scope so a cloud-only
+    # OLLAMA_HOST does not accidentally suppress unloads for a real local
+    # Ollama server on the default port.
+    consider("http://127.0.0.1:11434", allow_env=True)
+    consider(os.getenv("OLLAMA_HOST", ""), allow_env=True)
     try:
         conf = cfg.get_config()
     except Exception:

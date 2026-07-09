@@ -3757,19 +3757,52 @@ def test_game_mode_resource_release_skips_ollama_cloud_endpoints(monkeypatch):
     with game_mode.cfg.ACTIVE_RUNS_LOCK:
         game_mode.cfg.ACTIVE_RUNS.clear()
 
-    def fail_loaded_models(base_url):
-        raise AssertionError(f"Game Mode release should not inspect remote Ollama URL: {base_url}")
+    seen = []
+
+    def record_models(base_url):
+        seen.append(base_url)
+        if "ollama.com" in str(base_url).lower():
+            raise AssertionError(f"Game Mode release should not inspect remote Ollama URL: {base_url}")
+        return []
 
     monkeypatch.setattr(game_mode, "_cancel_stream", lambda stream_id: False)
-    monkeypatch.setattr(game_mode, "_loaded_ollama_models", fail_loaded_models)
+    monkeypatch.setattr(game_mode, "_loaded_ollama_models", record_models)
     monkeypatch.setattr(game_mode, "_terminate_known_local_model_servers", lambda: [])
     monkeypatch.setattr(game_mode, "_release_local_image_generation_queues", lambda: {"queues": []})
     monkeypatch.setattr(game_mode, "_gpu_process_memory_snapshot", lambda: {"available": True, "top": []})
 
     payload = game_mode.release_game_mode_resources()
 
-    assert payload["ollama"]["checked"] == []
+    assert "http://127.0.0.1:11434" in seen
+    assert all("ollama.com" not in str(base_url).lower() for base_url in seen)
+    assert payload["ollama"]["checked"] == ["http://127.0.0.1:11434"]
     assert payload["ollama"]["unloaded"] == []
+
+
+def test_game_mode_resource_release_keeps_local_ollama_default_even_with_cloud_host(monkeypatch):
+    from web.api import game_mode
+
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com/v1")
+    monkeypatch.setattr(game_mode.cfg, "get_config", lambda: {})
+
+    seen = []
+
+    def record_models(base_url):
+        seen.append(base_url)
+        return []
+
+    monkeypatch.setattr(game_mode, "_loaded_ollama_models", record_models)
+    monkeypatch.setattr(game_mode, "_unload_ollama_model", lambda _base_url, model: {"ok": True, "model": model})
+    monkeypatch.setattr(game_mode, "_cancel_stream", lambda stream_id: False)
+    monkeypatch.setattr(game_mode, "_terminate_known_local_model_servers", lambda: [])
+    monkeypatch.setattr(game_mode, "_release_local_image_generation_queues", lambda: {"queues": []})
+    monkeypatch.setattr(game_mode, "_gpu_process_memory_snapshot", lambda: {"available": True, "top": []})
+
+    payload = game_mode.release_game_mode_resources()
+
+    assert "http://127.0.0.1:11434" in seen
+    assert "https://ollama.com" not in "\n".join(seen)
+    assert payload["ollama"]["checked"] == ["http://127.0.0.1:11434"]
 
 
 def test_game_mode_release_targets_all_nova_local_model_ports():
