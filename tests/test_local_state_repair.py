@@ -125,3 +125,16 @@ def test_local_state_repair_defaults_target_to_current_sidekick_home(monkeypatch
 
     assert exit_code == 0
     assert captured["target"] == expected_target
+
+
+def test_local_state_repair_dry_run_missing_source_returns_nonzero(capsys):
+    from types import SimpleNamespace
+
+    from cli.local_state_repair import run_local_state_repair
+
+    args = SimpleNamespace(source=r"C:\definitely-missing-source", target=None, apply=False, no_user_env=False)
+    exit_code = run_local_state_repair(args)
+
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert "source does not exist" in captured.out

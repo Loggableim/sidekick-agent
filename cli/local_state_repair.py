@@ -323,9 +323,10 @@ def run_local_state_repair(args: Any) -> int:
     set_user_env = apply and not bool(getattr(args, "no_user_env", False))
     plan = build_repair_plan(source, target, apply=apply)
     _print_plan(plan)
+    source_missing = any(w.startswith("source does not exist:") for w in plan.warnings)
     if not apply:
         print("  next   : re-run with --apply to copy local state")
-        return 0
+        return 2 if source_missing else 0
     result = apply_repair_plan(plan, set_user_env=set_user_env)
     _print_result(result)
     return 0 if not any(w.startswith("source missing") for w in result.warnings) else 2
