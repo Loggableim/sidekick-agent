@@ -315,8 +315,10 @@ def _print_result(result: RepairResult) -> None:
 
 
 def run_local_state_repair(args: Any) -> int:
+    from runtime._compat.shim_constants import get_sidekick_home
+
     source = Path(getattr(args, "source", None) or r"C:\hermesportable\home")
-    target = Path(getattr(args, "target", None) or r"C:\sidekick\home")
+    target = Path(getattr(args, "target", None) or get_sidekick_home())
     apply = bool(getattr(args, "apply", False))
     set_user_env = apply and not bool(getattr(args, "no_user_env", False))
     plan = build_repair_plan(source, target, apply=apply)

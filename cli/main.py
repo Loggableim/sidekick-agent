@@ -10266,8 +10266,8 @@ def main():
     local_state.add_argument(
         "--to",
         dest="target",
-        default=r"C:\sidekick\home",
-        help=r"Target Sidekick home (default: C:\sidekick\home)",
+        default=get_sidekick_home(),
+        help=f"Target Sidekick home (default: {get_sidekick_home()})",
     )
     local_state.add_argument(
         "--apply",

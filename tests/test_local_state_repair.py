@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from pathlib import Path
 
 
 def _make_legacy_home(tmp_path):
@@ -100,3 +101,27 @@ def test_local_state_repair_rejects_known_bad_yaml_without_leaking_secret(tmp_pa
     assert plan.config_status.startswith("invalid")
     assert "SUPER_SECRET_TOKEN" not in "\n".join(plan.warnings)
     assert any("config.yaml" in warning for warning in plan.warnings)
+
+
+def test_local_state_repair_defaults_target_to_current_sidekick_home(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from cli import local_state_repair as repair_mod
+
+    captured = {}
+    expected_target = tmp_path / "custom-sidekick-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(expected_target))
+
+    def fake_build_repair_plan(source, target, *, apply=False):
+        captured["source"] = Path(source)
+        captured["target"] = Path(target)
+        captured["apply"] = apply
+        return repair_mod.RepairPlan(source=Path(source), target=Path(target), apply=apply)
+
+    monkeypatch.setattr(repair_mod, "build_repair_plan", fake_build_repair_plan)
+
+    args = SimpleNamespace(source=None, target=None, apply=False, no_user_env=False)
+    exit_code = repair_mod.run_local_state_repair(args)
+
+    assert exit_code == 0
+    assert captured["target"] == expected_target
