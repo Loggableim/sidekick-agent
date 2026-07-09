@@ -401,6 +401,32 @@ def test_mail_suggest_config_falls_back_to_generic_imap_and_warns():
     assert inbox["confidence"] == "fallback"
 
 
+def test_mail_imap_prefers_active_profile_home_for_request_scoped_config(monkeypatch, tmp_path):
+    import sys
+
+    import_path_home = tmp_path / "import-home"
+    active_home = tmp_path / "active-home"
+    (active_home / "spaces" / "demo").mkdir(parents=True)
+    (active_home / "spaces" / "demo" / "mail.json").write_text(
+        json.dumps({"inboxes": [{"id": "active", "imap_host": "imap.active.example"}]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+
+    sys.modules.pop("tools.mail_imap", None)
+    mail_imap = importlib.import_module("tools.mail_imap")
+
+    monkeypatch.setattr(mail_imap, "get_active_webui_home", lambda: active_home)
+
+    config = mail_imap.get_space_config("demo")
+
+    assert config is not None
+    assert config["inboxes"][0]["id"] == "active"
+    assert config["inboxes"][0]["imap_host"] == "imap.active.example"
+
+
 def test_space_engine_uses_active_profile_home_after_import(monkeypatch, tmp_path):
     import sys
 

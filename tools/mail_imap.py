@@ -34,6 +34,7 @@ from typing import Any
 import yaml
 
 from shared.paths import sidekick_home
+from web.api._home import get_active_webui_home
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,21 @@ def _load_mail_config_from_env() -> dict | None:
     return {"inboxes": [inbox], "source": "env"}
 
 
+def _resolve_mail_home(home: Path | None = None) -> Path:
+    """Return the mail home directory for the current request context.
+
+    When *home* is provided, use it directly. Otherwise prefer the active
+    WebUI home so mail tools follow the same profile/space resolution as the
+    rest of the runtime.
+    """
+    if home is not None:
+        return Path(home).expanduser().resolve()
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return sidekick_home()
+
+
 def suggest_mail_config(
     email: str,
     password: str,
@@ -290,7 +306,7 @@ def get_space_config(space_slug: str, home: Path | None = None) -> dict | None:
     config from legacy Gmail config / email env vars.  ``None`` is returned
     only when no usable config can be found.
     """
-    base_home = Path(home).expanduser().resolve() if home else sidekick_home()
+    base_home = _resolve_mail_home(home)
     path = base_home / "spaces" / space_slug / "mail.json"
     if path.exists():
         try:
