@@ -12314,7 +12314,7 @@ def _handle_handoff_summary(handler, body):
     def _resolve_handoff_channel_label():
         channel_label = None
         try:
-            from web.api.models import get_session as _get_session, get_cli_sessions
+            from web.api.models import get_session as _get_session
 
             session_meta = _get_session(sid)
             channel_label = (

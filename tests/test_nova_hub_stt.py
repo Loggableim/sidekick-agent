@@ -28,16 +28,13 @@ def load_dashboard_module():
     return module
 
 
-def test_wake_word_inline_question_is_extracted():
+def test_wake_word_requires_nova_prefix_before_question():
     stt = load_stt_module()
     session = stt.WakeWordSession()
 
     events = session.accept_text("hey nova wie spaet ist es")
 
-    assert events == [
-        {"type": "wake", "wake_word": "hey nova"},
-        {"type": "question", "text": "wie spaet ist es"},
-    ]
+    assert events == [{"type": "heard", "text": "hey nova wie spaet ist es"}]
 
 
 def test_wake_word_can_arm_next_utterance():
@@ -47,8 +44,8 @@ def test_wake_word_can_arm_next_utterance():
     first = session.accept_text("hey nova")
     second = session.accept_text("was macht der rechner")
 
-    assert first == [{"type": "wake", "wake_word": "hey nova"}]
-    assert second == [{"type": "question", "text": "was macht der rechner"}]
+    assert first == [{"type": "heard", "text": "hey nova"}]
+    assert second == [{"type": "heard", "text": "was macht der rechner"}]
 
 
 def test_wake_word_accepts_common_vosk_transcription_variants():
@@ -66,10 +63,7 @@ def test_wake_word_accepts_common_vosk_transcription_variants():
     ]:
         session = stt.WakeWordSession()
         events = session.accept_text(phrase)
-        assert events == [
-            {"type": "wake", "wake_word": "hey nova"},
-            {"type": "question", "text": "was gibt es neues"},
-        ]
+        assert events == [{"type": "heard", "text": phrase}]
 
 
 def test_partial_wake_word_combines_short_vosk_fragments():
@@ -82,27 +76,30 @@ def test_partial_wake_word_combines_short_vosk_fragments():
     second = session.accept_partial("nowa")
 
     assert first is None
-    assert second == {"type": "wake", "wake_word": "hey nova"}
+    assert second == {"type": "wake", "wake_word": "nova"}
 
 
-def test_wake_word_fuzzy_match_still_requires_greeting_prefix():
+def test_wake_word_fuzzy_match_accepts_nova_prefix():
     stt = load_stt_module()
     session = stt.WakeWordSession()
 
     events = session.accept_text("nova ist ein stern")
 
-    assert events == [{"type": "heard", "text": "nova ist ein stern"}]
+    assert events == [
+        {"type": "wake", "wake_word": "nova"},
+        {"type": "question", "text": "ist ein stern"},
+    ]
 
 
-def test_partial_wake_word_arms_dialog_without_sending_question():
+def test_partial_wake_word_does_not_arm_from_plain_greeting_phrase():
     stt = load_stt_module()
     session = stt.WakeWordSession()
 
     partial = session.accept_partial("hey nova")
     final = session.accept_text("hey nova was gibt es neues")
 
-    assert partial == {"type": "wake", "wake_word": "hey nova"}
-    assert final == [{"type": "question", "text": "was gibt es neues"}]
+    assert partial is None
+    assert final == [{"type": "heard", "text": "hey nova was gibt es neues"}]
 
 
 def test_followup_window_accepts_next_question_without_wake_word():

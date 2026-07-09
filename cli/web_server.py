@@ -42,6 +42,7 @@ from cli.config import (
     get_config_path,
     get_env_path,
     get_sidekick_home,
+    get_worktree_settings,
     load_config,
     load_env,
     save_config,
@@ -1775,6 +1776,21 @@ def _normalize_config_for_web(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
+def _coerce_worktree_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 @app.get("/api/config")
 async def get_config():
     config = _normalize_config_for_web(load_config())
@@ -1790,6 +1806,35 @@ async def get_defaults():
 @app.get("/api/config/schema")
 async def get_schema():
     return {"fields": CONFIG_SCHEMA, "category_order": _CATEGORY_ORDER}
+
+
+@app.get("/api/worktree/settings")
+async def get_worktree_settings_route():
+    return get_worktree_settings()
+
+
+@app.post("/api/worktree/settings")
+async def update_worktree_settings(body: Dict[str, Any] | None = None):
+    try:
+        cfg = load_config()
+        current = get_worktree_settings(cfg)
+        raw = body if isinstance(body, dict) else {}
+        worktree_body = raw.get("worktree")
+        if isinstance(worktree_body, bool):
+            worktree_body = {"enabled": worktree_body, "cleanup_on_exit": worktree_body}
+        elif not isinstance(worktree_body, dict):
+            worktree_body = raw
+        if not isinstance(worktree_body, dict):
+            worktree_body = {}
+        cfg["worktree"] = {
+            "enabled": _coerce_worktree_bool(worktree_body.get("enabled"), current["enabled"]),
+            "cleanup_on_exit": _coerce_worktree_bool(worktree_body.get("cleanup_on_exit"), current["cleanup_on_exit"]),
+        }
+        save_config(cfg)
+        return {"ok": True, **get_worktree_settings(cfg)}
+    except Exception as exc:
+        _log.exception("worktree settings save failed")
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
 
 _EMPTY_MODEL_INFO: dict = {

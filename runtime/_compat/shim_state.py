@@ -231,13 +231,12 @@ class SessionDB:
                 reasoning_expr = "COALESCE(reasoning_content, '')"
             else:
                 reasoning_expr = "''"
-            self._conn.execute(
-                f"""
+            sql = f"""
                 INSERT INTO message_fts(rowid, session_id, role, content, reasoning_content)
                 SELECT id, session_id, role, content, {reasoning_expr}
                 FROM messages
-                """
-            )
+                """  # noqa: S608 - reasoning_expr is selected from hardcoded schema branches.
+            self._conn.execute(sql)
             self._fts_enabled = True
         except Exception:
             # FTS is best-effort.  If backfill fails, keep the functional LIKE
@@ -832,8 +831,7 @@ class SessionDB:
             if source and "source" in session_columns:
                 where_sql.append("LOWER(COALESCE(s.source, '')) = ?")
                 params.append(str(source).strip().lower())
-            cursor = self._conn.execute(
-                f"""
+            sql = f"""
                 SELECT
                     f.session_id AS session_id,
                     COALESCE(s.title, '') AS session_title,
@@ -849,9 +847,8 @@ class SessionDB:
                 WHERE {' AND '.join(where_sql)}
                 ORDER BY {order_expr}
                 LIMIT ?
-                """,
-                [*params, max_limit],
-            )
+                """  # noqa: S608 - session_started_expr/session_pk are hardcoded schema branches.
+            cursor = self._conn.execute(sql, [*params, max_limit])
         else:
             content_expr = "LOWER(COALESCE(m.content, ''))"
             if "reasoning_content" in columns:
@@ -861,8 +858,7 @@ class SessionDB:
             if source and "source" in session_columns:
                 where_clause.append("LOWER(COALESCE(s.source, '')) = ?")
                 params.append(str(source).strip().lower())
-            cursor = self._conn.execute(
-                f"""
+            sql = f"""
                 SELECT
                     m.{session_col} AS session_id,
                     COALESCE(s.title, '') AS session_title,
@@ -877,9 +873,8 @@ class SessionDB:
                 WHERE {' AND '.join(where_clause)}
                 ORDER BY {order_expr}
                 LIMIT ?
-                """,
-                [*params, max_limit],
-            )
+                """  # noqa: S608 - session_started_expr/session_col/order_expr are hardcoded schema branches.
+            cursor = self._conn.execute(sql, [*params, max_limit])
         results: list[dict[str, Any]] = []
         for row in cursor.fetchall():
             snippet = self._message_snippet(row["content"])

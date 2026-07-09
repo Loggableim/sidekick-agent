@@ -438,58 +438,58 @@ def read_importable_agent_session_rows(
     def _load_stats(cur, session_ids: list[str]) -> dict[str, dict]:
         if not session_ids:
             return {}
-        placeholders = ",".join("?" for _ in session_ids)
+        session_ids_json = json.dumps(session_ids)
         if 'role' in message_cols and 'timestamp' in message_cols:
             cur.execute(
-                f"""
+                """
                 SELECT session_id,
                        COUNT(*) AS actual_message_count,
                        SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
                        MAX(timestamp) AS last_activity
                 FROM messages
-                WHERE session_id IN ({placeholders})
+                WHERE session_id IN (SELECT value FROM json_each(?))
                 GROUP BY session_id
                 """,
-                session_ids,
+                (session_ids_json,),
             )
         elif 'role' in message_cols:
             cur.execute(
-                f"""
+                """
                 SELECT session_id,
                        COUNT(*) AS actual_message_count,
                        SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
                        NULL AS last_activity
                 FROM messages
-                WHERE session_id IN ({placeholders})
+                WHERE session_id IN (SELECT value FROM json_each(?))
                 GROUP BY session_id
                 """,
-                session_ids,
+                (session_ids_json,),
             )
         elif 'timestamp' in message_cols:
             cur.execute(
-                f"""
+                """
                 SELECT session_id,
                        COUNT(*) AS actual_message_count,
                        COUNT(*) AS actual_user_message_count,
                        MAX(timestamp) AS last_activity
                 FROM messages
-                WHERE session_id IN ({placeholders})
+                WHERE session_id IN (SELECT value FROM json_each(?))
                 GROUP BY session_id
                 """,
-                session_ids,
+                (session_ids_json,),
             )
         else:
             cur.execute(
-                f"""
+                """
                 SELECT session_id,
                        COUNT(*) AS actual_message_count,
                        COUNT(*) AS actual_user_message_count,
                        NULL AS last_activity
                 FROM messages
-                WHERE session_id IN ({placeholders})
+                WHERE session_id IN (SELECT value FROM json_each(?))
                 GROUP BY session_id
                 """,
-                session_ids,
+                (session_ids_json,),
             )
         return {row['session_id']: dict(row) for row in cur.fetchall()}
 

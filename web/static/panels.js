@@ -5932,6 +5932,8 @@ function syncGameModeButton(){
       ? t(enabled?'game_mode_on':'game_mode_off')
       : (enabled ? 'Game mode on' : 'Game mode off');
     btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off');
+    btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off');
+    btn.setAttribute('title',label);
     btn.setAttribute('aria-label',label);
   }
   const cb=$('settingsGameModeEnabled');
