@@ -2451,6 +2451,16 @@ def test_appstore_mail_contract_exposes_builtin_mail_app_and_setup_flow():
     assert "_appstoreSyncMailButtons()" in panels_js
 
 
+def test_appstore_imap_mail_manifest_matches_auto_setup_contract():
+    manifest = json.loads(Path(r"C:/sidekick/home/appstore/imap-mail.json").read_text(encoding="utf-8"))
+
+    assert manifest["key"] == "imap-mail"
+    assert manifest["name"] == "Mail"
+    assert "automatisch" in manifest["desc"].lower()
+    assert "mail.json" in manifest["fullDesc"].lower()
+    assert manifest["setup_steps"] == []
+
+
 def test_insights_panel_bounds_wide_content_responsively():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
