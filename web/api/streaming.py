@@ -1186,6 +1186,15 @@ def generate_title_raw_via_aux(
     """Return (raw_text, status) via auxiliary LLM route."""
     if not user_text or not assistant_text:
         return None, 'missing_exchange'
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            provider = "ollama-cloud"
+            model = "deepseek-v4-flash"
+            base_url = ""
+    except Exception:
+        pass
     qa, prompts = _title_prompts(user_text, assistant_text)
     base_max_tokens = _title_completion_budget(provider, model, base_url)
     reasoning_extra = {"reasoning": {"enabled": False}}
@@ -1244,6 +1253,19 @@ def generate_title_raw_via_agent(agent, user_text: str, assistant_text: str) -> 
         return None, 'missing_exchange'
     if agent is None:
         return None, 'missing_agent'
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            return generate_title_raw_via_aux(
+                user_text,
+                assistant_text,
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                base_url="",
+            )
+    except Exception:
+        pass
 
     qa, prompts = _title_prompts(user_text, assistant_text)
     base_max_tokens = _title_completion_budget(
