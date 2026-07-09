@@ -3445,6 +3445,88 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
     assert captured["normalized_model"] is True
 
 
+def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": False})
+    monkeypatch.setattr(cfg, "resolve_model_provider", lambda model: ("qwen3:4b", "openai", "https://api.openai.com/v1"))
+    monkeypatch.setattr(cfg, "resolve_custom_provider_connection", lambda provider: (None, None))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+
+    captured = {}
+
+    class FakeAIAgent:
+        def __init__(self, *args, **kwargs):
+            from gateway.session_context import get_session_env
+            from tools.approval import _is_gateway_approval_context, get_current_session_key
+
+            captured["approval_session_key"] = get_current_session_key()
+            captured["approval_platform"] = get_session_env("HERMES_SESSION_PLATFORM")
+            captured["is_gateway"] = _is_gateway_approval_context()
+
+        def run_conversation(self, **kwargs):
+            return {
+                "final_response": "ok",
+                "messages": [{"role": "assistant", "content": "ok"}],
+                "completed": True,
+            }
+
+    session = SimpleNamespace(
+        session_id="chat-sync-1",
+        workspace=str(workspace),
+        model="qwen3:4b",
+        model_provider="openai",
+        workspace_slug="nova",
+        space_slug="nova",
+        space="nova",
+        messages=[],
+        context_messages=[],
+        title="Existing title",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost=0,
+        compact=lambda: {
+            "session_id": "chat-sync-1",
+            "title": "Existing title",
+            "messages": [],
+        },
+        save=lambda: None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: str(workspace))
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model, provider, False))
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
+    monkeypatch.setattr("web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock", lambda resolver, requested: {"api_key": "token", "provider": "openai", "base_url": "https://api.openai.com/v1"})
+    monkeypatch.setattr("run_agent.AIAgent", FakeAIAgent)
+    monkeypatch.setattr("web.api.streaming._merge_display_messages_after_agent_result", lambda previous_messages, previous_context_messages, result_messages, msg: [{"role": "assistant", "content": "ok"}])
+    monkeypatch.setattr("web.api.streaming._restore_reasoning_metadata", lambda previous, result: result)
+    monkeypatch.setattr("web.api.streaming._sanitize_messages_for_api", lambda messages: messages)
+    monkeypatch.setattr("web.api.streaming._session_context_messages", lambda s: list(s.context_messages))
+    monkeypatch.setattr("web.api.streaming._workspace_context_prefix", lambda workspace: "")
+
+    payload = routes._handle_chat_sync(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "chat-sync-1",
+            "message": "hello",
+            "workspace": str(workspace),
+            "model": "qwen3:4b",
+        },
+    )
+
+    assert payload["answer"] == "ok"
+    assert captured["approval_session_key"] == "chat-sync-1"
+    assert captured["approval_platform"] == "webui"
+    assert captured["is_gateway"] is True
+
+
 def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
     from types import SimpleNamespace
 

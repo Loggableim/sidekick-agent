@@ -11040,10 +11040,18 @@ def _handle_chat_sync(handler, body):
     with _ENV_LOCK:
         old_cwd = os.environ.get("TERMINAL_CWD")
         os.environ["TERMINAL_CWD"] = str(workspace)
+        old_platform = os.environ.get("SIDEKICK_PLATFORM")
+        old_session_platform = os.environ.get("SIDEKICK_SESSION_PLATFORM")
+        old_hermes_session_platform = os.environ.get("HERMES_SESSION_PLATFORM")
         old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK")
+        old_hermes_session_key = os.environ.get("HERMES_SESSION_KEY")
         old_session_key = os.environ.get("SIDEKICK_SESSION_KEY")
+        os.environ["SIDEKICK_PLATFORM"] = "webui"
+        os.environ["SIDEKICK_SESSION_PLATFORM"] = "webui"
+        os.environ["HERMES_SESSION_PLATFORM"] = "webui"
         os.environ["SIDEKICK_EXEC_ASK"] = "1"
         os.environ["SIDEKICK_EXEC_ASK"] = "1"
+        os.environ["HERMES_SESSION_KEY"] = s.session_id
         os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
         os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
     try:
@@ -11157,15 +11165,30 @@ def _handle_chat_sync(handler, body):
                 os.environ.pop("TERMINAL_CWD", None)
             else:
                 os.environ["TERMINAL_CWD"] = old_cwd
+            if old_platform is None:
+                os.environ.pop("SIDEKICK_PLATFORM", None)
+            else:
+                os.environ["SIDEKICK_PLATFORM"] = old_platform
+            if old_session_platform is None:
+                os.environ.pop("SIDEKICK_SESSION_PLATFORM", None)
+            else:
+                os.environ["SIDEKICK_SESSION_PLATFORM"] = old_session_platform
+            if old_hermes_session_platform is None:
+                os.environ.pop("HERMES_SESSION_PLATFORM", None)
+            else:
+                os.environ["HERMES_SESSION_PLATFORM"] = old_hermes_session_platform
             if old_exec_ask is None:
                 os.environ.pop("SIDEKICK_EXEC_ASK", None)
                 os.environ.pop("HERMES_EXEC_ASK", None)
             else:
                 os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
                 os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
+            if old_hermes_session_key is None:
+                os.environ.pop("HERMES_SESSION_KEY", None)
+            else:
+                os.environ["HERMES_SESSION_KEY"] = old_hermes_session_key
             if old_session_key is None:
                 os.environ.pop("SIDEKICK_SESSION_KEY", None)
-                os.environ.pop("HERMES_SESSION_KEY", None)
             else:
                 os.environ["SIDEKICK_SESSION_KEY"] = old_session_key
                 os.environ["SIDEKICK_SESSION_KEY"] = old_session_key

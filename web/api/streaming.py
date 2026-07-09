@@ -596,8 +596,12 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
         _browser_permission_token = ""
     env.update({
         'TERMINAL_CWD': str(workspace),
+        'SIDEKICK_PLATFORM': 'webui',
         'SIDEKICK_EXEC_ASK': '1',
+        'SIDEKICK_SESSION_PLATFORM': 'webui',
         'SIDEKICK_SESSION_KEY': session_id,
+        'HERMES_SESSION_PLATFORM': 'webui',
+        'HERMES_SESSION_KEY': session_id,
         'SIDEKICK_HOME': profile_home,
         'HERMES_HOME': profile_home,
         'SIDEKICK_WEBUI_BROWSER_SESSION_ID': session_id,

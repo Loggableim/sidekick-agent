@@ -1343,6 +1343,11 @@ def test_streaming_thread_env_sets_both_home_vars(monkeypatch, tmp_path):
 
     assert env["SIDEKICK_HOME"] == str(profile_home)
     assert env["HERMES_HOME"] == str(profile_home)
+    assert env["SIDEKICK_PLATFORM"] == "webui"
+    assert env["SIDEKICK_SESSION_PLATFORM"] == "webui"
+    assert env["HERMES_SESSION_PLATFORM"] == "webui"
+    assert env["SIDEKICK_SESSION_KEY"] == "session-123"
+    assert env["HERMES_SESSION_KEY"] == "session-123"
 
 
 def test_supermemory_client_uses_active_profile_after_import(monkeypatch, tmp_path):
