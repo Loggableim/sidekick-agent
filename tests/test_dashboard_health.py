@@ -3602,6 +3602,99 @@ def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path
     assert os.environ["HERMES_EXEC_ASK"] == "legacy-ask"
 
 
+def test_game_mode_chat_sync_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    session = SimpleNamespace(
+        session_id="chat-sync-gm-1",
+        workspace=str(workspace),
+        model="qwen3:4b",
+        model_provider="ollama",
+        workspace_slug="nova",
+        space_slug="nova",
+        space="nova",
+        messages=[],
+        context_messages=[],
+        title="Existing title",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost=0,
+        compact=lambda: {
+            "session_id": "chat-sync-gm-1",
+            "title": "Existing title",
+            "messages": [],
+        },
+        save=lambda: None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: str(workspace))
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model, provider, False))
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
+    monkeypatch.setattr(
+        "web.api.config.resolve_model_provider",
+        lambda model_id: (
+            "deepseek-v4-flash",
+            "ollama-cloud",
+            "https://ollama.example/v1",
+        )
+        if "deepseek-v4-flash" in str(model_id) or "ollama-cloud" in str(model_id)
+        else ("qwen3:4b", "ollama", "http://127.0.0.1:11434"),
+    )
+    monkeypatch.setattr(
+        "web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock",
+        lambda resolver, requested=None: {
+            "api_key": "token",
+            "provider": requested,
+            "base_url": "https://ollama.example/v1" if requested == "ollama-cloud" else "http://127.0.0.1:11434",
+        },
+    )
+
+    class FakeAIAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run_conversation(self, **kwargs):
+            return {
+                "final_response": "ok",
+                "messages": [{"role": "assistant", "content": "ok"}],
+                "completed": True,
+            }
+
+    monkeypatch.setattr("run_agent.AIAgent", FakeAIAgent)
+    monkeypatch.setattr("web.api.streaming._merge_display_messages_after_agent_result", lambda previous_messages, previous_context_messages, result_messages, msg: [{"role": "assistant", "content": "ok"}])
+    monkeypatch.setattr("web.api.streaming._restore_reasoning_metadata", lambda previous, result: result)
+    monkeypatch.setattr("web.api.streaming._sanitize_messages_for_api", lambda messages: messages)
+    monkeypatch.setattr("web.api.streaming._session_context_messages", lambda s: list(s.context_messages))
+    monkeypatch.setattr("web.api.streaming._workspace_context_prefix", lambda workspace: "")
+
+    payload = routes._handle_chat_sync(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "chat-sync-gm-1",
+            "message": "hello",
+            "workspace": str(workspace),
+            "model": "qwen3:4b",
+        },
+    )
+
+    assert payload["answer"] == "ok"
+    assert captured["provider"] == "ollama-cloud"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["base_url"] == "https://ollama.example/v1"
+    assert session.model == "deepseek-v4-flash"
+    assert session.model_provider == "ollama-cloud"
+
+
 def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
     from types import SimpleNamespace
 

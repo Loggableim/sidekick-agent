@@ -11115,6 +11115,10 @@ def _handle_chat_sync(handler, body):
                 _model, _provider, _base_url = resolve_model_provider(
                     model_with_provider_context(_model, _provider)
                 )
+                # Persist the Game Mode override so the session UI and any
+                # later reloads reflect the effective remote Nova model.
+                s.model = _model
+                s.model_provider = _provider
             # Resolve API key via Hermes runtime provider (matches gateway behaviour)
             _api_key = None
             try:
