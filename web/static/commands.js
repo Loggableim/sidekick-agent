@@ -826,15 +826,21 @@ async function cmdStop(){
 }
 
 function _goalCommandRequestBody(args){
+  const isObject=args&&typeof args==='object'&&!Array.isArray(args);
+  const goalText=isObject
+    ? String(args.text??args.goal??args.args??'').trim()
+    : String(args||'').trim();
   return {
     session_id: S.session.session_id,
-    args: args || '',
+    args: goalText,
     workspace: S.session.workspace,
     workspace_slug: S.session.workspace_slug || S.session.space_slug || S.session.space || null,
     space: S.session.space || S.session.space_slug || S.session.workspace_slug || null,
     model: S.session.model || ($('modelSelect') && $('modelSelect').value) || '',
     model_provider: S.session.model_provider || null,
     profile: S.activeProfile || S.session.profile || 'default',
+    ...(isObject&&Object.prototype.hasOwnProperty.call(args,'max_turns') ? { max_turns: args.max_turns } : {}),
+    ...(isObject&&Object.prototype.hasOwnProperty.call(args,'unlimited') ? { unlimited: !!args.unlimited } : {}),
   };
 }
 
@@ -1018,7 +1024,10 @@ async function cmdTitle(args){
   if(!S.session){showToast(t('no_active_session'));return;}
   const name=(args||'').trim();
   if(!name){
-    S.messages.push({role:'assistant',content:`${t('title_current')}: **${S.session.title||t('untitled')}**\n\n${t('title_change_hint')}`});
+    const currentTitle = (S.session.title && S.session.title !== 'Untitled')
+      ? S.session.title
+      : (typeof t === 'function' ? t('new_chat') : 'New chat');
+    S.messages.push({role:'assistant',content:`${t('title_current')}: **${currentTitle}**\n\n${t('title_change_hint')}`});
     renderMessages();return;
   }
   try{
@@ -1224,7 +1233,7 @@ function _statusCardFromSession(s){
   const workspace=s.workspace||S.currentDir||t('status_unknown');
   const rows=[
     {label:t('status_session_id'), value:s.session_id||t('status_unknown')},
-    {label:t('status_title'), value:s.title||t('untitled')},
+    {label:t('status_title'), value:(s.title && s.title !== 'Untitled') ? s.title : (typeof t === 'function' ? t('new_chat') : 'New chat')},
     {label:t('status_model'), value:model},
     {label:t('status_provider'), value:provider||t('status_unknown')},
     {label:t('status_profile'), value:profile},
@@ -3247,7 +3256,10 @@ async function cmdTitle(args){
   if(!S.session){showToast(t('no_active_session'));return;}
   const name=(args||'').trim();
   if(!name){
-    S.messages.push({role:'assistant',content:`${t('title_current')}: **${S.session.title||t('untitled')}**\n\n${t('title_change_hint')}`});
+    const currentTitle = (S.session.title && S.session.title !== 'Untitled')
+      ? S.session.title
+      : (typeof t === 'function' ? t('new_chat') : 'New chat');
+    S.messages.push({role:'assistant',content:`${t('title_current')}: **${currentTitle}**\n\n${t('title_change_hint')}`});
     renderMessages();return;
   }
   try{
@@ -3453,7 +3465,7 @@ function _statusCardFromSession(s){
   const workspace=s.workspace||S.currentDir||t('status_unknown');
   const rows=[
     {label:t('status_session_id'), value:s.session_id||t('status_unknown')},
-    {label:t('status_title'), value:s.title||t('untitled')},
+    {label:t('status_title'), value:(s.title && s.title !== 'Untitled') ? s.title : (typeof t === 'function' ? t('new_chat') : 'New chat')},
     {label:t('status_model'), value:model},
     {label:t('status_provider'), value:provider||t('status_unknown')},
     {label:t('status_profile'), value:profile},

@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -108,8 +109,7 @@ def _iterate_space_boards(space, agents: list[str], result: dict, *, dry_run: bo
     kb = _kb()
 
     # Temporarily set kanban home to this space's root
-    _set_space_kanban_home(str(space.root))
-    try:
+    with _kanban_home_override(str(space.root)):
         # Get list of boards
         boards = ["default"]  # At minimum the default board
         try:
@@ -128,8 +128,6 @@ def _iterate_space_boards(space, agents: list[str], result: dict, *, dry_run: bo
                     _dispatch_ready_tasks(space, agents, conn, tasks, board_slug, result, dry_run=dry_run)
             except Exception as e:
                 logger.debug("board %s/%s scan failed: %s", space.slug, board_slug, e)
-    finally:
-        _clear_kanban_home()
 
 
 def _dispatch_ready_tasks(space, agents, conn, tasks, board_slug, result, *, dry_run: bool = False) -> None:
@@ -289,18 +287,16 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 
         if exit_code != 0:
             # Worker crashed / was killed — reset task to ready
-            _set_space_kanban_home(str(space.root))
-            try:
-                from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
-                with _kb_conn(board=board_slug) as conn:
-                    _patch(conn, task_id, {"status": "ready"})
-            except Exception as e:
-                logger.warning(
-                    "worker %s: failed to reset crashed task to ready: %s",
-                    worker_id, e,
-                )
-            finally:
-                _clear_kanban_home()
+            with _kanban_home_override(str(space.root)):
+                try:
+                    from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
+                    with _kb_conn(board=board_slug) as conn:
+                        _patch(conn, task_id, {"status": "ready"})
+                except Exception as e:
+                    logger.warning(
+                        "worker %s: failed to reset crashed task to ready: %s",
+                        worker_id, e,
+                    )
 
     except FileNotFoundError:
         logger.error(
@@ -308,28 +304,24 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
             "(tried: %s); cannot spawn worker",
             worker_id, hermes_bin,
         )
-        _set_space_kanban_home(str(space.root))
-        try:
-            from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
-            with _kb_conn(board=board_slug) as conn:
-                _patch(conn, task_id, {"status": "blocked",
-                                       "block_reason": "sidekick binary not found on PATH"})
-        except Exception:
-            pass
-        finally:
-            _clear_kanban_home()
+        with _kanban_home_override(str(space.root)):
+            try:
+                from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
+                with _kb_conn(board=board_slug) as conn:
+                    _patch(conn, task_id, {"status": "blocked",
+                                           "block_reason": "sidekick binary not found on PATH"})
+            except Exception:
+                pass
 
     except Exception as e:
         logger.exception("dispatch worker %s: spawn failed: %s", worker_id, e)
-        _set_space_kanban_home(str(space.root))
-        try:
-            from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
-            with _kb_conn(board=board_slug) as conn:
-                _patch(conn, task_id, {"status": "ready"})
-        except Exception:
-            pass
-        finally:
-            _clear_kanban_home()
+        with _kanban_home_override(str(space.root)):
+            try:
+                from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
+                with _kb_conn(board=board_slug) as conn:
+                    _patch(conn, task_id, {"status": "ready"})
+            except Exception:
+                pass
 
     logger.info("dispatch worker %s completed", worker_id)
 
@@ -339,11 +331,31 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 def _set_space_kanban_home(space_root: str) -> None:
     """Set kanban home for this thread (bypasses request-local)."""
     os.environ["SIDEKICK_KANBAN_HOME"] = space_root
+    os.environ["HERMES_KANBAN_HOME"] = space_root
 
 
 def _clear_kanban_home() -> None:
     os.environ.pop("SIDEKICK_KANBAN_HOME", None)
     os.environ.pop("HERMES_KANBAN_HOME", None)
+
+
+@contextmanager
+def _kanban_home_override(space_root: str):
+    """Temporarily pin both kanban home env vars and restore prior values."""
+    old_home = os.environ.get("SIDEKICK_KANBAN_HOME")
+    old_hermes_home = os.environ.get("HERMES_KANBAN_HOME")
+    _set_space_kanban_home(space_root)
+    try:
+        yield
+    finally:
+        if old_home is None:
+            os.environ.pop("SIDEKICK_KANBAN_HOME", None)
+        else:
+            os.environ["SIDEKICK_KANBAN_HOME"] = old_home
+        if old_hermes_home is None:
+            os.environ.pop("HERMES_KANBAN_HOME", None)
+        else:
+            os.environ["HERMES_KANBAN_HOME"] = old_hermes_home
 
 
 # ── Status / Monitoring ─────────────────────────────────────────────────────

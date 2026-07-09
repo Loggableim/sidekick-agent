@@ -1221,7 +1221,7 @@ function updateTitlebarSpace() {
   if (wrap) wrap.style.setProperty('--space-color', color);
   if (btn) btn.style.setProperty('--space-color', color);
   nameEl.style.color = color;
-  if (btn) btn.setAttribute('title', `Switch space (${ws ? (ws.name || ws.slug) : _activeSpace})`);
+  if (btn) btn.setAttribute('aria-label', `Switch space (${ws ? (ws.name || ws.slug) : _activeSpace})`);
 }
 
 function _positionSpaceDropdown(dd, anchor) {

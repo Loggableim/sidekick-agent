@@ -84,9 +84,6 @@
     <button class="mode-btn active" data-mode="action" data-i18n="mode_action" type="button" aria-pressed="true">Action</button>
     <button class="mode-btn" data-mode="plan" data-i18n="mode_plan" type="button" aria-pressed="false">&#129504; Plan</button>
   </div>
-  <button class="compact-toggle-btn has-tooltip has-tooltip--bottom" id="compactToggleBtn" onclick="toggleCompactLayout()" type="button" data-tooltip="Compact layout" data-i18n-title="compact_layout" aria-label="Compact layout" aria-pressed="false">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="14" x2="20" y2="14" /><line x1="4" y1="20" x2="20" y2="20" /><line x1="4" y1="4" x2="4" y2="20" /><line x1="10" y1="4" x2="10" y2="20" /><line x1="16" y1="4" x2="16" y2="20" /></svg>
-  </button>
   </div>
   <div class="app-titlebar-spacer"></div>
   <script>
@@ -136,38 +133,6 @@
     function toggleReasoningDropdown() { return _toggleChipDropdown('composerReasoningDropdown', 'composerReasoningChip', 'reasoningModeBadge'); }
     function closeReasoningDropdown() { return _closeChipDropdown('composerReasoningDropdown', 'composerReasoningChip', 'reasoningModeBadge'); }
 
-    function browserToggleDrawer() {
-      document.body.classList.toggle('browser-drawer-open');
-      var open = document.body.classList.contains('browser-drawer-open');
-      var badge = $('browserStatusBadge');
-      if (badge) {
-        badge.classList.toggle('browser-state-open', open);
-        badge.classList.toggle('browser-state-closed', !open);
-      }
-      return false;
-    }
-
-    function browserToggleHeaderMenu(event) {
-      if (event && typeof event.preventDefault === 'function') event.preventDefault();
-      if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-      return _toggleChipDropdown('browserStatusMenu', 'browserStatusMenuBtn', 'browserStatusBadge');
-    }
-
-    function browserRunHeaderAction(action) {
-      if (String(action || '') === 'drawer-toggle') return browserToggleDrawer();
-      if (String(action || '') === 'permission') return false;
-      if (String(action || '') === 'explore') return false;
-      if (String(action || '') === 'split') {
-        if (typeof browserToggleSplit === 'function') return browserToggleSplit();
-        return false;
-      }
-      if (String(action || '') === 'fullscreen') return false;
-      if (String(action || '') === 'back' && typeof history.back === 'function') history.back();
-      if (String(action || '') === 'forward' && typeof history.forward === 'function') history.forward();
-      if (String(action || '') === 'reload') location.reload();
-      return false;
-    }
-
     function syncWorkflowChip() {
       var value = $('workflowStatusValue');
       if (!value) return '';
@@ -177,7 +142,7 @@
     function workflowToggleHeaderMenu(event) {
       if (event && typeof event.preventDefault === 'function') event.preventDefault();
       if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-      return _toggleChipDropdown('workflowStatusMenu', 'workflowStatusMenuBtn', 'workflowStatusBadge');
+      return _toggleChipDropdown('workflowStatusMenu', 'workflowStatusBadge', 'workflowStatusBadge');
     }
 
     function workflowRunHeaderAction(action) {
@@ -243,7 +208,6 @@
         if (badge) {
           badge.classList.remove('approval-mode-manual', 'approval-mode-smart', 'approval-mode-off');
           badge.classList.add('approval-mode-' + normalized);
-          badge.setAttribute('title', 'Approval mode: ' + normalized + '. Click to cycle.');
           badge.setAttribute('aria-label', 'Approval mode ' + normalized + '. Click to cycle.');
         }
         if (value) value.textContent = normalized;
@@ -326,7 +290,7 @@
     })();
   </script>
   <div class="titlebar-space" id="titlebarSpace">
-    <button class="titlebar-space-btn" id="titlebarSpaceBtn" type="button" title="Switch space" aria-haspopup="menu" aria-expanded="false">
+    <button class="titlebar-space-btn" id="titlebarSpaceBtn" type="button" aria-label="Switch space" aria-haspopup="menu" aria-expanded="false">
       <span class="titlebar-space-emoji" id="titlebarSpaceEmoji">&#128193;</span>
       <span class="titlebar-space-name" id="titlebarSpaceName">default</span>
       <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
@@ -345,12 +309,12 @@
       var name = document.getElementById('titlebarSpaceName');
       var btn = document.getElementById('titlebarSpaceBtn');
       if (name) name.textContent = slug;
-      if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
+      if (btn) btn.setAttribute('aria-label', 'Switch space (' + slug + ')');
     })();
   </script>
   <div class="titlebar-actions" id="titlebarActions">
     <div class="titlebar-lang-selector" id="titlebarLangSelector">
-      <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" aria-haspopup="menu" aria-expanded="false" aria-controls="langDropdown" onclick="toggleLangDropdown(event)">
+      <button class="titlebar-action-btn lang-selector-btn" id="btnLangSelector" type="button" aria-label="Language" aria-haspopup="menu" aria-expanded="false" aria-controls="langDropdown" onclick="toggleLangDropdown(event)">
         <span id="currentLangFlag">🇬🇧</span>
       </button>
       <div class="lang-dropdown" id="langDropdown" role="menu" hidden>
@@ -366,83 +330,57 @@
       </div>
     </div>
     <div class="titlebar-status-cluster">
-      <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle." title="Approval mode: manual. Click to cycle.">
+      <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle.">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
       </button>
-      <div class="titlebar-browser-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-        <button class="titlebar-approval-badge titlebar-browser-badge browser-state-closed browser-state-locked" id="browserStatusBadge" type="button" aria-live="polite" aria-label="Browser drawer closed, agent locked. Click to toggle." title="Browser drawer closed, agent locked. Click to toggle." onclick="browserToggleDrawer()">
-          <span class="titlebar-approval-dot" aria-hidden="true"></span>
-          <span class="titlebar-approval-value" id="browserStatusValue">browser closed · locked</span>
-        </button>
-        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="browserStatusMenuBtn" type="button" data-tooltip="Browser actions" aria-label="Browser actions" aria-haspopup="menu" aria-controls="browserStatusMenu" aria-expanded="false" onclick="browserToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
-        </button>
-        <div class="browser-header-menu" id="browserStatusMenu" role="menu" aria-label="Browser actions" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:240px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
-          <div style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Browser actions</div>
-          <button class="titlebar-action-btn" id="browserHeaderDrawerAction" type="button" role="menuitem" onclick="browserRunHeaderAction('drawer-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle drawer</button>
-          <button class="titlebar-action-btn" id="browserHeaderPermissionAction" type="button" role="menuitem" onclick="browserRunHeaderAction('permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Enable agent control</button>
-          <button class="titlebar-action-btn" id="browserHeaderExploreAction" type="button" role="menuitem" onclick="browserRunHeaderAction('explore')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Switch to Explore mode</button>
-          <button class="titlebar-action-btn" id="browserHeaderSplitAction" type="button" role="menuitem" onclick="browserRunHeaderAction('split')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Split browser and chat</button>
-          <button class="titlebar-action-btn" id="browserHeaderFullscreenAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullscreen')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Maximize browser</button>
-          <div role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-          <button class="titlebar-action-btn" id="browserHeaderBackAction" type="button" role="menuitem" onclick="browserRunHeaderAction('back')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go back</button>
-          <button class="titlebar-action-btn" id="browserHeaderForwardAction" type="button" role="menuitem" onclick="browserRunHeaderAction('forward')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go forward</button>
-          <button class="titlebar-action-btn" id="browserHeaderReloadAction" type="button" role="menuitem" onclick="browserRunHeaderAction('reload')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Reload page</button>
-          <button class="titlebar-action-btn" id="browserHeaderStopAction" type="button" role="menuitem" onclick="browserRunHeaderAction('stop')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Stop loading</button>
-          <button class="titlebar-action-btn" id="browserHeaderNavigateAction" type="button" role="menuitem" onclick="browserRunHeaderAction('navigate')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Navigate to URL...</button>
-          <button class="titlebar-action-btn" id="browserHeaderNewTabAction" type="button" role="menuitem" onclick="browserRunHeaderAction('newtab')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open current in new tab</button>
-          <button class="titlebar-action-btn" id="browserHeaderCopyUrlAction" type="button" role="menuitem" onclick="browserRunHeaderAction('copyurl')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy current URL</button>
-          <button class="titlebar-action-btn" id="browserHeaderPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
-          <button class="titlebar-action-btn" id="browserHeaderFullPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
-          <button class="titlebar-action-btn" id="browserHeaderScreenshotAction" type="button" role="menuitem" onclick="browserRunHeaderAction('screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
-        </div>
-      </div>
-      <button class="titlebar-approval-badge titlebar-research-badge research-mode-quick" id="researchModeBadge" type="button" aria-live="polite" aria-label="Research mode quick. Click to switch to deep research." title="Research mode: quick. Click to switch to deep research." onclick="workflowToggleResearchMode(event)">
+      <button class="titlebar-approval-badge titlebar-research-badge research-mode-quick" id="researchModeBadge" type="button" hidden data-titlebar-secondary="1" aria-live="polite" aria-label="Research mode quick. Click to switch to deep research." onclick="workflowToggleResearchMode(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="researchModeValue">quick</span>
       </button>
-      <button class="titlebar-approval-badge titlebar-mcp-badge mcp-state-loading" id="mcpStatusBadge" type="button" aria-live="polite" aria-label="MCP loading. Click to open MCP settings." title="MCP loading. Click to open MCP settings." onclick="workflowOpenMcpPanel(event)">
+      <button class="titlebar-approval-badge titlebar-mcp-badge mcp-state-loading" id="mcpStatusBadge" type="button" hidden data-titlebar-secondary="1" aria-live="polite" aria-label="MCP loading. Click to open MCP settings." onclick="workflowOpenMcpPanel(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="mcpStatusValue">mcp loading</span>
       </button>
-      <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." title="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
+      <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
+        <span class="titlebar-approval-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
         <span id="modelStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">model</span>
       </button>
-      <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." title="Reasoning effort: default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
+      <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
+        <span class="titlebar-approval-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span>
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="reasoningModeValue">default</span>
       </button>
-      <button class="titlebar-approval-badge titlebar-workspace-badge workspace-state-loading" id="workspaceStatusBadge" type="button" aria-live="polite" aria-label="Workspace loading. Click to open workspaces." title="Workspace loading. Click to open workspaces." onclick="workflowOpenWorkspacePanel(event)">
+      <button class="titlebar-approval-badge titlebar-workspace-badge workspace-state-loading" id="workspaceStatusBadge" type="button" aria-live="polite" aria-label="Workspace loading. Click to open workspaces." onclick="workflowOpenWorkspacePanel(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="workspaceStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">workspace</span>
       </button>
-      <button class="titlebar-approval-badge titlebar-subagents-badge subagents-state-loading" id="subagentsStatusBadge" type="button" aria-live="polite" aria-label="Subagents loading. Click to open subagents." title="Subagents loading. Click to open subagents." onclick="workflowOpenSubagentsPanel(event)">
+      <button class="titlebar-approval-badge titlebar-subagents-badge subagents-state-loading" id="subagentsStatusBadge" type="button" hidden data-titlebar-secondary="1" aria-live="polite" aria-label="Subagents loading. Click to open subagents." onclick="workflowOpenSubagentsPanel(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="subagentsStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">subagents loading</span>
       </button>
       <div class="titlebar-workflow-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-        <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
+        <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status. Cmd/Ctrl+K opens the palette." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)">
           <span class="titlebar-approval-dot" aria-hidden="true"></span>
-          <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
+          <span class="titlebar-approval-value titlebar-workflow-value" id="workflowStatusValue" style="text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
         </button>
-        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="workflowStatusMenuBtn" type="button" data-tooltip="Workflow palette (Cmd/Ctrl+Shift+K)" aria-label="Workflow palette. Shortcut Cmd/Ctrl+Shift+K." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
-        </button>
-        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;bottom:calc(100% + 6px);top:auto;right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));max-height:min(60vh,420px);overflow:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
           <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
           <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
             <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="approval" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('approval')">Approval</button>
-          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="model" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('model')">Model</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="reasoning" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('reasoning')">Reasoning</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="browser" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('browser')">Browser</button>
-          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="subagents" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('subagents')">Subagents</button>
-        </div>
+          </div>
         <input id="workflowHeaderMenuSearch" class="model-search-input" type="search" placeholder="Search workflow actions…" autocomplete="off" spellcheck="false" oninput="workflowFilterHeaderMenu(this.value)" onkeydown="workflowHeaderMenuSearchKeydown(event)" style="width:100%;margin:0 0 2px 0;box-sizing:border-box;">
         <div id="workflowHeaderMenuEmpty" hidden style="padding:6px 10px;font-size:12px;color:var(--muted);">No matching actions</div>
         <button class="titlebar-action-btn" id="workflowHeaderPrimarySubagentAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagent-primary')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open first subagent</button>
         <button class="titlebar-action-btn" id="workflowHeaderStatusAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('status')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Show status</button>
+        <button class="titlebar-action-btn" id="compactToggleBtn" type="button" role="menuitem" aria-label="Compact layout" aria-pressed="false" onclick="workflowRunHeaderAction('compact-layout')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="14" x2="20" y2="14" /><line x1="4" y1="20" x2="20" y2="20" /><line x1="4" y1="4" x2="4" y2="20" /><line x1="10" y1="4" x2="10" y2="20" /><line x1="16" y1="4" x2="16" y2="20" /></svg>
+          Compact layout
+        </button>
+        <button class="titlebar-action-btn" id="workflowHeaderCopyConversationAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('copy-conversation')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy conversation</button>
         <button class="titlebar-action-btn" id="workflowHeaderExecAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('exec')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Run exec prompt</button>
         <button class="titlebar-action-btn" id="workflowHeaderReviewAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('review')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open local review</button>
         <button class="titlebar-action-btn" id="workflowHeaderImageAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('image')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Generate image</button>
@@ -451,37 +389,53 @@
         <button class="titlebar-action-btn" id="workflowHeaderApprovalSmartAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('approval-smart')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Approval: smart</button>
         <button class="titlebar-action-btn" id="workflowHeaderApprovalOffAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('approval-off')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Approval: off</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-        <button class="titlebar-action-btn" id="workflowHeaderModelAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('model')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open model picker</button>
+        <button class="titlebar-action-btn" id="workflowHeaderModelAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('model')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open model picker</button>
         <button class="titlebar-action-btn" id="workflowHeaderReasoningAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('reasoning')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open reasoning picker</button>
-        <button class="titlebar-action-btn" id="workflowHeaderThinkingAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('thinking')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open thinking models</button>
+        <button class="titlebar-action-btn" id="workflowHeaderThinkingAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('thinking')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open thinking models</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserToggleAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle browser drawer</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserPermissionAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle browser control</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserMenuAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-menu')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open browser actions</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserScreenshotAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserFullPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderWebBackendAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('web-backend')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle web backend</button>
-        <button class="titlebar-action-btn" id="workflowHeaderMcpAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('mcp')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open MCP settings</button>
+        <button class="titlebar-action-btn" id="workflowHeaderMcpAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('mcp')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open MCP settings</button>
         <button class="titlebar-action-btn" id="workflowHeaderResearchAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('research')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open research panel</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-        <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>
+        <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>
+        <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
+        <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Language</div>
+        <div class="workflow-header-lang-row" role="toolbar" aria-label="Language selection" style="display:flex;flex-wrap:wrap;gap:4px;padding:0 4px 2px;">
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="English" onclick="switchLang('en')">EN</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Deutsch" onclick="switchLang('de')">DE</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Español" onclick="switchLang('es')">ES</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Italiano" onclick="switchLang('it')">IT</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Português" onclick="switchLang('pt')">PT</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Русский" onclick="switchLang('ru')">RU</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="日本語" onclick="switchLang('ja')">JP</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="한국어" onclick="switchLang('ko')">KR</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="中文" onclick="switchLang('zh')">ZH</button>
+        </div>
         <div id="workflowHeaderMenuFooter" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px 2px;margin-top:2px;font-size:11px;color:var(--muted);border-top:1px solid var(--border2);">
           <span id="workflowHeaderMenuSelection">Enter to run</span>
           <span id="workflowHeaderMenuShortcuts">Enter to run · Esc to close · ↑↓ to move</span>
         </div>
       </div>
+      </div>
     </div>
-    <button class="titlebar-action-btn game-mode-toggle-btn has-tooltip has-tooltip--bottom" id="btnGameModeToggle" onclick="toggleGameMode()" type="button" data-tooltip="Game Mode" data-i18n-title="game_mode_toggle" data-i18n-aria-label="game_mode_toggle" aria-label="Game Mode" aria-pressed="false">
+    <button class="titlebar-action-btn game-mode-toggle-btn" id="btnGameModeToggle" onclick="toggleGameMode()" type="button" data-i18n-aria-label="game_mode_toggle" aria-label="Game Mode" aria-pressed="false">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 18v2"/><path d="M18 18v2"/></svg>
     </button>
-    <button class="titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable" id="btnCastToggle" type="button" data-tooltip="Hub Cast" aria-label="Hub Cast" onclick="toggleHubCast()">
+    <button class="titlebar-action-btn cast-status-btn cast-unavailable" id="btnCastToggle" type="button" aria-label="Hub Cast" onclick="toggleHubCast()">
       <span id="castStatusIcon">📺</span>
     </button>
-    <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="btnRebootSidekick" onclick="confirmReboot()" type="button" data-tooltip="Neustarten (Browser+Caches+Server)" aria-label="Neustarten">
+    <button class="titlebar-action-btn" id="btnRebootSidekick" onclick="confirmReboot()" type="button" aria-label="Neustarten">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
     </button>
-    <button class="titlebar-action-btn titlebar-action-btn-danger has-tooltip has-tooltip--bottom" id="btnShutdownSidekick" onclick="confirmShutdown()" type="button" data-tooltip="Herunterfahren (Browser+Server schliessen)" aria-label="Herunterfahren">
+    <button class="titlebar-action-btn" id="titlebarThemeToggle" onclick="toggleThemeMode()" type="button" aria-label="Tag-/Nachtmodus umschalten" aria-pressed="false">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8Z"/></svg>
+    </button>
+    <button class="titlebar-action-btn titlebar-action-btn-danger" id="btnShutdownSidekick" onclick="confirmShutdown()" type="button" aria-label="Herunterfahren">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     </button>
   </div>
@@ -573,7 +527,7 @@
       <div class="panel-head">
         <span data-i18n="tab_chat">Chat</span>
         <div class="panel-head-actions">
-          <button class="panel-head-btn has-tooltip has-tooltip--bottom-right" id="btnNewChat" data-tooltip="New conversation (Cmd+K)" data-i18n-title="new_conversation" aria-label="New conversation">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom-right" id="btnNewChat" data-tooltip="New conversation (Cmd/Ctrl+N)" data-i18n-title="new_conversation" aria-label="New conversation">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
@@ -1169,12 +1123,12 @@
           <span class="voice-mode-indicator" id="voiceModeIndicator"></span>
           <span class="voice-mode-label" id="voiceModeLabel"></span>
         </div>
+        <div id="composerStatusStrip" class="composer-status-strip"></div>
         <div class="action-chips" id="actionChips">
-          <button type="button" class="action-chip" data-cmd="/review" onclick="actionChipClick('/review')" title="Review current state" data-tooltip="Review current state" aria-label="Review current state">Review</button>
-          <button type="button" class="action-chip" data-cmd="/test" onclick="actionChipClick('/test')" title="Run tests" data-tooltip="Run tests" aria-label="Run tests">Test</button>
-          <button type="button" class="action-chip" data-cmd="/install" onclick="actionChipClick('/install')" title="Install packages" data-tooltip="Install packages" aria-label="Install packages">Install</button>
-          <button type="button" class="action-chip" data-cmd="/deploy" onclick="actionChipClick('/deploy')" title="Deploy to production" data-tooltip="Deploy to production" aria-label="Deploy to production">Deploy</button>
-<button type="button" class="action-chip plan-mode-toggle" data-cmd="/plan" onclick="_togglePlanMode()" title="Toggle Plan Mode (prepends /plan)" data-tooltip="Toggle Plan Mode (prepends /plan)" aria-label="Toggle Plan Mode">&#129504; Plan</button>
+          <button type="button" class="action-chip" data-cmd="/review" onclick="actionChipClick('/review')" aria-label="Review current state">Review</button>
+          <button type="button" class="action-chip" data-cmd="/test" onclick="actionChipClick('/test')" aria-label="Run tests">Test</button>
+          <button type="button" class="action-chip" data-cmd="/install" onclick="actionChipClick('/install')" aria-label="Install packages">Install</button>
+          <button type="button" class="action-chip" data-cmd="/deploy" onclick="actionChipClick('/deploy')" aria-label="Deploy to production">Deploy</button>
         </div>
         <!-- -- Plan Mode Banner -- -->
         <div class="plan-banner" id="planBanner" style="display:none">
@@ -1186,6 +1140,11 @@
         <div class="goal-input-row" id="goalInputRow">
           <span class="goal-input-icon">🎯</span>
           <textarea class="goal-input-field" id="goalInputField" rows="1" placeholder="Define a goal for Nova…" data-i18n-placeholder="goal_input_placeholder"></textarea>
+          <div class="goal-budget-control" id="goalBudgetControl" role="group" aria-label="Persistent goal runs">
+            <span class="goal-budget-label">Runs</span>
+            <input class="goal-budget-input" id="goalTurnBudgetInput" type="number" min="1" step="1" value="20" aria-label="Persistent goal runs">
+            <button type="button" class="goal-budget-unlimited-btn" id="goalUnlimitedBtn" onclick="_toggleGoalBudgetUnlimited()" title="Unlimited goal runs" aria-label="Unlimited goal runs" aria-pressed="false">∞</button>
+          </div>
           <button type="button" class="goal-send-btn" id="goalSendBtn" onclick="_submitGoal()" title="Set goal and start" aria-label="Set goal and start">🎯 Set Goal</button>
           <button type="button" class="goal-exit-btn" id="goalExitBtn" onclick="_exitGoalMode()" title="Cancel goal mode" aria-label="Cancel goal mode">✕</button>
         </div>
@@ -1200,10 +1159,10 @@
         <div class="composer-footer">
           <div class="composer-left">
             <input type="file" id="fileInput" class="file-input-visually-hidden" multiple accept="image/*,text/*,application/pdf,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.py,.js,.ts,.yaml,.yml,.toml,.csv,.sh,.txt,.log,.env,.xls,.xlsx,.doc,.docx,.zip,.tar,.gz,.tgz,.bz2,.xz">
-            <button type="button" class="icon-btn has-tooltip" id="btnAttach" data-tooltip="Attach files" aria-label="Attach files">
+            <button type="button" class="icon-btn" id="btnAttach" aria-label="Attach files">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
-            <button class="icon-btn mic-btn has-tooltip" id="btnMic" title="Dictate" data-tooltip="Dictate" data-i18n-title="voice_dictate" aria-label="Dictate" style="display:none">
+            <button class="icon-btn mic-btn" id="btnMic" aria-label="Dictate" style="display:none">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="1" width="6" height="12" rx="3"/>
                 <path d="M5 10a7 7 0 0 0 14 0"/>
@@ -1211,7 +1170,7 @@
                 <line x1="8" y1="23" x2="16" y2="23"/>
               </svg>
             </button>
-            <button class="icon-btn voice-mode-btn has-tooltip" id="btnVoiceMode" title="Voice mode" data-tooltip="Voice mode" data-i18n-title="voice_mode_toggle" aria-label="Voice mode" style="display:none">
+            <button class="icon-btn voice-mode-btn" id="btnVoiceMode" aria-label="Voice mode" style="display:none">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <!-- Lucide audio-lines: signals two-way voice conversation, matches ChatGPT/Gemini convention. -->
                 <path d="M2 10v4"/>
@@ -1222,11 +1181,11 @@
                 <path d="M22 10v4"/>
               </svg>
 </button>
-            <button type="button" class="icon-btn has-tooltip goal-mode-toggle" id="btnGoalModeToggle" onclick="_toggleGoalMode()" title="Set a persistent goal" data-tooltip="Set a persistent goal" aria-label="Set a persistent goal">
+            <button type="button" class="icon-btn goal-mode-toggle" id="btnGoalModeToggle" onclick="_toggleGoalMode()" aria-label="Set a persistent goal">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
             </button>
             <div class="composer-divider" aria-hidden="true"></div>
-            <button type="button" class="icon-btn has-tooltip browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" data-tooltip="Browser drawer" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer">
+            <button type="button" class="icon-btn browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="4" width="18" height="16" rx="2"/>
                 <path d="M3 8h18"/>
@@ -1234,12 +1193,12 @@
                 <path d="M14 12h2v2"/>
               </svg>
             </button>
-            <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" title="YOLO mode — click to disable" data-i18n-title="yolo_pill_title_active">
+            <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" aria-label="YOLO mode active. Click to disable.">
               <span class="yolo-pill-icon" aria-hidden="true">⚡</span>
               <span class="yolo-pill-label" data-i18n="yolo_pill_label">YOLO</span>
             </button>
             <div id="profileChipWrap" class="composer-profile-wrap">
-              <button class="composer-profile-chip profile-chip" id="profileChip" type="button" onclick="toggleProfileDropdown()" title="Switch profile">
+              <button class="composer-profile-chip profile-chip" id="profileChip" type="button" onclick="toggleProfileDropdown()" aria-label="Switch profile">
                 <span class="composer-profile-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
                 <span class="composer-profile-label" id="profileChipLabel">default</span>
                 <span class="composer-profile-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
@@ -1247,28 +1206,29 @@
             </div>
             <div class="composer-ws-wrap">
               <div class="composer-workspace-group ws-chip" id="composerWorkspaceGroup" role="group" aria-label="Workspace controls">
-                <button class="composer-workspace-files-btn" id="btnWorkspacePanelToggle" type="button" onclick="toggleFileTreePanel()" title="Show file tree panel" aria-pressed="false" aria-label="Toggle file tree panel">
+                <button class="composer-workspace-files-btn" id="btnWorkspacePanelToggle" type="button" onclick="toggleFileTreePanel()" aria-pressed="false" aria-label="Toggle file tree panel">
                   <span class="composer-workspace-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
                 </button>
-                <button class="composer-workspace-chip" id="composerWorkspaceChip" type="button" onclick="toggleComposerWsDropdown()" title="Switch space" disabled>
+                <button class="composer-workspace-chip" id="composerWorkspaceChip" type="button" onclick="toggleComposerWsDropdown()" aria-label="Switch space" disabled>
                   <span class="composer-workspace-label" id="composerWorkspaceLabel"></span>
                   <span class="composer-workspace-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </button>
+                <span class="git-badge" id="composerGitBadge" style="display:none"></span>
             </div>
             </div>
-            <label class="sandbox-toggle has-tooltip" id="sandboxToggleLabel" data-tooltip="Sandbox-Einschränkung aktiv" title="Sandbox-Einschränkung aktiv">
+            <label class="sandbox-toggle" id="sandboxToggleLabel" aria-label="Sandbox restriction active">
               <input type="checkbox" id="sandboxToggle" checked>
               <span class="sandbox-toggle-icon">🧪</span>
             </label>
-            <button class="icon-btn has-tooltip" id="btnTerminalToggle" type="button" onclick="toggleComposerTerminal()" title="Open workspace terminal" data-tooltip="Open workspace terminal" aria-pressed="false" disabled>
+            <button class="icon-btn" id="btnTerminalToggle" type="button" onclick="toggleComposerTerminal()" aria-label="Open workspace terminal" aria-pressed="false" disabled>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             </button>
-            <button class="icon-btn composer-mobile-config-btn" id="composerMobileConfigBtn" type="button" onclick="toggleMobileComposerConfig()" title="Workspace, model, reasoning, and context settings" aria-label="Workspace, model, reasoning, and context settings" aria-haspopup="true" aria-expanded="false" aria-controls="composerMobileConfigPanel">
+            <button class="icon-btn composer-mobile-config-btn" id="composerMobileConfigBtn" type="button" onclick="toggleMobileComposerConfig()" aria-label="Workspace and context settings" aria-haspopup="true" aria-expanded="false" aria-controls="composerMobileConfigPanel">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
               <span class="composer-mobile-ctx-badge" id="composerMobileCtxBadge" aria-hidden="true" style="display:none">0</span>
             </button>
             <div class="composer-model-wrap">
-              <button class="composer-model-chip" id="composerModelChip" type="button" onclick="toggleModelDropdown()" title="Conversation model">
+              <button class="composer-model-chip" id="composerModelChip" type="button" onclick="toggleModelDropdown()" aria-label="Conversation model">
                 <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
                 <span class="composer-model-body">
                   <span class="composer-model-name">
@@ -1279,7 +1239,7 @@
                 </span>
                 <span class="composer-model-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
               </button>
-              <select id="modelSelect" class="composer-model-select" title="Conversation model" aria-hidden="true" tabindex="-1">
+              <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1">
               <optgroup label="OpenAI">
                 <option value="openai/gpt-5.4-mini">GPT-5.4 Mini</option>
                 <option value="openai/gpt-4o">GPT-4o</option>
@@ -1302,29 +1262,29 @@
             </select>
             </div>
             <div class="composer-reasoning-wrap" id="composerReasoningWrap" style="display:none">
-              <button class="composer-reasoning-chip" id="composerReasoningChip" type="button" onclick="toggleReasoningDropdown()" title="Reasoning effort level">
+              <button class="composer-reasoning-chip" id="composerReasoningChip" type="button" onclick="toggleReasoningDropdown()" aria-label="Reasoning effort level">
                 <span class="composer-reasoning-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span>
                 <span class="composer-reasoning-label" id="composerReasoningLabel"></span>
                 <span class="composer-reasoning-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
               </button>
             </div>
             <div class="composer-toolsets-wrap" id="composerToolsetsWrap">
-              <button class="composer-toolsets-chip" id="composerToolsetsChip" type="button" onclick="toggleToolsetsDropdown()" title="Session toolsets">
+              <button class="composer-toolsets-chip" id="composerToolsetsChip" type="button" onclick="toggleToolsetsDropdown()" aria-label="Session toolsets">
                 <span class="composer-toolsets-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                 <span class="composer-toolsets-label" id="composerToolsetsLabel">Global</span>
                 <span class="composer-toolsets-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
               </button>
             </div>
             <div class="composer-mode-wrap" id="composerModeWrap">
-              <button class="composer-mode-chip active" data-mode="queue" type="button" onclick="setComposerBusyMode('queue')" title="Queue: messages wait until the agent is free" aria-label="Queue mode">
+              <button class="composer-mode-chip active" data-mode="queue" type="button" onclick="setComposerBusyMode('queue')" aria-label="Queue mode">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 5H3"/><path d="M16 12H3"/><path d="M9 19H3"/><path d="m16 16-3 3 3 3"/><path d="M21 5v12a2 2 0 0 1-2 2h-6"/></svg>
                 <span>Queue</span>
               </button>
-              <button class="composer-mode-chip" data-mode="steer" type="button" onclick="setComposerBusyMode('steer')" title="Steer: inject a mid-turn correction without interrupting" aria-label="Steer mode">
+              <button class="composer-mode-chip" data-mode="steer" type="button" onclick="setComposerBusyMode('steer')" aria-label="Steer mode">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/></svg>
                 <span>Steer</span>
               </button>
-              <button class="composer-mode-chip" data-mode="bg" type="button" onclick="toggleBgMode()" title="Background: run a task in the background without blocking the chat" aria-label="Background mode">
+              <button class="composer-mode-chip" data-mode="bg" type="button" onclick="toggleBgMode()" aria-label="Background mode">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
                 <span>BG</span>
               </button>
@@ -1353,7 +1313,7 @@
                 </div>
               </div>
             </div>
-            <span class="bg-badge" id="bgBadge" style="display:none" title="Background tasks running">0</span>
+            <span class="bg-badge" id="bgBadge" style="display:none" aria-label="Background tasks running">0</span>
             <button class="ctx-info-btn has-tooltip has-tooltip--left" id="btnContextInfo" type="button" onclick="toggleContextInfoPanel()" data-tooltip="What's in context?" aria-label="Show context info" title="Context breakdown">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             </button>
@@ -1369,18 +1329,10 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             </button>
           </div>
-          <div class="composer-mobile-config-panel" id="composerMobileConfigPanel" aria-label="Workspace, model, reasoning, and context settings">
-            <button class="composer-mobile-config-action" id="composerMobileWorkspaceAction" type="button" onclick="toggleComposerWsDropdown()" title="Switch space">
+          <div class="composer-mobile-config-panel" id="composerMobileConfigPanel" aria-label="Workspace and context settings">
+            <button class="composer-mobile-config-action" id="composerMobileWorkspaceAction" type="button" onclick="toggleComposerWsDropdown()" aria-label="Switch space">
               <span class="composer-workspace-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
               <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_workspace">Workspace</span><span class="composer-mobile-config-value" id="composerMobileWorkspaceLabel"></span></span>
-            </button>
-            <button class="composer-mobile-config-action" id="composerMobileModelAction" type="button" onclick="toggleModelDropdown()" title="Conversation model">
-              <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
-              <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_model">Model</span><span class="composer-mobile-config-value" id="composerMobileModelLabel"></span></span>
-            </button>
-            <button class="composer-mobile-config-action" id="composerMobileReasoningAction" type="button" onclick="toggleReasoningDropdown()" title="Reasoning effort level" style="display:none">
-              <span class="composer-reasoning-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span>
-              <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_reasoning">Reasoning</span><span class="composer-mobile-config-value" id="composerMobileReasoningLabel"></span></span>
             </button>
             <div class="composer-mobile-config-action composer-mobile-context-action" id="composerMobileContextAction" role="group" aria-label="Context window" style="display:none">
               <span class="composer-mobile-config-copy composer-mobile-context-copy">
@@ -1391,28 +1343,6 @@
                 <span class="composer-mobile-context-detail" id="composerMobileContextCost" style="display:none"></span>
               </span>
               <button class="ctx-compress-btn composer-mobile-context-compress" id="composerMobileCtxCompressBtn" type="button" style="display:none"></button>
-            </div>
-            <div class="composer-advanced-panel" id="composerAdvancedPanel" aria-label="Advanced composer options">
-              <button class="composer-mobile-config-action" type="button" onclick="setComposerBusyMode('queue')" title="Queue messages while Nova is busy">
-                <span aria-hidden="true">?</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Queue</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="setComposerBusyMode('steer')" title="Steer the active response">
-                <span aria-hidden="true">?</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Steer</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="toggleBgMode()" title="Run next task in background">
-                <span aria-hidden="true">?</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Background</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="toggleComposerTerminal()" title="Open workspace terminal">
-                <span aria-hidden="true">&gt;_</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Terminal</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="const s=document.getElementById('sandboxToggle'); if(s){s.checked=!s.checked; s.dispatchEvent(new Event('change',{bubbles:true}));}" title="Toggle sandbox restrictions">
-                <span aria-hidden="true">🛡️</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Sandbox</span></span>
-              </button>
             </div>
           </div>
           <div class="profile-dropdown" id="profileDropdown"></div>
@@ -1441,6 +1371,45 @@
         <div class="upload-bar-wrap" id="uploadBarWrap"><div class="upload-bar" id="uploadBar"></div></div>
         <div class="browser-chat-context-bar" id="browserChatContextBar" onclick="browserToggleDrawer()" role="button" tabindex="0" aria-label="Open browser drawer"></div>
       </div>  <!-- /composer-box -->
+      <script>
+        (function relocateHeaderControlsToComposer(){
+          var strip = document.getElementById('composerStatusStrip');
+          if (!strip) return;
+
+          var cluster = document.getElementById('composerStatusStripCluster');
+          if (!cluster) {
+            cluster = document.createElement('div');
+            cluster.id = 'composerStatusStripCluster';
+            cluster.className = 'titlebar-status-cluster';
+            strip.appendChild(cluster);
+          }
+
+          function move(node) {
+            if (!node) return;
+            if (node.parentElement === cluster) return;
+            cluster.appendChild(node);
+          }
+
+          move(document.getElementById('btnBrowserDrawerToggle'));
+          move(document.querySelector('.titlebar-workflow-group'));
+          var actionChips = document.getElementById('actionChips');
+          if (actionChips && actionChips.parentElement !== strip) {
+            strip.insertBefore(actionChips, cluster);
+          }
+          var langSelector = document.getElementById('titlebarLangSelector');
+          if (langSelector) {
+            langSelector.hidden = true;
+          }
+
+          var topbarCluster = document.querySelector('.app-titlebar .titlebar-status-cluster');
+          if (topbarCluster) {
+            topbarCluster.hidden = true;
+          }
+
+          if (typeof syncModelChip === 'function') syncModelChip();
+          if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
+        })();
+      </script>
       <div class="browser-drawer" id="browserDrawer" aria-label="Live websearch drawer">
         <div class="browser-drawer-shell">
           <div class="panel-header browser-drawer-header">
@@ -1489,8 +1458,8 @@
               </div>
             </div>
             <div class="browser-empty-state" id="browserEmptyState">
-              <div class="browser-empty-title">Browser not attached</div>
-              <div class="browser-empty-text">Open a chat session to attach the browser runtime.</div>
+              <div class="browser-empty-title" id="browserEmptyStateTitle">Browser not attached</div>
+              <div class="browser-empty-text" id="browserEmptyStateText">Open a chat session to attach the browser runtime.</div>
             </div>
           </div>
         </div>
@@ -2291,6 +2260,26 @@
               <input type="text" id="settingsDashboardUrl" placeholder="http://127.0.0.1:9119" style="margin-top:8px;width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px;font-size:13px">
               <button class="sm-btn" onclick="saveDashboardSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600" data-i18n="settings_dashboard_link_save">Save dashboard link settings</button>
               <div id="settingsDashboardStatus" class="settings-autosave-status" aria-live="polite"></div>
+            </div>
+            <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+              <label style="display:block;font-weight:600;margin-bottom:6px" for="settingsWorktreeEnabled">Worktree defaults</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Control whether new worktree-backed conversations are enabled by default and whether they are removed on exit.</div>
+              <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
+                <input type="checkbox" id="settingsWorktreeEnabled" style="margin-top:2px">
+                <span>
+                  <span style="display:block;font-weight:600">Enable worktree mode</span>
+                  <span style="display:block;font-size:11px;color:var(--muted);line-height:1.4">Use a git worktree for new conversations when available.</span>
+                </span>
+              </label>
+              <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsWorktreeCleanupOnExit" style="margin-top:2px">
+                <span>
+                  <span style="display:block;font-weight:600">Cleanup on exit</span>
+                  <span style="display:block;font-size:11px;color:var(--muted);line-height:1.4">Remove worktrees automatically when Sidekick exits.</span>
+                </span>
+              </label>
+              <button class="sm-btn" type="button" onclick="saveWorktreeSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600">Save worktree settings</button>
+              <div id="settingsWorktreeStatus" class="settings-autosave-status" aria-live="polite"></div>
             </div>
             <!-- Gateway Status Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">

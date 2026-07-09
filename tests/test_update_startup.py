@@ -2,7 +2,9 @@ import subprocess
 import inspect
 import sys
 import textwrap
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
@@ -101,3 +103,47 @@ def test_import_web_server_does_not_run_git():
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_tui_node_bootstrap_uses_hermes_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+    import cli.main as main
+
+    repo_root = tmp_path / "repo"
+    helper = repo_root / "scripts" / "lib" / "node-bootstrap.sh"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    captured = {}
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setattr(main, "PROJECT_ROOT", repo_root)
+    monkeypatch.setattr(main.shutil, "which", lambda _name: None)
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs["env"]
+        return SimpleNamespace(stdout="/tmp/node\n", returncode=0)
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    main._ensure_tui_node()
+
+    assert captured["env"]["HERMES_HOME"] == str(tmp_path / "hermes-home")
+
+
+def test_cleanup_gateway_service_restores_env_without_crashing_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+    import cli.profiles as profiles
+
+    profile_dir = tmp_path / "profiles" / "coder"
+    profile_dir.mkdir(parents=True)
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("cli.gateway.get_service_name", lambda: "sidekick-coder")
+    monkeypatch.setattr("cli.gateway.get_launchd_plist_path", lambda: tmp_path / "unused.plist")
+
+    profiles._cleanup_gateway_service("coder", profile_dir)
+
+    assert os.environ.get("SIDEKICK_HOME") is None
+    assert os.environ.get("HERMES_HOME") == str(tmp_path / "hermes-home")

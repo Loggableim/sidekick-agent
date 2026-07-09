@@ -12,12 +12,18 @@ import os
 import secrets
 import tempfile
 import time
+from pathlib import Path
 
-from web.api.config import STATE_DIR, load_settings
+import web.api.config as _cfg
+from web.api.config import load_settings
 
 logger = logging.getLogger(__name__)
 
 PASSWORD_ENV_VARS = ("SIDEKICK_WEBUI_PASSWORD", "HERMES_WEBUI_PASSWORD")
+
+
+def _state_dir() -> Path:
+    return Path(_cfg.STATE_DIR).expanduser().resolve()
 
 
 def _get_password_env_value() -> str:
@@ -69,7 +75,10 @@ PUBLIC_PATHS = frozenset({
 
 COOKIE_NAME = 'hermes_session'
 
-_SESSIONS_FILE = STATE_DIR / '.sessions.json'
+_STATE_DIR = _state_dir()
+_SESSIONS_FILE = _STATE_DIR / '.sessions.json'
+_LOGIN_ATTEMPTS_FILE = _STATE_DIR / '.login_attempts.json'
+_STATE_DIR_CACHE = _STATE_DIR
 
 
 def _load_sessions() -> dict[str, float]:
@@ -98,8 +107,9 @@ def _save_sessions(sessions: dict[str, float]) -> None:
     truncated file.  Mirrors the same pattern as .signing_key persistence.
     """
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=STATE_DIR, suffix='.sessions.tmp')
+        state_dir = _state_dir()
+        state_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=state_dir, suffix='.sessions.tmp')
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
                 json.dump(sessions, f)
@@ -119,7 +129,7 @@ def _save_sessions(sessions: dict[str, float]) -> None:
 _sessions = _load_sessions()
 
 # ── Login rate limiter ──────────────────────────────────────────────────────
-_LOGIN_ATTEMPTS_FILE = STATE_DIR / '.login_attempts.json'
+_LOGIN_ATTEMPTS_FILE = _STATE_DIR / '.login_attempts.json'
 _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_WINDOW = 60  # seconds
 
@@ -172,8 +182,24 @@ def _save_login_attempts(attempts: dict[str, list[float]]) -> None:
 _login_attempts = _load_login_attempts()  # ip -> [timestamp, ...]
 
 
+def _refresh_state_paths() -> None:
+    """Rebind cached auth state paths when the active state dir changes."""
+    global _STATE_DIR, _SESSIONS_FILE, _LOGIN_ATTEMPTS_FILE, _STATE_DIR_CACHE
+    current = _state_dir()
+    if current == _STATE_DIR_CACHE:
+        return
+    _STATE_DIR = current
+    _STATE_DIR_CACHE = current
+    _SESSIONS_FILE = current / '.sessions.json'
+    _LOGIN_ATTEMPTS_FILE = current / '.login_attempts.json'
+    global _sessions, _login_attempts
+    _sessions = _load_sessions()
+    _login_attempts = _load_login_attempts()
+
+
 def _check_login_rate(ip: str) -> bool:
     """Return True if the IP is allowed to attempt login."""
+    _refresh_state_paths()
     now = time.time()
     attempts = _login_attempts.get(ip, [])
     # Prune old attempts
@@ -187,6 +213,7 @@ def _check_login_rate(ip: str) -> bool:
 
 
 def _record_login_attempt(ip: str) -> None:
+    _refresh_state_paths()
     now = time.time()
     attempts = _login_attempts.get(ip, [])
     attempts.append(now)
@@ -196,7 +223,7 @@ def _record_login_attempt(ip: str) -> None:
 
 def _signing_key():
     """Return a random signing key, generating and persisting one on first call."""
-    key_file = STATE_DIR / '.signing_key'
+    key_file = _state_dir() / '.signing_key'
     try:
         if key_file.exists():
             raw = key_file.read_bytes()
@@ -207,7 +234,7 @@ def _signing_key():
     # Generate a new random key
     key = secrets.token_bytes(32)
     try:
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        key_file.parent.mkdir(parents=True, exist_ok=True)
         key_file.write_bytes(key)
         key_file.chmod(0o600)
     except Exception:
@@ -229,6 +256,7 @@ def _hash_password(password):
 def get_password_hash() -> str | None:
     """Return the active password hash, or None if auth is disabled.
     Priority: env var > settings.json."""
+    _refresh_state_paths()
     env_pw = _get_password_env_value()
     if env_pw:
         return _hash_password(env_pw)
@@ -238,11 +266,13 @@ def get_password_hash() -> str | None:
 
 def is_auth_enabled() -> bool:
     """True if a password is configured (env var or settings)."""
+    _refresh_state_paths()
     return get_password_hash() is not None
 
 
 def verify_password(plain) -> bool:
     """Verify a plaintext password against the stored hash."""
+    _refresh_state_paths()
     expected = get_password_hash()
     if not expected:
         return False
@@ -251,6 +281,7 @@ def verify_password(plain) -> bool:
 
 def create_session() -> str:
     """Create a new auth session. Returns signed cookie value."""
+    _refresh_state_paths()
     token = secrets.token_hex(32)
     _sessions[token] = time.time() + _resolve_session_ttl()
     _save_sessions(_sessions)

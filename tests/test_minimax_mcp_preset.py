@@ -123,12 +123,12 @@ class TestMinimaxToolset(unittest.TestCase):
         handler = lambda **kw: "{}"
         check_fn = lambda: True
         registry.register(
-            name="web_search",
+            name="mcp_minimax_web_search",
             toolset="mcp-minimax",
             schema={
                 "type": "function",
                 "function": {
-                    "name": "web_search",
+                    "name": "mcp_minimax_web_search",
                     "description": "Mocked MCP tool",
                     "parameters": {"type": "object", "properties": {}},
                 },
@@ -142,9 +142,9 @@ class TestMinimaxToolset(unittest.TestCase):
         )
         try:
             resolved = self.resolve_toolset("mcp-minimax")
-            self.assertIn("web_search", resolved)
+            self.assertIn("mcp_minimax_web_search", resolved)
         finally:
-            registry._tools.pop("web_search", None)
+            registry._tools.pop("mcp_minimax_web_search", None)
 
 
 class TestMinimaxAlias(unittest.TestCase):

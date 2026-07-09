@@ -17,13 +17,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from web.api.config import (
-    WORKSPACES_FILE as _GLOBAL_WS_FILE,
-    LAST_WORKSPACE_FILE as _GLOBAL_LW_FILE,
-    DEFAULT_WORKSPACE as _BOOT_DEFAULT_WORKSPACE,
-    MAX_FILE_BYTES
-)
+import web.api.config as _cfg
+from web.api.config import MAX_FILE_BYTES
 from web.api.helpers import reject_windows_device_path
+from web.api._home import get_webui_home
 
 
 # ── Profile-aware path resolution ───────────────────────────────────────────
@@ -44,7 +41,33 @@ def _profile_state_dir() -> Path:
             return d
     except ImportError:
         logger.debug("Failed to import profiles module, using global state dir")
-    return _GLOBAL_WS_FILE.parent
+    return _cfg.WORKSPACES_FILE.parent
+
+
+def _profiles_root_dir() -> Path:
+    """Return the canonical profiles root for the active WebUI home."""
+    try:
+        from web.api.profiles import _profiles_root as profiles_root
+
+        return Path(profiles_root()).expanduser().resolve()
+    except Exception:
+        try:
+            from web.api.profiles import get_active_hermes_home
+
+            return Path(get_active_hermes_home()).expanduser().resolve() / "profiles"
+        except Exception:
+            return Path(get_webui_home()).expanduser().resolve() / "profiles"
+
+
+def _current_default_workspace() -> Path:
+    """Return the active default workspace for the current runtime state."""
+    try:
+        default_workspace = _cfg.load_settings().get("default_workspace")
+        if default_workspace:
+            return Path(default_workspace).expanduser().resolve()
+    except Exception:
+        pass
+    return _cfg.resolve_default_workspace()
 
 
 def _workspaces_file() -> Path:
@@ -65,7 +88,7 @@ def _profile_default_workspace() -> str:
       2. 'default_workspace' — alternate explicit key
       3. 'terminal.cwd'      — hermes-agent terminal working dir (most common)
 
-    Falls back to the boot-time DEFAULT_WORKSPACE constant.
+    Falls back to the current default workspace resolver.
     """
     try:
         from web.api.config import get_config
@@ -87,7 +110,7 @@ def _profile_default_workspace() -> str:
                     return str(p)
     except (ImportError, Exception):
         logger.debug("Failed to load profile default workspace config")
-    return str(_BOOT_DEFAULT_WORKSPACE)
+    return str(_current_default_workspace())
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
@@ -102,7 +125,7 @@ def _clean_workspace_list(workspaces: list) -> list:
       confusion with the 'default' profile name).
     Returns the cleaned list (may be empty).
     """
-    hermes_profiles = (Path.home() / '.sidekick' / 'profiles').resolve()
+    hermes_profiles = _profiles_root_dir()
     result = []
     for w in workspaces:
         path = w.get('path', '')
@@ -165,14 +188,14 @@ def _migrate_global_workspaces() -> list:
     their global file may contain cross-profile entries, test artifacts, and
     stale paths accumulated over time.  We clean it in-place and rewrite it.
     """
-    if not _GLOBAL_WS_FILE.exists():
+    if not _cfg.WORKSPACES_FILE.exists():
         return []
     try:
-        raw = json.loads(_GLOBAL_WS_FILE.read_text(encoding='utf-8'))
+        raw = json.loads(_cfg.WORKSPACES_FILE.read_text(encoding='utf-8'))
         cleaned = _clean_workspace_list(raw)
         if len(cleaned) != len(raw):
             # Rewrite the cleaned version so future reads are already clean
-            _GLOBAL_WS_FILE.write_text(
+            _cfg.WORKSPACES_FILE.write_text(
                 json.dumps(cleaned, ensure_ascii=False, indent=2), encoding='utf-8'
             )
         return cleaned
@@ -229,9 +252,9 @@ def get_last_workspace() -> str:
         except Exception:
             logger.debug("Failed to read last workspace from %s", lw_file)
     # Fallback: try global file
-    if _GLOBAL_LW_FILE.exists():
+    if _cfg.LAST_WORKSPACE_FILE.exists():
         try:
-            p = _GLOBAL_LW_FILE.read_text(encoding='utf-8').strip()
+            p = _cfg.LAST_WORKSPACE_FILE.read_text(encoding='utf-8').strip()
             if p and Path(p).is_dir():
                 return p
         except Exception:
@@ -428,7 +451,7 @@ def _trusted_workspace_roots() -> list[Path]:
             roots.append(p)
 
     add(Path.home())
-    add(_BOOT_DEFAULT_WORKSPACE)
+    add(_current_default_workspace())
     for w in load_workspaces():
         add(w.get("path"))
     roots.sort(key=lambda p: len(str(p)))
@@ -567,11 +590,11 @@ def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
          /boot, /proc, /sys, /dev, /root on Linux/macOS; Windows system dirs).
          This prevents even admin-saved workspaces from pointing at OS internals.
 
-    None/empty path falls back to the boot-time DEFAULT_WORKSPACE, which is always
-    trusted (it was validated at server startup).
+    None/empty path falls back to the current default workspace, which is always
+    trusted (it is validated by the workspace resolver).
     """
     if path in (None, ""):
-        return Path(_BOOT_DEFAULT_WORKSPACE).expanduser().resolve()
+        return _current_default_workspace()
 
     candidate = Path(path).expanduser().resolve()
 
@@ -602,14 +625,14 @@ def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
     except Exception:
         pass
 
-    # (C) Trusted if it is equal to or under the boot-time DEFAULT_WORKSPACE.
+    # (C) Trusted if it is equal to or under the current default workspace.
     #     In Docker deployments HERMES_WEBUI_DEFAULT_WORKSPACE is often set to a
     #     volume mount outside the user's home (e.g. /data/workspace).  That path
-    #     was already validated at server startup, so any sub-path of it is safe
+    #     is validated by the workspace resolver, so any sub-path of it is safe
     #     without requiring the user to add it to the workspace list manually.
     try:
-        boot_default = Path(_BOOT_DEFAULT_WORKSPACE).expanduser().resolve()
-        candidate.relative_to(boot_default)
+        current_default = _current_default_workspace()
+        candidate.relative_to(current_default)
         return candidate
     except ValueError:
         pass
@@ -732,8 +755,23 @@ def list_dir(workspace: Path, rel: str='.'):
         raise FileNotFoundError(f"Not a directory: {rel}")
     ws_resolved = workspace.resolve()
     entries = []
-    for item in sorted(target.iterdir(), key=lambda p: (not p.is_symlink(), p.is_file(), p.name.lower())):
-        if item.is_symlink():
+    def _entry_sort_key(item: Path) -> tuple[bool, bool, str]:
+        try:
+            is_symlink = item.is_symlink()
+        except OSError:
+            is_symlink = False
+        try:
+            is_file = item.is_file()
+        except OSError:
+            is_file = True
+        return (not is_symlink, is_file, item.name.lower())
+
+    for item in sorted(target.iterdir(), key=_entry_sort_key):
+        try:
+            is_symlink = item.is_symlink()
+        except OSError:
+            is_symlink = False
+        if is_symlink:
             # Resolve the symlink target and check if it stays within workspace
             try:
                 link_target = item.resolve()
@@ -778,8 +816,14 @@ def list_dir(workspace: Path, rel: str='.'):
             entry_path = item.name
             if rel and rel != '.':
                 entry_path = rel + '/' + item.name
-            is_dir = item.is_dir()
-            is_file = item.is_file()
+            try:
+                is_dir = item.is_dir()
+            except OSError:
+                is_dir = False
+            try:
+                is_file = item.is_file()
+            except OSError:
+                is_file = False
             size = None
             if is_file:
                 try:

@@ -14,17 +14,38 @@ logger = logging.getLogger(__name__)
 try:  # Exposed as a module attribute so tests can monkeypatch it directly.
     from cli.goals import (  # type: ignore
         CONTINUATION_PROMPT_TEMPLATE,
+        DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES,
         DEFAULT_MAX_TURNS,
         GoalManager as _NativeGoalManager,
         GoalState,
+        format_goal_turn_budget,
         judge_goal,
+        normalize_goal_turn_budget,
     )
 except Exception:  # pragma: no cover - depends on installed hermes-agent
     CONTINUATION_PROMPT_TEMPLATE = ""  # type: ignore
+    DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES = 3  # type: ignore
     DEFAULT_MAX_TURNS = 20  # type: ignore
     _NativeGoalManager = None  # type: ignore
     GoalState = None  # type: ignore
     judge_goal = None  # type: ignore
+    def format_goal_turn_budget(max_turns):  # type: ignore
+        try:
+            value = int(max_turns) if max_turns is not None else None
+        except (TypeError, ValueError):
+            value = None
+        return "∞" if value is None or value <= 0 else str(value)
+
+    def normalize_goal_turn_budget(max_turns, *, default=20, unlimited=False):  # type: ignore
+        if unlimited:
+            return None
+        if max_turns is None:
+            return int(default or DEFAULT_MAX_TURNS or 20)
+        try:
+            value = int(max_turns)
+        except (TypeError, ValueError):
+            return int(default or DEFAULT_MAX_TURNS or 20)
+        return None if value <= 0 else value
 
 GoalManager = _NativeGoalManager  # type: ignore
 
@@ -163,7 +184,7 @@ class _ProfileGoalManager:
         s = self._state
         if s is None or s.status in ("cleared",):
             return "No active goal. Set one with /goal <text>."
-        turns = f"{s.turns_used}/{s.max_turns} turns"
+        turns = f"{s.turns_used}/{format_goal_turn_budget(s.max_turns)} turns"
         if s.status == "active":
             return f"⊙ Goal (active, {turns}): {s.goal}"
         if s.status == "paused":
@@ -173,7 +194,13 @@ class _ProfileGoalManager:
             return f"✓ Goal done ({turns}): {s.goal}"
         return f"Goal ({s.status}, {turns}): {s.goal}"
 
-    def set(self, goal: str, *, max_turns: Optional[int] = None):
+    def set(
+        self,
+        goal: str,
+        *,
+        max_turns: Optional[int] = None,
+        unlimited: bool = False,
+    ):
         goal = (goal or "").strip()
         if not goal:
             raise ValueError("goal text is empty")
@@ -181,7 +208,11 @@ class _ProfileGoalManager:
             goal=goal,
             status="active",
             turns_used=0,
-            max_turns=int(max_turns) if max_turns else self.default_max_turns,
+            max_turns=normalize_goal_turn_budget(
+                max_turns,
+                default=self.default_max_turns,
+                unlimited=unlimited,
+            ),
             created_at=time.time(),
             last_turn_at=0.0,
         )
@@ -204,6 +235,7 @@ class _ProfileGoalManager:
         self._state.paused_reason = None
         if reset_budget:
             self._state.turns_used = 0
+        self._state.consecutive_parse_failures = 0
         self._save(self._state)
         return self._state
 
@@ -230,11 +262,15 @@ class _ProfileGoalManager:
         state.last_turn_at = time.time()
 
         if judge_goal is None:
-            verdict, reason = "continue", "goal judge unavailable"
+            verdict, reason, parse_failed = "continue", "goal judge unavailable", False
         else:
-            verdict, reason, _parse_failed = judge_goal(state.goal, str(last_response or ""))
+            verdict, reason, parse_failed = judge_goal(state.goal, str(last_response or ""))
         state.last_verdict = verdict
         state.last_reason = reason
+        if parse_failed:
+            state.consecutive_parse_failures = int(getattr(state, "consecutive_parse_failures", 0) or 0) + 1
+        else:
+            state.consecutive_parse_failures = 0
 
         if verdict == "done":
             state.status = "done"
@@ -248,9 +284,11 @@ class _ProfileGoalManager:
                 "message": f"✓ Goal achieved: {reason}",
             }
 
-        if state.turns_used >= state.max_turns:
+        if state.consecutive_parse_failures >= DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES:
             state.status = "paused"
-            state.paused_reason = f"turn budget exhausted ({state.turns_used}/{state.max_turns})"
+            state.paused_reason = (
+                f"judge model returned unparseable output {state.consecutive_parse_failures} turns in a row"
+            )
             self._save(state)
             return {
                 "status": "paused",
@@ -259,7 +297,31 @@ class _ProfileGoalManager:
                 "verdict": "continue",
                 "reason": reason,
                 "message": (
-                    f"⏸ Goal paused — {state.turns_used}/{state.max_turns} turns used. "
+                    f"⏸ Goal paused — the judge model ({state.consecutive_parse_failures} turns) "
+                    "isn't returning the required JSON verdict. Route the judge to a stricter "
+                    "model in ~/.sidekick/config.yaml:\n"
+                    "  auxiliary:\n"
+                    "    goal_judge:\n"
+                    "      provider: openrouter\n"
+                    "      model: google/gemini-3-flash-preview\n"
+                    "Then /goal resume to continue."
+                ),
+            }
+
+        if state.max_turns is not None and state.turns_used >= state.max_turns:
+            state.status = "paused"
+            state.paused_reason = (
+                f"turn budget exhausted ({state.turns_used}/{format_goal_turn_budget(state.max_turns)})"
+            )
+            self._save(state)
+            return {
+                "status": "paused",
+                "should_continue": False,
+                "continuation_prompt": None,
+                "verdict": "continue",
+                "reason": reason,
+                "message": (
+                    f"⏸ Goal paused — {state.turns_used}/{format_goal_turn_budget(state.max_turns)} turns used. "
                     "Use /goal resume to keep going, or /goal clear to stop."
                 ),
             }
@@ -271,7 +333,7 @@ class _ProfileGoalManager:
             "continuation_prompt": self.next_continuation_prompt(),
             "verdict": "continue",
             "reason": reason,
-            "message": f"↻ Continuing toward goal ({state.turns_used}/{state.max_turns}): {reason}",
+            "message": f"↻ Continuing toward goal ({state.turns_used}/{format_goal_turn_budget(state.max_turns)}): {reason}",
         }
 
     def next_continuation_prompt(self) -> Optional[str]:
@@ -318,7 +380,7 @@ def _state_payload(
         "goal": getattr(state, "goal", "") or "",
         "status": getattr(state, "status", "") or "",
         "turns_used": int(getattr(state, "turns_used", 0) or 0),
-        "max_turns": int(getattr(state, "max_turns", 0) or 0),
+        "max_turns": getattr(state, "max_turns", None),
         "last_verdict": getattr(state, "last_verdict", None),
         "last_reason": getattr(state, "last_reason", None),
         "paused_reason": getattr(state, "paused_reason", None),
@@ -369,30 +431,31 @@ def _goal_status_payload(state: Any, *, default_message: str | None = None) -> D
     if status in ("cleared",):
         return {"message": default_message, "message_key": "goal_status_none"}
     turns_used = int(getattr(state, "turns_used", 0) or 0)
-    max_turns = int(getattr(state, "max_turns", 0) or 0)
+    max_turns = getattr(state, "max_turns", None)
+    budget_label = format_goal_turn_budget(max_turns)
     goal = str(getattr(state, "goal", "") or "")
     if status == "active":
         return {
-            "message": f"⊙ Goal (active, {turns_used}/{max_turns} turns): {goal}",
+            "message": f"⊙ Goal (active, {turns_used}/{budget_label} turns): {goal}",
             "message_key": "goal_status_active",
-            "message_args": [turns_used, max_turns, goal],
+            "message_args": [turns_used, budget_label, goal],
         }
     if status == "paused":
         reason = str(getattr(state, "paused_reason", "") or "")
         return {
-            "message": f"⏸ Goal (paused, {turns_used}/{max_turns}{' — ' + reason if reason else ''}): {goal}",
+            "message": f"⏸ Goal (paused, {turns_used}/{budget_label}{' — ' + reason if reason else ''}): {goal}",
             "message_key": "goal_status_paused",
-            "message_args": [turns_used, max_turns, reason, goal],
+            "message_args": [turns_used, budget_label, reason, goal],
         }
     if status == "done":
         return {
-            "message": f"✓ Goal done ({turns_used}/{max_turns}): {goal}",
+            "message": f"✓ Goal done ({turns_used}/{budget_label}): {goal}",
             "message_key": "goal_status_done",
-            "message_args": [turns_used, max_turns, goal],
+            "message_args": [turns_used, budget_label, goal],
         }
     return {
-        "message": f"Goal ({status}, {turns_used}/{max_turns}): {goal}",
-        "message_args": [status, turns_used, max_turns, goal],
+        "message": f"Goal ({status}, {turns_used}/{budget_label}): {goal}",
+        "message_args": [status, turns_used, budget_label, goal],
     }
 
 
@@ -419,9 +482,13 @@ def _goal_decision_payload(
     status = str(decision.get("status") or "").strip()
     reason = str(decision.get("reason") or "").strip()
     turns_used = int(getattr(state, "turns_used", 0) or 0)
-    max_turns = int(getattr(state, "max_turns", 0) or 0)
-    if (turns_used, max_turns) == (0, 0):
-        turns_used, max_turns = _extract_goal_turns_from_message(str(decision.get("message") or ""))
+    max_turns = getattr(state, "max_turns", None)
+    budget_label = format_goal_turn_budget(max_turns)
+    if (turns_used, max_turns) in ((0, 0), (0, None)):
+        turns_used, parsed_max_turns = _extract_goal_turns_from_message(str(decision.get("message") or ""))
+        if parsed_max_turns:
+            max_turns = parsed_max_turns
+            budget_label = format_goal_turn_budget(max_turns)
 
     if status == "done":
         return {
@@ -437,7 +504,7 @@ def _goal_decision_payload(
             "turns_used": turns_used,
             "max_turns": max_turns,
             "message_key": "goal_paused_budget_exhausted",
-            "message_args": [turns_used, max_turns],
+            "message_args": [turns_used, budget_label],
         }
     if decision.get("should_continue"):
         return {
@@ -445,7 +512,7 @@ def _goal_decision_payload(
             "turns_used": turns_used,
             "max_turns": max_turns,
             "message_key": "goal_continuing",
-            "message_args": [turns_used, max_turns, reason],
+            "message_args": [turns_used, budget_label, reason],
         }
     return {
         **decision,
@@ -521,6 +588,8 @@ def goal_command_payload(
     stream_running: bool = False,
     profile_home: str | Path | None = None,
     space_slug: str | None = None,
+    max_turns: Optional[int] = None,
+    unlimited: bool = False,
 ) -> Dict[str, Any]:
     """Return the WebUI response payload for a /goal command.
 
@@ -617,19 +686,24 @@ def goal_command_payload(
         )
 
     try:
-        state = mgr.set(text)
+        state = mgr.set(text, max_turns=max_turns, unlimited=unlimited)
     except ValueError as exc:
         return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}", space_slug=space_slug)
+
+    budget_label = "unlimited runs" if getattr(state, "max_turns", None) is None else f"{state.max_turns} runs"
+    followup = (
+        "I'll keep working until the goal is done, you pause/clear it, or you stop it.\n"
+        if getattr(state, "max_turns", None) is None
+        else "I'll keep working until the goal is done, you pause/clear it, or the budget is exhausted.\n"
+    )
 
     return _payload(
         action="set",
         message=(
-            f"⊙ Goal set ({state.max_turns}-turn budget): {state.goal}\n"
-            "I'll keep working until the goal is done, you pause/clear it, or the budget is exhausted.\n"
+            f"⊙ Goal set ({budget_label}): {state.goal}\n"
+            f"{followup}"
             "Controls: /goal status · /goal pause · /goal resume · /goal clear"
         ),
-        message_key="goal_set",
-        message_args=[state.max_turns, state.goal],
         state=state,
         kickoff_prompt=state.goal,
         space_slug=space_slug,

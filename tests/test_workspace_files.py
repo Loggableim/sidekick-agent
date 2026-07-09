@@ -1,4 +1,5 @@
 from io import BytesIO
+import importlib
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -37,6 +38,37 @@ def test_list_dir_handles_file_deleted_between_is_file_and_stat(monkeypatch, tmp
             "type": "file",
             "size": None,
         }
+    ]
+
+
+def test_clean_workspace_list_filters_other_profile_directories(monkeypatch, tmp_path):
+    import sys
+
+    active_home = tmp_path / "hermes"
+    other_profile_path = active_home / "profiles" / "other" / "workspace"
+    other_profile_path.mkdir(parents=True)
+    keep_path = tmp_path / "shared-workspace"
+    keep_path.mkdir()
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.profiles", None)
+    sys.modules.pop("web.api.workspace", None)
+    profiles = importlib.import_module("web.api.profiles")
+    workspace = importlib.import_module("web.api.workspace")
+
+    monkeypatch.setattr(profiles, "get_active_hermes_home", lambda: active_home / "profiles" / "webui")
+
+    cleaned = workspace._clean_workspace_list(
+        [
+            {"path": str(other_profile_path), "name": "other"},
+            {"path": str(keep_path), "name": "shared"},
+        ]
+    )
+
+    assert cleaned == [
+        {"path": str(keep_path.resolve()), "name": "shared"},
     ]
 
 

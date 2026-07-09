@@ -29,27 +29,53 @@ import logging
 import sqlite3
 import threading
 import time
-from web.api.config import STATE_DIR
+from pathlib import Path
+
+import web.api.config as _cfg
 
 logger = logging.getLogger(__name__)
 
 # ── Database path ──────────────────────────────────────────────────────────────
-DB_DIR = STATE_DIR / "logs"
-DB_PATH = DB_DIR / "errors.db"
+def _state_dir() -> Path:
+    return Path(_cfg.STATE_DIR).expanduser().resolve()
+
+
+def _db_dir() -> Path:
+    return _state_dir() / "logs"
+
+
+def _db_path() -> Path:
+    return _db_dir() / "errors.db"
+
+
+DB_DIR = _db_dir()
+DB_PATH = _db_path()
 
 # ── Connection management (thread-safe) ───────────────────────────────────────
 _local = threading.local()
 
 def _get_conn() -> sqlite3.Connection:
     """Get a thread-local database connection."""
-    if not hasattr(_local, "conn") or _local.conn is None:
-        DB_DIR.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH), timeout=10)
+    global DB_DIR, DB_PATH
+    current_path = _db_path()
+    cached_path = getattr(_local, "conn_path", None)
+    if not hasattr(_local, "conn") or _local.conn is None or cached_path != str(current_path):
+        old_conn = getattr(_local, "conn", None)
+        if old_conn is not None:
+            try:
+                old_conn.close()
+            except Exception:
+                pass
+        current_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(current_path), timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         _init_schema(conn)
         _local.conn = conn
+        _local.conn_path = str(current_path)
+        DB_DIR = current_path.parent
+        DB_PATH = current_path
     return _local.conn
 
 
@@ -246,4 +272,4 @@ def clear_errors(before: str = None) -> int:
 
 def get_db_path() -> str:
     """Return the absolute path to the error database for diagnostic use."""
-    return str(DB_PATH.resolve())
+    return str(_db_path().resolve())

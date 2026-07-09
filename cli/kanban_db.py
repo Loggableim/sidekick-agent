@@ -131,9 +131,13 @@ DEFAULT_BOARD = "default"
 _BOARD_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]{0,63}$")
 
 
-def _env_override(name: str) -> str:
-    """Return a trimmed env var value, treating unset values as empty."""
-    return str(os.environ.get(name) or "").strip()
+def _env_override(*names: str) -> str:
+    """Return the first trimmed env var value, treating unset values as empty."""
+    for name in names:
+        value = str(os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _normalize_board_slug(slug: Optional[str]) -> Optional[str]:
@@ -156,9 +160,9 @@ def kanban_home() -> Path:
 
     Resolution order:
 
-    1. ``HERMES_KANBAN_HOME`` env var when set and non-empty (explicit
-       override for tests and unusual deployments).
-    2. ``get_default_hermes_root()``, which already returns ``<root>``
+    1. ``SIDEKICK_KANBAN_HOME`` env var when set and non-empty.
+    2. ``HERMES_KANBAN_HOME`` env var as a legacy fallback.
+    3. ``get_default_hermes_root()``, which already returns ``<root>``
        when ``HERMES_HOME`` is ``<root>/profiles/<name>``, and returns
        ``HERMES_HOME`` directly for Docker / custom deployments.
 
@@ -167,7 +171,7 @@ def kanban_home() -> Path:
     profile's ``HERMES_HOME`` would silently fork the board per profile,
     which breaks the dispatcher / worker handoff.
     """
-    override = _env_override("SIDEKICK_KANBAN_HOME")
+    override = _env_override("SIDEKICK_KANBAN_HOME", "HERMES_KANBAN_HOME")
     if override:
         return Path(override).expanduser()
     from runtime._compat.shim_constants import get_default_hermes_root
@@ -210,7 +214,7 @@ def get_current_board() -> str:
     with a best-effort warning — the dispatcher must never crash because a
     user hand-edited a file or removed a board directory.
     """
-    env = _env_override("SIDEKICK_KANBAN_BOARD")
+    env = _env_override("SIDEKICK_KANBAN_BOARD", "HERMES_KANBAN_BOARD")
     if env:
         try:
             normed = _normalize_board_slug(env)
@@ -301,7 +305,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
     3. Board ``default`` → ``<root>/kanban.db`` (back-compat path).
        Other boards → ``<root>/kanban/boards/<slug>/kanban.db``.
     """
-    override = _env_override("SIDEKICK_KANBAN_DB")
+    override = _env_override("SIDEKICK_KANBAN_DB", "HERMES_KANBAN_DB")
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -323,7 +327,7 @@ def workspaces_root(board: Optional[str] = None) -> Path:
     that existing scratch workspaces from before the boards feature are
     preserved. Other boards use ``<root>/kanban/boards/<slug>/workspaces/``.
     """
-    override = _env_override("SIDEKICK_KANBAN_WORKSPACES_ROOT")
+    override = _env_override("SIDEKICK_KANBAN_WORKSPACES_ROOT", "HERMES_KANBAN_WORKSPACES_ROOT")
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)

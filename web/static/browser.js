@@ -44,7 +44,6 @@ let _browserDiffTimer = null;
 let _browserTraceThumbnails = [];
 let _browserChatContextActive = false;
 let _browserPrevFrameRev = '';
-let _browserHeaderMenuOpen = false;
 let _browserUrlDraft = '';
 let _browserUrlDraftAt = 0;
 let _browserRuntimeInitialized = false;
@@ -256,6 +255,25 @@ function _browserSetEmptyVisible(visible) {
   const empty = _browserEl('browserEmptyState');
   if (!empty) return;
   empty.classList.toggle('visible', !!visible);
+}
+
+function _browserIsBlankState(state) {
+  if (!state || !state.session_id) return true;
+  const url = String(state.url || '').trim().toLowerCase();
+  return !url || url.startsWith('about:blank');
+}
+
+function _browserSyncEmptyStateText(state) {
+  const title = _browserEl('browserEmptyStateTitle');
+  const text = _browserEl('browserEmptyStateText');
+  if (!title || !text) return;
+  if (_browserIsBlankState(state) && state && state.session_id) {
+    title.textContent = 'Browser attached';
+    text.textContent = 'Open a URL or run a browser action to show the live viewport.';
+    return;
+  }
+  title.textContent = 'Browser not attached';
+  text.textContent = 'Open a chat session to attach the browser runtime.';
 }
 
 function _browserClearViewport() {
@@ -1075,125 +1093,12 @@ function _browserSetSessionLabel(state) {
 }
 
 function _browserUpdateHeaderBadge() {
-  const badge = _browserEl('browserStatusBadge');
-  const value = _browserEl('browserStatusValue');
-  if (!badge || !value) return;
-
-  const open = !!_browserDrawerOpen;
-  const mode = String(_browserPermissionMode || 'none');
-  const openState = open ? 'open' : 'closed';
-  const modeState = mode === 'control' ? 'control' : (mode === 'read' ? 'read' : 'locked');
-  const extraStates = [];
-  if (_browserExploreMode) extraStates.push('explore');
-  if (_browserSplitScreen) extraStates.push('split');
-  if (_browserFullscreen) extraStates.push('fullscreen');
-
-  badge.classList.remove('browser-state-open', 'browser-state-closed', 'browser-state-control', 'browser-state-read', 'browser-state-locked', 'browser-state-explore', 'browser-state-split', 'browser-state-fullscreen');
-  badge.classList.add('browser-state-' + openState);
-  badge.classList.add('browser-state-' + modeState);
-  extraStates.forEach(stateName => badge.classList.add('browser-state-' + stateName));
-
-  value.textContent = 'browser ' + openState + ' · ' + modeState;
-
-  const parts = [
-    'Browser drawer ' + openState,
-    modeState === 'control' ? 'agent control enabled' : (modeState === 'read' ? 'agent watch mode' : 'agent locked')
-  ];
-  if (_browserState && _browserState.status) parts.push(String(_browserState.status));
-  if (_browserExploreMode) parts.push('explore mode');
-  if (_browserSplitScreen) parts.push('split view');
-  if (_browserFullscreen) parts.push('fullscreen');
-  const label = parts.join(' · ') + '. Click to toggle the drawer.';
-  badge.setAttribute('title', label);
-  badge.setAttribute('aria-label', label);
-  _browserRefreshHeaderMenu();
   if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
-}
-
-function _browserRefreshHeaderMenu() {
-  const drawerBtn = _browserEl('browserHeaderDrawerAction');
-  const permissionBtn = _browserEl('browserHeaderPermissionAction');
-  const exploreBtn = _browserEl('browserHeaderExploreAction');
-  const splitBtn = _browserEl('browserHeaderSplitAction');
-  const fullscreenBtn = _browserEl('browserHeaderFullscreenAction');
-  const backBtn = _browserEl('browserHeaderBackAction');
-  const forwardBtn = _browserEl('browserHeaderForwardAction');
-  const reloadBtn = _browserEl('browserHeaderReloadAction');
-  const stopBtn = _browserEl('browserHeaderStopAction');
-  const navigateBtn = _browserEl('browserHeaderNavigateAction');
-  const newTabBtn = _browserEl('browserHeaderNewTabAction');
-  const copyUrlBtn = _browserEl('browserHeaderCopyUrlAction');
-  const pageContextBtn = _browserEl('browserHeaderPageContextAction');
-  const fullPageContextBtn = _browserEl('browserHeaderFullPageContextAction');
-  const screenshotBtn = _browserEl('browserHeaderScreenshotAction');
-  const menuBtn = _browserEl('browserStatusMenuBtn');
-
-  if (drawerBtn) drawerBtn.textContent = _browserDrawerOpen ? 'Close drawer' : 'Open drawer';
-  if (permissionBtn) {
-    permissionBtn.textContent = _browserPermissionMode === 'control'
-      ? 'Pause agent control'
-      : (_browserPermissionMode === 'read' ? 'Resume agent control' : 'Enable agent control');
-  }
-  if (exploreBtn) {
-    exploreBtn.textContent = _browserExploreMode ? 'Switch to Follow mode' : 'Switch to Explore mode';
-  }
-  if (splitBtn) {
-    splitBtn.textContent = _browserSplitScreen ? 'Exit split view' : 'Split browser and chat';
-  }
-  if (fullscreenBtn) {
-    fullscreenBtn.textContent = _browserFullscreen ? 'Exit fullscreen' : 'Maximize browser';
-  }
-  if (backBtn) backBtn.textContent = 'Go back';
-  if (forwardBtn) forwardBtn.textContent = 'Go forward';
-  if (reloadBtn) reloadBtn.textContent = 'Reload page';
-  if (stopBtn) stopBtn.textContent = 'Stop loading';
-  if (navigateBtn) navigateBtn.textContent = 'Navigate to URL...';
-  if (newTabBtn) newTabBtn.textContent = 'Open current in new tab';
-  if (copyUrlBtn) copyUrlBtn.textContent = 'Copy current URL';
-  if (pageContextBtn) pageContextBtn.textContent = 'Send readable page text to chat';
-  if (fullPageContextBtn) fullPageContextBtn.textContent = 'Send full page context to chat';
-  if (screenshotBtn) {
-    screenshotBtn.textContent = 'Send screenshot to chat';
-  }
-  if (menuBtn) {
-    menuBtn.setAttribute('aria-expanded', _browserHeaderMenuOpen ? 'true' : 'false');
-  }
-}
-
-function _browserCloseHeaderMenu() {
-  const menu = _browserEl('browserStatusMenu');
-  const menuBtn = _browserEl('browserStatusMenuBtn');
-  if (menu) menu.hidden = true;
-  if (menuBtn) menuBtn.setAttribute('aria-expanded', 'false');
-  if (_browserHeaderMenuOpen) {
-    document.removeEventListener('click', _browserHeaderMenuOutsideClick, true);
-    document.removeEventListener('keydown', _browserHeaderMenuKeydown, true);
-  }
-  _browserHeaderMenuOpen = false;
-}
-
-function _browserHeaderMenuOutsideClick(event) {
-  if (!_browserHeaderMenuOpen) return;
-  const menu = _browserEl('browserStatusMenu');
-  const menuBtn = _browserEl('browserStatusMenuBtn');
-  const target = event && event.target;
-  if (menu && target && menu.contains(target)) return;
-  if (menuBtn && target && menuBtn.contains(target)) return;
-  _browserCloseHeaderMenu();
-}
-
-function _browserHeaderMenuKeydown(event) {
-  if (!event) return;
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    _browserCloseHeaderMenu();
-  }
 }
 
 function _browserHandleExportHotkeys(event) {
   if (!event || event.defaultPrevented) return;
   if (!_browserPanelVisible()) return;
-  if (_browserHeaderMenuOpen) return;
   if (_browserIsEditableTarget(event.target)) return;
   const key = String(event.key || '').toLowerCase();
   if (key !== 'e') return;
@@ -1207,37 +1112,14 @@ function _browserHandleExportHotkeys(event) {
   }
 }
 
-function browserToggleHeaderMenu(event) {
-  if (event && typeof event.preventDefault === 'function') event.preventDefault();
-  if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-  const menu = _browserEl('browserStatusMenu');
-  if (!menu) return false;
-  if (_browserHeaderMenuOpen) {
-    _browserCloseHeaderMenu();
-    return false;
-  }
-  if (typeof workflowCloseHeaderMenu === 'function') workflowCloseHeaderMenu();
-  if (typeof closeModelDropdown === 'function') closeModelDropdown();
-  if (typeof closeReasoningDropdown === 'function') closeReasoningDropdown();
-  _browserRefreshHeaderMenu();
-  menu.hidden = false;
-  _browserHeaderMenuOpen = true;
-  const menuBtn = _browserEl('browserStatusMenuBtn');
-  if (menuBtn) menuBtn.setAttribute('aria-expanded', 'true');
-  document.addEventListener('click', _browserHeaderMenuOutsideClick, true);
-  document.addEventListener('keydown', _browserHeaderMenuKeydown, true);
-  return false;
-}
 if (typeof window !== 'undefined') {
   window.browserToggleDrawer = browserToggleDrawer;
-  window.browserToggleHeaderMenu = browserToggleHeaderMenu;
   window.browserRunHeaderAction = browserRunHeaderAction;
   window.browserTogglePermission = browserTogglePermission;
   window.browserSetDrawerOpen = browserSetDrawerOpen;
 }
 
 function browserRunHeaderAction(action) {
-  _browserCloseHeaderMenu();
   switch (String(action || '')) {
     case 'drawer-toggle':
       browserToggleDrawer();
@@ -1559,6 +1441,10 @@ function _browserSetStageRatio(state) {
 function _browserSetCursor(state) {
   const cursor = _browserEl('browserCursor');
   if (!cursor || !state) return;
+  if (_browserIsBlankState(state)) {
+    cursor.classList.remove('visible');
+    return;
+  }
   const w = Number(state.viewport_width || 1440) || 1440;
   const h = Number(state.viewport_height || 900) || 900;
   const x = Number(state.cursor_x || 0) || 0;
@@ -1587,6 +1473,10 @@ function _browserFlashClick(state) {
 function _browserSetImage(state) {
   const img = _browserEl('browserFrameImage');
   if (!img || !state) return;
+  if (_browserIsBlankState(state)) {
+    _browserClearViewport();
+    return;
+  }
   const rev = String(state.frame_rev || 0);
   const nextSrc = state.frame_url || ('/api/browser/frame?session_id=' + encodeURIComponent(state.session_id || _browserCurrentSessionId()) + '&rev=' + encodeURIComponent(rev));
   const frameRequestUrl = nextSrc + (nextSrc.includes('?') ? '&' : '?') + 'cache=' + encodeURIComponent(rev);
@@ -1639,9 +1529,11 @@ function _browserRender(state, opts = {}) {
   state.can_go_back = canGoBack;
   state.can_go_forward = canGoForward;
   _browserSetStageRatio(state);
-  _browserSetImage(state);
+  const isBlankState = _browserIsBlankState(state);
+  if (isBlankState) _browserClearViewport();
+  else _browserSetImage(state);
   _browserSetCursor(state);
-  if (state.click_ts != null) _browserFlashClick(state);
+  if (!isBlankState && state.click_ts != null) _browserFlashClick(state);
   _browserSetSessionLabel(state);
   _browserUpdateHeaderBadge();
   const isBlocked = state.status === 'blocked';
@@ -1667,7 +1559,8 @@ function _browserRender(state, opts = {}) {
   if (input && document.activeElement !== input && !draftFresh && state.url) {
     input.value = state.url;
   }
-  _browserSetEmptyVisible(!state.session_id || (!state.frame_rev && !state.url));
+  _browserSyncEmptyStateText(state);
+  _browserSetEmptyVisible(isBlankState);
   const stage = _browserEl('browserStage');
   if (stage) {
     stage.style.opacity = state.session_id ? '1' : '.65';
@@ -1724,7 +1617,6 @@ function _browserScheduleSyncRetry(delayMs = 1200) {
 }
 
 function browserPrepareSessionSwitch() {
-  _browserCloseHeaderMenu();
   _browserCloseStream();
   _browserRequestRev += 1;
   _browserActiveSessionId = null;
@@ -1740,6 +1632,7 @@ function browserPrepareSessionSwitch() {
   _browserSetPill('idle', 'Loading');
   _browserSetStatusUrl('Switching session...');
   _browserSetActionSummary('');
+  _browserSyncEmptyStateText(null);
   _browserSetEmptyVisible(true);
   _browserSetButtonsDisabled(true, null);
   browserRenderPermission({mode: 'none'});
@@ -1750,7 +1643,6 @@ function browserPrepareSessionSwitch() {
 function browserSetDrawerOpen(open, opts = {}) {
   const nextOpen = !!open;
   const prevOpen = _browserDrawerOpen;
-  _browserCloseHeaderMenu();
   _browserDrawerOpen = nextOpen;
   localStorage.setItem('sidekick-browser-drawer-open', nextOpen ? '1' : '0');
   document.body.classList.toggle('browser-drawer-open', nextOpen);
@@ -1788,7 +1680,6 @@ function browserSetDrawerOpen(open, opts = {}) {
 }
 
 function browserToggleDrawer() {
-  _browserCloseHeaderMenu();
   browserSetDrawerOpen(!_browserDrawerOpen, {force: true});
 }
 
@@ -1883,6 +1774,7 @@ async function browserSyncToCurrentSession(opts = {}) {
     if (visible) {
       _browserSetPill('idle', 'Loading');
       _browserSetStatusUrl('Switching session...');
+      _browserSyncEmptyStateText(null);
       _browserSetEmptyVisible(true);
       _browserSetButtonsDisabled(true, null);
     }
@@ -1893,6 +1785,7 @@ async function browserSyncToCurrentSession(opts = {}) {
     _browserPendingSessionSwitch = false;
     if (visible) {
       browserPrepareSessionSwitch();
+      _browserSyncEmptyStateText(null);
       _browserSetStatusUrl('Open a chat session to attach the browser runtime.');
     }
     return null;
@@ -1908,6 +1801,7 @@ async function browserSyncToCurrentSession(opts = {}) {
     }
     _browserSetPill('idle', 'Loading');
     _browserSetStatusUrl('Loading browser state...');
+    _browserSyncEmptyStateText(null);
     _browserSetEmptyVisible(true);
     _browserSetButtonsDisabled(true, null);
     const state = await _browserFetchState(sessionId);
@@ -2502,7 +2396,6 @@ window.browserPanelActivated = browserPanelActivated;
 window.browserPanelDeactivated = browserPanelDeactivated;
 window.browserSetDrawerOpen = browserSetDrawerOpen;
 window.browserToggleDrawer = browserToggleDrawer;
-window.browserToggleHeaderMenu = browserToggleHeaderMenu;
 window.browserRunHeaderAction = browserRunHeaderAction;
 window.browserTogglePermission = browserTogglePermission;
 window.browserStopPermission = browserStopPermission;
@@ -3005,7 +2898,6 @@ window.websearchQuickSearch = websearchQuickSearch;
 if (typeof window !== 'undefined') {
   if (typeof browserToggleDrawer === 'function') window.browserToggleDrawer = browserToggleDrawer;
   if (typeof browserSetDrawerOpen === 'function') window.browserSetDrawerOpen = browserSetDrawerOpen;
-  if (typeof browserToggleHeaderMenu === 'function') window.browserToggleHeaderMenu = browserToggleHeaderMenu;
   if (typeof browserRunHeaderAction === 'function') window.browserRunHeaderAction = browserRunHeaderAction;
   if (typeof browserToggleSplit === 'function') window.browserToggleSplit = browserToggleSplit;
   if (typeof browserToggleFullscreen === 'function') window.browserToggleFullscreen = browserToggleFullscreen;

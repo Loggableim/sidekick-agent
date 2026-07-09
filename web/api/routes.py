@@ -23,6 +23,8 @@ import uuid
 from pathlib import Path, PurePath, PureWindowsPath
 from contextlib import closing
 from urllib.parse import parse_qs
+from shared.sessions import DEFAULT_SESSION_TITLE, is_default_session_title
+from web.api._home import get_active_webui_home, get_webui_home
 from web.api.agent_sessions import (
     MESSAGING_SOURCES,
     is_cli_session_row,
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 _NOVA_ROUTE_STATUS_CACHE: dict[str, object] = {
     "module": None,
+    "path": None,
     "mtime": None,
 }
 
@@ -66,6 +69,24 @@ _MESSAGING_SESSION_METADATA_CACHE: dict[str, object] = {
 }
 _MESSAGING_SESSION_METADATA_LOCK = threading.Lock()
 _STALE_MESSAGING_END_REASONS = {"session_reset", "session_switch"}
+
+
+def _routes_active_home() -> Path:
+    """Return the active request home, falling back to the shared resolver."""
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return Path(get_webui_home()).expanduser().resolve()
+
+
+def _routes_profiles_root() -> Path:
+    """Return the canonical profiles root for the base home."""
+    try:
+        from web.api.profiles import _profiles_root as profiles_root
+
+        return Path(profiles_root()).expanduser().resolve()
+    except Exception:
+        return _routes_active_home() / "profiles"
 
 
 # ── Profile-scoped session/project filtering (#1611, #1614) ────────────────
@@ -187,12 +208,7 @@ def _active_skills_dir() -> Path:
 
         return Path(get_active_hermes_home()) / "skills"
     except Exception:
-        try:
-            from tools.skills_tool import SKILLS_DIR
-
-            return Path(SKILLS_DIR)
-        except Exception:
-            return Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser() / "skills"
+        return get_webui_home() / "skills"
 
 
 def _skill_path_within(base_dir: Path, candidate: Path) -> bool:
@@ -239,9 +255,14 @@ def _load_nova_route_status() -> dict:
         return {"healthy": False, "reason": "state_snapshot_missing"}
 
     try:
+        cache_path = str(snapshot_path.resolve(strict=False))
         mtime = snapshot_path.stat().st_mtime
         module = _NOVA_ROUTE_STATUS_CACHE.get("module")
-        if module is None or _NOVA_ROUTE_STATUS_CACHE.get("mtime") != mtime:
+        if (
+            module is None
+            or _NOVA_ROUTE_STATUS_CACHE.get("path") != cache_path
+            or _NOVA_ROUTE_STATUS_CACHE.get("mtime") != mtime
+        ):
             spec = importlib.util.spec_from_file_location("nova_state_snapshot_webui", snapshot_path)
             if spec is None or spec.loader is None:
                 return {"healthy": False, "reason": "state_snapshot_unloadable"}
@@ -253,6 +274,7 @@ def _load_nova_route_status() -> dict:
                 if sys.path and sys.path[0] == nova_dir:
                     sys.path.pop(0)
             _NOVA_ROUTE_STATUS_CACHE["module"] = module
+            _NOVA_ROUTE_STATUS_CACHE["path"] = cache_path
             _NOVA_ROUTE_STATUS_CACHE["mtime"] = mtime
 
         loader = getattr(module, "load_router_health", None)
@@ -573,8 +595,8 @@ def _gateway_session_metadata_path():
     try:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
-    except ImportError:
-        hermes_home = Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser().resolve()
+    except Exception:
+        hermes_home = get_webui_home()
     return hermes_home / "sessions" / "sessions.json"
 
 
@@ -982,8 +1004,6 @@ def _clear_live_models_cache() -> None:
         _LIVE_MODELS_CACHE.clear()
 
 from web.api.config import (
-    DEFAULT_WORKSPACE,
-    DEFAULT_MODEL,
     SESSIONS,
     SESSIONS_MAX,
     LOCK,
@@ -1422,7 +1442,7 @@ def _resolve_compatible_session_model_state(
     model = str(model_id or "").strip()
     requested_provider = _clean_session_model_provider(model_provider)
     if not model:
-        default_model = str(get_effective_default_model() or DEFAULT_MODEL or "").strip()
+        default_model = str(get_effective_default_model() or "").strip()
         return default_model, requested_provider, bool(default_model)
 
     try:
@@ -1459,7 +1479,7 @@ def _resolve_compatible_session_model_state(
             return model, explicit_provider_fast, False
 
     catalog = get_available_models()
-    default_model = str(catalog.get("default_model") or DEFAULT_MODEL or "").strip()
+    default_model = str(catalog.get("default_model") or get_effective_default_model() or "").strip()
 
     active_provider = _normalize_provider_id(catalog.get("active_provider"))
     # Also keep the raw active_provider slug for cross-provider detection with
@@ -1722,6 +1742,11 @@ def _lookup_cli_session_metadata(session_id: str) -> dict:
     if not session_id:
         return {}
     try:
+        from web.api.models import get_cli_session_metadata
+
+        metadata = get_cli_session_metadata(session_id)
+        if metadata:
+            return metadata
         for row in get_cli_sessions():
             if row.get("session_id") == session_id:
                 return row
@@ -1973,7 +1998,7 @@ def _merge_cli_sidebar_metadata(ui_session: dict, cli_meta: dict) -> dict:
 
     if cli_meta.get("title"):
         current_title = merged.get("title")
-        if not current_title or current_title == "Untitled":
+        if not current_title or is_default_session_title(current_title):
             merged["title"] = cli_meta["title"]
 
     if cli_meta.get("model"):
@@ -2126,6 +2151,21 @@ def _normalize_approval_mode_value(mode) -> str:
     _pending = {}
     _lock = threading.Lock()
     _permanent_approved = set()
+
+
+def _boolish(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default if not normalized else bool(value)
 
 
 # ── Approval SSE subscribers (long-connection push) ──────────────────────────
@@ -2460,7 +2500,7 @@ def _handle_logs(handler, parsed) -> bool:
 
         hermes_home = Path(get_active_hermes_home()).expanduser()
     except Exception:
-        hermes_home = Path(os.environ.get("SIDEKICK_HOME") or (Path.home() / ".sidekick")).expanduser()
+        hermes_home = get_webui_home()
 
     log_dir = hermes_home / "logs"
     log_path = log_dir / filename
@@ -2512,7 +2552,7 @@ def _llm_wiki_active_hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return Path(get_active_hermes_home()).expanduser()
     except Exception:
-        return Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser()
+        return get_webui_home()
 
 
 def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
@@ -3536,11 +3576,7 @@ def _handle_mail_config_get(handler, parsed) -> bool:
     """GET /api/mail/config — load mail.json for the active space."""
     try:
         space_slug = _workspace_slug_from_request(handler, parsed) or "default"
-        sidekick_home = Path(
-            os.environ.get("SIDEKICK_HOME")
-           
-            or Path.home() / ".sidekick"
-        )
+        sidekick_home = _routes_active_home()
         mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
         if mail_path.exists():
             config = json.loads(mail_path.read_text(encoding="utf-8"))
@@ -3561,11 +3597,7 @@ def _handle_mail_config_post(handler, parsed, body) -> bool:
             return bad(handler, "Invalid config: must have 'inboxes' list")
         if not isinstance(config["inboxes"], list):
             return bad(handler, "Invalid config: 'inboxes' must be a list")
-        sidekick_home = Path(
-            os.environ.get("SIDEKICK_HOME")
-           
-            or Path.home() / ".sidekick"
-        )
+        sidekick_home = _routes_active_home()
         mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
         mail_path.parent.mkdir(parents=True, exist_ok=True)
         mail_path.write_text(
@@ -3579,12 +3611,7 @@ def _handle_mail_config_post(handler, parsed, body) -> bool:
 
 
 def _cockpit_settings_path() -> Path:
-    home = os.getenv("SIDEKICK_HOME")
-    if home:
-        sidekick_home = Path(home).expanduser()
-    else:
-        sidekick_home = Path(__file__).resolve().parent.parent.parent.parent / "home"
-    return sidekick_home / "cockpit" / ".cockpit_settings.json"
+    return _routes_active_home() / "cockpit" / ".cockpit_settings.json"
 
 
 def _handle_cockpit_settings_get(handler, parsed) -> bool:
@@ -4027,6 +4054,14 @@ def handle_get(handler, parsed) -> bool:
             pass
         return j(handler, settings)
 
+    if parsed.path == "/api/worktree/settings":
+        try:
+            from cli.config import get_worktree_settings as _get_worktree_settings
+
+            return j(handler, _get_worktree_settings())
+        except Exception as exc:
+            return bad(handler, f"Failed to read worktree settings: {exc}", 500)
+
     if parsed.path == "/api/approval":
         try:
             from cli.config import load_config as _load_cli_config
@@ -4120,10 +4155,13 @@ def handle_get(handler, parsed) -> bool:
             _t1 = _time.monotonic()
             s = get_session(sid, metadata_only=(not load_messages))
             _clear_stale_stream_state(s)
-            cli_meta = _lookup_cli_session_metadata(sid)
-            is_messaging_session = _is_messaging_session_record(s) or _is_messaging_session_record(cli_meta)
-            cli_messages = []
+            is_messaging_session = _is_messaging_session_record(s)
+            cli_meta = {}
             if is_messaging_session:
+                cli_meta = _lookup_cli_session_metadata(sid)
+                is_messaging_session = _is_messaging_session_record(cli_meta) or is_messaging_session
+            cli_messages = []
+            if is_messaging_session and load_messages:
                 cli_messages = get_cli_session_messages(sid)
             _t2 = _time.monotonic()
             effective_model = (
@@ -4538,9 +4576,9 @@ def handle_get(handler, parsed) -> bool:
                     current_title = str(s.get("title") or "").strip()
                     meta_title = str(meta.get("title") or "").strip()
                     if (
-                        current_title in {"", "Untitled", "New Chat", "CLI Session", "Cli Session"}
+                        (not current_title or is_default_session_title(current_title) or current_title in {"CLI Session", "Cli Session"})
                         and meta_title
-                        and meta_title not in {"Untitled", "New Chat", "CLI Session", "Cli Session"}
+                        and not (is_default_session_title(meta_title) or meta_title in {"CLI Session", "Cli Session"})
                     ):
                         s["title"] = meta_title
                     if _is_messaging_session_record(meta):
@@ -4607,11 +4645,12 @@ def handle_get(handler, parsed) -> bool:
                 diag.stage("cli_cap")
                 scoped = _cap_recent_cli_sessions(scoped, cli_cap=CLI_VISIBLE_SESSION_CAP)
             diag.stage("redact_sessions")
+            redact_enabled = bool(load_settings().get("api_redact_enabled", True))
             safe_merged = []
             for s in scoped:
                 item = dict(s)
                 if isinstance(item.get("title"), str):
-                    item["title"] = _redact_text(item["title"])
+                    item["title"] = _redact_text(item["title"], _enabled=redact_enabled)
                 safe_merged.append(item)
             diag.stage("response_write")
             return j(handler, {
@@ -5968,6 +6007,32 @@ def handle_post(handler, parsed) -> bool:
             bad(handler, exc, status=500)
         return True
 
+    if parsed.path == "/api/worktree/settings":
+        try:
+            from cli.config import get_worktree_settings as _get_worktree_settings
+            from cli.config import load_config as _load_cli_config
+            from cli.config import save_config as _save_cli_config
+
+            cfg = _load_cli_config()
+            current = _get_worktree_settings(cfg)
+            raw = body if isinstance(body, dict) else {}
+            worktree_body = raw.get("worktree")
+            if isinstance(worktree_body, bool):
+                worktree_body = {"enabled": worktree_body, "cleanup_on_exit": worktree_body}
+            elif not isinstance(worktree_body, dict):
+                worktree_body = raw
+            if not isinstance(worktree_body, dict):
+                worktree_body = {}
+            cfg["worktree"] = {
+                "enabled": _boolish(worktree_body.get("enabled"), current["enabled"]),
+                "cleanup_on_exit": _boolish(worktree_body.get("cleanup_on_exit"), current["cleanup_on_exit"]),
+            }
+            _save_cli_config(cfg)
+            return j(handler, {"ok": True, **_get_worktree_settings(cfg)})
+        except Exception as exc:
+            logger.exception("worktree settings save failed")
+            return bad(handler, f"Failed to save worktree settings: {exc}", 500)
+
     if parsed.path == "/api/session/new":
         try:
             workspace = str(resolve_trusted_workspace(body.get("workspace"))) if body.get("workspace") else None
@@ -6027,9 +6092,9 @@ def handle_post(handler, parsed) -> bool:
             # content arrays), so a shallow `list(...)` is not enough.
             copied_session = Session(
                 session_id=uuid.uuid4().hex[:12],
-                # Defensive: legacy sessions may have title=None on disk; fall back to 'Untitled'
-                # so `+ " (copy)"` doesn't TypeError.
-                title=(session.title or "Untitled") + " (copy)",
+                # Defensive: legacy sessions may have title=None on disk; fall back to the
+                # canonical new-chat title so `+ " (copy)"` doesn't TypeError.
+                title=(session.title or DEFAULT_SESSION_TITLE) + " (copy)",
                 workspace=session.workspace,
                 model=session.model,
                 model_provider=session.model_provider,
@@ -6198,7 +6263,7 @@ def handle_post(handler, parsed) -> bool:
         except KeyError:
             return bad(handler, "Session not found", 404)
         with _get_session_agent_lock(body["session_id"]):
-            s.title = str(body["title"]).strip()[:80] or "Untitled"
+            s.title = str(body["title"]).strip()[:80] or DEFAULT_SESSION_TITLE
             s.save()
         return j(handler, {"session": s.compact()})
 
@@ -6422,7 +6487,7 @@ def handle_post(handler, parsed) -> bool:
         with _get_session_agent_lock(body["session_id"]):
             s.messages = []
             s.tool_calls = []
-            s.title = "Untitled"
+            s.title = DEFAULT_SESSION_TITLE
             s.save()
             # Evict cached agent — cleared session is a fresh conversation
             from web.api.config import _evict_session_agent
@@ -6495,7 +6560,7 @@ def handle_post(handler, parsed) -> bool:
         if custom_title:
             branch_title = custom_title
         else:
-            source_title = source.title or "Untitled"
+            source_title = source.title if source.title and not is_default_session_title(source.title) else DEFAULT_SESSION_TITLE
             branch_title = f"{source_title} (fork)"
 
         # Create new session inheriting workspace/model/profile
@@ -7706,7 +7771,7 @@ def _handle_agents_get(handler, parsed):
         from web.api.agents import list_activated_agents
         import json as _json
         agents_list = list_activated_agents()
-        profiles_root = Path.home() / ".sidekick" / "profiles"
+        profiles_root = _routes_profiles_root()
         results = []
         for a in agents_list:
             slug = a["slug"]
@@ -8126,12 +8191,13 @@ def _handle_sessions_search(handler, parsed):
     q = qs.get("q", [""])[0].lower().strip()
     content_search = qs.get("content", ["1"])[0] == "1"
     depth = int(qs.get("depth", ["5"])[0])
+    redact_enabled = bool(load_settings().get("api_redact_enabled", True))
     if not q:
         safe_sessions = []
         for s in all_sessions():
             item = dict(s)
             if isinstance(item.get("title"), str):
-                item["title"] = _redact_text(item["title"])
+                item["title"] = _redact_text(item["title"], _enabled=redact_enabled)
             safe_sessions.append(item)
         return j(handler, {"sessions": safe_sessions})
     results = []
@@ -8140,7 +8206,7 @@ def _handle_sessions_search(handler, parsed):
         if title_match:
             item = dict(s, match_type="title")
             if isinstance(item.get("title"), str):
-                item["title"] = _redact_text(item["title"])
+                item["title"] = _redact_text(item["title"], _enabled=redact_enabled)
             results.append(item)
             continue
         if content_search:
@@ -8158,7 +8224,7 @@ def _handle_sessions_search(handler, parsed):
                     if q in str(c).lower():
                         item = dict(s, match_type="content")
                         if isinstance(item.get("title"), str):
-                            item["title"] = _redact_text(item["title"])
+                            item["title"] = _redact_text(item["title"], _enabled=redact_enabled)
                         results.append(item)
                         break
             except (KeyError, Exception):
@@ -8636,10 +8702,11 @@ def _handle_media(handler, parsed):
     - Additional roots can be added via MEDIA_ALLOWED_ROOTS env var
       (os.pathsep-separated list of absolute paths; ":" on POSIX, ";" on Windows)
     """
-    import os as _os
     from web.api.auth import is_auth_enabled, parse_cookie, verify_session
+    import os as _os
+
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = Path(_os.getenv("SIDEKICK_HOME") or _os.getenv("SIDEKICK_HOME", str(_HOME / ".sidekick"))).expanduser()
+    _HERMES_HOME = _routes_active_home()
 
     # Auth check
     if is_auth_enabled():
@@ -9595,8 +9662,8 @@ def _handle_memory_read(handler):
             from web.api.profiles import get_active_hermes_home
 
             mem_dir = get_active_hermes_home() / "memories"
-        except ImportError:
-            mem_dir = Path.home() / ".sidekick" / "memories"
+        except Exception:
+            mem_dir = get_webui_home() / "memories"
     mem_file = mem_dir / "MEMORY.md"
     user_file = mem_dir / "USER.md"
     memory = (
@@ -9628,18 +9695,13 @@ _SUPERMEMORY_CLIENT = None
 _SUPERMEMORY_LOCK = threading.Lock()
 
 def _get_supermemory_client():
-    """Lazy-init Supermemory client from supermemory.json config."""
-    global _SUPERMEMORY_CLIENT
-    if _SUPERMEMORY_CLIENT is not None:
-        return _SUPERMEMORY_CLIENT
+    """Create a Supermemory client for the active profile on demand."""
     with _SUPERMEMORY_LOCK:
-        if _SUPERMEMORY_CLIENT is not None:
-            return _SUPERMEMORY_CLIENT
         try:
-            from web.api.profiles import get_active_hermes_home
-            sm_path = get_active_hermes_home() / "supermemory.json"
-        except ImportError:
-            sm_path = Path.home() / ".sidekick" / "supermemory.json"
+            sm_home = Path(get_active_webui_home()).expanduser().resolve()
+        except Exception:
+            sm_home = Path(get_webui_home()).expanduser().resolve()
+        sm_path = sm_home / "supermemory.json"
         if not sm_path.exists():
             alt = Path(os.environ.get("LOCALAPPDATA", "")) / "sidekick" / "supermemory.json"
             if alt.exists():
@@ -9652,8 +9714,7 @@ def _get_supermemory_client():
             if not api_key:
                 return None
             from supermemory import Supermemory
-            _SUPERMEMORY_CLIENT = Supermemory(api_key=api_key, max_retries=1, timeout=15)
-            return _SUPERMEMORY_CLIENT
+            return Supermemory(api_key=api_key, max_retries=1, timeout=15)
         except Exception:
             logger.exception("Failed to init Supermemory client")
             return None
@@ -9771,8 +9832,8 @@ def _handle_hybrid_search(handler, body):
         try:
             from web.api.profiles import get_active_hermes_home
             home = get_active_hermes_home()
-        except ImportError:
-            home = Path.home() / ".sidekick"
+        except Exception:
+            home = get_webui_home()
         memory_file = home / "MEMORY.md"
     if memory_file.exists():
         try:
@@ -9900,7 +9961,7 @@ def _handle_sessions_cleanup(handler, body, zero_only=False):
             if zero_only:
                 should_delete = s and len(s.messages) == 0
             else:
-                should_delete = s and s.title == "Untitled" and len(s.messages) == 0
+                should_delete = s and is_default_session_title(s.title) and len(s.messages) == 0
             if should_delete:
                 SESSIONS.pop(p.stem, None)  # single dict pop — GIL-safe
                 p.unlink(missing_ok=True)
@@ -10338,6 +10399,21 @@ def _handle_goal_command(handler, body):
     from web.api.goals import goal_command_payload, goal_state_snapshot, restore_goal_state
 
     goal_args = str(body.get("args", "") or body.get("text", "") or "")
+    goal_max_turns = body.get("max_turns", body.get("goal_max_turns", body.get("turns", body.get("goal_steps"))))
+    goal_unlimited = bool(body.get("unlimited", body.get("goal_unlimited", False)))
+    if isinstance(goal_max_turns, str):
+        goal_budget_text = goal_max_turns.strip().lower()
+        if goal_budget_text in {"unlimited", "infinite", "inf", "∞", "none"}:
+            goal_unlimited = True
+            goal_max_turns = None
+        elif goal_budget_text:
+            try:
+                goal_max_turns = int(goal_budget_text)
+            except ValueError:
+                goal_max_turns = None
+    if isinstance(goal_max_turns, (int, float)) and int(goal_max_turns) <= 0:
+        goal_unlimited = True
+        goal_max_turns = None
     goal_action = goal_args.strip().lower()
     will_kickoff = bool(
         goal_args.strip()
@@ -10369,6 +10445,8 @@ def _handle_goal_command(handler, body):
         stream_running=stream_running,
         profile_home=profile_home,
         space_slug=space_slug,
+        max_turns=goal_max_turns if not goal_unlimited else None,
+        unlimited=goal_unlimited,
     )
     if not payload.get("ok", True):
         status = 409 if payload.get("error") == "agent_running" else 400
@@ -10816,7 +10894,7 @@ def _handle_chat_sync(handler, body):
             msg,
         )
         # Only auto-generate title when still default; preserves user renames
-        if s.title == "Untitled":
+        if is_default_session_title(s.title):
             s.title = "⏳ Titel wird generiert..."
             s.save()
             # Background thread: Ollama-Titel generieren, dann zurückschreiben
@@ -10866,7 +10944,7 @@ def _async_ollama_title(session_id: str) -> None:
             return
 
         if is_game_mode_enabled():
-            s.title = title_from(s.messages, "Untitled")
+            s.title = title_from(s.messages, DEFAULT_SESSION_TITLE)
             s.save()
             return
 
@@ -10874,7 +10952,7 @@ def _async_ollama_title(session_id: str) -> None:
         if title:
             s.title = title
         else:
-            s.title = title_from(s.messages, "Untitled")
+            s.title = title_from(s.messages, DEFAULT_SESSION_TITLE)
         s.save()
     except Exception:
         # Bei Fehler: auf Sync-Fallback zurücksetzen
@@ -10882,7 +10960,7 @@ def _async_ollama_title(session_id: str) -> None:
             from web.api.models import Session as _Session2
             s = _Session2.load(session_id)
             if s and s.title == "⏳ Titel wird generiert...":
-                s.title = title_from(s.messages, "Untitled")
+                s.title = title_from(s.messages, DEFAULT_SESSION_TITLE)
                 s.save()
         except Exception:
             pass
@@ -10896,7 +10974,6 @@ def _async_extract_facts(sid: str) -> None:
     when the session is archived again.
     """
     try:
-        from pathlib import Path as _Path
         from web.api.models import Session as _Session
         from web.api.space_engine import get_or_create_space as _get_or_create_space
 
@@ -10931,8 +11008,8 @@ def _async_extract_facts(sid: str) -> None:
             try:
                 from web.api.profiles import get_active_hermes_home
                 mem_dir = get_active_hermes_home() / "memories"
-            except ImportError:
-                mem_dir = _Path.home() / ".sidekick" / "memories"
+            except Exception:
+                mem_dir = get_webui_home() / "memories"
 
         mem_dir.mkdir(parents=True, exist_ok=True)
         mem_file = mem_dir / "MEMORY.md"
@@ -11992,8 +12069,6 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
     This keeps summary cards available after hard-refresh for imported gateway
     sessions that are not in local session JSON yet.
     """
-    import os
-
     try:
         import sqlite3
     except ImportError:
@@ -12004,7 +12079,7 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
 
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))).expanduser().resolve()
+        hermes_home = get_webui_home()
 
     db_path = hermes_home / "state.db"
     if not db_path.exists():
@@ -12249,15 +12324,14 @@ def _handle_handoff_summary(handler, body):
                 or session_meta.session_source
             )
             if not channel_label:
-                for candidate in get_cli_sessions():
-                    if candidate.get("session_id") == sid:
-                        channel_label = (
-                            candidate.get("source_label")
-                            or candidate.get("raw_source")
-                            or candidate.get("source_tag")
-                            or candidate.get("source")
-                        )
-                        break
+                candidate = _lookup_cli_session_metadata(sid)
+                if candidate:
+                    channel_label = (
+                        candidate.get("source_label")
+                        or candidate.get("raw_source")
+                        or candidate.get("source_tag")
+                        or candidate.get("source")
+                    )
         except Exception:
             pass
         return channel_label
@@ -12564,8 +12638,8 @@ def _handle_memory_write(handler, body):
             from web.api.profiles import get_active_hermes_home
 
             mem_dir = get_active_hermes_home() / "memories"
-        except ImportError:
-            mem_dir = Path.home() / ".sidekick" / "memories"
+        except Exception:
+            mem_dir = get_webui_home() / "memories"
     mem_dir.mkdir(parents=True, exist_ok=True)
     section = body["section"]
     if section == "memory":
@@ -12669,11 +12743,7 @@ def _handle_session_import_cli(handler, body):
     if existing:
         fresh_msgs = get_cli_session_messages(sid)
         changed = False
-        cli_meta = None
-        for cs in list(get_cli_sessions()):
-            if cs["session_id"] == sid:
-                cli_meta = cs
-                break
+        cli_meta = _lookup_cli_session_metadata(sid)
         if fresh_msgs and len(fresh_msgs) > len(existing.messages):
             # Prefix-equality guard: only extend if existing messages are a prefix of
             # the fresh CLI messages. Prevents silently dropping WebUI-added messages
@@ -12839,10 +12909,11 @@ def _handle_session_import(handler, body):
         return bad(handler, 'JSON must contain a "messages" array')
     title = body.get("title", "Imported session")
     try:
-        workspace = str(resolve_trusted_workspace(body.get("workspace", str(DEFAULT_WORKSPACE))))
+        workspace_raw = str(body.get("workspace") or "").strip() or load_settings().get("default_workspace")
+        workspace = str(resolve_trusted_workspace(workspace_raw))
     except (TypeError, ValueError) as e:
         return bad(handler, str(e))
-    model = body.get("model", DEFAULT_MODEL)
+    model = body.get("model") or get_effective_default_model()
     s = Session(
         title=title,
         workspace=workspace,
@@ -13256,18 +13327,13 @@ _SUPERMEMORY_LOCK = __import__("threading").Lock()
 
 
 def _get_supermemory_client():
-    """Lazy-init Supermemory client from supermemory.json config."""
-    global _SUPERMEMORY_CLIENT
-    if _SUPERMEMORY_CLIENT is not None:
-        return _SUPERMEMORY_CLIENT
+    """Create a Supermemory client for the active profile on demand."""
     with _SUPERMEMORY_LOCK:
-        if _SUPERMEMORY_CLIENT is not None:
-            return _SUPERMEMORY_CLIENT
         try:
-            from web.api.profiles import get_active_hermes_home
-            sm_path = get_active_hermes_home() / "supermemory.json"
-        except ImportError:
-            sm_path = Path.home() / ".sidekick" / "supermemory.json"
+            sm_home = Path(get_active_webui_home()).expanduser().resolve()
+        except Exception:
+            sm_home = Path(get_webui_home()).expanduser().resolve()
+        sm_path = sm_home / "supermemory.json"
         if not sm_path.exists():
             alt = Path(os.environ.get("LOCALAPPDATA", "")) / "sidekick" / "supermemory.json"
             if alt.exists():
@@ -13280,8 +13346,7 @@ def _get_supermemory_client():
             if not api_key:
                 return None
             from supermemory import Supermemory
-            _SUPERMEMORY_CLIENT = Supermemory(api_key=api_key, max_retries=1, timeout=15)
-            return _SUPERMEMORY_CLIENT
+            return Supermemory(api_key=api_key, max_retries=1, timeout=15)
         except Exception:
             logger.exception("Failed to init Supermemory client")
             return None
@@ -13293,10 +13358,9 @@ def _handle_supermemory_status(handler):
     configured = False
     config_path = None
     try:
-        from web.api.profiles import get_active_hermes_home
-        sm_path = get_active_hermes_home() / "supermemory.json"
+        sm_path = Path(get_active_webui_home()).expanduser().resolve() / "supermemory.json"
         if not sm_path.exists():
-            sm_path = Path.home() / ".sidekick" / "supermemory.json"
+            sm_path = get_webui_home() / "supermemory.json"
         if sm_path.exists():
             configured = True
             config_path = str(sm_path)
@@ -13451,8 +13515,8 @@ def _handle_hybrid_search(handler, body):
         try:
             from web.api.profiles import get_active_hermes_home
             home = get_active_hermes_home()
-        except ImportError:
-            home = Path.home() / ".sidekick"
+        except Exception:
+            home = get_webui_home()
         memory_file = home / "MEMORY.md"
     if memory_file.exists():
         try:

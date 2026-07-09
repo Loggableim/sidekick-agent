@@ -59,7 +59,10 @@ Documentation = "https://docs.sidekick-agent.dev"
 
 [tool.setuptools]
 include-package-data = true
-py-modules = ["run_agent", "sidekick_constants", "bootstrap"]
+# Root-level helper modules are imported directly by package code.
+# Keep them in the editable/wheel module set so launcher-driven and
+# test-driven imports do not depend on the current working directory.
+py-modules = ["run_agent", "sidekick_constants", "bootstrap", "model_tools", "toolsets"]
 
 [tool.setuptools.packages.find]
 include = [

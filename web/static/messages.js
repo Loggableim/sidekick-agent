@@ -453,6 +453,52 @@ function closeLiveStream(sessionId, streamId){
 // ── Goal State (global, shared across sessions) ──
 window._goalState=null;
 
+function _goalBudgetLabel(value){
+  if(value===null||value===undefined||value==='') return '∞';
+  const n=Number(value);
+  return Number.isFinite(n)&&n>0 ? String(n) : '∞';
+}
+
+function _goalBudgetControls(){
+  return {
+    input:$('goalTurnBudgetInput'),
+    unlimited:$('goalUnlimitedBtn'),
+    wrap:$('goalBudgetControl'),
+  };
+}
+
+function _syncGoalBudgetUI(isUnlimited){
+  const {input, unlimited, wrap}=_goalBudgetControls();
+  if(!input||!unlimited) return;
+  const active=!!isUnlimited;
+  input.disabled=active;
+  unlimited.classList.toggle('active', active);
+  unlimited.setAttribute('aria-pressed', active?'true':'false');
+  if(wrap)wrap.classList.toggle('is-unlimited', active);
+}
+
+function _setGoalBudgetDefaults(){
+  const {input}=_goalBudgetControls();
+  if(input) input.value='20';
+  _syncGoalBudgetUI(false);
+}
+
+function _readGoalBudgetSelection(){
+  const {input, unlimited}=_goalBudgetControls();
+  const isUnlimited=!!(unlimited&&unlimited.classList.contains('active'));
+  if(isUnlimited) return {unlimited:true, max_turns:null};
+  const raw=input?parseInt(String(input.value||'').trim(),10):NaN;
+  const maxTurns=Number.isFinite(raw)&&raw>0?raw:20;
+  if(input) input.value=String(maxTurns);
+  return {unlimited:false, max_turns:maxTurns};
+}
+
+function _toggleGoalBudgetUnlimited(){
+  const {unlimited}=_goalBudgetControls();
+  const next=!(unlimited&&unlimited.classList.contains('active'));
+  _syncGoalBudgetUI(next);
+}
+
 function _renderGoalBanner(){
   const banner=$('goalBanner');
   const icon=$('goalBannerIcon');
@@ -493,8 +539,7 @@ function _renderGoalBanner(){
   else {icon.textContent='⊙';}
   text.textContent=gs.goal.length>90?gs.goal.slice(0,87)+'…':gs.goal;
   const tu=typeof gs.turns_used==='number'?gs.turns_used:0;
-  const mt=typeof gs.max_turns==='number'?gs.max_turns:20;
-  turns.textContent='('+tu+'/'+mt+')';
+  turns.textContent='('+tu+'/'+_goalBudgetLabel(gs.max_turns)+')';
   pauseBtn.style.display=(status==='active')?'':'none';
   resumeBtn.style.display=(status==='paused')?'':'none';
   clearBtn.style.display='';
@@ -512,7 +557,9 @@ function _updateGoalState(state){
     goal:String(state.goal||'').trim(),
     status:String(state.status||'').trim(),
     turns_used:typeof state.turns_used==='number'?state.turns_used:0,
-    max_turns:typeof state.max_turns==='number'?state.max_turns:20,
+    max_turns:state.max_turns===null||state.max_turns===undefined
+      ? null
+      : (Number.isFinite(Number(state.max_turns))&&Number(state.max_turns)>0 ? Number(state.max_turns) : null),
     last_verdict:state.last_verdict||null,
     last_reason:state.last_reason||null,
     paused_reason:state.paused_reason||null,
@@ -541,10 +588,12 @@ function _toggleGoalMode(){
     box.classList.remove('goal-mode');
     if(input)input.value='';
     if(toggle)toggle.classList.remove('active');
+    _setGoalBudgetDefaults();
     $('msg').focus();
   }else{
     box.classList.add('goal-mode');
     if(toggle)toggle.classList.add('active');
+    _setGoalBudgetDefaults();
     if(input){input.value='';input.focus();}
   }
 }
@@ -557,6 +606,7 @@ function _exitGoalMode(){
   if(toggle)toggle.classList.remove('active');
   const input=$('goalInputField');
   if(input)input.value='';
+  _setGoalBudgetDefaults();
   $('msg').focus();
 }
 
@@ -565,11 +615,12 @@ function _submitGoal(){
   if(!input)return;
   const text=input.value.trim();
   if(!text){showToast('Please enter a goal description.',2000);input.focus();return;}
+  const budget=_readGoalBudgetSelection();
   _exitGoalMode();
   showToast('🎯 Setting goal…',1500);
   // Small delay so the UI state transition settles
   setTimeout(function(){
-    if(typeof cmdGoal==='function')cmdGoal(text);
+    if(typeof cmdGoal==='function')cmdGoal({text, ...budget});
     else showToast('Goal command not available — try /goal '+text,3000);
   },100);
 }
@@ -642,9 +693,6 @@ function _togglePlanMode(){
     window._planMode=nextMode==='plan';
   }
   _renderPlanBanner();
-  // Toggle-Button visuell updaten
-  const btn=document.querySelector('.plan-mode-toggle');
-  if(btn)btn.classList.toggle('active',window._planMode);
   const box=$('composerBox');
   if(box)box.classList.toggle('plan-mode',window._planMode);
   if(typeof setComposerMode!=='function'){

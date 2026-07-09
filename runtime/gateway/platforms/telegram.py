@@ -19,6 +19,7 @@ from runtime.gateway.platforms.base import (
     MessageEvent,
     MessageType,
 )
+from shared.paths import sidekick_home
 
 logger = logging.getLogger(__name__)
 
@@ -194,15 +195,11 @@ class TelegramAdapter(BasePlatformAdapter):
             from faster_whisper import WhisperModel
             # Try GPU (Vulkan/CUDA) first, fall back to CPU
             try:
-                self._whisper_model = WhisperModel(
-                    "large-v3-turbo", device="cuda", compute_type="float16"
-                )
+                self._whisper_model = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16")
                 logger.info("Whisper STT loaded on CUDA")
             except Exception:
                 try:
-                    self._whisper_model = WhisperModel(
-                        "large-v3-turbo", device="cpu", compute_type="int8"
-                    )
+                    self._whisper_model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
                     logger.info("Whisper STT loaded on CPU (int8)")
                 except Exception as e:
                     logger.error(f"Whisper STT model load failed: {e}")
@@ -210,19 +207,22 @@ class TelegramAdapter(BasePlatformAdapter):
         return self._whisper_model if self._whisper_model else None
 
     async def _transcribe(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
-        # Local Whisper first — fastest, no codec issues, accepts OGG Opus directly.
-        local_model = self._get_whisper_model()
-        if local_model:
-            text = await self._transcribe_local(audio_bytes, local_model)
-            if text:
-                return text
         if self._fish_audio_key():
             text = await self._transcribe_fish_audio(audio_bytes, mime_type=mime_type)
             if text:
                 return text
         key = os.getenv("GROQ_API_KEY", "")
         if key:
-            return await self._transcribe_groq(audio_bytes, key)
+            text = await self._transcribe_groq(audio_bytes, key)
+            if text:
+                return text
+        # Local Whisper is the fallback when the hosted providers are absent
+        # or could not transcribe the audio.
+        local_model = self._get_whisper_model()
+        if local_model:
+            text = await self._transcribe_local(audio_bytes, local_model)
+            if text:
+                return text
         return None  # no providers left
 
     async def _transcribe_fish_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
@@ -280,7 +280,7 @@ class TelegramAdapter(BasePlatformAdapter):
             return None
         try:
             import httpx
-            audio_dir = Path(os.getenv("SIDEKICK_HOME", "C:/sidekick/home")) / "audio_cache"
+            audio_dir = sidekick_home() / "audio_cache"
             audio_dir.mkdir(parents=True, exist_ok=True)
             async with httpx.AsyncClient(timeout=120) as c:
                 r = await c.post(FISH_ENDPOINT,
@@ -376,7 +376,7 @@ class TelegramAdapter(BasePlatformAdapter):
             if value:
                 return value
         for path in (
-            Path(os.getenv("SIDEKICK_HOME", "C:/sidekick/home")) / "auth.json",
+            sidekick_home() / "auth.json",
             Path("C:/HermesPortable/home/auth.json"),
         ):
             value = self._read_fish_key_from_auth(path)

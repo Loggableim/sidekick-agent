@@ -148,7 +148,7 @@ sidekick/
 ├── shared/      Config, paths, sessions, logging, utility functions
 ├── tools/       ~100 tool implementations (registry, file ops, browser...)
 ├── docs/        Releases, roadmaps, audits, troubleshooting
-├── tests/       Smoke tests (18 tests) and HTTP smoke (7 tests)
+├── tests/       Smoke tests and HTTP smoke checks
 ├── sidekick_app/  Package entrypoint with legacy-import bootstrap
 └── sidekick_cli/  Legacy package forwarder (transition layer)
 ```
@@ -180,8 +180,8 @@ sidekick/
 | **Runtime** | ✅ AIAgent (15K LOC), 76 registered tools, provider integrations |
 | **Cron** | ✅ Scheduler + job management |
 | **Gateway** | ✅ Messaging platform runner (0 import warnings) |
-| **Smoke** | ✅ 18 CLI tests + 7 WebUI HTTP tests, all green |
-| **CI** | ✅ Linux (full) + macOS (subset), Python 3.11 + 3.12 |
+| **Smoke** | ✅ full smoke suite plus WebUI HTTP smoke, all green |
+| **CI** | ✅ Linux full + macOS/Windows smoke, Python 3.12-3.14 on Linux |
 
 ## Configuration
 
@@ -197,6 +197,11 @@ Home directory resolution:
 1. `$SIDEKICK_HOME` → `~/.sidekick/` (canonical)
 2. `$HERMES_HOME` → `~/.hermes/` (legacy fallback)
 3. Default → `~/.sidekick/`
+
+Reference docs:
+- `docs/architecture.md` - repo and runtime architecture
+- `docs/config-reference.md` - config tree and env-var summary
+- `docs/consolidation.md` - current consolidation state and legacy naming
 
 ## Graceful degradation without API key
 
@@ -236,9 +241,9 @@ See `docs/known-issues.md` for the full list.
 
 Key items:
 - Gateway warnings (2 non-blocking, `print_config_warnings`/`warn_deprecated_cwd_env_vars`)
-- Session layer: `shared.sessions` and `web.api.models.Session` use different data models
+- Session layer: `shared.sessions` and `web.api.models.Session` still use different data models, but round-tripping now preserves WebUI-only metadata
 - CLI help text still references `HERMES_*` env vars (legacy compat — intentional)
-- No Windows CI (currently Linux + macOS only)
+- Windows CI active (Linux full + macOS/Windows smoke)
 
 ## Release history
 

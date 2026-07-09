@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from web.api._home import get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # Checkpoint identifiers are SHA-style hex hashes from the agent's
@@ -44,7 +46,7 @@ def _hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return Path(get_active_hermes_home())
     except Exception:
-        return Path(os.environ.get("SIDEKICK_HOME")).expanduser()
+        return get_webui_home()
 
 
 def _workspace_hash(workspace: str) -> str:

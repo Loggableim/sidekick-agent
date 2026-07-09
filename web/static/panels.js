@@ -125,10 +125,15 @@ function syncAppTitlebar() {
   let subText = '';
   let sourceLabel = '';
   if (panel === 'chat' && typeof S !== 'undefined' && S && S.session) {
-    mainText = S.session.title || (typeof t === 'function' ? t('untitled') : 'Untitled');
+    const rawTitle = (S.session.title || '').trim();
+    mainText = rawTitle && rawTitle !== 'Untitled'
+      ? rawTitle
+      : (typeof t === 'function' ? t('new_chat') : 'New chat');
     const vis = Array.isArray(S.messages) ? S.messages.filter(m => m && m.role && m.role !== 'tool') : [];
-    if (typeof t === 'function') subText = t('n_messages', vis.length);
+    if (vis.length && typeof t === 'function') subText = t('n_messages', vis.length);
     if (S.session.is_cli_session) sourceLabel = S.session.source_label || S.session.source_tag || S.session.raw_source || '';
+  } else if (panel === 'chat') {
+    mainText = typeof t === 'function' ? t('new_chat') : 'New chat';
   } else {
     const key = APP_TITLEBAR_KEYS[panel];
     mainText = key && typeof t === 'function' ? t(key) : (panel.charAt(0).toUpperCase() + panel.slice(1));
@@ -169,7 +174,7 @@ function syncAppTitlebar() {
       const inp = document.createElement('input');
       inp.type = 'text';
       inp.className = 'app-titlebar-rename-input';
-      inp.value = S.session.title || (typeof t === 'function' ? t('untitled') : 'Untitled');
+      inp.value = (S.session.title && S.session.title !== 'Untitled') ? S.session.title : '';
 
       // Prevent click/dblclick on the input from bubbling — we don't want
       // panel switches, session switches, or any other handler firing.
@@ -180,7 +185,7 @@ function syncAppTitlebar() {
       const finish = async (save) => {
         _renamingAppTitlebar = false;
         if (save) {
-          const newTitle = inp.value.trim() || (typeof t === 'function' ? t('untitled') : 'Untitled');
+          const newTitle = inp.value.trim() || (typeof t === 'function' ? t('new_chat') : 'New chat');
           S.session.title = newTitle;
           syncTopbar();   // update #topbarTitle in the chat header
           syncAppTitlebar();
@@ -408,7 +413,7 @@ async function switchPanel(name, opts = {}) {
   }
   if (typeof resetAppShellScroll === 'function') resetAppShellScroll();
   if (typeof syncWorkspacePanelForActivePanel === 'function') syncWorkspacePanelForActivePanel(nextPanel);
-  // Titlebar mode-toggle + compact-btn only visible on chat panel
+  // Chat-panel controls: mode toggle stays visible, compact toggle is only relevant there.
   const isChat = nextPanel === 'chat' || !nextPanel;
   const modeToggle = document.getElementById('modeToggle');
   if (modeToggle) modeToggle.style.display = isChat ? '' : 'none';
@@ -4446,7 +4451,7 @@ function getWorkspaceFriendlyName(path){
     const match=_workspaceList.find(w=>w.path===path);
     if(match && match.name) return match.name;
   }
-  return path.split('/').filter(Boolean).pop()||path;
+  return String(path||'').replace(/\\/g,'/').split('/').filter(Boolean).pop()||path;
 }
 
 function syncWorkspaceDisplays(){
@@ -4483,11 +4488,9 @@ function syncWorkspaceDisplays(){
   if(mobileLabel) mobileLabel.textContent=S._bootReady?displayLabel:'';
   if(composerChip){
     composerChip.disabled=!canChooseWorkspace;
-    composerChip.title=hasWorkspace ? ws : ((S._bootReady && canChooseWorkspace) ? 'Choose workspace' : t('no_workspace'));
     composerChip.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
   }
   if(mobileAction){
-    mobileAction.title=hasWorkspace?ws:t('no_workspace');
     mobileAction.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
   }
   if(headerBadge){
@@ -4496,7 +4499,6 @@ function syncWorkspaceDisplays(){
     headerBadge.classList.add(headerState);
     headerBadge.hidden=false;
     headerBadge.disabled=false;
-    headerBadge.title=headerTitle;
     headerBadge.setAttribute('aria-label',headerTitle);
   }
   if(headerValue){
@@ -5742,7 +5744,9 @@ function switchSettingsSection(name){
 function _syncSidekickPanelSessionActions(){
   const hasSession=!!S.session;
   const visibleMessages=hasSession?(S.messages||[]).filter(m=>m&&m.role&&m.role!=='tool').length:0;
-  const title=hasSession?(S.session.title||t('untitled')):t('active_conversation_none');
+  const title=hasSession
+    ? ((S.session.title && S.session.title !== 'Untitled') ? S.session.title : (typeof t === 'function' ? t('new_chat') : 'New chat'))
+    : t('active_conversation_none');
   const meta=$('sidekickSessionMeta');
   if(meta){
     meta.textContent=hasSession
@@ -5927,9 +5931,7 @@ function syncGameModeButton(){
     const label=typeof t==='function'
       ? t(enabled?'game_mode_on':'game_mode_off')
       : (enabled ? 'Game mode on' : 'Game mode off');
-    btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off');
     btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off');
-    btn.setAttribute('data-tooltip',label);
     btn.setAttribute('aria-label',label);
   }
   const cb=$('settingsGameModeEnabled');
@@ -6427,6 +6429,7 @@ async function loadSettingsPanel(){
     }
     _syncSidekickPanelSessionActions();
     if(typeof loadDashboardSettings==='function') loadDashboardSettings();
+    if(typeof loadWorktreeSettings==='function') loadWorktreeSettings();
     loadProvidersPanel(); // load provider cards in background
     loadPluginsPanel(); // load plugin/hook visibility in background
     switchSettingsSection(_settingsSection);
@@ -8374,8 +8377,13 @@ function _buildProviderCard(p){
   label.textContent=_providerText('providers_status_api_key', 'API key');
   field.appendChild(label);
 
-  const row=document.createElement('div');
+  const row=document.createElement('form');
   row.className='provider-card-row';
+  row.noValidate=true;
+  row.addEventListener('submit',e=>{
+    e.preventDefault();
+    _saveProviderKey(p.id);
+  });
   const input=document.createElement('input');
   input.type='password';
   input.className='provider-card-input';
@@ -8393,10 +8401,9 @@ function _buildProviderCard(p){
     toggleBtn.textContent=revealed?'Show':'Hide';
   };
   const saveBtn=document.createElement('button');
-  saveBtn.type='button';
+  saveBtn.type='submit';
   saveBtn.className='provider-card-btn provider-card-btn-primary';
   saveBtn.textContent=_providerText('providers_save', 'Save');
-  saveBtn.onclick=()=>_saveProviderKey(p.id);
   saveBtn.disabled=true;
   row.appendChild(input);
   row.appendChild(toggleBtn);
@@ -8862,7 +8869,12 @@ const _backgroundErrors=[];  // {session_id, title, message, ts}
 function trackBackgroundError(sessionId, title, message){
   // Only track if user is NOT currently viewing this session
   if(S.session&&S.session.session_id===sessionId) return;
-  _backgroundErrors.push({session_id:sessionId, title:title||t('untitled'), message, ts:Date.now()});
+  _backgroundErrors.push({
+    session_id:sessionId,
+    title:(title && title !== 'Untitled') ? title : (typeof t === 'function' ? t('new_chat') : 'New chat'),
+    message,
+    ts:Date.now()
+  });
   showErrorBanner();
 }
 
@@ -9121,7 +9133,7 @@ function _renderSubagentStatus(active, paused, targetId='subagentStatusCard'){
   </div>` + entries.map(item=>{
     const sid=String(item&&item.subagent_id||'').trim();
     const sessionId=String(item&&item.session_id||'').trim();
-    const goal=String(item&&item.goal||'').trim()||'Untitled task';
+    const goal=String(item&&item.goal||'').trim()||(typeof t === 'function' ? t('kanban_new_task') : 'New task');
     const model=String(item&&item.model||'').trim();
     const depth=typeof item?.depth==='number'?item.depth:null;
     const toolCount=typeof item?.tool_count==='number'?item.tool_count:null;

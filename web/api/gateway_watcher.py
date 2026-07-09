@@ -10,13 +10,12 @@ requiring any changes to hermes-agent.
 """
 import hashlib
 import logging
-import os
 import queue
 import threading
 import time
 from pathlib import Path
 
-from web.api.config import HOME
+from web.api._home import get_webui_home
 from web.api.agent_sessions import read_importable_agent_session_rows
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ def _get_state_db_path() -> Path:
         from web.api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME') or os.getenv('HERMES_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
+        hermes_home = get_webui_home()
     return hermes_home / 'state.db'
 
 

@@ -18,28 +18,74 @@ from pathlib import Path
 
 import yaml
 
+from web.api._home import get_active_webui_home, get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Manifest cache (T27) — simple dict-based cache with 30-second TTL
 # ---------------------------------------------------------------------------
-_MANIFEST_CACHE: dict = {}
+_MANIFEST_CACHE: dict[str, dict] = {}
 _MANIFEST_CACHE_TTL = 30  # seconds
 
 
-def _get_cached_manifests() -> list[dict] | None:
+def _resolve_home(home: Path | None = None) -> Path:
+    """Return the active home directory for the current request."""
+    if home is not None:
+        return Path(home).expanduser().resolve()
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return Path(get_webui_home()).expanduser().resolve()
+
+
+def _apps_dir(home: Path | None = None) -> Path:
+    return _resolve_home(home) / "appstore"
+
+
+def _installed_file(home: Path | None = None) -> Path:
+    return _apps_dir(home) / ".installed.json"
+
+
+def _env_file(home: Path | None = None) -> Path:
+    return _resolve_home(home) / ".env"
+
+
+def _config_file(home: Path | None = None) -> Path:
+    return _resolve_home(home) / "config.yaml"
+
+
+def _spaces_root(home: Path | None = None) -> Path:
+    override = (
+        os.environ.get("SIDEKICK_WEBUI_SPACES_DIR")
+        or os.environ.get("HERMES_WEBUI_SPACES_DIR")
+        or ""
+    ).strip()
+    if override:
+        return Path(override).expanduser()
+    return _resolve_home(home) / "spaces"
+
+
+def _submitted_dir(home: Path | None = None) -> Path:
+    return _apps_dir(home) / "submitted"
+
+
+def _get_cached_manifests(home: Path) -> list[dict] | None:
     """Return cached manifests if still fresh, else ``None``."""
-    entry = _MANIFEST_CACHE.get("data")
-    ts = _MANIFEST_CACHE.get("ts", 0.0)
-    if entry is not None and (time.time() - ts) < _MANIFEST_CACHE_TTL:
-        return entry
+    cache_key = str(home)
+    entry = _MANIFEST_CACHE.get(cache_key)
+    if not entry:
+        return None
+    ts = entry.get("ts", 0.0)
+    data = entry.get("data")
+    if data is not None and (time.time() - ts) < _MANIFEST_CACHE_TTL:
+        return data
     return None
 
 
-def _set_cached_manifests(manifests: list[dict]) -> None:
+def _set_cached_manifests(home: Path, manifests: list[dict]) -> None:
     """Store manifests in cache with current timestamp."""
-    _MANIFEST_CACHE["data"] = manifests
-    _MANIFEST_CACHE["ts"] = time.time()
+    _MANIFEST_CACHE[str(home)] = {"data": manifests, "ts": time.time()}
 
 
 def _invalidate_manifest_cache() -> None:
@@ -51,11 +97,7 @@ def _invalidate_manifest_cache() -> None:
 # Paths (computed relative to this file's location in the repo)
 # ---------------------------------------------------------------------------
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent  # sidekick/
-_SIDEKICK_HOME = Path(
-    os.environ.get("SIDEKICK_HOME")
-   
-    or Path.home() / ".sidekick"
-)
+_SIDEKICK_HOME = get_webui_home()
 _HOME_DIR = _SIDEKICK_HOME
 _APPS_DIR = _HOME_DIR / "appstore"
 _INSTALLED_FILE = _APPS_DIR / ".installed.json"
@@ -81,11 +123,12 @@ _AGENT_DIR = _REPO_ROOT  # run_agent.py is in-repo now
 
 def _read_env() -> dict[str, str]:
     """Return all key-value pairs from ``~/.hermes/.env``."""
-    if not _ENV_FILE.exists():
+    env_file = _env_file()
+    if not env_file.exists():
         return {}
     env: dict[str, str] = {}
     try:
-        text = _ENV_FILE.read_text(encoding="utf-8")
+        text = env_file.read_text(encoding="utf-8")
         for line in text.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
@@ -94,12 +137,13 @@ def _read_env() -> dict[str, str]:
             if m:
                 env[m.group(1)] = m.group(2)
     except OSError as exc:
-        logger.warning("Failed to read %s: %s", _ENV_FILE, exc)
+        logger.warning("Failed to read %s: %s", env_file, exc)
     return env
 
 
 def _write_env(key: str, value: str) -> bool:
     """Set *key=value* in the .env file (idempotent). Returns True if changed."""
+    env_file = _env_file()
     existing = _read_env()
     if existing.get(key) == value:
         return False
@@ -109,9 +153,9 @@ def _write_env(key: str, value: str) -> bool:
     written = set()
 
     # Preserve existing order + comments if the file already exists
-    if _ENV_FILE.exists():
+    if env_file.exists():
         try:
-            text = _ENV_FILE.read_text(encoding="utf-8")
+            text = env_file.read_text(encoding="utf-8")
             for line in text.splitlines():
                 m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=.*", line.strip())
                 if m and m.group(1) == key:
@@ -127,18 +171,19 @@ def _write_env(key: str, value: str) -> bool:
         if k not in written:
             lines.append(f"{k}={v}")
 
-    _ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return True
 
 
 def _delete_env(key: str) -> bool:
     """Remove *key* from .env (idempotent). Returns True if anything changed."""
-    if not _ENV_FILE.exists():
+    env_file = _env_file()
+    if not env_file.exists():
         return False
     removed = False
     try:
-        text = _ENV_FILE.read_text(encoding="utf-8")
+        text = env_file.read_text(encoding="utf-8")
         new_lines: list[str] = []
         for line in text.splitlines():
             m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)=.*", line.strip())
@@ -147,7 +192,7 @@ def _delete_env(key: str) -> bool:
             else:
                 new_lines.append(line)
         if removed:
-            _ENV_FILE.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
     except OSError as exc:
         logger.warning("Failed to delete env key %s: %s", key, exc)
     return removed
@@ -185,12 +230,13 @@ def _patch_config(path_parts: list[str], value) -> bool:
     *path_parts* is a list like ``["services", "github", "enabled"]``.
     Returns True if the file was actually changed.
     """
-    if not _CONFIG_FILE.exists():
-        logger.warning("config.yaml not found at %s — cannot patch", _CONFIG_FILE)
+    config_file = _config_file()
+    if not config_file.exists():
+        logger.warning("config.yaml not found at %s — cannot patch", config_file)
         return False
 
     try:
-        with open(str(_CONFIG_FILE), "r", encoding="utf-8") as f:
+        with open(str(config_file), "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except Exception as exc:
         logger.warning("Failed to load config.yaml: %s", exc)
@@ -210,7 +256,7 @@ def _patch_config(path_parts: list[str], value) -> bool:
     current[key] = value
 
     try:
-        with open(str(_CONFIG_FILE), "w", encoding="utf-8") as f:
+        with open(str(config_file), "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
     except Exception as exc:
         logger.warning("Failed to write config.yaml: %s", exc)
@@ -224,11 +270,12 @@ def _unpatch_config(path_parts: list[str]) -> bool:
 
     Returns True if something was removed.
     """
-    if not _CONFIG_FILE.exists():
+    config_file = _config_file()
+    if not config_file.exists():
         return False
 
     try:
-        with open(str(_CONFIG_FILE), "r", encoding="utf-8") as f:
+        with open(str(config_file), "r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except Exception as exc:
         logger.warning("Failed to load config.yaml: %s", exc)
@@ -247,7 +294,7 @@ def _unpatch_config(path_parts: list[str]) -> bool:
     del current[key]
 
     try:
-        with open(str(_CONFIG_FILE), "w", encoding="utf-8") as f:
+        with open(str(config_file), "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
     except Exception as exc:
         logger.warning("Failed to write config.yaml during unpatch: %s", exc)
@@ -296,19 +343,21 @@ def _run_hermes_cli(args: list[str]) -> tuple[int, str]:
 
 def _load_installed() -> dict:
     """Load the ``.installed.json`` tracking file."""
-    if not _INSTALLED_FILE.exists():
+    installed_file = _installed_file()
+    if not installed_file.exists():
         return {}
     try:
-        return json.loads(_INSTALLED_FILE.read_text(encoding="utf-8"))
+        return json.loads(installed_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to load %s: %s", _INSTALLED_FILE, exc)
+        logger.warning("Failed to load %s: %s", installed_file, exc)
         return {}
 
 
 def _save_installed(data: dict) -> None:
     """Write the ``.installed.json`` tracking file."""
-    _INSTALLED_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _INSTALLED_FILE.write_text(
+    installed_file = _installed_file()
+    installed_file.parent.mkdir(parents=True, exist_ok=True)
+    installed_file.write_text(
         json.dumps(data, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -324,16 +373,18 @@ def discover_manifests() -> list[dict]:
     Results are cached for ``_MANIFEST_CACHE_TTL`` seconds (T27).
     Call ``_invalidate_manifest_cache()`` after writes.
     """
-    cached = _get_cached_manifests()
+    home = _resolve_home()
+    cached = _get_cached_manifests(home)
     if cached is not None:
         return cached
 
     manifests: list[dict] = []
-    if not _APPS_DIR.exists():
-        logger.warning("Appstore directory not found: %s", _APPS_DIR)
+    apps_dir = _apps_dir(home)
+    if not apps_dir.exists():
+        logger.warning("Appstore directory not found: %s", apps_dir)
         return manifests
 
-    for p in sorted(_APPS_DIR.glob("*.json")):
+    for p in sorted(apps_dir.glob("*.json")):
         if p.name == ".installed.json":
             continue
         try:
@@ -344,7 +395,7 @@ def discover_manifests() -> list[dict]:
             logger.warning("Skipping invalid manifest %s: %s", p.name, exc)
 
     manifests.sort(key=lambda m: (m.get("name") or m.get("key", "")))
-    _set_cached_manifests(manifests)
+    _set_cached_manifests(home, manifests)
     return manifests
 
 
@@ -453,7 +504,7 @@ def _get_space_active_apps(space_slug: str) -> set[str]:
 
     Reads from ``<spaces_root>/<slug>/space.yaml#apps``.
     """
-    space_dir = _SPACES_ROOT / space_slug
+    space_dir = _spaces_root() / space_slug
     space_yaml = space_dir / "space.yaml"
     if not space_yaml.exists():
         return set()
@@ -475,7 +526,7 @@ def _set_space_app_active(space_slug: str, app_key: str, active: bool) -> bool:
 
     Returns True if the file was changed.
     """
-    space_dir = _SPACES_ROOT / space_slug
+    space_dir = _spaces_root() / space_slug
     space_yaml = space_dir / "space.yaml"
     space_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -730,7 +781,7 @@ def get_updates() -> list[dict]:
 
 def get_sdk_docs() -> dict:
     """Return the Appstore SDK markdown for in-app documentation."""
-    sdk_path = _APPS_DIR / "SDK.md"
+    sdk_path = _apps_dir() / "SDK.md"
     if not sdk_path.exists() or not sdk_path.is_file():
         return {
             "success": False,
@@ -755,9 +806,6 @@ def get_sdk_docs() -> dict:
 # ---------------------------------------------------------------------------
 # T19 – Plugin-Einreichen (submit a new plugin manifest)
 # ---------------------------------------------------------------------------
-
-_SUBMITTED_DIR = _APPS_DIR / "submitted"
-
 
 def submit_plugin(manifest: dict) -> dict:
     """Submit (einreichen) a new plugin manifest for review.
@@ -798,8 +846,9 @@ def submit_plugin(manifest: dict) -> dict:
 
     # ---- Save to submitted/ directory ----
     try:
-        _SUBMITTED_DIR.mkdir(parents=True, exist_ok=True)
-        dest = _SUBMITTED_DIR / f"{key}.json"
+        submitted_dir = _submitted_dir()
+        submitted_dir.mkdir(parents=True, exist_ok=True)
+        dest = submitted_dir / f"{key}.json"
         dest.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False),
             encoding="utf-8",

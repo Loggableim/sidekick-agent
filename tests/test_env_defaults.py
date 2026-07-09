@@ -18,6 +18,16 @@ def test_runtime_provider_handles_unset_provider_env(monkeypatch):
     assert runtime_provider.resolve_requested_provider(None) == "auto"
 
 
+def test_default_github_mcp_skips_without_pat(monkeypatch):
+    monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
+
+    from tools.mcp_tool import _load_mcp_config
+
+    servers = _load_mcp_config()
+
+    assert "github" not in servers
+
+
 def test_oneshot_provider_without_model_handles_unset_model_env(monkeypatch, capsys):
     monkeypatch.delenv("SIDEKICK_INFERENCE_MODEL", raising=False)
 
@@ -79,3 +89,65 @@ def test_voice_debug_handles_unset_env(monkeypatch):
     from cli.voice import _debug
 
     _debug("noop")
+
+
+def test_portable_home_bootstrap_sets_both_home_vars(monkeypatch):
+    import importlib
+    import sys
+    from pathlib import Path
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_DISABLE_PORTABLE_HOME", raising=False)
+
+    sys.modules.pop("cli.main", None)
+    main = importlib.import_module("cli.main")
+
+    portable_home = main.PROJECT_ROOT.parent / "home"
+
+    assert Path(main.os.environ["SIDEKICK_HOME"]) == portable_home
+    assert Path(main.os.environ["HERMES_HOME"]) == portable_home
+
+
+def test_profile_override_bootstrap_sets_both_home_vars(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    from pathlib import Path
+
+    base_home = tmp_path / "base-home"
+    profile_home = base_home / "profiles" / "coder"
+    profile_home.mkdir(parents=True)
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(base_home))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.setattr(sys, "argv", ["sidekick", "--profile", "coder"])
+
+    sys.modules.pop("cli.main", None)
+    main = importlib.import_module("cli.main")
+
+    assert Path(main.os.environ["SIDEKICK_HOME"]) == profile_home
+    assert Path(main.os.environ["HERMES_HOME"]) == profile_home
+
+
+def test_profile_override_trusts_existing_profile_hermes_home(monkeypatch, tmp_path):
+    import importlib
+    import sys
+    from pathlib import Path
+
+    base_home = tmp_path / "base-home"
+    profile_home = base_home / "profiles" / "coder"
+    other_profile_home = base_home / "profiles" / "other"
+    profile_home.mkdir(parents=True)
+    other_profile_home.mkdir(parents=True)
+    (base_home / "active_profile").write_text("other", encoding="utf-8")
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(profile_home))
+    monkeypatch.setenv("SIDEKICK_DISABLE_PORTABLE_HOME", "1")
+    monkeypatch.setattr(sys, "argv", ["sidekick"])
+
+    sys.modules.pop("cli.main", None)
+    main = importlib.import_module("cli.main")
+
+    assert Path(main.os.environ["HERMES_HOME"]) == profile_home
+    assert main.os.environ.get("SIDEKICK_HOME") in {None, str(profile_home)}

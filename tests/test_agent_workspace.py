@@ -1,4 +1,5 @@
 import queue
+import importlib
 import subprocess
 import sys
 
@@ -89,3 +90,32 @@ def test_run_in_terminal_kills_process_after_timeout(monkeypatch, tmp_path):
     assert created[0].killed is True
     assert result["exit_code"] == -9
     assert "Timeout" in result["output"]
+
+
+def test_agent_workspace_uses_active_profile_home_after_import(monkeypatch, tmp_path):
+    import yaml
+
+    import_path_home = tmp_path / "import-home"
+    active_home = tmp_path / "active-home"
+    active_home.mkdir(parents=True)
+    (active_home / ".env").write_text("OPENROUTER_API_KEY=active-key\n", encoding="utf-8")
+    (active_home / "config.yaml").write_text("model:\n  default: gpt-4o\n", encoding="utf-8")
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    sys.modules.pop("web.api.agent_workspace", None)
+    agent_workspace = importlib.import_module("web.api.agent_workspace")
+
+    monkeypatch.setattr(agent_workspace, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr("web.api.config.resolve_active_provider_context", lambda: {})
+
+    cfg = agent_workspace._get_llm_config()
+    workspace = agent_workspace.ensure_agent_workspace("alpha")
+
+    assert cfg["api_key"] == "active-key"
+    assert cfg["model"] == "gpt-4o"
+    assert workspace == str(active_home / "workspaces" / "alpha")
+    assert (active_home / "workspaces" / "alpha" / "README.md").exists()
+    assert not (import_path_home / "workspaces" / "alpha").exists()

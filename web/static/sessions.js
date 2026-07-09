@@ -107,7 +107,7 @@ function _forceConversationMessageRecovery(sid, initialMessageCount = 0, signal 
     }).catch(() => {});
   }
 }
-async function _sessionApi(path, timeoutMs, externalSignal) {
+async function _sessionApi(path, timeoutMs, externalSignal, options) {
   const controller = new AbortController();
   const abortFromExternal = () => {
     try { controller.abort(); } catch (_) {}
@@ -121,7 +121,8 @@ async function _sessionApi(path, timeoutMs, externalSignal) {
     const scopedPath = (typeof _spaceScopedApiPath === 'function')
       ? _spaceScopedApiPath(path)
       : path;
-    return await api(scopedPath, {signal: controller.signal});
+    const apiOptions = Object.assign({signal: controller.signal}, options || {});
+    return await api(scopedPath, apiOptions);
   } finally {
     clearTimeout(timer);
     if (externalSignal) {
@@ -728,7 +729,12 @@ async function loadSession(sid, options){
   // Guard against network/server failures to prevent a permanently stuck loading state.
   let data;
   try {
-    data = await _sessionApi(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`, _SESSION_LOAD_TIMEOUT_MS, loadAbortController.signal);
+    data = await _sessionApi(
+      `/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`,
+      _SESSION_LOAD_TIMEOUT_MS,
+      loadAbortController.signal,
+      suppressMissingSessionMessage ? {logError:false} : undefined
+    );
   } catch(e) {
     if (loadAbortController.signal.aborted || (e && e.name === 'AbortError')) {
       _abortStaleSessionLoad(sid, previousState);
@@ -2489,6 +2495,24 @@ function _spaceScopedApiPath(path) {
   return base + '?' + params.toString();
 }
 
+function _sessionListDisplayTitle(rawTitle) {
+  const clean = String(rawTitle || '').trim().replace(/#[\w-]+/g, '').trim();
+  if (clean && clean !== 'Untitled') return clean;
+  return typeof t === 'function' ? t('new_chat') : 'New chat';
+}
+
+function _sessionListSearchText(session) {
+  const raw = String(session && session.title || '').trim();
+  const display = _sessionListDisplayTitle(raw);
+  return `${raw} ${display}`.trim().toLowerCase();
+}
+
+function _sessionListRenameValue(rawTitle) {
+  const clean = String(rawTitle || '').trim().replace(/#[\w-]+/g, '').trim();
+  if (!clean || clean === 'Untitled') return '';
+  return clean;
+}
+
 function filterSessions(){
   // Immediate client-side title filter (no flicker)
   renderSessionListFromCache();
@@ -2499,7 +2523,7 @@ function filterSessions(){
   _searchDebounceTimer = setTimeout(async () => {
     try {
       const data = await api(_spaceScopedApiPath(`/api/sessions/search?q=${encodeURIComponent(q)}&content=1&depth=5`));
-      const titleIds = new Set(_allSessions.filter(s => (s.title||'Untitled').toLowerCase().includes(q.toLowerCase())).map(s=>s.session_id));
+      const titleIds = new Set(_allSessions.filter(s => _sessionListSearchText(s).includes(q.toLowerCase())).map(s=>s.session_id));
       _contentSearchResults = (data.sessions||[]).filter(s => s.match_type === 'content' && !titleIds.has(s.session_id));
       renderSessionListFromCache();
     } catch(e) { /* ignore */ }
@@ -2676,9 +2700,8 @@ function _truncatedSessionId(sid){
 function _sessionTitleForForkParent(parentSid){
   if(!parentSid||!Array.isArray(_allSessions)) return '';
   const parent=_allSessions.find(item=>item&&item.session_id===parentSid);
-  const title=parent&&String(parent.title||'').trim();
-  if(!title||title==='Untitled') return '';
-  return title;
+  if(!parent) return '';
+  return _sessionListDisplayTitle(parent.title);
 }
 
 function _attachChildSessionsToSidebarRows(collapsedRows, rawSessions){
@@ -2717,7 +2740,7 @@ function _attachChildSessionsToSidebarRows(collapsedRows, rawSessions){
       const childCopy={...child};
       if(parentSegment){
         childCopy._parent_segment_id=parentSegment.session_id;
-        childCopy._parent_segment_title=parentSegment.title||child.parent_title||'Untitled';
+        childCopy._parent_segment_title=_sessionListDisplayTitle(parentSegment.title||child.parent_title||'');
       }
       parentRow._child_sessions.push(childCopy);
       parentRow._child_session_count=parentRow._child_sessions.length;
@@ -2893,6 +2916,33 @@ function _ensureSessionVirtualScrollHandler(list){
   list.addEventListener('scroll', _scheduleSessionVirtualizedRender, {passive:true});
 }
 
+function _sessionListSnippet(text, maxLen=72){
+  const clean=String(text||'').replace(/\s+/g,' ').trim();
+  if(!clean) return '';
+  if(clean.length<=maxLen) return clean;
+  return clean.slice(0,maxLen).trimEnd()+'…';
+}
+
+function _sessionListPreviewText(session, isActive){
+  const sid=session&&session.session_id;
+  const activeSid=S.session&&S.session.session_id;
+  if(isActive&&sid&&sid===activeSid&&Array.isArray(S.messages)&&S.messages.length){
+    for(let i=S.messages.length-1;i>=0;i--){
+      const m=S.messages[i];
+      if(!m||m.role==='tool'||m._transient||m._statusCard) continue;
+      const text=_sessionListSnippet(typeof msgContent==='function'?msgContent(m):String(m.content||''));
+      if(text) return text;
+    }
+  }
+  const fallback=_sessionListSnippet(session&&(
+    session.compression_anchor_summary||
+    session.pending_user_message||
+    session.title||
+    ''
+  ));
+  return fallback || '';
+}
+
 function renderSessionListFromCache(){
   // Don't re-render while user is actively renaming a session (would destroy the input)
   if(_renamingSid) return;
@@ -2903,7 +2953,7 @@ function renderSessionListFromCache(){
   _purgeStaleInflightEntries();
   const q=($('sessionSearch').value||'').toLowerCase();
   const activeSidForSidebar=_activeSessionIdForSidebar();
-  const titleMatches=q?_allSessions.filter(s=>(s.title||'Untitled').toLowerCase().includes(q)):_allSessions;
+  const titleMatches=q?_allSessions.filter(s=>_sessionListSearchText(s).includes(q)):_allSessions;
   // Merge content matches (deduped): content matches appended after title matches
   const titleIds=new Set(titleMatches.map(s=>s.session_id));
   const allMatched=q?[...titleMatches,..._contentSearchResults.filter(s=>!titleIds.has(s.session_id))]:titleMatches;
@@ -3259,7 +3309,7 @@ function renderSessionListFromCache(){
     }
     const title=document.createElement('span');
     title.className='session-title';
-    const cleanTitleText=cleanTitle||'Untitled';
+    const cleanTitleText=_sessionListDisplayTitle(cleanTitle);
     title.textContent=cleanTitleText;
     if(cleanTitleText.startsWith('⏳')||cleanTitleText.startsWith('⌛')){
       title.classList.add('session-title--generating');
@@ -3350,13 +3400,11 @@ titleRow.appendChild(ts);
     const density=(window._sidebarDensity==='detailed'?'detailed':'compact');
     if(density==='detailed') el.classList.add('detailed');
     sessionText.appendChild(titleRow);
-    if(density==='detailed'){
+    if(density==='detailed' || isActive){
       const preview=document.createElement('div');
       preview.className='session-preview';
-      const lastMsgContent=s.pending_user_message||s.title||null;
-      preview.textContent=lastMsgContent
-        ? (lastMsgContent.length>60?lastMsgContent.slice(0,60)+'…':lastMsgContent)
-        : '[No messages]';
+      const previewText=_sessionListPreviewText(s,isActive);
+      preview.textContent=previewText || '[No messages]';
       sessionText.appendChild(preview);
     }
     if(density==='detailed'){
@@ -3422,7 +3470,7 @@ if(childCount>0 && Array.isArray(s._child_sessions) && _expandedChildSessionKeys
         const row=document.createElement('button');
         row.type='button';
         row.className='session-child-session'+(activeSidForSidebar&&child.session_id===activeSidForSidebar?' active':'');
-        const childTitle=child.title||'Untitled child session';
+        const childTitle=_sessionListDisplayTitle(child.title||'');
         const childTime=_formatRelativeSessionTime(_sessionTimestampMs(child));
         const parentNote=child._parent_segment_title?` via ${child._parent_segment_title}`:'';
         row.textContent=`-> ${childTitle}${parentNote} - ${childTime}`;
@@ -3462,7 +3510,7 @@ if(childCount>0 && Array.isArray(s._child_sessions) && _expandedChildSessionKeys
 
       closeSessionActionMenu();
       _renamingSid = s.session_id;
-      const oldTitle=s.title||'Untitled';
+      const oldTitle=_sessionListRenameValue(s.title);
       const inp=document.createElement('input');
       inp.className='session-title-input';
       inp.value=oldTitle;
@@ -3491,7 +3539,7 @@ if(childCount>0 && Array.isArray(s._child_sessions) && _expandedChildSessionKeys
           releaseRename();
           return;
         }
-        const newTitle=inp.value.trim()||'Untitled';
+        const newTitle=inp.value.trim()||_sessionListDisplayTitle('');
         try{
           if(newTitle!==oldTitle){
             await api('/api/session/rename',{method:'POST',body:JSON.stringify({session_id:s.session_id,title:newTitle})});

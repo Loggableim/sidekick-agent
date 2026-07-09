@@ -3,6 +3,8 @@ from __future__ import annotations
 import os, stat, subprocess, sys
 from pathlib import Path
 
+from web.api._home import get_webui_home
+
 # Credential files that should never be world-readable
 _SENSITIVE_FILES = (
     '.env',
@@ -33,7 +35,7 @@ def fix_credential_permissions() -> None:
         except ValueError:
             pass
 
-    hermes_home = Path(os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME', str(Path.home() / '.sidekick')))
+    hermes_home = get_webui_home()
     if not hermes_home.is_dir():
         return
     for name in _SENSITIVE_FILES:
@@ -56,7 +58,7 @@ def fix_credential_permissions() -> None:
 
 
 def _agent_dir() -> Path | None:
-    hermes_home = Path(os.environ.get('SIDEKICK_HOME') or os.environ.get('HERMES_HOME', str(Path.home() / '.sidekick')))
+    hermes_home = get_webui_home()
     for raw in [
         os.environ.get('SIDEKICK_WEBUI_AGENT_DIR', '').strip(),
         os.environ.get('HERMES_WEBUI_AGENT_DIR', '').strip(),

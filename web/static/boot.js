@@ -1245,7 +1245,7 @@ $('msg').addEventListener('keydown',e=>{
     }
   }
 });
-// B14: Cmd/Ctrl+K creates a new chat from anywhere
+// B14: Cmd/Ctrl+K opens the workflow palette; Cmd/Ctrl+N creates a new chat.
 document.addEventListener('keydown',async e=>{
   // Cmd/Ctrl+B toggles desktop sidebar collapse (VS Code convention).
   // Skip when typing in an input/textarea/contenteditable so text-edit
@@ -1271,27 +1271,19 @@ document.addEventListener('keydown',async e=>{
       }
     }
   }
-  if((e.metaKey||e.ctrlKey)&&e.key==='k'){
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
-    // If the current session has no messages AND nothing is in flight, just focus
-    // the composer rather than creating another empty session that will clutter
-    // the sidebar list (#1171). See the matching guard in $('btnNewChat').onclick
-    // and bug #1432 for why the in-flight check is needed.
-    if(S.session
-       && (S.session.message_count||0)===0
-       && !S.busy
-       && !S.session.active_stream_id
-       && !S.session.pending_user_message){
-      $('msg').focus();return;
-    }
-    // Cmd/Ctrl+K should always create a new conversation, even while the current
-    // one is still streaming. The old !S.busy guard meant users had to wait for
-    // a long generation to finish before they could start something new — exactly
-    // the moment they want to switch context. newSession() leaves the in-flight
-    // stream running on its own session; the user just gets a fresh blank one.
-    await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
+    if(typeof workflowToggleHeaderMenu==='function') workflowToggleHeaderMenu(e);
+    return;
   }
-  // Cmd/Ctrl+Shift+K opens the workflow palette from anywhere.
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==='n'||e.key==='N')){
+    e.preventDefault();
+    if(typeof sidekickNewChat==='function'){
+      await sidekickNewChat();
+      return;
+    }
+  }
+  // Cmd/Ctrl+Shift+K remains a legacy alias for the workflow palette.
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&!e.altKey&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
     if(typeof workflowToggleHeaderMenu==='function') workflowToggleHeaderMenu(e);
@@ -1562,6 +1554,7 @@ function _setResolvedTheme(isDark){
   document.documentElement.classList.toggle('dark',!!isDark);
   _applySyntaxTheme(); // respects user's syntax theme preference, falls back to dark/light
   _syncThemeColorMeta();
+  _syncThemeToggleButton();
 }
 
 // ── Syntax highlighting theme (3 presets) ──
@@ -1625,6 +1618,21 @@ function _applySkin(name){
   if(key==='default') delete document.documentElement.dataset.skin;
   else document.documentElement.dataset.skin=key;
   _syncThemeColorMeta();
+}
+
+function _syncThemeToggleButton(){
+  const btn=$('titlebarThemeToggle');
+  if(!btn) return;
+  const isDark=document.documentElement.classList.contains('dark');
+  btn.setAttribute('aria-label', isDark ? 'Tagmodus aktivieren' : 'Nachtmodus aktivieren');
+  btn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+  btn.innerHTML = isDark
+    ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>'
+    : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8Z"/></svg>';
+}
+
+function toggleThemeMode(){
+  _pickTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark');
 }
 
 function _pickTheme(name){
@@ -1974,14 +1982,19 @@ function _bootTimeout(promise, ms, label) {
   let _bootSavedSessionLoadPromise = null;
   let _bootMissingSession = false;
   if (urlSession && saved && !_bootRestoreCanceled()) {
-    // Direct session URLs should start loading immediately instead of waiting
-    // for sidebar/session-list rendering to finish.
-    _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
-      if (!_bootRestoreCanceled()) throw e;
-    });
   }
   await renderSessionList();
   _initResizePanels();
+  const _bootSavedSessionExists = !!(saved && Array.isArray(_allSessions) && _allSessions.some((s) => s && s.session_id === saved));
+  if (urlSession && saved && !_bootRestoreCanceled()) {
+    if (_bootSavedSessionExists) {
+      _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
+        if (!_bootRestoreCanceled()) throw e;
+      });
+    } else {
+      _bootMissingSession = true;
+    }
+  }
   // Workspace panel restore happens AFTER loadSession so we know if
   // the session has a workspace — prevents the snap-open-then-closed flash (#576).
   // Fix #822: clear any browser-restored value before first render. This
@@ -2007,21 +2020,19 @@ function _bootTimeout(promise, ms, label) {
         const _bootLoadResult = await _bootSavedSessionLoadPromise;
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
       }
-      else if(!_bootRestoreCanceled()) {
+      else if(!_bootRestoreCanceled() && !_bootMissingSession) {
         const _bootLoadResult = await loadSession(saved);
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
-      if (saved && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
+      if (saved && !_bootMissingSession && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
         const _bootRetryResult = await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
         _bootMissingSession = _bootMissingSession || !!(_bootRetryResult && _bootRetryResult.missingSession);
       }
       if (_bootMissingSession && urlSession && saved) {
         if (typeof newSession === 'function') {
+          S._bootReady=true;
           await newSession();
-          if (typeof showToast === 'function') {
-            showToast('Previous session was missing. Started a new one.', 3000, 'info');
-          }
           if (typeof renderSessionList === 'function') await renderSessionList();
           if (typeof startGatewaySSE === 'function') startGatewaySSE();
           return;
@@ -2112,9 +2123,10 @@ function _bootTimeout(promise, ms, label) {
       if (_label) {
         const _icon = _label.querySelector('.sandbox-toggle-icon');
         if (_icon) _icon.textContent = window._sandboxDisabled ? '🚫' : '🛡️';
-        _label.title = window._sandboxDisabled
+        _label.setAttribute('aria-label', window._sandboxDisabled
           ? 'Sandbox deaktiviert - Agent kann auf alle Dateien zugreifen'
-          : 'Sandbox-Einschränkung aktiv';
+          : 'Sandbox-Einschränkung aktiv');
+        _label.removeAttribute('title');
       }
     });
   }

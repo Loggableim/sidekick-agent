@@ -118,7 +118,7 @@ TIPS = [
     "Set fallback_model in config.yaml to automatically fail over to a backup provider.",
     "Set privacy.redact_pii: true to hash user IDs and phone numbers before sending to the LLM.",
     "Set browser.record_sessions: true to auto-record browser sessions as WebM videos.",
-    "Set worktree: true in config.yaml to always create a git worktree (same as sidekick -w).",
+    "Set worktree: true in config.yaml to always create a git worktree (same as sidekick -w). Set worktree.cleanup_on_exit: false to keep the worktree on exit.",
     "Set security.website_blocklist.enabled: true to block specific domains from web tools.",
     "Set cron.wrap_response: false to deliver raw agent output without the cron header/footer.",
     "HERMES_TIMEZONE overrides the server timezone with any IANA timezone string.",

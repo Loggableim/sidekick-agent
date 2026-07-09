@@ -2115,7 +2115,7 @@ def _load_mcp_config() -> Dict[str, dict]:
     ``os.environ`` (which includes ``~/.sidekick/.env`` loaded at startup).
     """
     try:
-        from cli.config import load_config
+        from cli.config import load_config, _collect_unresolved_env_refs
         config = load_config()
         servers = config.get("mcp_servers")
         if not servers or not isinstance(servers, dict):
@@ -2126,7 +2126,18 @@ def _load_mcp_config() -> Dict[str, dict]:
             load_hermes_dotenv()
         except Exception:
             pass
-        return {name: _interpolate_env_vars(cfg) for name, cfg in servers.items()}
+        resolved: Dict[str, dict] = {}
+        for name, cfg in servers.items():
+            interpolated = _interpolate_env_vars(cfg)
+            unresolved = _collect_unresolved_env_refs(interpolated)
+            if unresolved:
+                logger.warning(
+                    "MCP server '%s' skipped: unresolved config placeholder(s): %s",
+                    name, ", ".join(unresolved),
+                )
+                continue
+            resolved[name] = interpolated
+        return resolved
     except Exception as exc:
         logger.debug("Failed to load MCP config: %s", exc)
         return {}

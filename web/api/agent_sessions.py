@@ -2,10 +2,13 @@
 import json
 import logging
 import sqlite3
+import threading
 from contextlib import closing
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+_AGENT_SESSION_ROWS_CACHE_LOCK = threading.Lock()
+_AGENT_SESSION_ROWS_CACHE: dict[tuple, tuple[dict, ...]] = {}
 
 
 MESSAGING_SOURCES = {
@@ -93,6 +96,33 @@ def _with_session_defaults(row: dict, columns: set[str]) -> dict:
         if key not in columns and key not in row:
             row[key] = value
     return row
+
+
+def _normalize_agent_session_excludes(exclude_sources) -> tuple[str, ...] | None:
+    if exclude_sources is None:
+        return None
+    excluded = tuple(
+        str(source).strip()
+        for source in exclude_sources
+        if str(source).strip()
+    )
+    return excluded or None
+
+
+def _agent_session_rows_cache_key(db_path: Path, limit, normalized_excludes) -> tuple | None:
+    try:
+        path = Path(db_path).expanduser().resolve()
+        stat = path.stat()
+    except OSError:
+        return None
+    normalized_limit = None if limit is None else max(0, int(limit))
+    return (
+        str(path),
+        stat.st_mtime_ns,
+        stat.st_size,
+        normalized_limit,
+        normalized_excludes,
+    )
 
 
 def _safe_lower(value) -> str:
@@ -382,6 +412,87 @@ def read_importable_agent_session_rows(
         return []
 
     log = log or logger
+    normalized_excludes = _normalize_agent_session_excludes(exclude_sources)
+    cache_key = _agent_session_rows_cache_key(db_path, limit, normalized_excludes)
+    if cache_key is not None:
+        with _AGENT_SESSION_ROWS_CACHE_LOCK:
+            cached = _AGENT_SESSION_ROWS_CACHE.get(cache_key)
+        if cached is not None:
+            return [dict(row) for row in cached]
+
+    normalized_limit = None if limit is None else max(0, int(limit))
+    def _finalize(rows: list[dict]) -> list[dict]:
+        projected = _project_agent_session_rows(rows)
+        projected = [_with_normalized_source(row) for row in projected]
+        projected = [row for row in projected if is_cli_session_row_visible(row)]
+        if normalized_limit is None:
+            result = projected
+        else:
+            result = projected[:normalized_limit]
+        cached_result = tuple(dict(row) for row in result)
+        if cache_key is not None:
+            with _AGENT_SESSION_ROWS_CACHE_LOCK:
+                _AGENT_SESSION_ROWS_CACHE[cache_key] = cached_result
+        return [dict(row) for row in cached_result]
+
+    def _load_stats(cur, session_ids: list[str]) -> dict[str, dict]:
+        if not session_ids:
+            return {}
+        placeholders = ",".join("?" for _ in session_ids)
+        if 'role' in message_cols and 'timestamp' in message_cols:
+            cur.execute(
+                f"""
+                SELECT session_id,
+                       COUNT(*) AS actual_message_count,
+                       SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                       MAX(timestamp) AS last_activity
+                FROM messages
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id
+                """,
+                session_ids,
+            )
+        elif 'role' in message_cols:
+            cur.execute(
+                f"""
+                SELECT session_id,
+                       COUNT(*) AS actual_message_count,
+                       SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                       NULL AS last_activity
+                FROM messages
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id
+                """,
+                session_ids,
+            )
+        elif 'timestamp' in message_cols:
+            cur.execute(
+                f"""
+                SELECT session_id,
+                       COUNT(*) AS actual_message_count,
+                       COUNT(*) AS actual_user_message_count,
+                       MAX(timestamp) AS last_activity
+                FROM messages
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id
+                """,
+                session_ids,
+            )
+        else:
+            cur.execute(
+                f"""
+                SELECT session_id,
+                       COUNT(*) AS actual_message_count,
+                       COUNT(*) AS actual_user_message_count,
+                       NULL AS last_activity
+                FROM messages
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id
+                """,
+                session_ids,
+            )
+        return {row['session_id']: dict(row) for row in cur.fetchall()}
+
     with closing(sqlite3.connect(str(db_path), timeout=1.0)) as conn:
         try:
             conn.execute("PRAGMA busy_timeout=1000")
@@ -405,15 +516,53 @@ def read_importable_agent_session_rows(
             )
             return []
 
+        if normalized_limit is not None and normalized_limit <= 200:
+            candidate_limit = 400
+            if 'ended_at' in session_cols and 'updated_at' in session_cols:
+                sort_expr = "COALESCE(s.ended_at, s.updated_at, s.started_at)"
+            elif 'ended_at' in session_cols:
+                sort_expr = "COALESCE(s.ended_at, s.started_at)"
+            elif 'updated_at' in session_cols:
+                sort_expr = "COALESCE(s.updated_at, s.started_at)"
+            else:
+                sort_expr = "s.started_at"
+            candidate_sql = f"""
+                SELECT s.*
+                FROM sessions s
+                WHERE s.source IS NOT NULL
+            """
+            if normalized_excludes:
+                candidate_sql += "\n                AND s.source NOT IN (SELECT value FROM json_each(?))"
+            candidate_sql += f"""
+                ORDER BY {sort_expr} DESC, COALESCE(s.message_count, 0) DESC, s.id DESC
+                LIMIT ?
+            """
+            candidate_params: tuple[object, ...]
+            if normalized_excludes:
+                candidate_params = (json.dumps(normalized_excludes), candidate_limit)
+            else:
+                candidate_params = (candidate_limit,)
+            cur.execute(candidate_sql, candidate_params)
+            candidate_rows = [_with_session_defaults(dict(row), session_cols) for row in cur.fetchall()]
+            if candidate_rows:
+                candidate_ids = [row['id'] for row in candidate_rows if row.get('id')]
+                stats = _load_stats(cur, candidate_ids)
+                projected_rows = []
+                for row in candidate_rows:
+                    stat = stats.get(row['id']) or {}
+                    row['actual_message_count'] = stat.get('actual_message_count') or 0
+                    row['actual_user_message_count'] = stat.get('actual_user_message_count') or 0
+                    row['last_activity'] = stat.get('last_activity')
+                    projected_rows.append(_with_normalized_source(row))
+                candidate_result = _finalize(projected_rows)
+                if len(candidate_result) >= normalized_limit:
+                    return candidate_result
+
         params: tuple[object, ...]
         exclude_clause = ""
-        if exclude_sources:
-            excluded = tuple(str(source) for source in exclude_sources if source)
-            if excluded:
-                exclude_clause = "AND s.source NOT IN (SELECT value FROM json_each(?))"
-                params = (json.dumps(excluded),)
-            else:
-                params = ()
+        if normalized_excludes:
+            exclude_clause = "AND s.source NOT IN (SELECT value FROM json_each(?))"
+            params = (json.dumps(normalized_excludes),)
         else:
             params = ()
 
@@ -494,14 +643,9 @@ def read_importable_agent_session_rows(
         sql += "\n                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC"
 
         cur.execute(sql, params)
-        projected = _project_agent_session_rows([
+        return _finalize([
             _with_session_defaults(dict(row), session_cols) for row in cur.fetchall()
         ])
-        projected = [_with_normalized_source(row) for row in projected]
-        projected = [row for row in projected if is_cli_session_row_visible(row)]
-        if limit is None:
-            return projected
-        return projected[:max(0, int(limit))]
 
 
 

@@ -76,10 +76,22 @@ def test_hub_cockpit_settings_live_under_sidekick_home():
 
 
 def test_webui_cockpit_settings_use_same_sidekick_home(monkeypatch, tmp_path):
-    from web.api import routes
+    from web.api import profiles, routes
 
     home = tmp_path / "home"
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
     monkeypatch.delenv("HERMES_HOME", raising=False)
+    profiles.refresh_profile_base_home_from_env()
 
     assert routes._cockpit_settings_path() == home / "cockpit" / ".cockpit_settings.json"
+
+
+def test_webui_cockpit_settings_follow_hermes_home_when_sidekick_is_missing(monkeypatch, tmp_path):
+    from web.api import profiles, routes
+
+    hermes_home = tmp_path / "hermes-home"
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    profiles.refresh_profile_base_home_from_env()
+
+    assert routes._cockpit_settings_path() == hermes_home / "cockpit" / ".cockpit_settings.json"

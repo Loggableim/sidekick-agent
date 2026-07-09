@@ -116,14 +116,16 @@ def _conn(board=None):
 
     If the current thread has a workspace kanban home (set via
     :func:`set_workspace_kanban`), the Nova library's
-    ``HERMES_KANBAN_HOME`` env var is temporarily overridden so that
+    ``SIDEKICK_KANBAN_HOME`` env var is temporarily overridden so that
     the DB is created/opened inside the workspace root.
     """
     _ws_home = _get_ws_kanban_home()
     if _ws_home:
         old_home = os.environ.get("SIDEKICK_KANBAN_HOME")
+        old_hermes_home = os.environ.get("HERMES_KANBAN_HOME")
         try:
             os.environ["SIDEKICK_KANBAN_HOME"] = _ws_home
+            os.environ["HERMES_KANBAN_HOME"] = _ws_home
             kb = _kb()
             kb.init_db(board=board)
             return kb.connect(board=board)
@@ -132,6 +134,9 @@ def _conn(board=None):
                 os.environ["SIDEKICK_KANBAN_HOME"] = old_home
             else:
                 os.environ.pop("SIDEKICK_KANBAN_HOME", None)
+            if old_hermes_home:
+                os.environ["HERMES_KANBAN_HOME"] = old_hermes_home
+            else:
                 os.environ.pop("HERMES_KANBAN_HOME", None)
     kb = _kb()
     kb.init_db(board=board)

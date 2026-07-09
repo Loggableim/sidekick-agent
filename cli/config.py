@@ -603,6 +603,12 @@ DEFAULT_CONFIG = {
         "persistent_shell": True,
     },
 
+    "worktree": {
+        # When true, preserve worktrees on exit instead of auto-removing them.
+        # Legacy boolean shorthand still works too: worktree: true / false.
+        "cleanup_on_exit": True,
+    },
+
     "web": {
         "backend": "",           # shared fallback — applies to both search and extract
         "search_backend": "",    # per-capability override for web_search (e.g. "searxng")
@@ -3935,6 +3941,36 @@ def _expand_env_vars(obj):
     return obj
 
 
+def _collect_unresolved_env_refs(obj):
+    """Return unresolved ``${VAR}`` references found anywhere in *obj*.
+
+    The helper walks strings, dicts, and lists, collecting the placeholder
+    names that remain after env expansion. Callers can use this to detect
+    config entries that still depend on missing environment variables.
+    """
+    refs = []
+
+    def _walk(value):
+        if isinstance(value, str):
+            refs.extend(match.group(1) for match in re.finditer(r"\${([^}]+)}", value))
+        elif isinstance(value, dict):
+            for item in value.values():
+                _walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                _walk(item)
+
+    _walk(obj)
+    seen = set()
+    unique_refs = []
+    for ref in refs:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        unique_refs.append(ref)
+    return unique_refs
+
+
 def _items_by_unique_name(items):
     """Return a name-indexed dict only when all items have unique string names."""
     if not isinstance(items, list):
@@ -4196,6 +4232,20 @@ def load_config() -> Dict[str, Any]:
         else:
             _LOAD_CONFIG_CACHE.pop(path_key, None)
         return expanded
+
+
+def get_worktree_settings(config: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+    """Return normalized worktree settings from a config tree."""
+    source = config if config is not None else load_config()
+    raw = source.get("worktree", {}) if isinstance(source, dict) else {}
+    if isinstance(raw, bool):
+        return {"enabled": raw, "cleanup_on_exit": raw}
+    if not isinstance(raw, dict):
+        return {"enabled": False, "cleanup_on_exit": True}
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "cleanup_on_exit": bool(raw.get("cleanup_on_exit", True)),
+    }
 
 
 _SECURITY_COMMENT = """

@@ -858,8 +858,7 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
         if old_home is not None:
             os.environ["SIDEKICK_HOME"] = old_home
         elif "HERMES_HOME" in os.environ or "SIDEKICK_HOME" in os.environ:
-            del os.environ["SIDEKICK_HOME"]
-            del os.environ["SIDEKICK_HOME"]
+            os.environ.pop("SIDEKICK_HOME", None)
 
 
 def _stop_gateway_process(profile_dir: Path) -> None:

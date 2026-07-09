@@ -22,6 +22,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from web.api._home import get_webui_home
 from runtime.provider_response_state import get_provider_response_state
 from web.api.config import (
     _PROVIDER_DISPLAY,
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 _NOVA_STATE_SNAPSHOT_CACHE: dict[str, object] = {
     "module": None,
+    "path": None,
     "mtime": None,
 }
 
@@ -436,7 +438,7 @@ def _get_hermes_home() -> Path:
         from web.api.profiles import get_active_hermes_home
         return get_active_hermes_home()
     except ImportError:
-        return Path.home() / ".sidekick"
+        return get_webui_home()
 
 
 def _load_env_file(env_path: Path) -> dict[str, str]:
@@ -1065,9 +1067,14 @@ def _load_nova_state_snapshot_module():
     if not snapshot_path.exists():
         return None
     try:
+        cache_path = str(snapshot_path.resolve(strict=False))
         mtime = snapshot_path.stat().st_mtime
         module = _NOVA_STATE_SNAPSHOT_CACHE.get("module")
-        if module is None or _NOVA_STATE_SNAPSHOT_CACHE.get("mtime") != mtime:
+        if (
+            module is None
+            or _NOVA_STATE_SNAPSHOT_CACHE.get("path") != cache_path
+            or _NOVA_STATE_SNAPSHOT_CACHE.get("mtime") != mtime
+        ):
             spec = importlib.util.spec_from_file_location("nova_state_snapshot_provider_quota", snapshot_path)
             if spec is None or spec.loader is None:
                 return None
@@ -1079,6 +1086,7 @@ def _load_nova_state_snapshot_module():
                 if sys.path and sys.path[0] == nova_dir:
                     sys.path.pop(0)
             _NOVA_STATE_SNAPSHOT_CACHE["module"] = module
+            _NOVA_STATE_SNAPSHOT_CACHE["path"] = cache_path
             _NOVA_STATE_SNAPSHOT_CACHE["mtime"] = mtime
         return module
     except Exception:

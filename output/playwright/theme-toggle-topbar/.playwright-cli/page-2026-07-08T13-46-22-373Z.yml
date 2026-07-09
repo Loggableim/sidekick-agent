@@ -1,0 +1,902 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e5]: Untitled
+    - radiogroup "Composer mode" [ref=e7]:
+      - button "⎔ Action" [pressed] [ref=e209] [cursor=pointer]
+      - button "Plan" [ref=e210] [cursor=pointer]
+    - button "📁 Nova" [ref=e211] [cursor=pointer]:
+      - generic [ref=e12]: 📁
+      - generic [ref=e13]: Nova
+      - img [ref=e14]
+    - generic [ref=e16]:
+      - 'button "Game Mode: local GPU blocked" [pressed] [ref=e212] [cursor=pointer]':
+        - img [ref=e18]
+      - button "Hub Cast" [ref=e20] [cursor=pointer]:
+        - generic [ref=e21]: 📺
+      - button "Neustarten" [ref=e22] [cursor=pointer]:
+        - img [ref=e23]
+      - button "Tagmodus aktivieren" [pressed] [ref=e213] [cursor=pointer]:
+        - img [ref=e214]
+      - button "Herunterfahren" [ref=e29] [cursor=pointer]:
+        - img [ref=e30]
+  - generic [ref=e33]:
+    - navigation "Primary navigation" [ref=e34]:
+      - button "Chat" [ref=e35] [cursor=pointer]:
+        - img [ref=e36]
+      - button "Tasks" [ref=e38] [cursor=pointer]:
+        - img [ref=e39]
+      - button "Kanban" [ref=e41] [cursor=pointer]:
+        - img [ref=e42]
+      - button "Skills" [ref=e44] [cursor=pointer]:
+        - img [ref=e45]
+      - button "Agents" [ref=e49] [cursor=pointer]:
+        - img [ref=e50]
+      - button "Memory" [ref=e53] [cursor=pointer]:
+        - img [ref=e54]
+      - button "Spaces" [ref=e56] [cursor=pointer]:
+        - img [ref=e57]
+      - button "Agent profiles" [ref=e59] [cursor=pointer]:
+        - img [ref=e60]
+      - button "Todos" [ref=e63] [cursor=pointer]:
+        - img [ref=e64]
+      - button "Insights" [ref=e67] [cursor=pointer]:
+        - img [ref=e68]
+      - button "Logs" [ref=e69] [cursor=pointer]:
+        - img [ref=e70]
+      - button "Gmail" [ref=e73] [cursor=pointer]:
+        - img [ref=e74]
+      - button "Websearch" [ref=e77] [cursor=pointer]:
+        - img [ref=e78]
+      - button "Discord" [ref=e84] [cursor=pointer]:
+        - img [ref=e85]
+      - button "Appstore" [ref=e89] [cursor=pointer]:
+        - img [ref=e90]
+      - button "Sidebar ein-/ausklappen" [ref=e93] [cursor=pointer]:
+        - img [ref=e94]
+      - button "Settings" [ref=e96] [cursor=pointer]:
+        - img [ref=e97]
+    - generic [ref=e101]:
+      - complementary [ref=e102]:
+        - generic [ref=e103]:
+          - generic [ref=e105]: Chat
+          - button "New chat" [ref=e107] [cursor=pointer]:
+            - img [ref=e108]
+            - generic [ref=e109]: New chat
+          - generic [ref=e110]:
+            - img
+            - textbox "Filter conversations..." [ref=e111]
+          - generic [ref=e1492]:
+            - button "Favorites" [ref=e1493] [cursor=pointer]:
+              - img [ref=e1494]
+              - generic [ref=e1496]: Favorites
+            - button "Select" [ref=e1497] [cursor=pointer]:
+              - img [ref=e1498]
+              - generic [ref=e1500]: Select
+          - generic [ref=e121]:
+            - generic [ref=e226] [cursor=pointer]: Show 38 archived
+            - generic [ref=e227]:
+              - generic [ref=e228] [cursor=pointer]:
+                - generic [ref=e229]: ▾
+                - generic [ref=e230]: Today
+              - generic [ref=e232] [cursor=pointer]:
+                - generic [ref=e234]:
+                  - generic "Double-click to rename" [ref=e235]: test
+                  - generic [ref=e236]: 3m
+                - button "Conversation actions" [ref=e238]:
+                  - img [ref=e239]
+            - generic [ref=e243]:
+              - generic [ref=e244] [cursor=pointer]:
+                - generic [ref=e245]: ▾
+                - generic [ref=e246]: This week
+              - generic [ref=e247]:
+                - generic [ref=e248] [cursor=pointer]:
+                  - generic [ref=e250]:
+                    - generic "Double-click to rename" [ref=e251]: Smoke Reload Continuation
+                    - generic [ref=e252]: 2d
+                  - button "Conversation actions" [ref=e254]:
+                    - img [ref=e255]
+                - generic [ref=e259] [cursor=pointer]:
+                  - generic [ref=e261]:
+                    - generic "Double-click to rename" [ref=e262]: Smoke reload continuation
+                    - generic [ref=e263]: 2d
+                  - button "Conversation actions" [ref=e265]:
+                    - img [ref=e266]
+                - generic [ref=e270] [cursor=pointer]:
+                  - generic [ref=e272]:
+                    - generic "Double-click to rename" [ref=e273]: Smoke reload continuation
+                    - generic [ref=e274]: 2d
+                  - button "Conversation actions" [ref=e276]:
+                    - img [ref=e277]
+                - generic [ref=e281] [cursor=pointer]:
+                  - generic [ref=e283]:
+                    - generic "Double-click to rename" [ref=e284]: Smoke reload continuation
+                    - generic [ref=e285]: 2d
+                  - button "Conversation actions" [ref=e287]:
+                    - img [ref=e288]
+                - generic [ref=e292] [cursor=pointer]:
+                  - generic [ref=e294]:
+                    - generic "Double-click to rename" [ref=e295]: continue
+                    - generic [ref=e296]: 2d
+                  - button "Conversation actions" [ref=e298]:
+                    - img [ref=e299]
+                - generic [ref=e303] [cursor=pointer]:
+                  - generic [ref=e305]:
+                    - generic "Double-click to rename" [ref=e306]: Browser Tool Test After Patches
+                    - generic [ref=e307]: 2d
+                  - button "Conversation actions" [ref=e309]:
+                    - img [ref=e310]
+                - generic [ref=e314] [cursor=pointer]:
+                  - generic [ref=e316]:
+                    - generic "Double-click to rename" [ref=e317]: Untitled
+                    - generic [ref=e318]: 2d
+                  - button "Conversation actions" [ref=e320]:
+                    - img [ref=e321]
+                - generic [ref=e325] [cursor=pointer]:
+                  - generic [ref=e327]:
+                    - generic "Double-click to rename" [ref=e328]: ACES Autonomous Expansion System
+                    - generic [ref=e329]: 2d
+                  - button "Conversation actions" [ref=e331]:
+                    - img [ref=e332]
+                - generic [ref=e336] [cursor=pointer]:
+                  - generic [ref=e338]:
+                    - generic "Double-click to rename" [ref=e339]: Test der neuen Browser-Anbindung
+                    - generic [ref=e340]: 2d
+                  - button "Conversation actions" [ref=e342]:
+                    - img [ref=e343]
+            - generic [ref=e347]:
+              - generic [ref=e348] [cursor=pointer]:
+                - generic [ref=e349]: ▾
+                - generic [ref=e350]: Last week
+              - generic [ref=e351]:
+                - generic [ref=e352] [cursor=pointer]:
+                  - generic [ref=e354]:
+                    - generic "Double-click to rename" [ref=e355]: "Small Project: Blog Tool"
+                    - generic [ref=e356]: 1w
+                  - button "Conversation actions" [ref=e358]:
+                    - img [ref=e359]
+                - generic [ref=e363] [cursor=pointer]:
+                  - generic [ref=e365]:
+                    - generic "Double-click to rename" [ref=e366]: wie ist der status, finde 10 dinge die wir am projekt weiterarbe
+                    - generic [ref=e367]: 1w
+                  - button "Conversation actions" [ref=e369]:
+                    - img [ref=e370]
+                - generic [ref=e374] [cursor=pointer]:
+                  - generic [ref=e376]:
+                    - generic "Double-click to rename" [ref=e377]: GitHub Issue Triage
+                    - generic [ref=e378]: 1w
+                  - button "Conversation actions" [ref=e380]:
+                    - img [ref=e381]
+                - generic [ref=e385] [cursor=pointer]:
+                  - generic [ref=e387]:
+                    - generic "Double-click to rename" [ref=e388]: Telegram Integration Troubleshooting
+                    - generic [ref=e389]: 1w
+                  - button "Conversation actions" [ref=e391]:
+                    - img [ref=e392]
+                - generic [ref=e396] [cursor=pointer]:
+                  - generic [ref=e398]:
+                    - generic "Double-click to rename" [ref=e399]: Gateway Heartbeat Failure Status
+                    - generic [ref=e400]: 1w
+                  - button "Conversation actions" [ref=e402]:
+                    - img [ref=e403]
+                - generic [ref=e407] [cursor=pointer]:
+                  - generic [ref=e409]:
+                    - generic "Double-click to rename" [ref=e410]: Hermes Import Error Fix
+                    - generic [ref=e411]: 1w
+                  - button "Conversation actions" [ref=e413]:
+                    - img [ref=e414]
+                - generic [ref=e418] [cursor=pointer]:
+                  - generic [ref=e420]:
+                    - generic "Double-click to rename" [ref=e421]: Deprecated models in sidekick-agent repo
+                    - generic [ref=e422]: 1w
+                  - button "Conversation actions" [ref=e424]:
+                    - img [ref=e425]
+                - generic [ref=e429] [cursor=pointer]:
+                  - generic [ref=e431]:
+                    - generic "Double-click to rename" [ref=e432]: Ollama Fallback Key Setup
+                    - generic [ref=e433]: 1w
+                  - button "Conversation actions" [ref=e435]:
+                    - img [ref=e436]
+                - generic [ref=e440] [cursor=pointer]:
+                  - generic [ref=e442]:
+                    - generic "Double-click to rename" [ref=e443]: Zen Browser Open Source
+                    - generic [ref=e444]: 1w
+                  - button "Conversation actions" [ref=e446]:
+                    - img [ref=e447]
+                - generic [ref=e451] [cursor=pointer]:
+                  - generic [ref=e453]:
+                    - generic "Double-click to rename" [ref=e454]: Terminal PTY Error and Game Mode Status
+                    - generic [ref=e455]: 1w
+                  - button "Conversation actions" [ref=e457]:
+                    - img [ref=e458]
+                - generic [ref=e462] [cursor=pointer]:
+                  - generic [ref=e464]:
+                    - generic "Double-click to rename" [ref=e465]: MorphLLM kein systemweiter Workflow
+                    - generic [ref=e466]: 1w
+                  - button "Conversation actions" [ref=e468]:
+                    - img [ref=e469]
+                - generic [ref=e473] [cursor=pointer]:
+                  - generic [ref=e475]:
+                    - generic "Double-click to rename" [ref=e476]: Ollama Cloud Keys Agent Capacities
+                    - generic [ref=e477]: 1w
+                  - button "Conversation actions" [ref=e479]:
+                    - img [ref=e480]
+                - generic [ref=e484] [cursor=pointer]:
+                  - generic [ref=e486]:
+                    - generic "Double-click to rename" [ref=e487]: Morph Compression Rate Limit
+                    - generic [ref=e488]: 1w
+                  - button "Conversation actions" [ref=e490]:
+                    - img [ref=e491]
+                - generic [ref=e495] [cursor=pointer]:
+                  - generic [ref=e497]:
+                    - generic "Double-click to rename" [ref=e498]: Sidekick Hermes Legacy Code Audit
+                    - generic [ref=e499]: 1w
+                  - button "Conversation actions" [ref=e501]:
+                    - img [ref=e502]
+                - generic [ref=e506] [cursor=pointer]:
+                  - generic [ref=e508]:
+                    - generic "Double-click to rename" [ref=e509]: hi, folgendes problem. ich habe grad ein update gemacht am serve
+                    - generic [ref=e510]: 1w
+                  - button "Conversation actions" [ref=e512]:
+                    - img [ref=e513]
+                - generic [ref=e517] [cursor=pointer]:
+                  - generic [ref=e519]:
+                    - generic "Double-click to rename" [ref=e520]: Z.AI Provider Setup in Sidekick
+                    - generic [ref=e521]: 1w
+                  - button "Conversation actions" [ref=e523]:
+                    - img [ref=e524]
+                - generic [ref=e528] [cursor=pointer]:
+                  - generic [ref=e530]:
+                    - generic "Double-click to rename" [ref=e531]: Nova GLM-5.2 System Status Check-In
+                    - generic [ref=e532]: 1w
+                  - button "Conversation actions" [ref=e534]:
+                    - img [ref=e535]
+                - generic [ref=e539] [cursor=pointer]:
+                  - generic [ref=e541]:
+                    - generic "Double-click to rename" [ref=e542]: Nova and Cid Greeting
+                    - generic [ref=e543]: 1w
+                  - button "Conversation actions" [ref=e545]:
+                    - img [ref=e546]
+                - generic [ref=e550] [cursor=pointer]:
+                  - generic [ref=e552]:
+                    - generic "Double-click to rename" [ref=e553]: Sidekick WebUI Appstore Analyse
+                    - generic [ref=e554]: 1w
+                  - button "Conversation actions" [ref=e556]:
+                    - img [ref=e557]
+                - generic [ref=e561] [cursor=pointer]:
+                  - generic [ref=e563]:
+                    - generic "Forked from Z.AI Provider Setup in Sidekick":
+                      - img
+                    - generic "Double-click to rename" [ref=e564]: Z.AI Provider Setup in Sidekick (fork)
+                    - generic [ref=e565]: 1w
+                  - button "Conversation actions" [ref=e567]:
+                    - img [ref=e568]
+                - generic [ref=e572] [cursor=pointer]:
+                  - generic [ref=e574]:
+                    - generic "Double-click to rename" [ref=e575]: MiniMax Vision and Image Generation
+                    - generic [ref=e576]: 1w
+                  - button "Conversation actions" [ref=e578]:
+                    - img [ref=e579]
+                - generic [ref=e583] [cursor=pointer]:
+                  - generic [ref=e585]:
+                    - generic "Double-click to rename" [ref=e586]: Subagent Chat Interaction in WebUI
+                    - generic [ref=e587]: 1w
+                  - button "Conversation actions" [ref=e589]:
+                    - img [ref=e590]
+                - generic [ref=e594] [cursor=pointer]:
+                  - generic [ref=e596]:
+                    - generic "Double-click to rename" [ref=e597]: MiniMax HTTP 500 Server Error
+                    - generic [ref=e598]: 1w
+                  - button "Conversation actions" [ref=e600]:
+                    - img [ref=e601]
+                - generic [ref=e605] [cursor=pointer]:
+                  - generic [ref=e607]:
+                    - generic "Double-click to rename" [ref=e608]: Browser Control Tab Improvements
+                    - generic [ref=e609]: 1w
+                  - button "Conversation actions" [ref=e611]:
+                    - img [ref=e612]
+                - generic [ref=e616] [cursor=pointer]:
+                  - generic [ref=e618]:
+                    - generic "Double-click to rename" [ref=e619]: Morph Integration into Codebase
+                    - generic [ref=e620]: 1w
+                  - button "Conversation actions" [ref=e622]:
+                    - img [ref=e623]
+                - generic [ref=e627] [cursor=pointer]:
+                  - generic [ref=e629]:
+                    - generic "Double-click to rename" [ref=e630]: Sidekick Minimax Image Generation Skill
+                    - generic [ref=e631]: 1w
+                  - button "Conversation actions" [ref=e633]:
+                    - img [ref=e634]
+                - generic [ref=e638] [cursor=pointer]:
+                  - generic [ref=e640]:
+                    - generic "Double-click to rename" [ref=e641]: Minimax WebUI Integration Review
+                    - generic [ref=e642]: 1w
+                  - button "Conversation actions" [ref=e644]:
+                    - img [ref=e645]
+                - generic [ref=e649] [cursor=pointer]:
+                  - generic [ref=e651]:
+                    - generic "Double-click to rename" [ref=e652]: welches ist das beste subscrption llm api model. think minimax,
+                    - generic [ref=e653]: 1w
+                  - button "Conversation actions" [ref=e655]:
+                    - img [ref=e656]
+                - generic [ref=e660] [cursor=pointer]:
+                  - generic [ref=e662]:
+                    - generic "Double-click to rename" [ref=e663]: Persistent Goal Function Test
+                    - generic [ref=e664]: 1w
+                  - button "Conversation actions" [ref=e666]:
+                    - img [ref=e667]
+                - generic [ref=e671] [cursor=pointer]:
+                  - generic [ref=e673]:
+                    - generic "Double-click to rename" [ref=e674]: Session Start Reflection
+                    - generic [ref=e675]: 1w
+                  - button "Conversation actions" [ref=e677]:
+                    - img [ref=e678]
+                - generic [ref=e682] [cursor=pointer]:
+                  - generic [ref=e684]:
+                    - generic "Double-click to rename" [ref=e685]: GPU freigegeben und Continuity Check
+                    - generic [ref=e686]: 1w
+                  - button "Conversation actions" [ref=e688]:
+                    - img [ref=e689]
+            - generic [ref=e693]:
+              - generic [ref=e694] [cursor=pointer]:
+                - generic [ref=e695]: ▾
+                - generic [ref=e696]: Older
+              - generic [ref=e697]:
+                - generic [ref=e698] [cursor=pointer]:
+                  - generic [ref=e700]:
+                    - generic "Double-click to rename" [ref=e701]: Game Mode GPU Restriction Fix
+                    - generic [ref=e702]: 28. Juni
+                  - button "Conversation actions" [ref=e704]:
+                    - img [ref=e705]
+                - generic [ref=e709] [cursor=pointer]:
+                  - generic [ref=e711]:
+                    - generic "Double-click to rename" [ref=e712]: Custom Voice Not Listed After Add
+                    - generic [ref=e713]: 27. Juni
+                  - button "Conversation actions" [ref=e715]:
+                    - img [ref=e716]
+                - generic [ref=e720] [cursor=pointer]:
+                  - generic [ref=e722]:
+                    - generic "Double-click to rename" [ref=e723]: VRCFaceTracking LiveLink Module
+                    - generic [ref=e724]: 26. Juni
+                  - button "Conversation actions" [ref=e726]:
+                    - img [ref=e727]
+                - generic [ref=e731] [cursor=pointer]:
+                  - generic [ref=e733]:
+                    - generic "Double-click to rename" [ref=e734]: Apple App Programming Assistance
+                    - generic [ref=e735]: 26. Juni
+                  - button "Conversation actions" [ref=e737]:
+                    - img [ref=e738]
+                - generic [ref=e742] [cursor=pointer]:
+                  - generic [ref=e744]:
+                    - generic "Double-click to rename" [ref=e745]: Pause GPU tasks for gaming
+                    - generic [ref=e746]: 25. Juni
+                  - button "Conversation actions" [ref=e748]:
+                    - img [ref=e749]
+                - generic [ref=e753] [cursor=pointer]:
+                  - generic [ref=e755]:
+                    - generic "Double-click to rename" [ref=e756]: Portable Sidekick Engine auf USB Stick
+                    - generic [ref=e757]: 24. Juni
+                  - button "Conversation actions" [ref=e759]:
+                    - img [ref=e760]
+                - generic [ref=e764] [cursor=pointer]:
+                  - generic [ref=e766]:
+                    - generic "Double-click to rename" [ref=e767]: Hermes CLI to Sidekick Rebrand Fix
+                    - generic [ref=e768]: 23. Juni
+                  - button "Conversation actions" [ref=e770]:
+                    - img [ref=e771]
+                - generic [ref=e775] [cursor=pointer]:
+                  - generic [ref=e777]:
+                    - generic "Double-click to rename" [ref=e778]: Untitled
+                    - generic [ref=e779]: 21. Juni
+                  - button "Conversation actions" [ref=e781]:
+                    - img [ref=e782]
+                - generic [ref=e786] [cursor=pointer]:
+                  - generic [ref=e788]:
+                    - generic "Double-click to rename" [ref=e789]: Untitled
+                    - generic [ref=e790]: 21. Juni
+                  - button "Conversation actions" [ref=e792]:
+                    - img [ref=e793]
+                - generic [ref=e797] [cursor=pointer]:
+                  - generic [ref=e799]:
+                    - generic "Double-click to rename" [ref=e800]: LLM Connection Status 2026
+                    - generic [ref=e801]: 21. Juni
+                  - button "Conversation actions" [ref=e803]:
+                    - img [ref=e804]
+                - generic [ref=e808] [cursor=pointer]:
+                  - generic [ref=e810]:
+                    - generic "Double-click to rename" [ref=e811]: Dual Licensing for Sidekick Gig
+                    - generic [ref=e812]: 21. Juni
+                  - button "Conversation actions" [ref=e814]:
+                    - img [ref=e815]
+                - generic [ref=e819] [cursor=pointer]:
+                  - generic [ref=e821]:
+                    - generic "Double-click to rename" [ref=e822]: ich würde gerne meine
+                    - generic [ref=e823]: 20. Juni
+                  - button "Conversation actions" [ref=e825]:
+                    - img [ref=e826]
+                - generic [ref=e830] [cursor=pointer]:
+                  - generic [ref=e832]:
+                    - generic "Double-click to rename" [ref=e833]: hey nova ich schreib
+                    - generic [ref=e834]: 20. Juni
+                  - button "Conversation actions" [ref=e836]:
+                    - img [ref=e837]
+                - generic [ref=e841] [cursor=pointer]:
+                  - generic [ref=e843]:
+                    - generic "Double-click to rename" [ref=e844]: roland zorbach
+                    - generic [ref=e845]: 12. Juni
+                  - button "Conversation actions" [ref=e847]:
+                    - img [ref=e848]
+            - generic [ref=e852] [cursor=pointer]: Select
+            - generic [ref=e853]:
+              - generic [ref=e854]: Today
+              - generic [ref=e855]: (41)
+            - generic [ref=e856]:
+              - generic [ref=e857] [cursor=pointer]:
+                - generic [ref=e859]:
+                  - generic "Double-click to rename" [ref=e860]: test
+                  - generic [ref=e861]: 3m
+                - button "Conversation actions" [ref=e863]:
+                  - img [ref=e864]
+              - generic [ref=e868] [cursor=pointer]:
+                - generic [ref=e870]:
+                  - generic "Double-click to rename" [ref=e871]: Smoke Reload Continuation
+                  - generic [ref=e872]: 2d
+                - button "Conversation actions" [ref=e874]:
+                  - img [ref=e875]
+              - generic [ref=e879] [cursor=pointer]:
+                - generic [ref=e881]:
+                  - generic "Double-click to rename" [ref=e882]: Smoke reload continuation
+                  - generic [ref=e883]: 2d
+                - button "Conversation actions" [ref=e885]:
+                  - img [ref=e886]
+              - generic [ref=e890] [cursor=pointer]:
+                - generic [ref=e892]:
+                  - generic "Double-click to rename" [ref=e893]: Smoke reload continuation
+                  - generic [ref=e894]: 2d
+                - button "Conversation actions" [ref=e896]:
+                  - img [ref=e897]
+              - generic [ref=e901] [cursor=pointer]:
+                - generic [ref=e903]:
+                  - generic "Double-click to rename" [ref=e904]: Smoke reload continuation
+                  - generic [ref=e905]: 2d
+                - button "Conversation actions" [ref=e907]:
+                  - img [ref=e908]
+              - generic [ref=e912] [cursor=pointer]:
+                - generic [ref=e914]:
+                  - generic "Double-click to rename" [ref=e915]: continue
+                  - generic [ref=e916]: 2d
+                - button "Conversation actions" [ref=e918]:
+                  - img [ref=e919]
+              - generic [ref=e923] [cursor=pointer]:
+                - generic [ref=e925]:
+                  - generic "Double-click to rename" [ref=e926]: Browser Tool Test After Patches
+                  - generic [ref=e927]: 2d
+                - button "Conversation actions" [ref=e929]:
+                  - img [ref=e930]
+              - generic [ref=e934] [cursor=pointer]:
+                - generic [ref=e936]:
+                  - generic "Double-click to rename" [ref=e937]: Untitled
+                  - generic [ref=e938]: 2d
+                - button "Conversation actions" [ref=e940]:
+                  - img [ref=e941]
+              - generic [ref=e945] [cursor=pointer]:
+                - generic [ref=e947]:
+                  - generic "Double-click to rename" [ref=e948]: ACES Autonomous Expansion System
+                  - generic [ref=e949]: 2d
+                - button "Conversation actions" [ref=e951]:
+                  - img [ref=e952]
+              - generic [ref=e956] [cursor=pointer]:
+                - generic [ref=e958]:
+                  - generic "Double-click to rename" [ref=e959]: Test der neuen Browser-Anbindung
+                  - generic [ref=e960]: 2d
+                - button "Conversation actions" [ref=e962]:
+                  - img [ref=e963]
+              - generic [ref=e967] [cursor=pointer]:
+                - generic [ref=e969]:
+                  - generic "Double-click to rename" [ref=e970]: "Small Project: Blog Tool"
+                  - generic [ref=e971]: 1w
+                - button "Conversation actions" [ref=e973]:
+                  - img [ref=e974]
+              - generic [ref=e978] [cursor=pointer]:
+                - generic [ref=e980]:
+                  - generic "Double-click to rename" [ref=e981]: wie ist der status, finde 10 dinge die wir am projekt weiterarbe
+                  - generic [ref=e982]: 1w
+                - button "Conversation actions" [ref=e984]:
+                  - img [ref=e985]
+              - generic [ref=e989] [cursor=pointer]:
+                - generic [ref=e991]:
+                  - generic "Double-click to rename" [ref=e992]: GitHub Issue Triage
+                  - generic [ref=e993]: 1w
+                - button "Conversation actions" [ref=e995]:
+                  - img [ref=e996]
+              - generic [ref=e1000] [cursor=pointer]:
+                - generic [ref=e1002]:
+                  - generic "Double-click to rename" [ref=e1003]: Telegram Integration Troubleshooting
+                  - generic [ref=e1004]: 1w
+                - button "Conversation actions" [ref=e1006]:
+                  - img [ref=e1007]
+              - generic [ref=e1011] [cursor=pointer]:
+                - generic [ref=e1013]:
+                  - generic "Double-click to rename" [ref=e1014]: Gateway Heartbeat Failure Status
+                  - generic [ref=e1015]: 1w
+                - button "Conversation actions" [ref=e1017]:
+                  - img [ref=e1018]
+              - generic [ref=e1022] [cursor=pointer]:
+                - generic [ref=e1024]:
+                  - generic "Double-click to rename" [ref=e1025]: Hermes Import Error Fix
+                  - generic [ref=e1026]: 1w
+                - button "Conversation actions" [ref=e1028]:
+                  - img [ref=e1029]
+              - generic [ref=e1033] [cursor=pointer]:
+                - generic [ref=e1035]:
+                  - generic "Double-click to rename" [ref=e1036]: Deprecated models in sidekick-agent repo
+                  - generic [ref=e1037]: 1w
+                - button "Conversation actions" [ref=e1039]:
+                  - img [ref=e1040]
+              - generic [ref=e1044] [cursor=pointer]:
+                - generic [ref=e1046]:
+                  - generic "Double-click to rename" [ref=e1047]: Ollama Fallback Key Setup
+                  - generic [ref=e1048]: 1w
+                - button "Conversation actions" [ref=e1050]:
+                  - img [ref=e1051]
+              - generic [ref=e1055] [cursor=pointer]:
+                - generic [ref=e1057]:
+                  - generic "Double-click to rename" [ref=e1058]: Zen Browser Open Source
+                  - generic [ref=e1059]: 1w
+                - button "Conversation actions" [ref=e1061]:
+                  - img [ref=e1062]
+              - generic [ref=e1066] [cursor=pointer]:
+                - generic [ref=e1068]:
+                  - generic "Double-click to rename" [ref=e1069]: Terminal PTY Error and Game Mode Status
+                  - generic [ref=e1070]: 1w
+                - button "Conversation actions" [ref=e1072]:
+                  - img [ref=e1073]
+              - generic [ref=e1077] [cursor=pointer]:
+                - generic [ref=e1079]:
+                  - generic "Double-click to rename" [ref=e1080]: MorphLLM kein systemweiter Workflow
+                  - generic [ref=e1081]: 1w
+                - button "Conversation actions" [ref=e1083]:
+                  - img [ref=e1084]
+              - generic [ref=e1088] [cursor=pointer]:
+                - generic [ref=e1090]:
+                  - generic "Double-click to rename" [ref=e1091]: Ollama Cloud Keys Agent Capacities
+                  - generic [ref=e1092]: 1w
+                - button "Conversation actions" [ref=e1094]:
+                  - img [ref=e1095]
+              - generic [ref=e1099] [cursor=pointer]:
+                - generic [ref=e1101]:
+                  - generic "Double-click to rename" [ref=e1102]: Morph Compression Rate Limit
+                  - generic [ref=e1103]: 1w
+                - button "Conversation actions" [ref=e1105]:
+                  - img [ref=e1106]
+              - generic [ref=e1110] [cursor=pointer]:
+                - generic [ref=e1112]:
+                  - generic "Double-click to rename" [ref=e1113]: Sidekick Hermes Legacy Code Audit
+                  - generic [ref=e1114]: 1w
+                - button "Conversation actions" [ref=e1116]:
+                  - img [ref=e1117]
+              - generic [ref=e1121] [cursor=pointer]:
+                - generic [ref=e1123]:
+                  - generic "Double-click to rename" [ref=e1124]: hi, folgendes problem. ich habe grad ein update gemacht am serve
+                  - generic [ref=e1125]: 1w
+                - button "Conversation actions" [ref=e1127]:
+                  - img [ref=e1128]
+              - generic [ref=e1132] [cursor=pointer]:
+                - generic [ref=e1134]:
+                  - generic "Double-click to rename" [ref=e1135]: Z.AI Provider Setup in Sidekick
+                  - generic [ref=e1136]: 1w
+                - button "Conversation actions" [ref=e1138]:
+                  - img [ref=e1139]
+              - generic [ref=e1143] [cursor=pointer]:
+                - generic [ref=e1145]:
+                  - generic "Double-click to rename" [ref=e1146]: Nova GLM-5.2 System Status Check-In
+                  - generic [ref=e1147]: 1w
+                - button "Conversation actions" [ref=e1149]:
+                  - img [ref=e1150]
+              - generic [ref=e1154] [cursor=pointer]:
+                - generic [ref=e1156]:
+                  - generic "Double-click to rename" [ref=e1157]: Nova and Cid Greeting
+                  - generic [ref=e1158]: 1w
+                - button "Conversation actions" [ref=e1160]:
+                  - img [ref=e1161]
+              - generic [ref=e1165] [cursor=pointer]:
+                - generic [ref=e1167]:
+                  - generic "Double-click to rename" [ref=e1168]: Sidekick WebUI Appstore Analyse
+                  - generic [ref=e1169]: 1w
+                - button "Conversation actions" [ref=e1171]:
+                  - img [ref=e1172]
+              - generic [ref=e1176] [cursor=pointer]:
+                - generic [ref=e1178]:
+                  - generic "Forked from Z.AI Provider Setup in Sidekick":
+                    - img
+                  - generic "Double-click to rename" [ref=e1179]: Z.AI Provider Setup in Sidekick (fork)
+                  - generic [ref=e1180]: 1w
+                - button "Conversation actions" [ref=e1182]:
+                  - img [ref=e1183]
+              - generic [ref=e1187] [cursor=pointer]:
+                - generic [ref=e1189]:
+                  - generic "Double-click to rename" [ref=e1190]: MiniMax Vision and Image Generation
+                  - generic [ref=e1191]: 1w
+                - button "Conversation actions" [ref=e1193]:
+                  - img [ref=e1194]
+              - generic [ref=e1198] [cursor=pointer]:
+                - generic [ref=e1200]:
+                  - generic "Double-click to rename" [ref=e1201]: Subagent Chat Interaction in WebUI
+                  - generic [ref=e1202]: 1w
+                - button "Conversation actions" [ref=e1204]:
+                  - img [ref=e1205]
+              - generic [ref=e1209] [cursor=pointer]:
+                - generic [ref=e1211]:
+                  - generic "Double-click to rename" [ref=e1212]: MiniMax HTTP 500 Server Error
+                  - generic [ref=e1213]: 1w
+                - button "Conversation actions" [ref=e1215]:
+                  - img [ref=e1216]
+              - generic [ref=e1220] [cursor=pointer]:
+                - generic [ref=e1222]:
+                  - generic "Double-click to rename" [ref=e1223]: Browser Control Tab Improvements
+                  - generic [ref=e1224]: 1w
+                - button "Conversation actions" [ref=e1226]:
+                  - img [ref=e1227]
+              - generic [ref=e1231] [cursor=pointer]:
+                - generic [ref=e1233]:
+                  - generic "Double-click to rename" [ref=e1234]: Morph Integration into Codebase
+                  - generic [ref=e1235]: 1w
+                - button "Conversation actions" [ref=e1237]:
+                  - img [ref=e1238]
+              - generic [ref=e1242] [cursor=pointer]:
+                - generic [ref=e1244]:
+                  - generic "Double-click to rename" [ref=e1245]: Sidekick Minimax Image Generation Skill
+                  - generic [ref=e1246]: 1w
+                - button "Conversation actions" [ref=e1248]:
+                  - img [ref=e1249]
+              - generic [ref=e1253] [cursor=pointer]:
+                - generic [ref=e1255]:
+                  - generic "Double-click to rename" [ref=e1256]: Minimax WebUI Integration Review
+                  - generic [ref=e1257]: 1w
+                - button "Conversation actions" [ref=e1259]:
+                  - img [ref=e1260]
+              - generic [ref=e1264] [cursor=pointer]:
+                - generic [ref=e1266]:
+                  - generic "Double-click to rename" [ref=e1267]: welches ist das beste subscrption llm api model. think minimax,
+                  - generic [ref=e1268]: 1w
+                - button "Conversation actions" [ref=e1270]:
+                  - img [ref=e1271]
+              - generic [ref=e1275] [cursor=pointer]:
+                - generic [ref=e1277]:
+                  - generic "Double-click to rename" [ref=e1278]: Persistent Goal Function Test
+                  - generic [ref=e1279]: 1w
+                - button "Conversation actions" [ref=e1281]:
+                  - img [ref=e1282]
+              - generic [ref=e1286] [cursor=pointer]:
+                - generic [ref=e1288]:
+                  - generic "Double-click to rename" [ref=e1289]: Session Start Reflection
+                  - generic [ref=e1290]: 1w
+                - button "Conversation actions" [ref=e1292]:
+                  - img [ref=e1293]
+              - generic [ref=e1297] [cursor=pointer]:
+                - generic [ref=e1299]:
+                  - generic "Double-click to rename" [ref=e1300]: GPU freigegeben und Continuity Check
+                  - generic [ref=e1301]: 1w
+                - button "Conversation actions" [ref=e1303]:
+                  - img [ref=e1304]
+            - generic [ref=e1308]:
+              - generic [ref=e1309]: Older
+              - generic [ref=e1310]: (14)
+            - generic [ref=e1311]:
+              - generic [ref=e1312] [cursor=pointer]:
+                - generic [ref=e1314]:
+                  - generic "Double-click to rename" [ref=e1315]: Game Mode GPU Restriction Fix
+                  - generic [ref=e1316]: 28. Juni
+                - button "Conversation actions" [ref=e1318]:
+                  - img [ref=e1319]
+              - generic [ref=e1323] [cursor=pointer]:
+                - generic [ref=e1325]:
+                  - generic "Double-click to rename" [ref=e1326]: Custom Voice Not Listed After Add
+                  - generic [ref=e1327]: 27. Juni
+                - button "Conversation actions" [ref=e1329]:
+                  - img [ref=e1330]
+              - generic [ref=e1334] [cursor=pointer]:
+                - generic [ref=e1336]:
+                  - generic "Double-click to rename" [ref=e1337]: VRCFaceTracking LiveLink Module
+                  - generic [ref=e1338]: 26. Juni
+                - button "Conversation actions" [ref=e1340]:
+                  - img [ref=e1341]
+              - generic [ref=e1345] [cursor=pointer]:
+                - generic [ref=e1347]:
+                  - generic "Double-click to rename" [ref=e1348]: Apple App Programming Assistance
+                  - generic [ref=e1349]: 26. Juni
+                - button "Conversation actions" [ref=e1351]:
+                  - img [ref=e1352]
+              - generic [ref=e1356] [cursor=pointer]:
+                - generic [ref=e1358]:
+                  - generic "Double-click to rename" [ref=e1359]: Pause GPU tasks for gaming
+                  - generic [ref=e1360]: 25. Juni
+                - button "Conversation actions" [ref=e1362]:
+                  - img [ref=e1363]
+              - generic [ref=e1367] [cursor=pointer]:
+                - generic [ref=e1369]:
+                  - generic "Double-click to rename" [ref=e1370]: Portable Sidekick Engine auf USB Stick
+                  - generic [ref=e1371]: 24. Juni
+                - button "Conversation actions" [ref=e1373]:
+                  - img [ref=e1374]
+              - generic [ref=e1378] [cursor=pointer]:
+                - generic [ref=e1380]:
+                  - generic "Double-click to rename" [ref=e1381]: Hermes CLI to Sidekick Rebrand Fix
+                  - generic [ref=e1382]: 23. Juni
+                - button "Conversation actions" [ref=e1384]:
+                  - img [ref=e1385]
+              - generic [ref=e1389] [cursor=pointer]:
+                - generic [ref=e1391]:
+                  - generic "Double-click to rename" [ref=e1392]: Untitled
+                  - generic [ref=e1393]: 21. Juni
+                - button "Conversation actions" [ref=e1395]:
+                  - img [ref=e1396]
+              - generic [ref=e1400] [cursor=pointer]:
+                - generic [ref=e1402]:
+                  - generic "Double-click to rename" [ref=e1403]: Untitled
+                  - generic [ref=e1404]: 21. Juni
+                - button "Conversation actions" [ref=e1406]:
+                  - img [ref=e1407]
+              - generic [ref=e1411] [cursor=pointer]:
+                - generic [ref=e1413]:
+                  - generic "Double-click to rename" [ref=e1414]: LLM Connection Status 2026
+                  - generic [ref=e1415]: 21. Juni
+                - button "Conversation actions" [ref=e1417]:
+                  - img [ref=e1418]
+              - generic [ref=e1422] [cursor=pointer]:
+                - generic [ref=e1424]:
+                  - generic "Double-click to rename" [ref=e1425]: Dual Licensing for Sidekick Gig
+                  - generic [ref=e1426]: 21. Juni
+                - button "Conversation actions" [ref=e1428]:
+                  - img [ref=e1429]
+              - generic [ref=e1433] [cursor=pointer]:
+                - generic [ref=e1435]:
+                  - generic "Double-click to rename" [ref=e1436]: ich würde gerne meine
+                  - generic [ref=e1437]: 20. Juni
+                - button "Conversation actions" [ref=e1439]:
+                  - img [ref=e1440]
+              - generic [ref=e1444] [cursor=pointer]:
+                - generic [ref=e1446]:
+                  - generic "Double-click to rename" [ref=e1447]: hey nova ich schreib
+                  - generic [ref=e1448]: 20. Juni
+                - button "Conversation actions" [ref=e1450]:
+                  - img [ref=e1451]
+              - generic [ref=e1455] [cursor=pointer]:
+                - generic [ref=e1457]:
+                  - generic "Double-click to rename" [ref=e1458]: roland zorbach
+                  - generic [ref=e1459]: 12. Juni
+                - button "Conversation actions" [ref=e1461]:
+                  - img [ref=e1462]
+      - main [ref=e125]:
+        - generic [ref=e128]:
+          - generic [ref=e130]:
+            - heading "What can I help with?" [level=2] [ref=e131]
+            - paragraph [ref=e132]: Ask anything, run commands, explore files, or manage your scheduled tasks.
+            - generic [ref=e133]:
+              - button "What files are in this workspace?" [ref=e134] [cursor=pointer]:
+                - img [ref=e135]
+                - text: What files are in this workspace?
+              - button "What's on my schedule today?" [ref=e137] [cursor=pointer]:
+                - img [ref=e138]
+                - text: What's on my schedule today?
+              - button "Help me plan a small project." [ref=e141] [cursor=pointer]:
+                - img [ref=e142]
+                - text: Help me plan a small project.
+          - generic [ref=e145]:
+            - generic:
+              - region "Queued messages"
+            - generic [ref=e146]:
+              - generic [ref=e147]:
+                - generic [ref=e148]:
+                  - button "Review current state" [ref=e149] [cursor=pointer]: Review
+                  - button "Run tests" [ref=e150] [cursor=pointer]: Test
+                  - button "Install packages" [ref=e151] [cursor=pointer]: Install
+                  - button "Deploy to production" [ref=e152] [cursor=pointer]: Deploy
+                - generic [ref=e153]:
+                  - button "Browser drawer" [ref=e154] [cursor=pointer]:
+                    - img [ref=e155]
+                  - 'button "Workflow: approval off, reasoning xhigh, quick search, mcp 0/4 · 4 offline, Web auto, local review ready, subagents 0, model Deepseek V4 Flash, browser browser closed · locked. Click to show workflow status. Cmd/Ctrl+K opens the palette." [expanded] [ref=e1466] [cursor=pointer]':
+                    - generic [ref=e162]: off · xhigh · quick
+              - textbox "Message Nova…" [ref=e163]
+              - generic:
+                - button "Expand editor":
+                  - img
+                  - text: Expand
+              - generic [ref=e164]:
+                - generic [ref=e165]:
+                  - button "Choose File" [ref=e166]
+                  - button "Attach files" [ref=e167] [cursor=pointer]:
+                    - img [ref=e168]
+                  - button "Dictate" [ref=e170] [cursor=pointer]:
+                    - img [ref=e171]
+                  - button "Set a persistent goal" [ref=e174] [cursor=pointer]:
+                    - img [ref=e175]
+                  - button "Switch profile" [ref=e181] [cursor=pointer]:
+                    - img [ref=e183]
+                    - img [ref=e187]
+                  - generic [ref=e189]:
+                    - button "Deepseek V4 Flash (thinking) Ollama cloud" [ref=e1467] [cursor=pointer]:
+                      - img [ref=e192]
+                      - generic [ref=e195]:
+                        - generic [ref=e1468]: Deepseek V4 Flash (thinking)
+                        - generic [ref=e1469]: Ollama cloud
+                      - img [ref=e199]
+                    - combobox
+                  - button "xhigh" [ref=e1471] [cursor=pointer]:
+                    - img [ref=e1473]
+                    - generic [ref=e1476]: xhigh
+                    - img [ref=e1478]
+                - generic [ref=e201]:
+                  - button "Show context info" [ref=e202] [cursor=pointer]:
+                    - img [ref=e203]
+                  - button "Type a message to send" [disabled] [ref=e1480]:
+                    - img [ref=e1481]
+    - complementary:
+      - generic:
+        - generic:
+          - generic:
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button "Close workspace panel": ×
+        - generic: This workspace is empty.
+  - menu "Workflow palette" [ref=e1501]:
+    - generic [ref=e1502]: Workflow palette
+    - toolbar "Workflow filter presets" [ref=e1503]:
+      - button "All" [pressed] [ref=e1504] [cursor=pointer]
+      - button "Approval" [ref=e1505] [cursor=pointer]
+      - button "Reasoning" [ref=e1506] [cursor=pointer]
+      - button "Browser" [ref=e1507] [cursor=pointer]
+    - searchbox "Search workflow actions…" [active] [ref=e1508]
+    - menuitem [disabled] [ref=e1509]: Open first subagent
+    - menuitem "Show status" [ref=e1510] [cursor=pointer]
+    - menuitem "Compact layout" [ref=e1511] [cursor=pointer]:
+      - img [ref=e1512]
+      - text: Compact layout
+    - menuitem "Copy conversation" [ref=e1513] [cursor=pointer]
+    - menuitem "Run Python code in the session sandbox" [ref=e1514] [cursor=pointer]: Run exec prompt
+    - menuitem "Run local review chain" [ref=e1515] [cursor=pointer]
+    - menuitem "Prompt for local image generation" [ref=e1516] [cursor=pointer]: Generate image
+    - separator
+    - 'menuitem "Approval: manual" [ref=e1517] [cursor=pointer]'
+    - 'menuitem "Approval: smart" [ref=e1518] [cursor=pointer]'
+    - 'menuitem "Approval: off" [ref=e1519] [cursor=pointer]'
+    - separator
+    - menuitem [ref=e1520] [cursor=pointer]: Open model picker
+    - menuitem "Open reasoning picker" [ref=e1521] [cursor=pointer]
+    - menuitem [ref=e1522] [cursor=pointer]: Open thinking models
+    - separator
+    - menuitem "Open browser drawer" [ref=e1523] [cursor=pointer]
+    - menuitem "Enable browser control" [ref=e1524] [cursor=pointer]
+    - menuitem "Open browser actions" [ref=e1525] [cursor=pointer]
+    - menuitem "Send screenshot to chat" [ref=e1526] [cursor=pointer]
+    - menuitem "Send readable page text to chat" [ref=e1527] [cursor=pointer]
+    - menuitem "Send full page context to chat" [ref=e1528] [cursor=pointer]
+    - menuitem "Pin web backend to Firecrawl" [ref=e1529] [cursor=pointer]
+    - menuitem [ref=e1530] [cursor=pointer]: Open MCP settings
+    - menuitem "Open the browser research panel" [ref=e1531] [cursor=pointer]: Open research panel
+    - separator
+    - menuitem [ref=e1532] [cursor=pointer]: Open subagents (0 active)
+    - separator
+    - generic [ref=e1533]: Language
+    - toolbar "Language selection" [ref=e1534]:
+      - menuitem "English" [ref=e1535] [cursor=pointer]: EN
+      - menuitem "Deutsch" [ref=e1536] [cursor=pointer]: DE
+      - menuitem "Español" [ref=e1537] [cursor=pointer]: ES
+      - menuitem "Italiano" [ref=e1538] [cursor=pointer]: IT
+      - menuitem "Português" [ref=e1539] [cursor=pointer]: PT
+      - menuitem "Русский" [ref=e1540] [cursor=pointer]: RU
+      - menuitem "日本語" [ref=e1541] [cursor=pointer]: JP
+      - menuitem "한국어" [ref=e1542] [cursor=pointer]: KR
+      - menuitem "中文" [ref=e1543] [cursor=pointer]: ZH
+    - generic [ref=e1544]:
+      - generic [ref=e1545]: 27 actions · Show status
+      - generic [ref=e1546]: Enter to run · Esc to close · ↑↓ to move

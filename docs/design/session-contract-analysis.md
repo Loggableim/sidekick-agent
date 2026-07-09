@@ -1,17 +1,25 @@
-"""Session Contract — Analyse der Divergenz zwischen shared.sessions und web.api
+"""Session Contract - historical analysis of shared.sessions and web.api
 
 Stand: v0.2.0 (5f9edfe)
 Datum: 2026-06-07
 
-## Session-Modelle
+Historical note:
+- The current tree uses the same session storage root for both layers:
+  `~/.sidekick/state/webui/sessions/`.
+- `shared.sessions` now preserves unknown WebUI metadata fields on load/save,
+  so cross-surface round-trips do not drop extra JSON keys.
+- The models still differ in shape; this file documents the original split and
+  the remaining object-shape differences.
 
-### shared.sessions.Session (6 Felder)
+## Session models
+
+### shared.sessions.Session (6 fields)
 - session_id, title, workspace, model, messages, created_at, updated_at
-- Reines @dataclass
-- Persistenz: ~/.sidekick/state/webui/sessions/<id>.json
-- Nutzer: CLI (cli.cli), TUI, smoke tests
+- Plain `@dataclass`
+- Current persist path: `~/.sidekick/state/webui/sessions/<id>.json`
+- Users: CLI (`cli.cli`), TUI, smoke tests
 
-### web.api.models.Session (30+ Felder)
+### web.api.models.Session (30+ fields)
 - session_id, title, workspace, model, model_provider, messages, tool_calls,
   created_at, updated_at, pinned, archived, project_id, profile,
   input_tokens, output_tokens, estimated_cost, personality,
@@ -21,41 +29,41 @@ Datum: 2026-06-07
   gateway_routing*, llm_title_generated, parent_session_id,
   worktree_*, is_cli_session, source_tag, enabled_toolsets,
   composer_draft, workspace_slug, agent_slug
-- Runtime-Objekt mit JSON-Persistenz, Index, Lock- und Stream-Lifecycle
-- Persistenz: ~/.hermes/webui/sessions/<id>.json (ALT!)
-  Ziel: ~/.sidekick/state/webui/sessions/<id>.json (NEU)
-- Nutzer: WebUI (routes.py, streaming.py, session_ops.py)
+- Rich runtime object with JSON persistence, index, lock, and stream lifecycle
+- Current persist path: `~/.sidekick/state/webui/sessions/<id>.json`
+- Users: WebUI (`routes.py`, `streaming.py`, `session_ops.py`)
 
 ## Operationelle APIs
 
 ### retry_last(session_id) -> dict
-- shared: reine Logik: load → truncate → save
-- web.api: Gleiche Logik + WebUI-Lock (_get_session_agent_lock)
-  + stale-object-guard (SESSIONS.get) + context_messages truncation
+- shared: plain load -> truncate -> save
+- web.api: same logic + WebUI lock (`_get_session_agent_lock`)
+  + stale-object guard (`SESSIONS.get`) + `context_messages` truncation
 
 ### undo_last(session_id) -> dict
-- shared: reine Logik: load → truncate → save
-- web.api: Gleiche Logik + Lock + stale-guard + context_messages
+- shared: plain load -> truncate -> save
+- web.api: same logic + lock + stale guard + `context_messages`
 
 ### session_status(session_id) -> dict
-- shared: Reine Metadaten aus JSON
-- web.api: + stream_active check, pending_user_message check
+- shared: plain metadata from JSON
+- web.api: + `stream_active` check, `pending_user_message` check
 
-## Storage-Pfad-Divergenz
+## Storage note
 
-Beide schreiben Session-JSONs, aber in UNTERSCHIEDLICHE Verzeichnisse:
-- shared.sessions → ~/.sidekick/state/webui/sessions/
-- web.api.models → ~/.hermes/webui/sessions/
+Both layers now write the same directory:
+- shared.sessions -> `~/.sidekick/state/webui/sessions/`
+- web.api.models -> `~/.sidekick/state/webui/sessions/`
 
-Das ist der kritischste Punkt: Sessions aus der CLI sind im WebUI unsichtbar.
+The remaining difference is the object form, not the storage root.
 
-## Umstellungsplan
+## Historical plan
 
-1. web/api/config.py STATE_DIR auf kanonischen Pfad umstellen
-   (SIDEKICK_WEBUI_STATE_DIR > HERMES_WEBUI_STATE_DIR > ~/.sidekick/state/webui/)
-2. Legacy-Migration: Einmalige Kopie ~/.hermes/webui/sessions/* → neuer Pfad
-3. web/api/session_ops.py retry_last/undo_last/session_status als thin wrappers
-   die web.api.spezifische Locks hinzufügen, Logik aber an shared.sessions delegieren
-4. Env-Var-Chain: SIDEKICK_WEBUI_STATE_DIR hat Vorrang vor HERMES_WEBUI_STATE_DIR
-5. shared.runtime.web_state_dir() und web.api.config.STATE_DIR auf gleiche Logik
+1. `web/api/config.py` STATE_DIR on canonical path
+   (`SIDEKICK_WEBUI_STATE_DIR > HERMES_WEBUI_STATE_DIR > ~/.sidekick/state/webui/`)
+2. Legacy migration: one-time copy `~/.hermes/webui/sessions/*` -> new path
+3. `web/api/session_ops.py` thin wrappers over `shared.sessions`
+4. Env-var chain: `SIDEKICK_WEBUI_STATE_DIR` wins over `HERMES_WEBUI_STATE_DIR`
+5. `shared.runtime.web_state_dir()` and `web.api.config.STATE_DIR` on same logic
+
+All of the above are now implemented in the current tree.
 """

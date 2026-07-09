@@ -42,6 +42,26 @@ def test_telegram_fish_tts_payload_uses_hub_voice_reference_id():
     assert "voice_id" not in payload
 
 
+def test_telegram_fish_audio_key_uses_hermes_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+    adapter = TelegramAdapter(PlatformConfig(token="telegram-token"))
+    hermes_home = tmp_path / "hermes-home"
+    seen_paths = []
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.delenv("FISHAUDIO_API_KEY", raising=False)
+    monkeypatch.delenv("FISH_AUDIO_API_KEY", raising=False)
+
+    def fake_read(path):
+        seen_paths.append(path)
+        return "fish-key"
+
+    monkeypatch.setattr(adapter, "_read_fish_key_from_auth", fake_read)
+
+    assert adapter._fish_audio_key() == "fish-key"
+    assert seen_paths == [hermes_home / "auth.json"]
+
+
 def test_telegram_send_adds_voice_reply_after_voice_input(tmp_path):
     class FakeBot:
         def __init__(self):

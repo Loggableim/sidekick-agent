@@ -834,6 +834,41 @@ def test_goal_state_for_session_omits_cleared_goal(monkeypatch, tmp_path):
     assert goal_state_for_session("goal-session", space_slug="color") is None
 
 
+def test_webui_profile_goal_auto_pauses_after_repeated_judge_parse_failures(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.goals import evaluate_goal_after_turn, goal_command_payload, goal_state_for_session
+
+    monkeypatch.setattr(
+        "web.api.goals.judge_goal",
+        lambda *args, **kwargs: ("continue", "judge reply was not JSON", True),
+    )
+
+    profile_home = tmp_path / "home" / "profiles" / "default"
+    profile_home.mkdir(parents=True)
+
+    payload = goal_command_payload("goal-session", "Ship it", profile_home=profile_home)
+    assert payload["goal"]["status"] == "active"
+
+    decision = None
+    for _ in range(3):
+        decision = evaluate_goal_after_turn(
+            "goal-session",
+            "assistant reply",
+            profile_home=profile_home,
+        )
+
+    assert decision is not None
+    assert decision["status"] == "paused"
+    assert decision["should_continue"] is False
+
+    state = goal_state_for_session("goal-session", profile_home=profile_home)
+    assert state is not None
+    assert state["status"] == "paused"
+    assert "unparseable output" in str(state["paused_reason"])
+    assert "judge model" in decision["message"]
+
+
 def test_goal_command_status_omits_cleared_goal(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -1340,6 +1375,176 @@ def test_kanban_db_missing_env_vars_fall_back_to_default_home(monkeypatch, tmp_p
     assert boards and boards[0]["slug"] == "default"
 
 
+def test_kanban_db_honors_legacy_hermes_kanban_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_HOME", str(tmp_path / "legacy-kanban"))
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_DB", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_WORKSPACES_ROOT", raising=False)
+
+    from cli import kanban_db
+
+    assert kanban_db.kanban_home() == tmp_path / "legacy-kanban"
+    assert kanban_db.kanban_db_path() == tmp_path / "legacy-kanban" / "kanban.db"
+    assert kanban_db.workspaces_root() == tmp_path / "legacy-kanban" / "kanban" / "workspaces"
+
+
+def test_kanban_db_honors_legacy_board_and_direct_paths(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_BOARD", "blog-sprint")
+    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "legacy-db.sqlite"))
+    monkeypatch.setenv("HERMES_KANBAN_WORKSPACES_ROOT", str(tmp_path / "legacy-workspaces"))
+
+    from cli import kanban_db
+
+    assert kanban_db.get_current_board() == "blog-sprint"
+    assert kanban_db.kanban_db_path() == tmp_path / "legacy-db.sqlite"
+    assert kanban_db.workspaces_root() == tmp_path / "legacy-workspaces"
+
+
+def test_kanban_command_restores_board_override_env(monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    from cli import kanban, kanban_db
+
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.setattr(kanban_db, "board_exists", lambda slug: True)
+    monkeypatch.setattr(kanban_db, "init_db", lambda *args, **kwargs: None)
+
+    def _fake_list(args):
+        assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
+        return 0
+
+    monkeypatch.setattr(kanban, "_cmd_list", _fake_list)
+
+    result = kanban.kanban_command(SimpleNamespace(kanban_action="list", board="blog-sprint"))
+
+    assert result == 0
+    assert os.environ.get("SIDEKICK_KANBAN_BOARD") is None
+
+
+def test_kanban_command_restores_both_board_override_envs(monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    from cli import kanban, kanban_db
+
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-sidekick")
+    monkeypatch.setenv("HERMES_KANBAN_BOARD", "legacy-hermes")
+    monkeypatch.setattr(kanban_db, "board_exists", lambda slug: True)
+    monkeypatch.setattr(kanban_db, "init_db", lambda *args, **kwargs: None)
+
+    def _fake_list(args):
+        assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
+        assert os.environ["HERMES_KANBAN_BOARD"] == "blog-sprint"
+        return 0
+
+    monkeypatch.setattr(kanban, "_cmd_list", _fake_list)
+
+    result = kanban.kanban_command(SimpleNamespace(kanban_action="list", board="blog-sprint"))
+
+    assert result == 0
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-sidekick"
+    assert os.environ["HERMES_KANBAN_BOARD"] == "legacy-hermes"
+
+
+def test_pin_kanban_board_env_mirrors_legacy_board_env(monkeypatch):
+    import os
+
+    from cli import main
+
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_BOARD", "legacy-board")
+
+    main._pin_kanban_board_env()
+
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-board"
+    assert os.environ["HERMES_KANBAN_BOARD"] == "legacy-board"
+
+
+def test_pin_kanban_board_env_normalizes_existing_sidekick_board_env(monkeypatch):
+    import os
+
+    from cli import main
+
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "primary-board")
+    monkeypatch.setenv("HERMES_KANBAN_BOARD", "legacy-board")
+
+    main._pin_kanban_board_env()
+
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "primary-board"
+    assert os.environ["HERMES_KANBAN_BOARD"] == "primary-board"
+
+
+def test_kanban_bridge_conn_preserves_legacy_hermes_env(monkeypatch, tmp_path):
+    import os
+
+    from web.api import kanban_bridge
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.setenv("HERMES_KANBAN_HOME", "legacy-root")
+    monkeypatch.setattr(kanban_bridge, "_get_ws_kanban_home", lambda: str(workspace_root))
+
+    class _FakeKB:
+        def init_db(self, board=None):
+            assert os.environ["SIDEKICK_KANBAN_HOME"] == str(workspace_root)
+            assert os.environ["HERMES_KANBAN_HOME"] == str(workspace_root)
+
+        def connect(self, board=None):
+            return object()
+
+    monkeypatch.setattr(kanban_bridge, "_kb", lambda: _FakeKB())
+
+    conn = kanban_bridge._conn()
+
+    assert conn is not None
+    assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
+    assert os.environ.get("HERMES_KANBAN_HOME") == "legacy-root"
+
+
+def test_dispatcher_kanban_home_helpers_set_and_clear_both_env_vars(monkeypatch):
+    import os
+
+    from web.api import dispatcher
+
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+
+    dispatcher._set_space_kanban_home("space-root")
+
+    assert os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
+    assert os.environ["HERMES_KANBAN_HOME"] == "space-root"
+
+    dispatcher._clear_kanban_home()
+
+    assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
+    assert os.environ.get("HERMES_KANBAN_HOME") is None
+
+
+def test_dispatcher_kanban_home_override_restores_previous_env(monkeypatch):
+    from web.api import dispatcher
+
+    monkeypatch.setenv("SIDEKICK_KANBAN_HOME", "original-sidekick")
+    monkeypatch.setenv("HERMES_KANBAN_HOME", "original-hermes")
+
+    with dispatcher._kanban_home_override("space-root"):
+        assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
+        assert dispatcher.os.environ["HERMES_KANBAN_HOME"] == "space-root"
+
+    assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "original-sidekick"
+    assert dispatcher.os.environ["HERMES_KANBAN_HOME"] == "original-hermes"
+
+
 def test_kanban_board_list_reports_fallback_current_source(monkeypatch):
     from types import SimpleNamespace
     from web.api import kanban_bridge
@@ -1452,35 +1657,15 @@ def test_settings_navigation_and_locale_labels_are_i18n_driven():
     assert "settings_tab_preferences: 'Einstellungen'" in i18n_js
 
 
-def test_mobile_sidebar_is_forced_out_of_flex_flow():
+def test_desktop_sidebar_and_rightpanel_keep_flex_flow():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    assert "@media(max-width:640px)" in style_css
     assert ".sidebar{" in style_css
-    assert "position:fixed!important" in style_css
-    assert "left:-300px!important;" in style_css
-    assert "overflow:hidden!important" in style_css
-    assert "pointer-events:none!important" in style_css
-    assert "transform:none!important" in style_css
-    assert "transition:left .25s ease!important;" in style_css
-    assert ".sidebar.mobile-open{" in style_css
-    assert "transform:translate3d(300px,0,0)!important;" in style_css
-    assert "pointer-events:auto!important" in style_css
     assert ".rightpanel{" in style_css
-    assert "right:calc(-1 * var(--mobile-rightpanel-width))!important" in style_css
-    assert re.search(
-        r"\.rightpanel\{\s*"
-        r"--mobile-rightpanel-width:min\(300px,100vw\);\s*"
-        r"display:flex!important;\s*"
-        r"position:fixed!important;\s*"
-        r"right:calc\(-1 \* var\(--mobile-rightpanel-width\)\)!important;\s*"
-        r"top:calc\(38px \+ var\(--app-titlebar-safe-top,0px\)\)!important;",
-        style_css,
-        re.S,
-    )
-    assert "border-left-color:transparent!important" in style_css
-    assert ".rightpanel.mobile-open{" in style_css
-    assert "main.main{width:100%!important" in style_css
+    assert "@media(min-width:641px)" in style_css
+    assert ".sidebar{position:relative;}" in style_css
+    assert ".rightpanel{position:relative;}" in style_css
+    assert "main.main{width:100%!important;flex:1 1 auto!important;}" not in style_css
 
 
 def test_mobile_nav_click_closes_sidebar_and_keeps_hamburger_clickable():
@@ -1494,9 +1679,10 @@ def test_mobile_nav_click_closes_sidebar_and_keeps_hamburger_clickable():
     assert "sidebar.style.setProperty('left','-300px','important')" in Path("web/static/boot.js").read_text(encoding="utf-8")
     assert "sidebar.style.setProperty('transform',open?'translate3d(300px,0,0)':'none','important')" in Path("web/static/boot.js").read_text(encoding="utf-8")
     assert "sidebar.style.removeProperty('left')" in Path("web/static/boot.js").read_text(encoding="utf-8")
-    assert ".app-titlebar{position:relative;z-index:220!important;}" in style_css
-    assert ".app-titlebar-hamburger{position:relative;z-index:221!important;}" in style_css
-    assert "top:calc(38px + var(--app-titlebar-safe-top,0px))!important;" in style_css
+    assert ".app-titlebar{display:flex;align-items:center;justify-content:flex-start;height:38px;flex-shrink:0;background:var(--sidebar);border-bottom:1px solid var(--border);padding:0 12px;padding-top:var(--app-titlebar-safe-top);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0));box-sizing:content-box;font-size:12px;color:var(--muted);user-select:none;-webkit-app-region:drag;position:relative;z-index:20;}" in style_css
+    assert ".app-titlebar-hamburger{-webkit-app-region:no-drag;align-items:center;justify-content:center;background:none;border:none;color:var(--muted);border-radius:8px;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .15s,color .15s;}" in style_css
+    assert "z-index:220!important;" not in style_css
+    assert "z-index:221!important;" not in style_css
 
 
 def test_mobile_sidebar_and_workspace_panel_are_mutually_exclusive():
@@ -1516,34 +1702,36 @@ def test_mobile_sidebar_and_workspace_panel_are_mutually_exclusive():
     assert "_setWorkspacePanelMode('closed')" in toggle_body
 
 
-def test_mobile_titlebar_center_stays_in_flex_flow():
+def test_titlebar_center_stays_desktop_aligned():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    assert "@media(max-width:640px)" in style_css
-    assert ".app-titlebar-center{position:static;" in style_css
-    assert "transform:none;" in style_css
-    assert '.app-titlebar-center .mode-btn{position:relative;flex:0 0 28px;width:28px;min-width:28px;padding:3px 0;overflow:hidden;font-size:0;}' in style_css
-    assert '.app-titlebar-center .mode-btn[data-mode="action"]::before{content:"\\2394";}' in style_css
-    assert '.app-titlebar-center .mode-btn[data-mode="plan"]::before{content:"\\1F9E0";}' in style_css
-    assert ".app-titlebar-center{flex:0 0 42px;min-width:42px;}" in style_css
-    assert ".app-titlebar-center .mode-toggle{flex:0 0 42px;min-width:42px;}" in style_css
-    assert ".app-titlebar-center .mode-btn{flex-basis:18px;width:18px;min-width:18px;}" in style_css
-    assert ".app-titlebar-center .mode-btn::before{font-size:11px;}" in style_css
-    assert ".compact-toggle-btn{display:none!important;}" in style_css
-    assert ".titlebar-space-spacer{display:none;}" in style_css
-    assert ".titlebar-space{flex:0 1 auto;min-width:0;max-width:112px;margin-right:0;}" in style_css
-    assert ".titlebar-space-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}" in style_css
+    assert ".app-titlebar-center{position:absolute;left:calc(50% + (var(--workspace-sidebar-width) - var(--workspace-rightpanel-width)) / 2);top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;gap:8px;min-width:0;max-width:220px;-webkit-app-region:no-drag;z-index:8;}" in style_css
+    assert ".titlebar-space-spacer {" in style_css
+    assert "width: 60px;" in style_css
+    assert ".titlebar-space {" in style_css
+    assert "margin-right: 2px;" in style_css
+    assert "--space-color: var(--accent, #7c5cfc);" in style_css
+    assert "max-width: 184px;" in style_css
+    assert "overflow: visible;" in style_css
+    assert "transition: max-width .18s ease;" in style_css
+    assert ".titlebar-space-name {" in style_css
+    assert "max-width: 120px;" in style_css
+    assert "opacity: 1;" in style_css
+    assert "font-weight: 500;" in style_css
+    assert "color: var(--space-color);" in style_css
+    assert "transition: max-width .18s ease, opacity .12s ease, margin .18s ease;" in style_css
+    assert ".titlebar-space:hover .titlebar-space-name" not in style_css
+    assert ".titlebar-space-name{margin-left:2px;}" in style_css
 
 
-def test_mobile_titlebar_keeps_language_game_mode_and_hub_visible():
+def test_titlebar_actions_remain_visible_on_desktop():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
 
-    assert ".titlebar-actions{display:inline-flex!important;flex:0 0 auto;align-items:center;gap:2px;margin-right:0;}" in mobile_guard
-    assert ".titlebar-actions #btnCastToggle" not in mobile_guard
-    assert ".cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.88;}" in style_css
-    assert ".titlebar-actions #btnRebootSidekick," in mobile_guard
-    assert ".titlebar-actions #btnShutdownSidekick{display:none!important;}" in mobile_guard
+    assert ".titlebar-actions{display:flex;align-items:center;gap:2px;margin-right:4px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
+    assert ".titlebar-actions #btnCastToggle," in style_css
+    assert ".titlebar-actions #btnRebootSidekick," in style_css
+    assert ".titlebar-actions #btnShutdownSidekick{display:inline-flex!important;}" in style_css
+    assert ".titlebar-actions:hover #btnCastToggle," not in style_css
 
 
 def test_agents_dashboard_chat_docks_existing_chat_view_in_main_area():
@@ -1718,6 +1906,7 @@ def test_compact_layout_toggle_exposes_pressed_state():
     assert 'id="compactToggleBtn"' in index_html
     assert 'aria-label="Compact layout"' in index_html
     assert 'aria-pressed="false"' in index_html
+    assert "workflowRunHeaderAction('compact-layout')" in index_html
 
     toggle_start = ui_js.index("function toggleCompactLayout()")
     init_start = ui_js.index("function _initCompactLayout()")
@@ -1766,22 +1955,14 @@ def test_space_dropdown_selection_uses_delegated_container_click():
     assert "_bindSpaceDropdownSelection(dd);" in spaces_js[spaces_js.index("function _openSpaceDropdown") :]
 
 
-def test_mobile_sidebar_nav_uses_scrollable_touch_targets():
+def test_desktop_sidebar_nav_does_not_use_mobile_touch_compaction():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
-    assert ".sidebar-nav{overflow-x:auto!important;overflow-y:hidden!important;" in mobile_guard
-    assert "scrollbar-width:none;-webkit-overflow-scrolling:touch;" in mobile_guard
-    assert ".sidebar-nav::-webkit-scrollbar{display:none;}" in mobile_guard
-    assert (
-        ".sidebar-nav .nav-tab:not(.nav-tab-space){flex:0 0 44px!important;"
-        "width:44px!important;min-width:44px!important;min-height:44px!important;"
-        "padding:0!important;}"
-    ) in mobile_guard
-    assert (
-        ".sidebar-nav .nav-tab-space{flex:0 0 64px!important;"
-        "min-width:64px!important;min-height:44px!important;}"
-    ) in mobile_guard
+    assert ".sidebar-nav{overflow-x:auto!important;overflow-y:hidden!important;" not in style_css
+    assert "scrollbar-width:none;-webkit-overflow-scrolling:touch;" not in style_css
+    assert ".sidebar-nav::-webkit-scrollbar{display:none;}" not in style_css
+    assert ".sidebar-nav .nav-tab:not(.nav-tab-space){flex:0 0 44px!important;" not in style_css
+    assert ".sidebar-nav .nav-tab-space{flex:0 0 64px!important;" not in style_css
 
 
 def test_desktop_rail_owns_vertical_overflow():
@@ -1804,17 +1985,12 @@ def test_short_desktop_rail_compacts_navigation_buttons():
     assert 'html[data-rail-expanded="1"] .rail-btn{height:34px;min-height:34px;}' in style_css
 
 
-def test_mobile_open_sidebar_layers_above_rightpanel():
+def test_mobile_open_sidebar_layering_rules_stay_scoped_to_mobile_media():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
-    sidebar_open = re.search(r"\.sidebar\.mobile-open\{(?P<body>[^}]+)\}", mobile_guard)
-    rightpanel = re.search(r"\.rightpanel\{(?P<body>[^}]+)\}", mobile_guard)
-
-    assert sidebar_open, "mobile sidebar open rule should be present"
-    assert rightpanel, "mobile rightpanel rule should be present"
-    assert "z-index:230!important;" in sidebar_open.group("body")
-    assert "z-index:200!important;" in rightpanel.group("body")
+    assert "@media(max-width:640px)" in style_css
+    assert ".sidebar.mobile-open{left:0;}" in style_css
+    assert ".rightpanel.mobile-open{right:0!important;box-shadow:-4px 0 24px rgba(0,0,0,.4)!important;}" in style_css
 
 
 def test_space_selector_buttons_bind_before_async_space_load():
@@ -1885,16 +2061,10 @@ def test_mobile_composer_config_button_has_scroll_row_priority():
     ) in style_css
 
 
-def test_mobile_composer_config_layers_above_rightpanel():
+def test_mobile_composer_config_layering_rules_were_removed():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
-    assert ".rightpanel{" in mobile_guard
-    assert "z-index:200!important;" in mobile_guard
-    assert (
-        ".composer-wrap:has(.composer-mobile-config-panel.open){z-index:240!important;}"
-        in mobile_guard
-    )
+    assert ".composer-wrap:has(.composer-mobile-config-panel.open){z-index:240!important;}" not in style_css
 
 
 def test_browser_drawer_open_renders_as_fixed_bottom_sheet():
@@ -2623,6 +2793,7 @@ def test_cast_autostart_reuses_running_local_cockpit_without_launch(monkeypatch)
 
 def test_boot_uses_realistic_metadata_timeouts():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
 
     assert "_bootTimeout(api('/api/settings'),20000,'settings')" in boot_js
@@ -2630,6 +2801,8 @@ def test_boot_uses_realistic_metadata_timeouts():
     assert "_bootTimeout(loadWorkspaceList(),10000,'workspace list')" in boot_js
     assert "_bootTimeout(_loadActiveSpaceConfig(),8000,'space config')" in boot_js
     assert "_bootTimeout(loadOnboardingWizard(),8000,'onboarding')" in boot_js
+    assert "if (saved && !_bootMissingSession &&" in boot_js
+    assert "suppressMissingSessionMessage ? {logError:false} : undefined" in sessions_js
     assert "_withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces')" in spaces_js
 
 
@@ -3230,6 +3403,49 @@ def test_media_endpoint_serves_allowed_local_file(monkeypatch, tmp_path):
     assert handler.response_headers["content-type"] == "application/octet-stream"
 
 
+def test_media_endpoint_falls_back_to_hermes_home(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import quote, urlparse
+
+    from web.api import routes
+
+    hermes_home = tmp_path / "hermes-home"
+    hermes_home.mkdir()
+    media_file = hermes_home / "preview.txt"
+    media_file.write_text("hello from hermes home", encoding="utf-8")
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(
+        handler,
+        urlparse(f"/api/media?path={quote(str(media_file))}"),
+    )
+
+    assert handled is True
+    assert handler.status_code == 200
+    assert handler.wfile.getvalue() == b"hello from hermes home"
+
+
 def test_extension_url_list_caps_without_crashing(monkeypatch, tmp_path):
     from web.api import extensions
 
@@ -3393,12 +3609,22 @@ def test_preferences_controls_are_disabled_until_autosave_handlers_are_ready():
     assert bot_name < busy_end
 
 
+def test_provider_key_input_is_wrapped_in_a_form_for_enter_submit_semantics():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+
+    assert "const row=document.createElement('form');" in panels_js
+    assert "row.noValidate=true;" in panels_js
+    assert "row.addEventListener('submit',e=>{" in panels_js
+    assert "saveBtn.type='submit';" in panels_js
+
+
 def test_background_stream_requests_keep_owner_workspace():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
     sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
 
     assert "const scopedPath = (typeof _spaceScopedApiPath === 'function')" in sessions_js
-    assert "return await api(scopedPath, {signal: controller.signal})" in sessions_js
+    assert "const apiOptions = Object.assign({signal: controller.signal}, options || {});" in sessions_js
+    assert "return await api(scopedPath, apiOptions);" in sessions_js
     assert "msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}`,\n      _SESSION_MESSAGES_TIMEOUT_MS" in sessions_js
     assert "messages=1&resolve_model=0`,\n      _SESSION_MESSAGES_TIMEOUT_MS" in sessions_js
     assert "workspace_slug:ownerWorkspaceSlug" in messages_js
@@ -3641,6 +3867,21 @@ def test_asyncio_disconnect_exception_filter_delegates_real_errors():
     finally:
         asyncio.set_event_loop(old_loop)
         loop.close()
+
+
+def test_sse_write_disconnect_is_suppressed():
+    from web.api.streaming import _sse
+
+    class FailingWFile:
+        def write(self, data):
+            raise ConnectionResetError("client closed")
+
+        def flush(self):
+            raise AssertionError("flush should not run after a disconnect")
+
+    handler = SimpleNamespace(wfile=FailingWFile())
+
+    _sse(handler, "snapshot", {"ok": True})
 
 
 def test_query_token_only_authenticates_event_streams():

@@ -26,22 +26,27 @@ import threading
 import time
 from pathlib import Path
 
+from web.api._home import get_active_webui_home, get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # ── Root directory for all workspaces ─────────────────────────────────────────
 DEFAULT_WORKSPACE_SLUG = (os.getenv("SIDEKICK_WEBUI_DEFAULT_SPACE") or "").strip().lower() or "nova"
 
-WORKSPACES_ROOT = (
-    Path(
-        os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR")
-        or os.getenv(
-            "HERMES_WEBUI_WORKSPACES_DIR",
-            str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
-        )
-    )
-    .expanduser()
-    .resolve()
-)
+_DEFAULT_WORKSPACES_ROOT: Path = (get_webui_home() / "workspaces").expanduser().resolve()
+WORKSPACES_ROOT: Path = _DEFAULT_WORKSPACES_ROOT
+
+
+def _workspaces_root() -> Path:
+    configured = os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR") or os.getenv("HERMES_WEBUI_WORKSPACES_DIR", "")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if WORKSPACES_ROOT != _DEFAULT_WORKSPACES_ROOT:
+        return WORKSPACES_ROOT
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve() / "workspaces"
+    except Exception:
+        return get_webui_home() / "workspaces"
 
 
 # ── Workspace class ─────────────────────────────────────────────────────────────
@@ -57,7 +62,7 @@ class Workspace:
 
     @property
     def root(self) -> Path:
-        return WORKSPACES_ROOT / self.slug
+        return _workspaces_root() / self.slug
 
     @property
     def config_path(self) -> Path:
@@ -171,13 +176,15 @@ class Workspace:
 # ── Registry ───────────────────────────────────────────────────────────────────
 
 _WORKSPACE_CACHE: list[Workspace] | None = None
+_WORKSPACE_CACHE_ROOT: str | None = None
 _WORKSPACE_CACHE_TS: float = 0.0
 _CACHE_TTL: float = 5.0
 
 
 def _invalidate_cache() -> None:
-    global _WORKSPACE_CACHE, _WORKSPACE_CACHE_TS
+    global _WORKSPACE_CACHE, _WORKSPACE_CACHE_ROOT, _WORKSPACE_CACHE_TS
     _WORKSPACE_CACHE = None
+    _WORKSPACE_CACHE_ROOT = None
     _WORKSPACE_CACHE_TS = 0.0
 
 
@@ -195,14 +202,20 @@ def get_all_workspaces() -> list[Workspace]:
 
     Results are cached for ``_CACHE_TTL`` seconds.
     """
-    global _WORKSPACE_CACHE, _WORKSPACE_CACHE_TS
+    global _WORKSPACE_CACHE, _WORKSPACE_CACHE_ROOT, _WORKSPACE_CACHE_TS
     now = time.time()
-    if _WORKSPACE_CACHE is not None and (now - _WORKSPACE_CACHE_TS) < _CACHE_TTL:
+    current_root = str(_workspaces_root())
+    if (
+        _WORKSPACE_CACHE is not None
+        and _WORKSPACE_CACHE_ROOT == current_root
+        and (now - _WORKSPACE_CACHE_TS) < _CACHE_TTL
+    ):
         return _WORKSPACE_CACHE
 
     workspaces: list[Workspace] = []
-    if WORKSPACES_ROOT.is_dir():
-        for child in sorted(WORKSPACES_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    root = Path(current_root)
+    if root.is_dir():
+        for child in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if child.is_dir():
                 slug = child.name
                 name = slug  # default: slug == name
@@ -218,6 +231,7 @@ def get_all_workspaces() -> list[Workspace]:
         workspaces.append(ws)
 
     _WORKSPACE_CACHE = workspaces
+    _WORKSPACE_CACHE_ROOT = current_root
     _WORKSPACE_CACHE_TS = now
     return workspaces
 

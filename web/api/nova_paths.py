@@ -7,15 +7,20 @@ back to a stale repo-local ``home`` directory.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from web.api._home import get_active_webui_home, get_webui_home
+
+
+def _active_nova_home() -> Path:
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return get_webui_home()
 
 
 def get_nova_space_root() -> Path:
-    raw_home = (os.getenv("SIDEKICK_HOME") or "").strip()
-    if raw_home:
-        return Path(raw_home).expanduser() / "spaces" / "nova"
-    return Path(__file__).resolve().parents[2] / "home" / "spaces" / "nova"
+    return _active_nova_home() / "spaces" / "nova"
 
 
 def get_nova_session_start_path() -> Path:

@@ -16,6 +16,10 @@
 | v0.5.0 | Streaming, Diagnostics, macOS CI | ✅ |
 | **v0.6.0** | **Vertrauen, Vorzeigbarkeit, Konsistenz** | **⏳** |
 
+**Aktueller Stand:** Architecture-Overview, Config-Reference, Consolidation-Refresh,
+the branding regression audit, Windows CI, and a dedicated WebUI frontend
+contract test are now in the repo.
+
 ---
 
 ## Analyse: was fehlt noch?
@@ -32,9 +36,9 @@
 
 | Lücke | Impact |
 |-------|--------|
-| Windows CI inaktiv | Nutzer melden Windows-Probleme ungefiltert |
+| Windows CI aktiv | Windows smoke tests laufen jetzt in CI |
 | Kein automatisierter Hermes-Branding-Regressionstest | Könnte bei Änderungen again auftauchen |
-| Kein WebUI-Frontend-Test (JS-Logik) | Nur Python-Backend getestet |
+| Kein Browser-E2E-Test | Statische JS-Contracts sind jetzt abgedeckt |
 
 ### Produktqualität (🟢 Niedrig)
 
@@ -42,7 +46,7 @@
 |-------|--------|
 | Kein Dashboard-Redesign | Funktional, aber nicht „sleek" |
 | TUI nie interaktiv getestet | Nur Import-Smoke |
-| Session-Layer-Divergenz dokumentiert | Verständlich, aber nicht ideal |
+| Session-Layer-Divergenz reduziert | Verständlich, aber object models still differ |
 
 ---
 
@@ -147,5 +151,5 @@ Schritte:
 3. `docs/consolidation.md` ist auf aktuellen Stand (keine veraltete Migration)
 4. Windows CI läuft (mindestens CLI-Smoke-subset)
 5. Branding-Regressionstest failt bei neuen Hermes-Referenzen
-6. Smoke 19/19 (1 neuer Branding-Test)
+6. Smoke 21/21 (Branding + frontend contract)
 7. Kein LastBrowser, keine user-facing Hermes, keine neuen Features

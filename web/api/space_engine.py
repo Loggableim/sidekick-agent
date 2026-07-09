@@ -32,6 +32,8 @@ import threading
 import time
 from pathlib import Path
 
+from web.api._home import get_active_webui_home, get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -39,22 +41,36 @@ logger = logging.getLogger(__name__)
 _SPACES_ROOT_KEY = "HERMES_WEBUI_SPACES_DIR"
 _OLD_WORKSPACES_KEY = "HERMES_WEBUI_WORKSPACES_DIR"
 
-SPACES_ROOT: Path = Path(
-    os.getenv("SIDEKICK_WEBUI_SPACES_DIR")
-    or os.getenv(
-        _SPACES_ROOT_KEY,
-        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))) / "spaces"),
-    )
-).expanduser().resolve()
+_DEFAULT_SPACES_ROOT: Path = (get_webui_home() / "spaces").expanduser().resolve()
+SPACES_ROOT: Path = _DEFAULT_SPACES_ROOT
 
 # Old workspaces dir for backward compat
-_OLD_ROOT: Path = Path(
-    os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR")
-    or os.getenv(
-        _OLD_WORKSPACES_KEY,
-        str(Path(os.getenv("SIDEKICK_HOME") or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick"))) / "workspaces"),
-    )
-).expanduser().resolve()
+_DEFAULT_OLD_ROOT: Path = (get_webui_home() / "workspaces").expanduser().resolve()
+_OLD_ROOT: Path = _DEFAULT_OLD_ROOT
+
+
+def _spaces_root() -> Path:
+    configured = os.getenv("SIDEKICK_WEBUI_SPACES_DIR") or os.getenv(_SPACES_ROOT_KEY, "")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if SPACES_ROOT != _DEFAULT_SPACES_ROOT:
+        return SPACES_ROOT
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve() / "spaces"
+    except Exception:
+        return get_webui_home() / "spaces"
+
+
+def _old_root() -> Path:
+    configured = os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR") or os.getenv(_OLD_WORKSPACES_KEY, "")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    if _OLD_ROOT != _DEFAULT_OLD_ROOT:
+        return _OLD_ROOT
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve() / "workspaces"
+    except Exception:
+        return get_webui_home() / "workspaces"
 
 _AGENT_SLUG_RE = None  # lazy import
 
@@ -152,7 +168,7 @@ class Space:
 
     @property
     def root(self) -> Path:
-        return (self._custom_root or SPACES_ROOT) / self.slug
+        return (self._custom_root or _spaces_root()) / self.slug
 
     @property
     def config_path(self) -> Path:
@@ -370,13 +386,15 @@ class Space:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _SPACE_CACHE: list[Space] | None = None
+_SPACE_CACHE_ROOTS: tuple[str, str] | None = None
 _SPACE_CACHE_TS: float = 0.0
 _CACHE_TTL: float = 5.0
 
 
 def _invalidate_space_cache() -> None:
-    global _SPACE_CACHE, _SPACE_CACHE_TS
+    global _SPACE_CACHE, _SPACE_CACHE_ROOTS, _SPACE_CACHE_TS
     _SPACE_CACHE = None
+    _SPACE_CACHE_ROOTS = None
     _SPACE_CACHE_TS = 0.0
 
 
@@ -580,10 +598,12 @@ def _scan_fs_for_spaces() -> list[Space]:
     spaces: list[Space] = []
 
     # Primary: new spaces/ dir
-    roots_to_scan = [(SPACES_ROOT, False)]
+    current_spaces_root = _spaces_root()
+    current_old_root = _old_root()
+    roots_to_scan = [(current_spaces_root, False)]
     # Backward compat: old workspaces/ dir (never-create)
-    if _OLD_ROOT != SPACES_ROOT and _OLD_ROOT.is_dir():
-        roots_to_scan.append((_OLD_ROOT, True))
+    if current_old_root != current_spaces_root and current_old_root.is_dir():
+        roots_to_scan.append((current_old_root, True))
 
     for root, is_legacy in roots_to_scan:
         if not root.is_dir():
@@ -644,11 +664,17 @@ def _soft_migrate_workspace(space: Space, old_yaml: Path) -> None:
 
 def get_all_spaces() -> list[Space]:
     """List all spaces (cached)."""
-    global _SPACE_CACHE, _SPACE_CACHE_TS
+    global _SPACE_CACHE, _SPACE_CACHE_ROOTS, _SPACE_CACHE_TS
     now = time.time()
-    if _SPACE_CACHE is not None and (now - _SPACE_CACHE_TS) < _CACHE_TTL:
+    current_roots = (str(_spaces_root()), str(_old_root()))
+    if (
+        _SPACE_CACHE is not None
+        and _SPACE_CACHE_ROOTS == current_roots
+        and (now - _SPACE_CACHE_TS) < _CACHE_TTL
+    ):
         return _SPACE_CACHE
     _SPACE_CACHE = _scan_fs_for_spaces()
+    _SPACE_CACHE_ROOTS = current_roots
     _SPACE_CACHE_TS = now
     return _SPACE_CACHE
 
@@ -722,7 +748,7 @@ def delete_space(slug: str) -> bool:
         logger.warning("refusing to delete protected default space %s", slug)
         return False
     candidates = []
-    for root in (SPACES_ROOT, _OLD_ROOT):
+    for root in (_spaces_root(), _old_root()):
         path = root / slug
         if path.is_dir() and path not in candidates:
             candidates.append(path)

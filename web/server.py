@@ -11,6 +11,7 @@ import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 # ── Test-mode network isolation ─────────────────────────────────────────────
 # When `HERMES_WEBUI_TEST_NETWORK_BLOCK=1` is set in the environment, refuse
@@ -140,7 +141,7 @@ def _resolve_log_file():
     return str(STATE_DIR.parent / "webui.log")
 
 from web.api.auth import check_auth
-from web.api.config import HOST, PORT, STATE_DIR, SESSION_DIR, DEFAULT_WORKSPACE
+from web.api.config import HOST, PORT, STATE_DIR, SESSION_DIR, load_settings
 from web.api.helpers import j, get_profile_cookie
 from web.api.profiles import set_request_profile, clear_request_profile
 from web.api.routes import handle_delete, handle_get, handle_patch, handle_post
@@ -247,6 +248,11 @@ def create_server(host: str | None = None, port: int | None = None) -> QuietHTTP
         from web.api import models as models_mod
         models_mod._SESSION_LIST_CACHE.clear()
         models_mod._SESSION_LIST_CACHE_AT.clear()
+    except Exception:
+        pass
+    try:
+        from web.api.agents import init_agents_db
+        init_agents_db(config_mod.STATE_DIR, config_mod.SESSION_DIR)
     except Exception:
         pass
 
@@ -573,7 +579,8 @@ def main() -> None:
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
-    DEFAULT_WORKSPACE.mkdir(parents=True, exist_ok=True)
+    default_workspace = Path(load_settings().get("default_workspace") or (STATE_DIR / "workspace"))
+    default_workspace.mkdir(parents=True, exist_ok=True)
 
     _release_game_mode_resources_on_startup()
 

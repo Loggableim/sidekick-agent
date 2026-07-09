@@ -1,5 +1,4 @@
-# GitHub Actions CI for sidekick
-# Runs pytest unit tests + integration test on push/PR to master
+# GitHub Actions CI for Sidekick
 name: CI
 
 on:
@@ -13,9 +12,10 @@ env:
   PIP_NO_INPUT: "1"
 
 jobs:
-  test:
+  linux:
+    name: pytest (${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -36,8 +36,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip
-          pip install -e .[all]
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[web,all]" pytest
 
       - name: Run pytest (unit tests)
         run: |
@@ -46,3 +46,34 @@ jobs:
       - name: Run integration test
         run: |
           python test_integration.py
+
+  smoke:
+    name: smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[web,all]" pytest
+
+      - name: Run smoke suite
+        run: |
+          python tests/smoke_all.py

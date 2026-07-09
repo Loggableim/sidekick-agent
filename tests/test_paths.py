@@ -27,6 +27,7 @@ from shared.sessions import (
     load_session,
     new_session,
     sessions_dir,
+    session_status,
     update_session,
 )
 from web.server import create_server
@@ -309,6 +310,44 @@ def test_web_server_health_endpoint(monkeypatch, tmp_path):
         thread.join(timeout=5)
 
 
+def test_web_server_agents_list_endpoint_initializes_cleanly(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
+    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
+    server = create_server()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = server.server_address[:2]
+        with urllib.request.urlopen(f"http://{host}:{port}/api/agents/list", timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        assert isinstance(payload, dict)
+        assert payload.get("agents") is not None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_web_helpers_ignore_client_disconnects():
+    from web.api.helpers import j, t
+
+    class _BrokenWriter:
+        def write(self, body):
+            raise BrokenPipeError()
+
+    handler = SimpleNamespace(
+        headers={},
+        wfile=_BrokenWriter(),
+        send_response=lambda *args, **kwargs: None,
+        send_header=lambda *args, **kwargs: None,
+        end_headers=lambda: None,
+    )
+
+    j(handler, {"ok": True})
+    t(handler, "ok")
+
+
 def test_new_session_persists_to_web_state(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     session = new_session(title="Test Session", model="gpt-test")
@@ -321,6 +360,7 @@ def test_new_session_persists_to_web_state(monkeypatch, tmp_path):
 def test_list_sessions_returns_compact_rows(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     new_session(title="One")
+    monkeypatch.setattr(list_sessions, "_migrated", True, raising=False)
     rows = list_sessions()
     assert len(rows) == 1
     assert rows[0]["title"] == "One"
@@ -345,6 +385,58 @@ def test_append_message_updates_session(monkeypatch, tmp_path):
     assert updated is not None
     assert updated.messages[-1]["content"] == "Hello from web"
     assert updated.title == "Hello from web"
+
+
+def test_shared_sessions_preserve_webui_only_metadata(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    sess_dir = sessions_dir()
+    session_path = sess_dir / "rich-session.json"
+    payload = {
+        "session_id": "rich-session",
+        "title": "Rich Session",
+        "workspace": str(tmp_path / "workspace"),
+        "model": "gpt-test",
+        "messages": [{"role": "user", "content": "hello"}],
+        "created_at": 1.0,
+        "updated_at": 2.0,
+        "workspace_slug": "nova",
+        "agent_slug": "coding-agent",
+        "worktree_path": str(tmp_path / "worktree"),
+        "pending_user_message": "draft me",
+        "compression_anchor_summary": "summary",
+        "custom_note": "keep me",
+    }
+    session_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_session("rich-session")
+    assert loaded is not None
+    assert getattr(loaded, "_extra")["workspace_slug"] == "nova"
+    assert getattr(loaded, "_extra")["agent_slug"] == "coding-agent"
+    assert getattr(loaded, "_extra")["custom_note"] == "keep me"
+
+    monkeypatch.setattr(list_sessions, "_migrated", True, raising=False)
+    rows = list_sessions()
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == "rich-session"
+    assert rows[0]["title"] == "Rich Session"
+    assert rows[0]["workspace_slug"] == "nova"
+    assert rows[0]["agent_slug"] == "coding-agent"
+    assert rows[0]["custom_note"] == "keep me"
+
+    status = session_status("rich-session")
+    assert status["workspace"] == str(tmp_path / "workspace")
+    assert status["title"] == "Rich Session"
+    assert status["workspace_slug"] == "nova"
+    assert status["agent_slug"] == "coding-agent"
+    assert status["custom_note"] == "keep me"
+
+    updated = update_session("rich-session", title="Updated Rich Session")
+    assert updated is not None
+    saved = json.loads(session_path.read_text(encoding="utf-8"))
+    assert saved["title"] == "Updated Rich Session"
+    assert saved["workspace_slug"] == "nova"
+    assert saved["agent_slug"] == "coding-agent"
+    assert saved["custom_note"] == "keep me"
 
 
 def test_web_server_session_endpoints(monkeypatch, tmp_path):

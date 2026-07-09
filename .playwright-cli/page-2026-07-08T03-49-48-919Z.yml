@@ -1,0 +1,133 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e5]: Sidekick
+    - generic [ref=e6]:
+      - radiogroup "Composer mode" [ref=e7]:
+        - button "Action" [pressed] [ref=e8] [cursor=pointer]
+        - button "🧠 Plan" [ref=e9] [cursor=pointer]
+      - button "Compact layout" [ref=e10] [cursor=pointer]:
+        - img [ref=e11]
+    - button "📁 nova" [ref=e13] [cursor=pointer]:
+      - generic [ref=e14]: 📁
+      - generic [ref=e15]: nova
+      - img [ref=e16]
+    - 'button "Game Mode: local GPU allowed" [ref=e19] [cursor=pointer]':
+      - img [ref=e20]
+  - generic [ref=e22]:
+    - navigation "Primary navigation" [ref=e23]:
+      - button "Chat" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+      - button "Tasks" [ref=e27] [cursor=pointer]:
+        - img [ref=e28]
+      - button "Kanban" [ref=e30] [cursor=pointer]:
+        - img [ref=e31]
+      - button "Skills" [ref=e33] [cursor=pointer]:
+        - img [ref=e34]
+      - button "Agents" [ref=e38] [cursor=pointer]:
+        - img [ref=e39]
+      - button "Memory" [ref=e42] [cursor=pointer]:
+        - img [ref=e43]
+      - button "Spaces" [ref=e45] [cursor=pointer]:
+        - img [ref=e46]
+      - button "Agent profiles" [ref=e48] [cursor=pointer]:
+        - img [ref=e49]
+      - button "Todos" [ref=e52] [cursor=pointer]:
+        - img [ref=e53]
+      - button "Insights" [ref=e56] [cursor=pointer]:
+        - img [ref=e57]
+      - button "Logs" [ref=e58] [cursor=pointer]:
+        - img [ref=e59]
+      - button "Gmail" [ref=e62] [cursor=pointer]:
+        - img [ref=e63]
+      - button "Websearch" [ref=e66] [cursor=pointer]:
+        - img [ref=e67]
+      - button "Discord" [ref=e73] [cursor=pointer]:
+        - img [ref=e74]
+      - button "Appstore" [ref=e78] [cursor=pointer]:
+        - img [ref=e79]
+      - button "Sidebar ein-/ausklappen" [ref=e82] [cursor=pointer]:
+        - img [ref=e83]
+      - button "Settings" [ref=e85] [cursor=pointer]:
+        - img [ref=e86]
+    - generic [ref=e90]:
+      - complementary [ref=e91]:
+        - generic [ref=e92]:
+          - generic [ref=e94]: Chat
+          - button "New chat" [ref=e96] [cursor=pointer]:
+            - img [ref=e97]
+            - generic [ref=e98]: New chat
+          - generic [ref=e99]:
+            - img
+            - textbox "Filter conversations..." [ref=e100]
+          - generic [ref=e101]:
+            - button "Favorites" [ref=e102] [cursor=pointer]:
+              - img [ref=e103]
+              - generic [ref=e105]: Favorites
+            - button "Select" [ref=e106] [cursor=pointer]:
+              - img [ref=e107]
+              - generic [ref=e109]: Select
+      - main [ref=e114]:
+        - generic [ref=e117]:
+          - generic [ref=e119]:
+            - heading "What can I help with?" [level=2] [ref=e120]
+            - paragraph [ref=e121]: Ask anything, run commands, explore files, or manage your scheduled tasks.
+            - generic [ref=e122]:
+              - button "What files are in this workspace?" [ref=e123] [cursor=pointer]:
+                - img [ref=e124]
+                - text: What files are in this workspace?
+              - button "What's on my schedule today?" [ref=e126] [cursor=pointer]:
+                - img [ref=e127]
+                - text: What's on my schedule today?
+              - button "Help me plan a small project." [ref=e130] [cursor=pointer]:
+                - img [ref=e131]
+                - text: Help me plan a small project.
+          - generic [ref=e134]:
+            - generic:
+              - region "Queued messages"
+            - generic [ref=e135]:
+              - 'button "Workflow: approval manual, reasoning default, quick search, mcp unknown, Web auto, local review ready, subagents, model model, browser browser closed · locked. Click to show workflow status. Cmd/Ctrl+K opens the palette." [ref=e139] [cursor=pointer]':
+                - generic [ref=e141]: manual · default · quick
+              - generic [ref=e142]:
+                - button "Review current state" [ref=e143] [cursor=pointer]: Review
+                - button "Run tests" [ref=e144] [cursor=pointer]: Test
+                - button "Install packages" [ref=e145] [cursor=pointer]: Install
+                - button "Deploy to production" [ref=e146] [cursor=pointer]: Deploy
+              - textbox "Message Nova…" [ref=e147]
+              - generic:
+                - button "Expand editor":
+                  - img
+                  - text: Expand
+              - generic [ref=e148]:
+                - generic [ref=e149]:
+                  - button "Choose File" [ref=e150]
+                  - button "Attach files" [ref=e151] [cursor=pointer]:
+                    - img [ref=e152]
+                  - button "Dictate" [ref=e154] [cursor=pointer]:
+                    - img [ref=e155]
+                  - button "Set a persistent goal" [ref=e158] [cursor=pointer]:
+                    - img [ref=e159]
+                  - button "Switch profile" [ref=e165] [cursor=pointer]:
+                    - img [ref=e167]
+                    - img [ref=e171]
+                - generic [ref=e173]:
+                  - button "Show context info" [ref=e174] [cursor=pointer]:
+                    - img [ref=e175]
+                  - button [disabled] [ref=e177]:
+                    - img [ref=e178]
+    - complementary:
+      - generic:
+        - generic:
+          - generic:
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button:
+              - img
+            - button "Close workspace panel": ×

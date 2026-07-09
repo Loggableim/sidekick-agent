@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
+from web.api._home import get_webui_home
+
 if TYPE_CHECKING:
     from runtime.credential_pool import CredentialPool
 
@@ -42,11 +44,11 @@ TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
 def _resolve_state_dir_from_env() -> Path:
-    configured_home = os.getenv("SIDEKICK_HOME")
+    configured_home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
     default_state = (
         Path(configured_home).expanduser() / "state" / "webui"
         if configured_home
-        else Path.home() / ".sidekick" / "state"
+        else get_webui_home() / "state"
     )
     return (
         Path(
@@ -312,7 +314,7 @@ def _get_config_path() -> Path:
 
         return get_active_hermes_home() / "config.yaml"
     except ImportError:
-        return HOME / ".sidekick" / "config.yaml"
+        return get_webui_home() / "config.yaml"
 
 
 _WEBUI_SESSION_SAVE_MODES = {"deferred", "eager"}
@@ -1874,7 +1876,7 @@ def model_with_provider_context(model_id: str, model_provider: str | None = None
 def get_effective_default_model(config_data: dict | None = None) -> str:
     """Resolve the effective Hermes default model from config, then env overrides."""
     active_cfg = config_data if config_data is not None else cfg
-    default_model = DEFAULT_MODEL
+    default_model = os.getenv("SIDEKICK_WEBUI_DEFAULT_MODEL")
 
     model_cfg = active_cfg.get("model", {})
     if isinstance(model_cfg, str):
@@ -4448,6 +4450,7 @@ def _normalize_appearance(theme, skin) -> tuple[str, str]:
 def load_settings() -> dict:
     """Load settings from disk, merging with defaults for any missing keys."""
     settings = dict(_SETTINGS_DEFAULTS)
+    settings["default_workspace"] = str(resolve_default_workspace())
     stored = None
     try:
         settings_exists = SETTINGS_FILE.exists()

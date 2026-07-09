@@ -131,7 +131,7 @@ def _apply_portable_home_default() -> None:
         return
 
     os.environ["SIDEKICK_HOME"] = str(portable_home)
-    os.environ["SIDEKICK_HOME"] = str(portable_home)
+    os.environ["HERMES_HOME"] = str(portable_home)
 
 
 _apply_portable_home_default()
@@ -219,6 +219,7 @@ def _apply_profile_override() -> None:
             )
             return
         os.environ["SIDEKICK_HOME"] = hermes_home
+        os.environ["HERMES_HOME"] = hermes_home
         # Strip the flag from argv so argparse doesn't choke
         if consume > 0:
             for i, arg in enumerate(argv):
@@ -1019,7 +1020,7 @@ def _ensure_tui_node() -> None:
     if not helper.is_file():
         return
 
-    hermes_home = os.environ.get("SIDEKICK_HOME") or str(Path.home() / ".hermes")
+    hermes_home = os.environ.get("SIDEKICK_HOME") or os.environ.get("HERMES_HOME") or str(Path.home() / ".hermes")
     try:
         # Helper writes logs to stderr; we ask bash to print `command -v node`
         # on stdout once ensure_node succeeds. Subshell PATH edits don't leak
@@ -1195,11 +1196,15 @@ def _launch_tui(
     env.setdefault("HERMES_PYTHON", sys.executable)
     env.setdefault("HERMES_CWD", os.getcwd())
     env.setdefault("NODE_ENV", "development" if tui_dev else "production")
+    from cli.config import get_worktree_settings
+
+    worktree_settings = get_worktree_settings()
 
     wt_info = None
-    if worktree:
+    use_worktree = worktree or worktree_settings["enabled"]
+    if use_worktree:
         try:
-            from cli import (
+            from cli.cli import (
                 _cleanup_worktree,
                 _git_repo_root,
                 _prune_stale_worktrees,
@@ -1285,7 +1290,7 @@ def _launch_tui(
             os.unlink(active_session_file)
         except OSError:
             pass
-        if wt_info:
+        if wt_info and worktree_settings["cleanup_on_exit"]:
             try:
                 _cleanup_worktree(wt_info)
             except Exception:
@@ -1305,12 +1310,17 @@ def _pin_kanban_board_env() -> None:
     calls hit board B (#20074). Pinning at chat boot mirrors what the
     dispatcher already does for spawned workers.
     """
-    if os.environ.get("SIDEKICK_KANBAN_BOARD"):
+    current_board = os.environ.get("SIDEKICK_KANBAN_BOARD") or os.environ.get("HERMES_KANBAN_BOARD")
+    if current_board:
+        os.environ["SIDEKICK_KANBAN_BOARD"] = current_board
+        os.environ["HERMES_KANBAN_BOARD"] = current_board
         return
     try:
         from cli.kanban_db import get_current_board
 
-        os.environ["SIDEKICK_KANBAN_BOARD"] = get_current_board()
+        current_board = get_current_board()
+        os.environ["SIDEKICK_KANBAN_BOARD"] = current_board
+        os.environ["HERMES_KANBAN_BOARD"] = current_board
     except Exception:
         pass
 

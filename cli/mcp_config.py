@@ -21,6 +21,7 @@ from cli.config import (
     save_config,
     get_env_value,
     save_env_value,
+    _collect_unresolved_env_refs,
     get_sidekick_home,  # noqa: F401 — used by test mocks
 )
 from cli.colors import Colors, color
@@ -209,6 +210,13 @@ def _probe_single_server(
     )
 
     _ensure_mcp_loop()
+
+    unresolved = _collect_unresolved_env_refs(config)
+    if unresolved:
+        raise ValueError(
+            f"Server '{name}' has unresolved config placeholder(s): "
+            f"{', '.join(unresolved)}"
+        )
 
     tools_found: List[Tuple[str, str]] = []
 
@@ -575,6 +583,13 @@ def cmd_mcp_test(args):
     # Show auth info (masked)
     auth_type = cfg.get("auth", "")
     headers = cfg.get("headers", {})
+    unresolved = _collect_unresolved_env_refs(cfg)
+    if unresolved:
+        _error(
+            "Auth: missing environment variable(s): "
+            + ", ".join(unresolved)
+        )
+        return
     if auth_type == "oauth":
         _info("Auth: OAuth 2.1 PKCE")
     elif headers:

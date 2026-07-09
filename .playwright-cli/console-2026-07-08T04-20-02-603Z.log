@@ -1,0 +1,6 @@
+[     156ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4dcfd4:1480
+[     164ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4dcfd4:1181
+[     178ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/does-not-exist-12345?cachebust=1783477607091:0
+[  327816ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4dd121:1480
+[  327822ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4dd121:1181
+[  327830ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/9d1fcbdc5525?cachebust=1783477607091:0

@@ -258,8 +258,8 @@ async function loadDir(path){
 }
 
 async function _refreshGitBadge(){
-  const badge=$('gitBadge');
-  if(!badge||!S.session)return;
+  const badges=[$('gitBadge'),$('composerGitBadge')].filter(Boolean);
+  if(!badges.length||!S.session)return;
   try{
     const data=await api(`/api/git-info?session_id=${encodeURIComponent(S.session.session_id)}`);
     if(data.git&&data.git.is_git){
@@ -268,14 +268,18 @@ async function _refreshGitBadge(){
       if(g.dirty>0) text+=` \u00b7 ${g.dirty}\u2206`; // middot + delta
       if(g.behind>0) text+=` \u2193${g.behind}`;
       if(g.ahead>0) text+=` \u2191${g.ahead}`;
-      badge.textContent=text;
-      badge.className='git-badge'+(g.dirty>0?' dirty':'');
-      badge.style.display='';
+      badges.forEach(badge=>{
+        badge.textContent=text;
+        badge.className='git-badge'+(g.dirty>0?' dirty':'');
+        badge.style.display='';
+      });
     } else {
-      badge.style.display='none';
-      badge.textContent='';
+      badges.forEach(badge=>{
+        badge.style.display='none';
+        badge.textContent='';
+      });
     }
-  }catch(e){badge.style.display='none';}
+  }catch(e){badges.forEach(badge=>{badge.style.display='none';});}
 }
 
 function navigateUp(){

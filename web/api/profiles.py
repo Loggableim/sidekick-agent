@@ -17,6 +17,8 @@ import sys
 import threading
 from pathlib import Path
 
+from web.api._home import get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # ── Constants (match hermes_cli.profiles upstream) ─────────────────────────
@@ -70,9 +72,8 @@ def _resolve_base_sidekick_home() -> Path:
 
     Resolution order:
       1. SIDEKICK_BASE_HOME env var (set explicitly, highest priority)
-      2. SIDEKICK_HOME env var — but only if it does NOT look like a profile subdir
-         (i.e. its parent is not named 'profiles').  This handles test isolation
-         where SIDEKICK_HOME is set to an isolated test state dir.
+      2. SIDEKICK_HOME / HERMES_HOME env vars, normalized through the shared
+         WebUI home resolver and then unwrapped from any profile subdir.
       3. ~/.sidekick (always-correct default)
 
     The bug this prevents: if SIDEKICK_HOME has already been mutated to
@@ -91,13 +92,7 @@ def _resolve_base_sidekick_home() -> Path:
     if base_override:
         return _unwrap_profile_home_to_base(Path(base_override).expanduser())
 
-    hermes_home = (os.getenv('SIDEKICK_HOME') or '').strip()
-    if hermes_home:
-        p = Path(hermes_home).expanduser()
-        # If HERMES_HOME points to a profiles/ subdir, walk up two levels to the base
-        return _unwrap_profile_home_to_base(p)
-
-    return Path.home() / '.sidekick'
+    return _unwrap_profile_home_to_base(get_webui_home())
 
 _DEFAULT_SIDEKICK_HOME = _resolve_base_sidekick_home()
 
@@ -643,7 +638,63 @@ def _set_hermes_home(home: Path):
     os.environ['SIDEKICK_HOME'] = str(home)
     os.environ['HERMES_HOME'] = str(home)
 
+    try:
+        from web.api import config as _config
+
+        _config.refresh_runtime_paths_from_env()
+    except Exception:
+        logger.debug("Failed to refresh web.api.config runtime paths")
+
     _patch_skill_home_modules(home)
+
+    try:
+        from web.api import agent_workspace as _agent_workspace
+
+        _agent_workspace.HERMES_HOME = home
+        _agent_workspace.WORKSPACES_ROOT = home / "workspaces"
+    except Exception:
+        logger.debug("Failed to patch web.api.agent_workspace home caches")
+
+    try:
+        from web.api import oauth as _oauth
+
+        _oauth.AUTH_JSON_PATH = home / "auth.json"
+    except Exception:
+        logger.debug("Failed to patch web.api.oauth auth.json cache")
+
+    try:
+        from web.api import appstore as _appstore
+
+        _appstore._SIDEKICK_HOME = home
+        _appstore._HOME_DIR = home
+        _appstore._APPS_DIR = home / "appstore"
+        _appstore._INSTALLED_FILE = _appstore._APPS_DIR / ".installed.json"
+        _appstore._ENV_FILE = home / ".env"
+        _appstore._CONFIG_FILE = home / "config.yaml"
+        _appstore._SPACES_ROOT = home / "spaces"
+    except Exception:
+        logger.debug("Failed to patch web.api.appstore home caches")
+
+    try:
+        from web.api import space_engine as _space_engine
+
+        _space_engine.SPACES_ROOT = home / "spaces"
+        _space_engine._OLD_ROOT = home / "workspaces"
+        _space_engine._SPACE_CACHE = None
+        _space_engine._SPACE_CACHE_ROOTS = None
+        _space_engine._SPACE_CACHE_TS = 0.0
+    except Exception:
+        logger.debug("Failed to patch web.api.space_engine home caches")
+
+    try:
+        from web.api import workspace_isolation as _workspace_isolation
+
+        _workspace_isolation.WORKSPACES_ROOT = home / "workspaces"
+        _workspace_isolation._WORKSPACE_CACHE = None
+        _workspace_isolation._WORKSPACE_CACHE_ROOT = None
+        _workspace_isolation._WORKSPACE_CACHE_TS = 0.0
+    except Exception:
+        logger.debug("Failed to patch web.api.workspace_isolation home caches")
 
     # Patch cron/jobs module-level cache
     try:
@@ -705,6 +756,11 @@ def init_profile_state() -> None:
     module-level cached paths.  Called once from config.py after imports.
     """
     global _active_profile
+    # Re-read the base home from the current environment before we resolve the
+    # active profile.  Config.py can import this module after other tests or
+    # startup hooks have changed SIDEKICK_HOME / HERMES_HOME, and the cached
+    # base home must not replay a stale directory from a previous import.
+    refresh_profile_base_home_from_env()
     _active_profile = _read_active_profile_file()
     home = get_active_hermes_home()
     _set_hermes_home(home)
@@ -802,13 +858,12 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
     # yet).  We derive workspace in priority order:
     #   1. {home}/webui_state/last_workspace.txt  (previously chosen workspace for this profile)
     #   2. cfg terminal.cwd / workspace / default_workspace keys
-    #   3. Boot-time DEFAULT_WORKSPACE constant
+    #   3. The target profile's own workspace directory
     # Use the module-level ``Path`` (imported at line 17) rather than re-importing
     # it locally — keeps the exception fallback simple and avoids a latent NameError
     # if a future refactor moves the inner imports.
     default_workspace = None
     try:
-        from web.api.config import DEFAULT_WORKSPACE as _DW
         lw_file = home / 'webui_state' / 'last_workspace.txt'
         if lw_file.exists():
             _p = lw_file.read_text(encoding='utf-8').strip()
@@ -833,13 +888,9 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
                     if _pp.is_dir():
                         default_workspace = str(_pp)
         if default_workspace is None:
-            default_workspace = str(_DW)
+            default_workspace = str((home / "workspace").resolve())
     except Exception:
-        try:
-            from web.api.config import DEFAULT_WORKSPACE as _DW2
-            default_workspace = str(_DW2)
-        except Exception:
-            default_workspace = str(Path.home())
+        default_workspace = str((home / "workspace").resolve())
 
     return {
         'profiles': list_profiles_api(),

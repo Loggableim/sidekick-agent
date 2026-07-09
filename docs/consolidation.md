@@ -1,75 +1,61 @@
-# Sidekick Repo — Consolidation & Current State
+# Sidekick Repo - Consolidation And Current State
 
-**Stand:** v0.5.0 (Tag `v0.5.0`, Commit `129322f`)
-**Datum:** 2026-06-07
+Sidekick is the current monorepo. The historical split between
+`cids-hermes-agent` and `cids-hermes-webui` are gone; the remaining legacy
+`hermes` names in this repo are compatibility shims, aliases, or historical
+references.
 
----
+## What Lives Where
 
-## Was ist Sidekick?
-
-Sidekick ist ein **installierbares Assistant-Monorepo** mit drei First-Class-
-Surfaces: **CLI**, **TUI** und **WebUI**. Dieses Repo ersetzt die historische
-Trennung zwischen `cids-hermes-agent` (Agent-Runtime + CLI + Tools) und
-`cids-hermes-webui` (WebUI-Server + Frontend).
-
-## Aktuelle Struktur
-
-```
-sidekick/
-├── cli/         CLI + TUI (77 Module — REPL, auth, config, setup)
-├── runtime/     Agent-Runtime (94 Module — providers, cron, gateway)
-├── tools/       101 Tool-Implementierungen (registry, file, browser, terminal)
-├── web/         WebUI (48 API-Module + 113 Static-Assets)
-├── shared/      Config, Paths, Sessions, Logging, Utils (10 Module)
-├── sidekick_app/  Entrypoint + Legacy-Import-Bootstrap
-├── sidekick_cli/  Legacy-Package-Forwarder (Transition Layer)
-├── docs/        Releases, Roadmaps, Audits, Troubleshooting
-└── tests/       Smoke-Tests (18 CLI + 7 WebUI HTTP)
-```
-
-## Wichtige Änderungen seit der Migration
-
-| Alt (getrennt) | Neu (monorepo) |
-|----------------|----------------|
-| `cids-hermes-agent/agent/*.py` | `runtime/*.py` |
-| `cids-hermes-agent/cron/` | `runtime/cron/` |
-| `cids-hermes-agent/gateway/` | `runtime/gateway/` |
-| `cids-hermes-agent/cli.py + sidekick_cli/` | `cli/` (77 Module) |
-| `cids-hermes-webui/api/` | `web/api/` (48 Module) |
-| `cids-hermes-webui/static/` | `web/static/` (113 Dateien) |
+- `cli/` owns the human entrypoints, setup, auth, config, and TUI.
+- `runtime/` owns provider adapters, the agent loop, cron, and gateway logic.
+- `web/` owns the WebUI backend and frontend assets.
+- `shared/` owns the low-level config, path, logging, and session helpers.
+- `tools/` owns the concrete tool implementations.
+- `sidekick_app/` and `sidekick_cli/` keep the entrypoint and import-compat
+  layer stable.
 
 ## Naming
 
-| Begriff | Bedeutung |
-|---------|-----------|
-| **Sidekick** | Produktname (kanonisch) |
-| **Nova** | Assistant-Name (Chat-Identität) |
-| **hermes** | Legacy-CLI-Alias (`hermes` → `sidekick`) |
-| **HERMES_\*** | Legacy-Env-Vars (read as fallback) |
-| **~/.hermes** | Legacy-Home-Verzeichnis (Fallback) |
-| **~/.sidekick** | Kanonisches Home-Verzeichnis |
+| Term | Meaning |
+|------|---------|
+| `Sidekick` | Canonical product name |
+| `Nova` | Default assistant identity |
+| `hermes` | Legacy CLI alias for `sidekick` |
+| `HERMES_*` | Legacy env-var names kept for backward compatibility |
+| `~/.hermes` | Legacy home directory fallback |
+| `~/.sidekick` | Canonical home directory |
 
-## Legacy-Kompatibilität
+## Compatibility Rules
 
-- `HERMES_HOME` → wird als Fallback gelesen (nach `SIDEKICK_HOME`)
-- `HERMES_*` Env-Vars → werden als Aliase akzeptiert
-- `hermes` CLI → Alias auf `sidekick` Binary
-- `sidekick_cli.*` Python-Imports → Forwarder auf `cli.*`
-- `~/.hermes/` → Legacy-Sessions werden beim ersten Zugriff automatisch
-  nach `~/.sidekick/state/` migriert
+- `SIDEKICK_HOME` wins over `HERMES_HOME`.
+- `HERMES_*` env vars are still read when a `SIDEKICK_*` replacement exists.
+- `hermes` remains a documented alias for the `sidekick` binary.
+- `sidekick_cli.*` imports still forward to `cli.*`.
+- `~/.hermes/` state can still be migrated or reused when the old install
+  layout is present.
 
-## Releases
+## Current Product Posture
 
-| Version | Fokus | Tag |
-|---------|-------|-----|
-| v0.1.0-monorepo | Erste Baseline, alle Komponenten migriert | `v0.1.0-monorepo` |
-| v0.2.0 | Rebrand: Hermes aus user-facing Texten entfernt | `v0.2.0` |
-| v0.3.0 | Session Contract, Gateway-Warnings, CI/Smoke | `v0.3.0` |
-| v0.4.0 | Error Handling, Doctor Exit-Codes, Troubleshooting | `v0.4.0` |
-| v0.5.0 | Doctor --check-providers, macOS CI, Streaming | `v0.5.0` |
+The repository is now organized around one shared runtime and three first-class
+surfaces:
 
-## Ausblick
+- CLI and TUI
+- WebUI
+- Messaging gateway / background automation
 
-Das Repo befindet sich im **Post-Migration-Zustand**. Keine weitere Migration
-von Alt-Repos nötig. Nächste Schritte sind Dokumentation, Tests und
-Produktqualität (siehe `docs/roadmap-v0.6.0.md`).
+The remaining gaps are the ones tracked in `docs/known-issues.md` and the
+current roadmap:
+
+- Windows CI is active.
+- The session layer still has two object models, but shared round-tripping
+  plus shared list/status snapshots now preserve WebUI-only metadata.
+- A few legacy compatibility strings remain by design.
+
+## Canonical References
+
+- `docs/architecture.md`
+- `docs/config-reference.md`
+- `docs/known-issues.md`
+- `docs/release-checklist.md`
+- `docs/troubleshooting.md`

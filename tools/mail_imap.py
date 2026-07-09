@@ -29,17 +29,13 @@ import time
 from pathlib import Path
 from typing import Any
 
+from shared.paths import sidekick_home
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_SIDEKICK_HOME = Path(
-    os.environ.get("SIDEKICK_HOME")
-   
-    or Path.home() / ".sidekick"
-)
 
 _IMAP_CONNECT_TIMEOUT = 10  # seconds
 _IMAP_READ_TIMEOUT = 30     # seconds
@@ -57,7 +53,7 @@ def get_space_config(space_slug: str) -> dict | None:
     Returns the parsed JSON dict (with an ``inboxes`` list) or ``None``
     if the file does not exist or is invalid.
     """
-    path = _SIDEKICK_HOME / "spaces" / space_slug / "mail.json"
+    path = sidekick_home() / "spaces" / space_slug / "mail.json"
     if not path.exists():
         return None
     try:

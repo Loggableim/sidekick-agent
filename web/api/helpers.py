@@ -114,6 +114,17 @@ def _accepts_gzip(handler) -> bool:
     return 'gzip' in ae
 
 
+def _is_client_disconnect_error(exc: Exception) -> bool:
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)):
+        return True
+    if isinstance(exc, OSError):
+        if getattr(exc, 'errno', None) in (32, 54, 104, 110):
+            return True
+        if getattr(exc, 'winerror', None) in (10053, 10054, 10058):
+            return True
+    return False
+
+
 def j(handler, payload, status: int=200, extra_headers: dict=None) -> None:
     """Send a JSON response.
 
@@ -121,37 +132,47 @@ def j(handler, payload, status: int=200, extra_headers: dict=None) -> None:
     (e.g., {'Set-Cookie': '...'}).  Headers are sent before end_headers().
     """
     body = _json.dumps(payload, ensure_ascii=False, indent=2).encode('utf-8')
-    handler.send_response(status)
-    handler.send_header('Content-Type', 'application/json; charset=utf-8')
+    try:
+        handler.send_response(status)
+        handler.send_header('Content-Type', 'application/json; charset=utf-8')
 
-    # Gzip-compress responses over 1KB when the client accepts it.
-    # Typical JSON API responses compress 70-80%, giving a big speedup
-    # for large payloads (session history, message lists).
-    if _accepts_gzip(handler) and len(body) > 1024:
-        import gzip
-        body = gzip.compress(body, compresslevel=4)
-        handler.send_header('Content-Encoding', 'gzip')
+        # Gzip-compress responses over 1KB when the client accepts it.
+        # Typical JSON API responses compress 70-80%, giving a big speedup
+        # for large payloads (session history, message lists).
+        if _accepts_gzip(handler) and len(body) > 1024:
+            import gzip
+            body = gzip.compress(body, compresslevel=4)
+            handler.send_header('Content-Encoding', 'gzip')
 
-    handler.send_header('Content-Length', str(len(body)))
-    handler.send_header('Cache-Control', 'no-store')
-    _security_headers(handler)
-    if extra_headers:
-        for k, v in extra_headers.items():
-            handler.send_header(k, v)
-    handler.end_headers()
-    handler.wfile.write(body)
+        handler.send_header('Content-Length', str(len(body)))
+        handler.send_header('Cache-Control', 'no-store')
+        _security_headers(handler)
+        if extra_headers:
+            for k, v in extra_headers.items():
+                handler.send_header(k, v)
+        handler.end_headers()
+        handler.wfile.write(body)
+    except Exception as exc:
+        if _is_client_disconnect_error(exc):
+            return
+        raise
 
 
 def t(handler, payload, status: int=200, content_type: str='text/plain; charset=utf-8') -> None:
     """Send a plain text or HTML response."""
     body = payload if isinstance(payload, bytes) else str(payload).encode('utf-8')
-    handler.send_response(status)
-    handler.send_header('Content-Type', content_type)
-    handler.send_header('Content-Length', str(len(body)))
-    handler.send_header('Cache-Control', 'no-store')
-    _security_headers(handler)
-    handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.send_response(status)
+        handler.send_header('Content-Type', content_type)
+        handler.send_header('Content-Length', str(len(body)))
+        handler.send_header('Cache-Control', 'no-store')
+        _security_headers(handler)
+        handler.end_headers()
+        handler.wfile.write(body)
+    except Exception as exc:
+        if _is_client_disconnect_error(exc):
+            return
+        raise
 
 
 MAX_BODY_BYTES = 20 * 1024 * 1024  # 20MB limit for non-upload POST bodies

@@ -32,6 +32,7 @@ from web.api.config import (
     resolve_custom_provider_connection,
     model_with_provider_context,
 )
+from web.api._home import get_webui_home
 from web.api.helpers import redact_session_data, _redact_text
 from web.api.compression_anchor import visible_messages_for_anchor
 from web.api.metering import meter
@@ -57,6 +58,14 @@ _NOVA_SELF_QUERY_HINTS = (
     "wer bist du",
     "was unterscheidet dich",
     "was willst du",
+)
+
+_SSE_DISCONNECT_ERRORS = (
+    BrokenPipeError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    TimeoutError,
+    OSError,
 )
 
 
@@ -90,6 +99,30 @@ def _prewarm_skill_tool_modules():
             __import__(_mod_name)
         except ImportError:
             pass
+
+
+def _apply_streaming_home_env(profile_home: str) -> None:
+    """Set both home env vars for the active streaming profile."""
+    os.environ["SIDEKICK_HOME"] = profile_home
+    os.environ["HERMES_HOME"] = profile_home
+
+
+def _restore_streaming_home_env(old_sidekick_home: str | None, old_hermes_home: str | None) -> None:
+    """Restore both home env vars after a streaming turn finishes."""
+    if old_sidekick_home is None and old_hermes_home is None:
+        os.environ.pop("SIDEKICK_HOME", None)
+        os.environ.pop("HERMES_HOME", None)
+        return
+
+    if old_sidekick_home is not None:
+        os.environ["SIDEKICK_HOME"] = old_sidekick_home
+    else:
+        os.environ.pop("SIDEKICK_HOME", None)
+
+    if old_hermes_home is not None:
+        os.environ["HERMES_HOME"] = old_hermes_home
+    else:
+        os.environ.pop("HERMES_HOME", None)
 
 
 def _load_nova_session_start_module():
@@ -564,20 +597,13 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
     env.update({
         'TERMINAL_CWD': str(workspace),
         'SIDEKICK_EXEC_ASK': '1',
-        'SIDEKICK_EXEC_ASK': '1',
-        'SIDEKICK_SESSION_KEY': session_id,
         'SIDEKICK_SESSION_KEY': session_id,
         'SIDEKICK_HOME': profile_home,
-        'SIDEKICK_HOME': profile_home,
-        'SIDEKICK_WEBUI_BROWSER_SESSION_ID': session_id,
+        'HERMES_HOME': profile_home,
         'SIDEKICK_WEBUI_BROWSER_SESSION_ID': session_id,
         'SIDEKICK_WEBUI_BROWSER_BASE_URL': _browser_base_url,
-        'SIDEKICK_WEBUI_BROWSER_BASE_URL': _browser_base_url,
-        'SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE': _browser_permission_mode,
         'SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE': _browser_permission_mode,
         'SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN': _browser_permission_token,
-        'SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN': _browser_permission_token,
-        'SIDEKICK_WEBUI_ACTIVE_WORKSPACE': os.path.basename(str(workspace).rstrip('/\\')).strip().lower(),
         'SIDEKICK_WEBUI_ACTIVE_WORKSPACE': os.path.basename(str(workspace).rstrip('/\\')).strip().lower(),
     })
     return env
@@ -2063,8 +2089,13 @@ def _extract_tool_calls_from_messages(messages, live_tool_calls=None):
 def _sse(handler, event, data):
     """Write one SSE event to the response stream."""
     payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-    handler.wfile.write(payload.encode('utf-8'))
-    handler.wfile.flush()
+    try:
+        handler.wfile.write(payload.encode('utf-8'))
+        handler.wfile.flush()
+    except _SSE_DISCONNECT_ERRORS:
+        # Long-lived EventSource clients are allowed to disappear at any time.
+        # Treat those disconnects as normal shutdown rather than request errors.
+        return
 
 
 def _materialize_pending_user_turn_before_error(session) -> bool:
@@ -2466,7 +2497,7 @@ def _run_agent_streaming(
             _profile_home = str(_profile_home_path)
             _profile_runtime_env = get_profile_runtime_env(_profile_home_path)
         except ImportError:
-            _profile_home = os.environ.get('SIDEKICK_HOME') or os.environ.get('SIDEKICK_HOME', '')
+            _profile_home = str(get_webui_home())
             _profile_runtime_env = {}
             _patch_skill_home_modules = None
         
@@ -2521,31 +2552,24 @@ def _run_agent_streaming(
         with _ENV_LOCK:
             old_profile_env = {key: os.environ.get(key) for key in _profile_runtime_env}
             old_cwd = os.environ.get('TERMINAL_CWD')
-            old_exec_ask = os.environ.get('SIDEKICK_EXEC_ASK') or os.environ.get('SIDEKICK_EXEC_ASK')
-            old_session_key = os.environ.get('SIDEKICK_SESSION_KEY') or os.environ.get('SIDEKICK_SESSION_KEY')
+            old_exec_ask = os.environ.get('SIDEKICK_EXEC_ASK')
+            old_session_key = os.environ.get('SIDEKICK_SESSION_KEY')
             old_sidekick_home = os.environ.get('SIDEKICK_HOME')
-            old_hermes_home = os.environ.get('SIDEKICK_HOME')
-            old_browser_session_id = os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID') or os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID')
-            old_browser_base_url = os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL') or os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL')
-            old_browser_permission_mode = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE') or os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE')
-            old_browser_permission_token = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN') or os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN')
+            old_hermes_home = os.environ.get('HERMES_HOME')
+            old_browser_session_id = os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID')
+            old_browser_base_url = os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL')
+            old_browser_permission_mode = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE')
+            old_browser_permission_token = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN')
             os.environ.update(_profile_runtime_env)
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['SIDEKICK_EXEC_ASK'] = '1'
-            os.environ['SIDEKICK_EXEC_ASK'] = '1'
             os.environ['SIDEKICK_SESSION_KEY'] = session_id
-            os.environ['SIDEKICK_SESSION_KEY'] = session_id
-            os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
-            os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
-            os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
-            os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', '')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', '')
+            os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
+            os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
+            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
+            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', '')
             if _profile_home:
-                os.environ['SIDEKICK_HOME'] = _profile_home
-                os.environ['SIDEKICK_HOME'] = _profile_home
+                _apply_streaming_home_env(_profile_home)
                 # Patch module-level caches to match the active profile.
                 # _set_hermes_home() does this for process-wide switches
                 # but per-request switches skip it (#1700).
@@ -4192,51 +4216,28 @@ def _run_agent_streaming(
                 else: os.environ['TERMINAL_CWD'] = old_cwd
                 if old_exec_ask is None:
                     os.environ.pop('SIDEKICK_EXEC_ASK', None)
-                    os.environ.pop('SIDEKICK_EXEC_ASK', None)
                 else:
-                    os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
                     os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
                 if old_session_key is None:
                     os.environ.pop('SIDEKICK_SESSION_KEY', None)
-                    os.environ.pop('SIDEKICK_SESSION_KEY', None)
                 else:
                     os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
-                    os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
-                if old_sidekick_home is None and old_hermes_home is None:
-                    os.environ.pop('SIDEKICK_HOME', None)
-                    os.environ.pop('SIDEKICK_HOME', None)
-                else:
-                    if old_sidekick_home is not None:
-                        os.environ['SIDEKICK_HOME'] = old_sidekick_home
-                    else:
-                        os.environ.pop('SIDEKICK_HOME', None)
-                    if old_hermes_home is not None:
-                        os.environ['SIDEKICK_HOME'] = old_hermes_home
-                    else:
-                        os.environ.pop('SIDEKICK_HOME', None)
+                _restore_streaming_home_env(old_sidekick_home, old_hermes_home)
                 if old_browser_session_id is None:
                     os.environ.pop('SIDEKICK_WEBUI_BROWSER_SESSION_ID', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_SESSION_ID', None)
                 else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = old_browser_session_id
                     os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = old_browser_session_id
                 if old_browser_base_url is None:
                     os.environ.pop('SIDEKICK_WEBUI_BROWSER_BASE_URL', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_BASE_URL', None)
                 else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = old_browser_base_url
                     os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = old_browser_base_url
                 if old_browser_permission_mode is None:
                     os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', None)
                 else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = old_browser_permission_mode
                     os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = old_browser_permission_mode
                 if old_browser_permission_token is None:
                     os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', None)
                 else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = old_browser_permission_token
                     os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = old_browser_permission_token
 
     except Exception as e:

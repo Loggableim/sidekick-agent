@@ -13338,7 +13338,10 @@ def main(
         # ── Git worktree isolation (#652) ──
         # Create an isolated worktree so this agent instance doesn't collide
         # with other agents working on the same repo.
-        use_worktree = worktree or w or CLI_CONFIG.get("worktree", False)
+        from cli.config import get_worktree_settings
+
+        worktree_settings = get_worktree_settings(CLI_CONFIG)
+        use_worktree = worktree or w or worktree_settings["enabled"]
         wt_info = None
         if use_worktree:
             # Prune stale worktrees from crashed/killed sessions
@@ -13349,7 +13352,8 @@ def main(
             if wt_info:
                 _active_worktree = wt_info
                 os.environ["TERMINAL_CWD"] = wt_info["path"]
-                atexit.register(_cleanup_worktree, wt_info)
+                if worktree_settings["cleanup_on_exit"]:
+                    atexit.register(_cleanup_worktree, wt_info)
             else:
                 # Worktree was explicitly requested but setup failed —
                 # don't silently run without isolation.

@@ -1,0 +1,169 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic "Nova Settings" [ref=e4] [cursor=pointer]: ⚙
+    - generic [ref=e5]: 🌤 Innsbruck — wird geladen...
+    - generic [ref=e6] [cursor=pointer]: 📺
+    - generic "Nova Mikrofon" [ref=e7] [cursor=pointer]: 🎙
+    - generic "Nova Voice" [ref=e8] [cursor=pointer]:
+      - generic [ref=e43]: VOICE
+    - generic [ref=e44]: 00:00
+  - generic [ref=e45]:
+    - generic [ref=e46]:
+      - generic [ref=e47]: ⚡ CPU
+      - generic [ref=e48]: 0.0%
+    - generic [ref=e49]:
+      - generic [ref=e50]: 🧠 RAM
+      - generic [ref=e51]: 0.0%
+    - generic [ref=e52]:
+      - generic [ref=e53]: 🎮 GPU TEMP
+      - generic [ref=e54]: "--°"
+    - generic [ref=e55]:
+      - generic [ref=e56]: "💾 C:"
+      - generic [ref=e57]: 0.0%
+  - generic [ref=e58]:
+    - generic [ref=e59]:
+      - generic [ref=e60] [cursor=pointer]: ●
+      - generic [ref=e61] [cursor=pointer]: ●
+      - generic [ref=e62] [cursor=pointer]: ●
+      - generic [ref=e63] [cursor=pointer]: ●
+      - generic [ref=e64] [cursor=pointer]: ●
+      - generic [ref=e65] [cursor=pointer]: ●
+    - generic [ref=e66]:
+      - generic [ref=e67]:
+        - generic [ref=e68]: ✦ NOVA
+        - generic [ref=e71]: WACH
+      - generic [ref=e72]:
+        - generic [ref=e73]: Ich denke gerade.
+        - generic [ref=e74]: —
+        - generic [ref=e75]: —
+        - generic [ref=e76]: —
+      - generic [ref=e77]:
+        - generic [ref=e78]:
+          - generic [ref=e79]: ● AROUSAL
+          - generic [ref=e82]: "0.50"
+        - generic [ref=e83]:
+          - generic [ref=e84]: ● VALENZ
+          - generic [ref=e87]: "0.50"
+        - generic [ref=e88]:
+          - generic [ref=e89]: ● NOVELTY
+          - generic [ref=e92]: "0.50"
+        - generic [ref=e93]:
+          - generic [ref=e94]: ● KOHÄRENZ
+          - generic [ref=e97]: "0.50"
+    - generic:
+      - generic:
+        - generic:
+          - generic: ⏱ UPTIME
+          - generic: "--h"
+          - generic: seit Systemstart
+        - generic:
+          - generic: 🧠 MEMORY
+          - generic: 0.0G
+          - generic: 0% belegt · 0 Agents
+        - generic:
+          - generic: 🌡 GPU TEMP
+          - generic:
+            - generic: "--°"
+          - generic: kühl
+        - generic:
+          - generic: 🔧 GPU LOAD
+          - generic: "--%"
+          - generic: Auslastung (3D/Compute)
+        - generic:
+          - generic: 🔌 PROVIDER
+          - generic:
+            - generic: wird geladen...
+    - generic:
+      - generic:
+        - generic: 🧪 ruhig
+        - generic: A.0 V.0 N.0 C.0
+      - generic:
+        - generic:
+          - generic: 🧪 CORTISOL
+          - generic: "0.00"
+          - generic: ·
+        - generic:
+          - generic: ✨ DOPAMIN
+          - generic: "0.00"
+          - generic: ·
+        - generic:
+          - generic: ☀️ SEROTONIN
+          - generic: "0.00"
+          - generic: ·
+        - generic:
+          - generic: 💗 OXYTOCIN
+          - generic: "0.00"
+          - generic: ·
+        - generic:
+          - generic: ⚡ ADRENALIN
+          - generic: "0.00"
+          - generic: ·
+        - generic:
+          - generic: 🌙 MELATONIN
+          - generic: "0.00"
+          - generic: ·
+    - generic:
+      - generic:
+        - generic:
+          - generic: 💰 EQUITY
+          - generic: $--
+          - generic: Cash $-- · BP $--
+        - generic:
+          - generic: 📈 HEUTE
+          - generic: $--
+          - generic: —
+        - generic:
+          - generic: 🏆 POSITIONEN
+          - generic: "0"
+          - generic: "Portfolio: —"
+        - generic:
+          - generic: 📊 OFFENE
+          - generic:
+            - generic: keine Positionen
+        - generic:
+          - generic: 🕐 TRADES
+          - generic:
+            - generic: keine
+    - generic:
+      - generic:
+        - generic:
+          - generic: ₿ FUTURES
+          - generic: $--
+          - generic: Wallet Balance
+        - generic:
+          - generic: 📊 POSITIONS
+          - generic: "0"
+          - generic: "P&L: —"
+        - generic:
+          - generic: 💰 SPOT
+          - generic: $--
+          - generic: — Assets
+        - generic:
+          - generic: 🔶 FUTURES POSITIONS
+          - generic:
+            - generic: keine offenen Futures
+        - generic:
+          - generic: 🪙 SPOT BALANCES
+          - generic:
+            - generic: werde geladen...
+    - generic:
+      - generic:
+        - generic:
+          - generic: 🤖 AGENTEN · 0/0 Slots aktiv
+          - generic: lädt...
+    - generic:
+      - generic: 📢
+      - generic: system
+      - generic: Event
+      - generic: —
+    - generic:
+      - generic:
+        - generic: NOVA
+        - generic: BEREIT
+      - generic:
+        - generic:
+          - generic: Eingabe
+          - generic: Sag hey nova.
+        - generic:
+          - generic: Antwort
+          - generic: —

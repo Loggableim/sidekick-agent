@@ -1,3 +1,4 @@
+import importlib
 from pathlib import Path
 
 from web.api.nova_paths import (
@@ -30,3 +31,24 @@ def test_nova_paths_fallback_to_repo_home(monkeypatch):
     monkeypatch.delenv("HERMES_HOME", raising=False)
 
     assert get_nova_space_root() == Path(__file__).resolve().parents[1] / "home" / "spaces" / "nova"
+
+
+def test_nova_paths_follow_active_profile_after_import(monkeypatch, tmp_path):
+    import sys
+
+    import_home = tmp_path / "import-home"
+    active_home = tmp_path / "active-home"
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(import_home))
+
+    sys.modules.pop("web.api.nova_paths", None)
+    nova_paths = importlib.import_module("web.api.nova_paths")
+    profiles = importlib.import_module("web.api.profiles")
+
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "coder")
+    monkeypatch.setattr(profiles, "get_active_hermes_home", lambda: active_home)
+
+    assert nova_paths.get_nova_space_root() == active_home / "spaces" / "nova"
+    assert nova_paths.get_nova_session_start_path() == active_home / "spaces" / "nova" / "session_start.py"
+    assert nova_paths.get_nova_state_snapshot_path() == active_home / "spaces" / "nova" / "state_snapshot.py"

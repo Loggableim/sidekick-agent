@@ -1,0 +1,40 @@
+[     630ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4de264:1480
+[     648ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4de264:1181
+[     685ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/5d8a8db4cc02?cachebust=1783477607091:0
+[ 1322871ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/analytics/usage?days=1:0
+[ 1386591ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:9119/api/analytics/usage?days=1:0
+[ 1390405ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/cast/start:0
+[ 1391666ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/health?offline_probe=1783490534697:0
+[ 1403281ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1480
+[ 1403297ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1181
+[ 1403322ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/037e97ae757b?cachebust=1783477607091:0
+[ 1419099ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/dashboard/status:0
+[ 1421102ms] [ERROR] An unknown error occurred when fetching the script. @ :0
+[ 1421101ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/sessions?limit=20&offset=20&workspace=nova:0
+[ 1421107ms] [WARNING] [pwa] Service worker registration failed: TypeError: Failed to register a ServiceWorker for scope ('http://127.0.0.1:9119/') with script ('http://127.0.0.1:9119/sw.js?v=v0.8.6-89-g181006d-dirty-6a4de359'): An unknown error occurred when fetching the script. @ http://127.0.0.1:9119/session/037e97ae757b?cachebust=1783477607091:65
+[ 1458922ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/cast/start:0
+[ 1459925ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/health?offline_probe=1783490603214:0
+[ 1462623ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1480
+[ 1462630ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1181
+[ 1462641ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/5179a9fd5c68?cachebust=1783477607091:0
+[ 1477442ms] [WARNING] renderSessionList projects unavailable, continuing without projects AbortError: signal is aborted without reason
+    at abortChild (http://127.0.0.1:9119/static/sessions.js?v=v0.8.6-89-g181006d-dirty-6a4de359:2220:22)
+    at http://127.0.0.1:9119/static/sessions.js?v=v0.8.6-89-g181006d-dirty-6a4de359:2228:5 @ http://127.0.0.1:9119/static/sessions.js?v=v0.8.6-89-g181006d-dirty-6a4de359:2286
+[ 1548140ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/cast/start:0
+[ 1549143ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/health?offline_probe=1783490692432:0
+[ 1552663ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/health?offline_probe=1783490695945:0
+[ 1553700ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/crons/recent?since=1783490606.913:0
+[ 1554336ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1480
+[ 1554345ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1181
+[ 1554355ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/d53d66739162?cachebust=1783477607091:0
+[ 1639097ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/cast/start:0
+[ 1640100ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/health?offline_probe=1783490783388:0
+[ 1648549ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1480
+[ 1648560ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1181
+[ 1648575ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/394023507165?cachebust=1783477607091:0
+[ 2932746ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/cast/start:0
+[ 3022742ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/api/cast/start:0
+[ 3023744ms] [ERROR] Failed to load resource: net::ERR_INSUFFICIENT_RESOURCES @ http://127.0.0.1:9119/health?offline_probe=1783492167034:0
+[ 3028455ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1480
+[ 3028462ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4de359:1181
+[ 3028479ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/253a0c5f1a32?cachebust=1783477607091:0

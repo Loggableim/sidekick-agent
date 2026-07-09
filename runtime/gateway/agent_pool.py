@@ -29,6 +29,8 @@ import time
 from collections import OrderedDict
 from typing import Dict, Optional
 
+from shared.paths import sidekick_home
+
 logger = logging.getLogger(__name__)
 
 # --- Default pool limits per provider ---
@@ -58,17 +60,13 @@ KEY_BAN_SECONDS = 6 * 3600  # 6 hours
 # How often to check for recovered keys (seconds)
 RECOVERY_CHECK_INTERVAL = 300  # 5 minutes
 
-# Path to auth.json for key status monitoring
-AUTH_JSON_PATHS = [
-    os.path.join(os.environ.get("SIDEKICK_HOME", ""), "auth.json"),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "home", "auth.json"),
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "home", "auth.json"),
-]
-
-
 def _resolve_auth_path() -> Optional[str]:
     """Find auth.json in standard locations."""
-    for path in AUTH_JSON_PATHS:
+    for path in (
+        str(sidekick_home() / "auth.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "home", "auth.json"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "home", "auth.json"),
+    ):
         resolved = os.path.abspath(path)
         if os.path.exists(resolved):
             return resolved

@@ -13,10 +13,66 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from web.api._home import get_active_webui_home, get_webui_home
+
 
 def get_hermes_home() -> Path:
-    val = (os.environ.get("SIDEKICK_HOME") or "").strip()
-    return Path(val) if val else Path.home() / ".hermes"
+    return get_webui_home()
+
+
+def _active_home() -> Path:
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return Path(get_webui_home()).expanduser().resolve()
+
+
+def _evey_dir(home: Path | None = None) -> Path:
+    return (_active_home() if home is None else Path(home).expanduser().resolve()) / "workspace" / "evey"
+
+
+def _data_dir(home: Path | None = None) -> Path:
+    return _evey_dir(home) / "data"
+
+
+def _log_dir(home: Path | None = None) -> Path:
+    return _evey_dir(home) / "logs"
+
+
+def _cache_dir(home: Path | None = None) -> Path:
+    return _evey_dir(home) / "cache"
+
+
+def _telemetry_file(home: Path | None = None) -> Path:
+    return _log_dir(home) / "events.jsonl"
+
+
+def _learnings_file(home: Path | None = None) -> Path:
+    return _data_dir(home) / "learnings.jsonl"
+
+
+def _delegation_scores_file(home: Path | None = None) -> Path:
+    return _data_dir(home) / "delegation-scores.jsonl"
+
+
+def _memory_scores_file(home: Path | None = None) -> Path:
+    return _data_dir(home) / "memory-scores.json"
+
+
+def _habits_file(home: Path | None = None) -> Path:
+    return _data_dir(home) / "habits.json"
+
+
+def _cache_file(home: Path | None = None) -> Path:
+    return _cache_dir(home) / "delegation-cache.json"
+
+
+def _schedule_file(home: Path | None = None) -> Path:
+    return _data_dir(home) / "schedule.json"
+
+
+def _watchdog_file(home: Path | None = None) -> Path:
+    return _data_dir(home) / "watchdog-state.json"
 
 
 HERMES_HOME = get_hermes_home()
@@ -127,8 +183,8 @@ def get_status() -> dict:
             "arch": _p.machine(),
         },
         "evey": {
-            "learnings": len(_rj_lines(DATA_DIR / "learnings.jsonl")),
-            "delegation_scores": len(_rj_lines(DATA_DIR / "delegation-scores.jsonl")),
+            "learnings": len(_rj_lines(_learnings_file())),
+            "delegation_scores": len(_rj_lines(_delegation_scores_file())),
         },
         "watchdog": _get_watchdog_status(),
     }
@@ -160,25 +216,25 @@ def _loadavg():
 # 2. TELEMETRY
 # ═══════════════════════════════════════════════════════════════════════
 
-TELEMETRY_FILE = LOG_DIR / "events.jsonl"
 MAX_TELEMETRY_SIZE = 10 * 1024 * 1024
 
 
 def emit_telemetry(type_name: str, data: dict = None):
     event = {"ts": datetime.now().isoformat(), "type": type_name, **(data or {})}
-    _aj(TELEMETRY_FILE, event)
+    telemetry_file = _telemetry_file()
+    _aj(telemetry_file, event)
     try:
-        if TELEMETRY_FILE.stat().st_size > MAX_TELEMETRY_SIZE:
-            rotated = TELEMETRY_FILE.with_name(f"events.{int(time.time())}.jsonl")
-            TELEMETRY_FILE.rename(rotated)
-            for f in sorted(LOG_DIR.glob("events.*.jsonl"))[:-5]:
+        if telemetry_file.stat().st_size > MAX_TELEMETRY_SIZE:
+            rotated = telemetry_file.with_name(f"events.{int(time.time())}.jsonl")
+            telemetry_file.rename(rotated)
+            for f in sorted(_log_dir().glob("events.*.jsonl"))[:-5]:
                 f.unlink()
     except Exception:
         pass
 
 
 def query_telemetry(query_type: str = "session_metrics", limit: int = 20) -> dict:
-    events = _rj_lines(TELEMETRY_FILE, 500)
+    events = _rj_lines(_telemetry_file(), 500)
     if query_type == "recent_events":
         return {"status": "ok", "count": len(events), "events": events[-limit:]}
     elif query_type == "recent_errors":
@@ -234,7 +290,6 @@ def query_telemetry(query_type: str = "session_metrics", limit: int = 20) -> dic
 # 3. LEARNER
 # ═══════════════════════════════════════════════════════════════════════
 
-LEARNINGS_FILE = DATA_DIR / "learnings.jsonl"
 MAX_LEARNINGS = 500
 
 
@@ -253,12 +308,13 @@ def learn_from_interaction(body: dict) -> dict:
         "do_differently": str(body.get("do_differently", ""))[:500],
         "tags": (body.get("tags", []) or [])[:10],
     }
-    _aj(LEARNINGS_FILE, entry)
-    all_l = _rj_lines(LEARNINGS_FILE, MAX_LEARNINGS + 10)
+    learnings_file = _learnings_file()
+    _aj(learnings_file, entry)
+    all_l = _rj_lines(learnings_file, MAX_LEARNINGS + 10)
     if len(all_l) > MAX_LEARNINGS:
         keep = all_l[-MAX_LEARNINGS:]
-        LEARNINGS_FILE.write_text("\n".join(json.dumps(e, default=str) for e in keep) + "\n")
-    total = len(_rj_lines(LEARNINGS_FILE))
+        learnings_file.write_text("\n".join(json.dumps(e, default=str) for e in keep) + "\n")
+    total = len(_rj_lines(learnings_file))
     return {"status": "learned", "quality_score": entry["quality_score"], "task_preview": task[:100], "total_learnings": total}
 
 
@@ -266,7 +322,7 @@ def apply_learnings(body: dict) -> dict:
     task_desc = body.get("task_description", "")
     if not task_desc:
         return {"status": "error", "error": "task_description required"}
-    learnings = _rj_lines(LEARNINGS_FILE, 200)
+    learnings = _rj_lines(_learnings_file(), 200)
     if not learnings:
         return {"status": "no_learnings", "message": "No past learnings", "applicable_lessons": []}
     stop_words = {"the", "a", "an", "is", "to", "and", "of", "in", "for", "with", "on", "at", "by"}
@@ -315,7 +371,7 @@ def apply_learnings(body: dict) -> dict:
 
 
 def list_learnings() -> dict:
-    learnings = _rj_lines(LEARNINGS_FILE, 200)
+    learnings = _rj_lines(_learnings_file(), 200)
     return {"status": "ok", "count": len(learnings), "learnings": learnings}
 
 
@@ -376,12 +432,12 @@ def delegation_log(body: dict) -> dict:
     score = max(0, min(10, int(score)))
     tokens = max(0, int(body.get("tokens_used", 0)))
     entry = {"timestamp": datetime.now().isoformat(), "model": model, "task_type": task_type, "score": score, "tokens_used": tokens}
-    _aj(DEL_SCORES_FILE, entry)
+    _aj(_delegation_scores_file(), entry)
     return {"status": "logged", "entry": entry}
 
 
 def delegation_stats(period: str = "all") -> dict:
-    entries = _rj_lines(DEL_SCORES_FILE, 1000)
+    entries = _rj_lines(_delegation_scores_file(), 1000)
     if not entries: return {"status": "no_data"}
     now_dt = datetime.now()
     if period == "today":
@@ -410,13 +466,10 @@ def delegation_stats(period: str = "all") -> dict:
 # 6. MEMORY SCORE & DECAY
 # ═══════════════════════════════════════════════════════════════════════
 
-MEM_SCORES_FILE = DATA_DIR / "memory-scores.json"
-
-
 def memory_score(body: dict) -> dict:
     action = body.get("action", "rank")
     key = body.get("memory_key", "")
-    scores = _rj(MEM_SCORES_FILE, {})
+    scores = _rj(_memory_scores_file(), {})
     now = time.time()
     if action == "rank":
         ranked = []
@@ -429,17 +482,17 @@ def memory_score(body: dict) -> dict:
     if key not in scores: scores[key] = {"importance": 1.0, "accesses": 0, "last_accessed": now, "created": now}
     if action == "boost":
         scores[key]["importance"] = min(scores[key].get("importance", 1) + 0.5, 5.0)
-        scores[key]["last_accessed"] = now; _wj(MEM_SCORES_FILE, scores)
+        scores[key]["last_accessed"] = now; _wj(_memory_scores_file(), scores)
         return {"status": "boosted", "key": key, "new_importance": scores[key]["importance"]}
     if action == "access":
         scores[key]["accesses"] = scores[key].get("accesses", 0) + 1
-        scores[key]["last_accessed"] = now; _wj(MEM_SCORES_FILE, scores)
+        scores[key]["last_accessed"] = now; _wj(_memory_scores_file(), scores)
         return {"status": "accessed", "key": key, "accesses": scores[key]["accesses"]}
     return {"error": f"Invalid action: {action}"}
 
 
 def memory_decay(threshold: float = 0.1) -> dict:
-    scores = _rj(MEM_SCORES_FILE, {})
+    scores = _rj(_memory_scores_file(), {})
     now = time.time()
     flagged, healthy = [], []
     for k, d in scores.items():
@@ -454,11 +507,8 @@ def memory_decay(threshold: float = 0.1) -> dict:
 # 7. HABITS
 # ═══════════════════════════════════════════════════════════════════════
 
-HABITS_FILE = DATA_DIR / "habits.json"
-
-
 def habits_log(body: dict) -> dict:
-    data = _rj(HABITS_FILE, {"interactions": [], "hour_counts": {}, "topic_counts": {}, "total_interactions": 0, "first_seen": "", "last_seen": ""})
+    data = _rj(_habits_file(), {"interactions": [], "hour_counts": {}, "topic_counts": {}, "total_interactions": 0, "first_seen": "", "last_seen": ""})
     now_dt = datetime.now(); hour = str(now_dt.hour); topic = body.get("topic", "general")
     entry = {"timestamp": now_dt.isoformat(), "hour": now_dt.hour, "day_of_week": now_dt.strftime("%A"), "topic": topic, "v_message_length": int(body.get("v_message_length", 0)), "v_mood": body.get("v_mood", ""), "response_was_good": body.get("response_was_good", True)}
     data["hour_counts"][hour] = data["hour_counts"].get(hour, 0) + 1
@@ -468,12 +518,12 @@ def habits_log(body: dict) -> dict:
     data["last_seen"] = now_dt.isoformat()
     data["interactions"].append(entry)
     if len(data["interactions"]) > 200: data["interactions"] = data["interactions"][-200:]
-    _wj(HABITS_FILE, data)
+    _wj(_habits_file(), data)
     return {"status": "logged", "total_interactions": data["total_interactions"]}
 
 
 def habits_insights() -> dict:
-    data = _rj(HABITS_FILE, {})
+    data = _rj(_habits_file(), {})
     if not data.get("total_interactions"): return {"status": "no_data", "message": "No interactions logged yet"}
     hours = data.get("hour_counts", {}); peak = sorted(hours.items(), key=lambda x: -x[1])[:3]
     topics = data.get("topic_counts", {}); top = sorted(topics.items(), key=lambda x: -x[1])[:5]
@@ -490,13 +540,12 @@ def habits_insights() -> dict:
 # 8. CACHE
 # ═══════════════════════════════════════════════════════════════════════
 
-CACHE_FILE = CACHE_DIR / "delegation-cache.json"
 MAX_CACHE_ENTRIES = 100
 CACHE_TTL = 86400
 
 
 def cache_stats() -> dict:
-    cache = _rj(CACHE_FILE, {}); now = time.time()
+    cache = _rj(_cache_file(), {}); now = time.time()
     valid = sum(1 for v in cache.values() if now - v.get("cached_at", 0) < CACHE_TTL)
     hits = sum(v.get("hit_count", 0) for v in cache.values())
     return {"total": len(cache), "valid": valid, "total_hits": hits, "max": MAX_CACHE_ENTRIES, "ttl_hours": 24}
@@ -507,12 +556,12 @@ def cached_delegate(body: dict) -> dict:
     if not model or not goal: return {"status": "error", "error": "model and goal required"}
     bypass = body.get("bypass_cache", False)
     key = hashlib.sha256(f"{model.strip().lower()}::{goal.strip().lower()}".encode()).hexdigest()[:16]
-    cache = _rj(CACHE_FILE, {}); now = time.time()
+    cache = _rj(_cache_file(), {}); now = time.time()
     if not bypass and key in cache:
         entry = cache[key]; age = now - (entry.get("cached_at") or 0)
         if age < CACHE_TTL:
             entry["last_accessed"] = now; entry["hit_count"] = entry.get("hit_count", 0) + 1
-            _wj(CACHE_FILE, cache)
+            _wj(_cache_file(), cache)
             return {"status": "cache_hit", "result": entry.get("result", ""), "age_seconds": round(age), "hit_count": entry["hit_count"]}
     return {"status": "cache_miss", "cache_key": key, "message": "No cached result"}
 
@@ -521,30 +570,27 @@ def cached_delegate(body: dict) -> dict:
 # 9. SCHEDULER
 # ═══════════════════════════════════════════════════════════════════════
 
-SCHEDULE_FILE = DATA_DIR / "schedule.json"
-
-
 def schedule_add(body: dict) -> dict:
     title = body.get("title", ""); when = body.get("when", "")
     if not title or not when: return {"status": "error", "error": "title and when required"}
-    data = _rj(SCHEDULE_FILE, {"events": []})
+    data = _rj(_schedule_file(), {"events": []})
     event = {"id": f"ev-{int(time.time() * 1000)}", "title": title, "when": when, "duration_minutes": int(body.get("duration_minutes", 30)), "category": body.get("category", "task"), "notes": body.get("notes", ""), "created_at": datetime.now().isoformat(), "status": "active"}
-    data["events"].append(event); _wj(SCHEDULE_FILE, data)
+    data["events"].append(event); _wj(_schedule_file(), data)
     return {"status": "added", "event": event}
 
 
 def schedule_list() -> dict:
-    data = _rj(SCHEDULE_FILE, {"events": []})
+    data = _rj(_schedule_file(), {"events": []})
     events = [e for e in data.get("events", []) if e.get("status") == "active"]
     events.sort(key=lambda e: e.get("when", ""))
     return {"status": "ok", "count": len(events), "events": events}
 
 
 def schedule_remove(event_id: str) -> dict:
-    data = _rj(SCHEDULE_FILE, {"events": []})
+    data = _rj(_schedule_file(), {"events": []})
     for ev in data.get("events", []):
         if ev.get("id") == event_id:
-            ev["status"] = "removed"; _wj(SCHEDULE_FILE, data)
+            ev["status"] = "removed"; _wj(_schedule_file(), data)
             return {"status": "removed", "event_id": event_id}
     return {"status": "not_found"}
 
@@ -553,11 +599,8 @@ def schedule_remove(event_id: str) -> dict:
 # 10. WATCHDOG
 # ═══════════════════════════════════════════════════════════════════════
 
-WATCHDOG_FILE = DATA_DIR / "watchdog-state.json"
-
-
 def _get_watchdog_status() -> dict:
-    state = _rj(WATCHDOG_FILE, {"last_heartbeat": 0, "total_heartbeats": 0})
+    state = _rj(_watchdog_file(), {"last_heartbeat": 0, "total_heartbeats": 0})
     now = time.time(); silent = -1; last_time = "never"
     if state.get("last_heartbeat"):
         silent = int((now - state["last_heartbeat"]) / 60)
@@ -566,11 +609,11 @@ def _get_watchdog_status() -> dict:
 
 
 def watchdog_heartbeat(activity: str = "heartbeat") -> dict:
-    state = _rj(WATCHDOG_FILE, {"last_heartbeat": 0, "total_heartbeats": 0})
+    state = _rj(_watchdog_file(), {"last_heartbeat": 0, "total_heartbeats": 0})
     now = time.time()
     state["last_heartbeat"] = now; state["last_activity"] = activity
     state["total_heartbeats"] = state.get("total_heartbeats", 0) + 1
-    _wj(WATCHDOG_FILE, state)
+    _wj(_watchdog_file(), state)
     return {"status": "alive", "activity": activity, "total_heartbeats": state["total_heartbeats"]}
 
 

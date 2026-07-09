@@ -570,6 +570,16 @@ async function loadDashboardSettings(){
     if(urlEl) urlEl.value=cfg.url||'';
   }catch(_){/* leave defaults visible */}
 }
+async function loadWorktreeSettings(){
+  const enabledEl=$('settingsWorktreeEnabled');
+  const cleanupEl=$('settingsWorktreeCleanupOnExit');
+  if(!enabledEl&&!cleanupEl) return;
+  try{
+    const cfg=await api('/api/worktree/settings');
+    if(enabledEl) enabledEl.checked=!!(cfg&&cfg.enabled);
+    if(cleanupEl) cleanupEl.checked=(cfg&&cfg.cleanup_on_exit)!==false;
+  }catch(_){/* leave defaults visible */}
+}
 async function saveDashboardSettings(){
   const modeEl=$('settingsDashboardMode');
   const urlEl=$('settingsDashboardUrl');
@@ -584,6 +594,24 @@ async function saveDashboardSettings(){
   }catch(err){
     if(statusEl) statusEl.textContent='Dashboard link settings failed to save.';
     else if(typeof showToast==='function') showToast('Dashboard link settings failed to save.');
+  }
+}
+async function saveWorktreeSettings(){
+  const enabledEl=$('settingsWorktreeEnabled');
+  const cleanupEl=$('settingsWorktreeCleanupOnExit');
+  const statusEl=$('settingsWorktreeStatus');
+  const payload={
+    enabled: !!(enabledEl&&enabledEl.checked),
+    cleanup_on_exit: !!(cleanupEl&&cleanupEl.checked),
+  };
+  try{
+    const saved=await api('/api/worktree/settings',{method:'POST',body:JSON.stringify(payload)});
+    if(enabledEl) enabledEl.checked=!!(saved&&saved.enabled);
+    if(cleanupEl) cleanupEl.checked=(saved&&saved.cleanup_on_exit)!==false;
+    if(statusEl) statusEl.textContent='Worktree settings saved.';
+  }catch(err){
+    if(statusEl) statusEl.textContent='Worktree settings failed to save.';
+    else if(typeof showToast==='function') showToast('Worktree settings failed to save.');
   }
 }
 function openNovaDashboard(event){
@@ -634,22 +662,34 @@ function _applyCastUI(){
   if(!icon)return;
   const btn=icon.closest('.titlebar-action-btn');
   if(btn)btn.style.display='';
+  if(btn){
+    btn.removeAttribute('data-tooltip');
+    btn.removeAttribute('title');
+  }
   if(_castLoading){
     icon.textContent='⏳';
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-off';
-    icon.parentElement?.setAttribute('data-tooltip',_castActive?'Cast wird gestoppt…':'Cast wird gestartet…');
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-off';
+      btn.setAttribute('aria-label',_castActive?'Hub Cast wird gestoppt…':'Hub Cast wird gestartet…');
+    }
   }else if(_castActive){
     icon.textContent='📺';
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-on';
-    icon.parentElement?.setAttribute('data-tooltip','Hub Dashboard oeffnen');
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-on';
+      btn.setAttribute('aria-label','Hub Dashboard öffnen');
+    }
   }else if(!_castAvailable){
     icon.textContent='📺';
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable';
-    icon.parentElement?.setAttribute('data-tooltip',_castLastError||'Hub nicht erreichbar');
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-unavailable';
+      btn.setAttribute('aria-label',_castLastError||'Hub nicht erreichbar');
+    }
   }else{
     icon.textContent='📺';
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-off';
-    icon.parentElement?.setAttribute('data-tooltip','Cast inaktiv – klicken zum starten');
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-off';
+      btn.setAttribute('aria-label','Cast inaktiv – klicken zum starten');
+    }
   }
 }
 
@@ -718,6 +758,7 @@ else _startHubCastMonitor();
 
 function _initDashboardLinkProbe(){
   loadDashboardSettings();
+  loadWorktreeSettings();
   refreshDashboardStatus(true);
   setInterval(refreshDashboardStatus,DASHBOARD_STATUS_TTL_MS);
 }
@@ -1322,8 +1363,6 @@ function syncModelChip(){
   const label=$('composerModelLabel');
   const providerEl=$('composerModelProvider');
   const speedDot=$('modelSpeedDot');
-  const mobileLabel=$('composerMobileModelLabel');
-  const mobileAction=$('composerMobileModelAction');
   const headerBadge=$('modelStatusBadge');
   const headerValue=$('modelStatusValue');
   const dd=$('composerModelDropdown');
@@ -1332,13 +1371,10 @@ function syncModelChip(){
     label.textContent='';
     if(providerEl) providerEl.textContent='';
     if(speedDot) speedDot.className='model-speed-dot';
-    if(mobileLabel) mobileLabel.textContent='';
     if(headerValue) headerValue.textContent='model';
     if(headerBadge){
-      headerBadge.title='Conversation model';
       headerBadge.setAttribute('aria-label','Conversation model. Click to open the model picker.');
     }
-    chip.title='Conversation model';
     return;
   }
   const opt=_selectedModelOption();
@@ -1351,17 +1387,14 @@ function syncModelChip(){
   const _thinkingKey=s=>String(s||'').trim().toLowerCase().replace(/^@[^:]+:/,'').replace(/^[^/]+\//,'').replace(/[^a-z0-9]+/g,'');
   const isThinking=!!thinkingIds.length && thinkingIds.some(id=>_thinkingKey(id)===_thinkingKey(sel.value||''));
   label.textContent=isThinking ? `${displayText} (thinking)` : displayText;
-  if(mobileLabel) mobileLabel.textContent=isThinking ? `${displayText} (thinking)` : displayText;
   const badgeTitle=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
-  chip.title=badgeTitle;
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
-  if(headerValue) headerValue.textContent=isThinking ? `${displayText} (thinking)` : displayText;
+  if(headerValue) headerValue.textContent=displayText;
   if(headerBadge){
-    headerBadge.title=badgeTitle+'. Click to open the model picker.';
-    headerBadge.setAttribute('aria-label',badgeTitle+'. Click to open the model picker.');
+    const headerTitle=badgeTitle+(isThinking ? ' · thinking' : '');
+    headerBadge.setAttribute('aria-label',headerTitle+'. Click to open the model picker.');
     headerBadge.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   }
-  if(mobileAction) mobileAction.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   // Update provider label
   if(providerEl){
     const providerName=_getModelProviderName(sel.value||'');
@@ -1454,12 +1487,10 @@ function _positionFixedDropdownWithinViewport(dd,anchor){
 function _positionModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
-  const mobileAction=$('composerMobileModelAction');
   const headerBadge=$('modelStatusBadge');
   const footer=document.querySelector('.composer-footer');
   if(!dd||!footer) return;
-  const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:mobileAction));
+  const anchor=_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:null);
   if(!anchor) return;
   if(anchor===headerBadge) _positionFixedDropdownWithinViewport(dd,anchor);
   else _positionComposerDropdownWithinViewport(dd,anchor,footer);
@@ -1775,31 +1806,106 @@ async function toggleModelDropdown(){
   if(typeof closeToolsetsDropdown==='function') closeToolsetsDropdown();
   const ready=window._modelDropdownReady;
   if(ready&&typeof ready.then==='function'){
-    try{await ready;}catch(_){}
+    ready.catch(()=>{}).then(()=>{
+      const dd=$('composerModelDropdown');
+      if(dd&&dd.classList.contains('open')){
+        renderModelDropdown();
+        _positionModelDropdown();
+      }
+    });
   }
   if(dd.classList.contains('open')) return;
   renderModelDropdown();
   dd.classList.add('open');
   _positionModelDropdown();
   chip.classList.add('active');
-  const mobileAction=$('composerMobileModelAction');
-  if(mobileAction) mobileAction.classList.add('active');
 }
 
 function closeModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
-  const mobileAction=$('composerMobileModelAction');
   if(dd) dd.classList.remove('open');
   if(chip) chip.classList.remove('active');
-  if(mobileAction) mobileAction.classList.remove('active');
+}
+if(typeof window!=='undefined'){
+  window.toggleModelDropdown=toggleModelDropdown;
+  window.closeModelDropdown=closeModelDropdown;
+}
+
+// Some browser surfaces do not activate inline onclick handlers. Attach a
+// fallback listener so the topbar badges and palette actions keep working.
+function _bindInlineClickFallbacks(root){
+  const scope=root&&typeof root.querySelectorAll==='function' ? root : document;
+  if(!scope||typeof scope.querySelectorAll!=='function') return;
+  for(const el of Array.from(scope.querySelectorAll('[onclick]'))){
+    if(!el||el.dataset.inlineClickFallbackBound==='1') continue;
+    if(
+      el.id==='modelStatusBadge' ||
+      el.id==='composerModelChip' ||
+      el.id==='reasoningModeBadge' ||
+      el.id==='composerReasoningChip'
+    ) continue;
+    if(typeof el.onclick==='function') continue;
+    const code=el.getAttribute('onclick');
+    if(!code) continue;
+    el.dataset.inlineClickFallbackBound='1';
+    try{
+      const fallback=new Function('event', code);
+      el.addEventListener('click',function(event){
+        try{
+          const result=fallback.call(this,event);
+          if(result===false&&event){
+            if(typeof event.preventDefault==='function') event.preventDefault();
+            if(typeof event.stopPropagation==='function') event.stopPropagation();
+          }
+        }catch(err){
+          console.error('[ui] inline click fallback failed for', el.id||el.className||el.tagName, err);
+        }
+      });
+    }catch(err){
+      console.error('[ui] inline click fallback could not compile for', el.id||el.className||el.tagName, err);
+    }
+  }
+}
+
+function _initInlineClickFallbacks(){
+  _bindInlineClickFallbacks(document);
+}
+
+function _bindModelAndReasoningTriggers(){
+  const bindings=[
+    ['modelStatusBadge', toggleModelDropdown],
+    ['composerModelChip', toggleModelDropdown],
+    ['reasoningModeBadge', toggleReasoningDropdown],
+    ['composerReasoningChip', toggleReasoningDropdown],
+  ];
+  for(const [id, handler] of bindings){
+    const el=$(id);
+    if(!el || typeof handler!=='function' || el.dataset.inlineClickFallbackBound==='1') continue;
+    if(typeof el.onclick==='function') continue;
+    el.dataset.inlineClickFallbackBound='1';
+    el.addEventListener('click', function(event){
+      const result=handler.call(this, event);
+      if(result===false&&event){
+        if(typeof event.preventDefault==='function') event.preventDefault();
+        if(typeof event.stopPropagation==='function') event.stopPropagation();
+      }
+    });
+  }
+}
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',_initInlineClickFallbacks,{once:true});
+  document.addEventListener('DOMContentLoaded',_bindModelAndReasoningTriggers,{once:true});
+}else{
+  _initInlineClickFallbacks();
+  _bindModelAndReasoningTriggers();
 }
 
 document.addEventListener('click',e=>{
   if(
     !e.target.closest('#modelStatusBadge') &&
     !e.target.closest('#composerModelChip') &&
-    !e.target.closest('#composerMobileModelAction') &&
     !e.target.closest('#composerModelDropdown')
   ) closeModelDropdown();
 });
@@ -1870,39 +1976,27 @@ function _applyReasoningChip(eff, status){
   const chip=$('composerReasoningChip');
   const headerBadge=$('reasoningModeBadge');
   const headerValue=$('reasoningModeValue');
-  const mobileLabel=$('composerMobileReasoningLabel');
-  const mobileAction=$('composerMobileReasoningAction');
   if(!wrap||!label) return;
   wrap.style.display='';
-  if(mobileAction) mobileAction.style.display='';
   const text=_formatReasoningEffortLabel(effort);
   const allowedSet=allowed?new Set(allowed):null;
   const supported=!allowedSet||!effort||effort==='none'||allowedSet.has(effort);
   const allowedText=allowed&&allowed.length?' · allowed: '+allowed.join(' | '):'';
   const title='Reasoning effort: '+text+allowedText+(supported ? '' : ' (not supported by the selected model)');
   label.textContent=text;
-  if(mobileLabel) mobileLabel.textContent=text;
   if(chip){
     const inactive=!effort||effort==='none';
     chip.classList.toggle('inactive',inactive);
     chip.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
-    chip.title=title;
   }
   if(headerBadge){
     const inactive=!effort||effort==='none';
     headerBadge.classList.toggle('inactive',inactive);
     headerBadge.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
     headerBadge.classList.toggle('active',!!($('composerReasoningDropdown')&&$('composerReasoningDropdown').classList.contains('open')));
-    headerBadge.title=title+'. Click to open the reasoning picker.';
     headerBadge.setAttribute('aria-label',title+'. Click to open the reasoning picker.');
   }
   if(headerValue) headerValue.textContent=text;
-  if(mobileAction){
-    const inactive=!effort||effort==='none';
-    mobileAction.classList.toggle('inactive',inactive);
-    mobileAction.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
-    mobileAction.title=title;
-  }
   const options=document.querySelectorAll('.reasoning-option');
   options.forEach(function(opt){
     const optEff=_normalizeReasoningEffort(opt&&opt.dataset&&opt.dataset.effort);
@@ -2019,6 +2113,10 @@ function _workflowReviewLabel(){
   return 'Run local review chain';
 }
 
+function _workflowTitlebarIsSecondaryChip(el){
+  return !!(el && el.dataset && el.dataset.titlebarSecondary==='1');
+}
+
 function _workflowWebBackendState(){
   const btn=$('browserBackendStatus');
   const backend=String(btn&&btn.dataset&&btn.dataset.backend||'').trim().toLowerCase();
@@ -2050,6 +2148,11 @@ function workflowRefreshResearchBadge(){
   const badge=$('researchModeBadge');
   const value=$('researchModeValue');
   if(!badge && !value) return;
+  if(_workflowTitlebarIsSecondaryChip(badge)){
+    if(badge) badge.hidden=true;
+    if(value) value.hidden=true;
+    return;
+  }
   const state=_workflowResearchModeState();
   const mode=state.mode==='deep'?'deep':'quick';
   if(badge){
@@ -2060,7 +2163,6 @@ function workflowRefreshResearchBadge(){
     badge.setAttribute('aria-pressed',mode==='deep'?'true':'false');
     const nextMode=mode==='deep'?'quick':'deep';
     const label='Research mode '+mode+'. Click to switch to '+(nextMode==='deep'?'deep research':'quick search')+'.';
-    badge.title=label;
     badge.setAttribute('aria-label',label);
   }
   if(value){
@@ -2135,21 +2237,24 @@ function workflowRefreshMcpBadge(force){
   const badge=$('mcpStatusBadge');
   const value=$('mcpStatusValue');
   const state=_workflowMcpSummaryState();
+  const secondary=_workflowTitlebarIsSecondaryChip(badge);
   if(badge){
     ['mcp-state-loading','mcp-state-connected','mcp-state-partial','mcp-state-offline'].forEach(cls=>badge.classList.remove(cls));
     badge.classList.add(_workflowMcpStateClass(state));
-    badge.hidden=false;
+    badge.hidden=secondary;
     badge.disabled=false;
     const label=state.error
       ? 'MCP unavailable. Click to open MCP settings.'
       : (state.available
         ? ('MCP '+state.connected+'/'+state.total+(state.tools ? ', '+state.tools+' tools' : '')+'. Click to open MCP settings.')
         : 'MCP loading. Click to open MCP settings.');
-    badge.title=label;
-    badge.setAttribute('aria-label',label);
+    if(!secondary){
+      badge.setAttribute('aria-label',label);
+    }
   }
   if(value){
     value.textContent=_workflowMcpLabel(state);
+    value.hidden=secondary;
   }
   if((force || (!state.available && !state.error)) && !window._workflowMcpSummaryPromise && typeof api==='function'){
     window._workflowMcpSummaryPromise=api('/api/mcp/servers').then(data=>{
@@ -2208,6 +2313,7 @@ function workflowRefreshSubagentBadge(force){
   const badge=$('subagentsStatusBadge');
   const value=$('subagentsStatusValue');
   if(!badge && !value) return;
+  const secondary=_workflowTitlebarIsSecondaryChip(badge);
   const state=_workflowSubagentSummaryState();
   const shouldFetch=!!force || (!state.available && !state.loading && !state.error);
   if(shouldFetch && typeof api==='function' && !window._workflowSubagentSummaryPromise){
@@ -2235,16 +2341,18 @@ function workflowRefreshSubagentBadge(force){
   const stateClass=_workflowSubagentStateClass(renderState);
   const title=label.slice(0,1).toUpperCase()+label.slice(1)+(label.endsWith('.')?'':'.')+' Click to open subagents.';
   if(badge){
-    badge.hidden=false;
+    badge.hidden=secondary;
     badge.disabled=false;
     badge.classList.remove('subagents-state-loading','subagents-state-active','subagents-state-paused','subagents-state-empty','subagents-state-offline');
     badge.classList.add(stateClass);
     badge.setAttribute('aria-busy',renderState.loading ? 'true' : 'false');
-    badge.title=title;
-    badge.setAttribute('aria-label',title);
+    if(!secondary){
+      badge.setAttribute('aria-label',title);
+    }
   }
   if(value){
     value.textContent=label;
+    value.hidden=secondary;
   }
 }
 
@@ -2324,6 +2432,10 @@ function _workflowHeaderMenuActionButtons(){
   const menu=$('workflowStatusMenu');
   if(!menu) return [];
   return Array.from(menu.querySelectorAll('[role="menuitem"]'));
+}
+
+function _workflowHeaderMenuIsStickyHidden(btn){
+  return !!(btn && btn.dataset && btn.dataset.workflowStickyHidden==='1');
 }
 
 function _workflowHeaderMenuVisibleButtons(){
@@ -2419,6 +2531,12 @@ function workflowFilterHeaderMenu(query){
   const buttons=_workflowHeaderMenuActionButtons();
   let visibleCount=0;
   buttons.forEach(btn=>{
+    if(_workflowHeaderMenuIsStickyHidden(btn)){
+      btn.hidden=true;
+      btn.setAttribute('aria-hidden','true');
+      btn.tabIndex=-1;
+      return;
+    }
     const text=(btn.textContent||'').trim().toLowerCase();
     const titleText=(btn.title||'').trim().toLowerCase();
     const hit=!q || text.includes(q) || titleText.includes(q);
@@ -2432,7 +2550,7 @@ function workflowFilterHeaderMenu(query){
   if(empty) empty.hidden=!(filtered && visibleCount===0);
   separators.forEach(sep=>{ sep.hidden=filtered || visibleCount===0; });
   if(!filtered){
-    buttons.forEach(btn=>{ if(btn) btn.hidden=false; });
+    buttons.forEach(btn=>{ if(btn && !_workflowHeaderMenuIsStickyHidden(btn)) btn.hidden=false; });
     separators.forEach(sep=>{ sep.hidden=false; });
     if(title) title.hidden=false;
     if(empty) empty.hidden=true;
@@ -2505,18 +2623,21 @@ function syncWorkflowChip(){
   const approval=normalizeApproval(window._approvalMode || ($('approvalModeValue')&&$('approvalModeValue').textContent) || 'manual');
   const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
-  const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
-    const webBackend=_workflowWebBackendState();
+  const browserPermissionBtn=$('browserPermissionBtn');
+  const browserOpen=document.body&&document.body.classList.contains('browser-drawer-open');
+  const browserMode=String((browserPermissionBtn&&browserPermissionBtn.dataset&&browserPermissionBtn.dataset.state) || (browserPermissionBtn&&browserPermissionBtn.getAttribute('aria-pressed')==='true' ? 'control' : 'none')).trim().toLowerCase();
+  const browser=(browserOpen ? 'browser open' : 'browser closed')+' · '+(browserMode==='control' ? 'control' : (browserMode==='read' ? 'read' : 'locked'));
+  const webBackend=_workflowWebBackendState();
   const review=_workflowReviewState();
   const research=_workflowResearchModeState();
   const mcp=_workflowMcpSummaryState();
   const subagents=_workflowSubagentChipLabel();
-  value.textContent=approval+' · '+reasoning+' · '+(research.mode==='deep'?'deep':'quick')+(review.visible ? ' · review' : '')+' · '+subagents;
+  value.textContent=approval+' · '+reasoning+(review.visible ? ' · review' : '');
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
   const reviewLabel=review.visible ? _workflowReviewLabel() : 'local review ready';
   const researchLabel=research.mode==='deep' ? 'deep research' : 'quick search';
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+_workflowMcpLabel(mcp)+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
-  badge.title=label;
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+_workflowMcpLabel(mcp)+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status. Cmd/Ctrl+K opens the palette.';
+  badge.removeAttribute('title');
   badge.setAttribute('aria-label',label);
   workflowRefreshMcpBadge();
   workflowRefreshSubagentBadge();
@@ -2527,7 +2648,6 @@ function syncWorkflowChip(){
 function workflowRefreshHeaderMenu(){
   const menu=$('workflowStatusMenu');
   const badge=$('workflowStatusBadge');
-  const menuBtn=$('workflowStatusMenuBtn');
   const primarySubagent=$('workflowHeaderPrimarySubagentAction');
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
@@ -2541,13 +2661,13 @@ function workflowRefreshHeaderMenu(){
   }
   if(badge){
     badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
-  }
-  if(menuBtn){
-    menuBtn.setAttribute('aria-expanded',_workflowHeaderMenuOpen?'true':'false');
+    badge.setAttribute('aria-expanded',_workflowHeaderMenuOpen?'true':'false');
   }
   if(primarySubagent){
     const preview=_workflowSubagentPreviewLabel(subagentState);
-    const available=!!subagentState.available;
+    const available=!!subagentState.count;
+    if(available) primarySubagent.removeAttribute('data-workflow-sticky-hidden');
+    else primarySubagent.setAttribute('data-workflow-sticky-hidden','1');
     primarySubagent.hidden=!available;
     primarySubagent.disabled=!available;
     primarySubagent.textContent=preview ? 'Open first subagent · '+preview : 'Open first subagent';
@@ -2632,16 +2752,60 @@ function workflowCloseHeaderMenu(){
   if(search){
     search.value='';
   }
-  const menuBtn=$('workflowStatusMenuBtn');
-  if(menuBtn) menuBtn.setAttribute('aria-expanded','false');
   document.removeEventListener('click', _workflowHeaderMenuOutsideClick, true);
   document.removeEventListener('keydown', _workflowHeaderMenuKeydown, true);
   workflowRefreshHeaderMenu();
   workflowRefreshHeaderMenuFooter();
 }
+function workflowOpenHeaderMenu(event){
+  if(event&&typeof event.preventDefault==='function') event.preventDefault();
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const menu=$('workflowStatusMenu');
+  if(!menu || _workflowHeaderMenuOpen) return false;
+  if(menu.parentElement!==document.body){
+    document.body.appendChild(menu);
+  }
+  if(typeof closeModelDropdown==='function') closeModelDropdown();
+  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
+  _workflowHeaderMenuOpen=true;
+  menu.hidden=false;
+  workflowRefreshHeaderMenu();
+  const badge=$('workflowStatusBadge');
+  if(menu&&badge&&typeof menu.getBoundingClientRect==='function'&&typeof badge.getBoundingClientRect==='function'){
+    const badgeRect=badge.getBoundingClientRect();
+    const menuRect=menu.getBoundingClientRect();
+    const pad=12;
+    const desiredLeft=Math.round(badgeRect.right-menuRect.width);
+    const maxLeft=Math.max(pad, window.innerWidth-menuRect.width-pad);
+    const left=Math.max(pad, Math.min(maxLeft, desiredLeft));
+    const desiredTop=Math.round(badgeRect.top-menuRect.height-8);
+    const maxTop=Math.max(pad, window.innerHeight-menuRect.height-pad);
+    const top=Math.max(pad, Math.min(maxTop, desiredTop));
+    menu.style.position='fixed';
+    menu.style.left=left+'px';
+    menu.style.top=top+'px';
+    menu.style.right='auto';
+    menu.style.bottom='auto';
+  }
+  document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
+  document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
+  workflowFilterHeaderMenu((_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
+  workflowRefreshHeaderMenuFooter();
+  setTimeout(workflowFocusHeaderMenuSearch,0);
+  return false;
+}
+function workflowMaybeCloseHeaderMenu(event){
+  const menu=$('workflowStatusMenu');
+  const badge=$('workflowStatusBadge');
+  const next=event&&event.relatedTarget;
+  if(typeof window.matchMedia==='function' && !window.matchMedia('(hover: hover)').matches) return false;
+  if(next && ((menu&&menu.contains(next)) || (badge&&badge.contains(next)))) return false;
+  workflowCloseHeaderMenu();
+  return false;
+}
 function _workflowHeaderMenuOutsideClick(event){
   const menu=$('workflowStatusMenu');
-  const btn=$('workflowStatusMenuBtn');
+  const btn=$('workflowStatusBadge');
   if(!menu || menu.hidden) return;
   if(menu.contains(event.target)) return;
   if(btn && btn.contains(event.target)) return;
@@ -2655,27 +2819,11 @@ function _workflowHeaderMenuKeydown(event){
 function workflowToggleHeaderMenu(event){
   if(event&&typeof event.preventDefault==='function') event.preventDefault();
   if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
-  const menu=$('workflowStatusMenu');
-  if(!menu) return false;
   if(_workflowHeaderMenuOpen){
     workflowCloseHeaderMenu();
     return false;
   }
-  if(typeof closeModelDropdown==='function') closeModelDropdown();
-  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
-  if(typeof browserToggleHeaderMenu==='function'){
-    const browserMenu=$('browserStatusMenu');
-    if(browserMenu && !browserMenu.hidden) browserToggleHeaderMenu();
-  }
-  _workflowHeaderMenuOpen=true;
-  menu.hidden=false;
-  workflowRefreshHeaderMenu();
-  document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
-  document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
-  workflowFilterHeaderMenu((_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
-  workflowRefreshHeaderMenuFooter();
-  setTimeout(workflowFocusHeaderMenuSearch,0);
-  return false;
+  return workflowOpenHeaderMenu(event);
 }
 
 function workflowRunHeaderAction(action){
@@ -2684,6 +2832,22 @@ function workflowRunHeaderAction(action){
     case 'status':
       if(typeof executeCommand==='function') executeCommand('/workflow status');
       break;
+    case 'compact-layout':
+      if(typeof toggleCompactLayout==='function') toggleCompactLayout();
+      break;
+    case 'copy-conversation': {
+      const text=typeof transcript==='function' ? transcript() : '';
+      if(!text||!String(text).trim()){
+        showToast(typeof t==='function' ? t('no_active_session') : 'No active session');
+        break;
+      }
+      _copyText(text).then(()=>{
+        showToast(typeof t==='function' ? t('copied') : 'Copied!');
+      }).catch(()=>{
+        showToast(typeof t==='function' ? t('copy_failed') : 'Copy failed');
+      });
+      break;
+    }
     case 'subagent-primary': {
       const state=_workflowSubagentSummaryState();
       const target=String(state.sessionId||state.subagentId||'').trim();
@@ -2721,12 +2885,6 @@ function workflowRunHeaderAction(action){
     case 'browser-permission':
       if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('permission');
       else if(typeof browserTogglePermission==='function') browserTogglePermission();
-      break;
-    case 'browser-menu':
-      if(typeof browserToggleHeaderMenu==='function'){
-        const browserMenu=$('browserStatusMenu');
-        if(browserMenu && browserMenu.hidden) browserToggleHeaderMenu();
-      }
       break;
     case 'browser-screenshot':
       if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('screenshot');
@@ -2775,6 +2933,7 @@ function workflowRunHeaderAction(action){
 if(typeof window!=='undefined'){
   window.workflowToggleHeaderMenu=workflowToggleHeaderMenu;
   window.workflowRunHeaderAction=workflowRunHeaderAction;
+  window.workflowOpenHeaderMenu=workflowOpenHeaderMenu;
   window.workflowCloseHeaderMenu=workflowCloseHeaderMenu;
   window.syncWorkflowChip=syncWorkflowChip;
   window.syncModelChip=syncModelChip;
@@ -2787,6 +2946,7 @@ if(typeof window!=='undefined'){
   window.workflowOpenMcpPanel=workflowOpenMcpPanel;
   window.workflowOpenSubagentsPanel=workflowOpenSubagentsPanel;
   window.workflowOpenExecPrompt=workflowOpenExecPrompt;
+  window._bindInlineClickFallbacks=_bindInlineClickFallbacks;
 }
 
 function _highlightReasoningOption(effort){
@@ -2824,19 +2984,15 @@ function toggleReasoningDropdown(){
   _positionReasoningDropdown();
   chip.classList.add('active');
   if(headerBadge) headerBadge.classList.add('active');
-  const mobileAction=$('composerMobileReasoningAction');
-  if(mobileAction) mobileAction.classList.add('active');
 }
 
 function _positionReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
   const headerBadge=$('reasoningModeBadge');
-  const mobileAction=$('composerMobileReasoningAction');
   const footer=document.querySelector('.composer-footer');
   if(!dd||!footer) return;
-  const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:mobileAction));
+  const anchor=_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:chip);
   if(!anchor) return;
   if(anchor===headerBadge) _positionFixedDropdownWithinViewport(dd,anchor);
   else _positionComposerDropdownWithinViewport(dd,anchor,footer);
@@ -2846,18 +3002,19 @@ function closeReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
   const headerBadge=$('reasoningModeBadge');
-  const mobileAction=$('composerMobileReasoningAction');
   if(dd) dd.classList.remove('open');
   if(chip) chip.classList.remove('active');
   if(headerBadge) headerBadge.classList.remove('active');
-  if(mobileAction) mobileAction.classList.remove('active');
+}
+if(typeof window!=='undefined'){
+  window.toggleReasoningDropdown=toggleReasoningDropdown;
+  window.closeReasoningDropdown=closeReasoningDropdown;
 }
 
 document.addEventListener('click',function(e){
   if(
     !e.target.closest('#reasoningModeBadge') &&
     !e.target.closest('#composerReasoningChip') &&
-    !e.target.closest('#composerMobileReasoningAction') &&
     !e.target.closest('#composerReasoningDropdown')
   ) closeReasoningDropdown();
   if(e.target.closest('.reasoning-option')){
@@ -2898,12 +3055,11 @@ function _applyToolsetsChip(toolsets) {
   if (hasCustom) {
     label.textContent = toolsets.join(', ');
     chip.classList.add('has-custom');
-    chip.title = t('session_toolsets') + ': ' + toolsets.join(', ');
   } else {
     label.textContent = t('session_toolsets_global');
     chip.classList.remove('has-custom');
-    chip.title = t('session_toolsets');
   }
+  chip.removeAttribute('title');
 }
 
 function _syncToolsetsChip() {
@@ -3252,6 +3408,7 @@ if (typeof window !== 'undefined') {
   if (typeof workflowRefreshMcpBadge === 'function') window.workflowRefreshMcpBadge = workflowRefreshMcpBadge;
   if (typeof workflowRefreshSubagentBadge === 'function') window.workflowRefreshSubagentBadge = workflowRefreshSubagentBadge;
   if (typeof populateModelDropdown === 'function') window.populateModelDropdown = populateModelDropdown;
+  if (typeof _bindInlineClickFallbacks === 'function') window._bindInlineClickFallbacks = _bindInlineClickFallbacks;
 }
 
 // Keep settled activity disclosure labels honest and avoid stale mojibake labels.
@@ -3362,7 +3519,7 @@ function _clearActivityElapsedTimer(){
   _activityElapsedTimerGroup=null;
 }
 
-const _MOBILE_CONFIG_BASE_LABEL='Workspace, model, reasoning, and context settings';
+const _MOBILE_CONFIG_BASE_LABEL='Workspace and context settings';
 
 function _setCtxCompressButton(btn,text){
   if(!btn)return;
@@ -3395,7 +3552,7 @@ function _syncMobileCtxDisplay(state){
     if(row)row.style.display='none';
     if(mobileConfigBtn){
       mobileConfigBtn.setAttribute('aria-label',_MOBILE_CONFIG_BASE_LABEL);
-      mobileConfigBtn.setAttribute('title',_MOBILE_CONFIG_BASE_LABEL);
+      mobileConfigBtn.removeAttribute('title');
     }
     _setCtxCompressButton(compressBtn,'');
     return;
@@ -3405,11 +3562,12 @@ function _syncMobileCtxDisplay(state){
     badge.textContent=state.hasPromptTok?String(state.pct):'\u00b7';
     badge.classList.toggle('ctx-mid',state.pct>50&&state.pct<=75);
     badge.classList.toggle('ctx-high',state.pct>75);
-    badge.setAttribute('title',state.label);
+    badge.removeAttribute('title');
+    badge.setAttribute('aria-label',state.label);
   }
   if(mobileConfigBtn){
     mobileConfigBtn.setAttribute('aria-label',`${_MOBILE_CONFIG_BASE_LABEL}; ${state.label}`);
-    mobileConfigBtn.setAttribute('title',`${_MOBILE_CONFIG_BASE_LABEL} \u00b7 ${state.label}`);
+    mobileConfigBtn.removeAttribute('title');
   }
   if(row){
     row.style.display='';
@@ -4548,19 +4706,50 @@ function setStatus(t){
   showToast(t, 4000);
 }
 
+function _composerBusyLabel(){
+  if(typeof t==='function'){
+    const voiceThinking=t('voice_thinking');
+    if(voiceThinking&&voiceThinking!=='voice_thinking') return voiceThinking;
+    const thinking=t('thinking');
+    if(thinking&&thinking!=='thinking') return thinking;
+  }
+  return 'Thinking...';
+}
+
 function setComposerStatus(t, isLoading){
   const el=$('composerStatus');
   if(!el)return;
   if(!t){
-    el.style.display='none';
-    el.textContent='';
-    el.classList.remove('is-loading');
-    return;
+    if(S&&S.busy){
+      t=_composerBusyLabel();
+      isLoading=true;
+    }else{
+      el.style.display='none';
+      el.textContent='';
+      el.classList.remove('is-loading');
+      return;
+    }
   }
   el.textContent=t;
   if(isLoading) el.classList.add('is-loading');
   else el.classList.remove('is-loading');
   el.style.display='';
+}
+
+function _syncComposerBusyStatus(){
+  const el=$('composerStatus');
+  if(!el) return;
+  if(S&&S.busy){
+    if(!(el.textContent||'').trim()){
+      setComposerStatus(_composerBusyLabel(), true);
+    }
+    return;
+  }
+  if((el.textContent||'').trim() && el.classList.contains('is-loading')) return;
+  if(!(el.textContent||'').trim()){
+    el.style.display='none';
+    el.classList.remove('is-loading');
+  }
 }
 
 let _composerLockState=null;
@@ -4790,6 +4979,7 @@ function toggleCompactLayout(){
   const btn=document.getElementById('compactToggleBtn');
   if(btn){
     btn.classList.toggle('active',active);
+    btn.classList.toggle('workflow-menu-active',active);
     btn.setAttribute('aria-pressed',active?'true':'false');
   }
   try{localStorage.setItem('sidekick-webui-compact-chat',active?'1':'');}catch(_){}
@@ -4802,6 +4992,7 @@ function _initCompactLayout(){
   const btn=document.getElementById('compactToggleBtn');
   if(btn){
     btn.classList.toggle('active',active);
+    btn.classList.toggle('workflow-menu-active',active);
     btn.setAttribute('aria-pressed',active?'true':'false');
   }
 }
@@ -4990,6 +5181,7 @@ function setBusy(v){
       },120);
     }
   }
+  if(typeof _syncComposerBusyStatus==='function') _syncComposerBusyStatus();
 }
 
 // ── Queue chip display (Codex Desktop pattern) ─────────────────────────────
@@ -6185,7 +6377,10 @@ function syncTopbar(){
     if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
     return;
   }
-  const sessionTitle=S.session.title||t('untitled');
+  const rawTitle=String(S.session.title||'').trim();
+  const sessionTitle=rawTitle && rawTitle!=='Untitled'
+    ? rawTitle
+    : (typeof t==='function' ? t('new_chat') : 'New chat');
   document.title=sessionTitle+' \u2014 '+(window._botName||'Nova');
   if(typeof syncAppTitlebar==='function') syncAppTitlebar();
   if(typeof _syncWorkspaceHeadingState==='function') _syncWorkspaceHeadingState();
@@ -10166,6 +10361,14 @@ async function uploadPendingFiles(){
 
 /* ── Split pane resize (Codex-style: resizable chat + workspace) ─────── */
 
+function syncWorkspaceRightpanelWidth(){
+  const root=document.documentElement;
+  if(!root) return;
+  const panel=document.querySelector('.rightpanel');
+  const width=panel ? Math.max(0,Math.round(panel.getBoundingClientRect().width)) : 0;
+  root.style.setProperty('--workspace-rightpanel-width',width+'px');
+}
+
 function initSplitPane(){
   const handle=document.getElementById('chatSplitResize');
   if(!handle) return;
@@ -10173,6 +10376,17 @@ function initSplitPane(){
   if(!layout) return;
   const panel=layout.querySelector('.rightpanel');
   if(!panel) return;
+  syncWorkspaceRightpanelWidth();
+  if(typeof ResizeObserver!=='undefined'){
+    if(window._workspaceRightpanelWidthObserver && typeof window._workspaceRightpanelWidthObserver.disconnect==='function'){
+      window._workspaceRightpanelWidthObserver.disconnect();
+    }
+    window._workspaceRightpanelWidthObserver=new ResizeObserver(()=>syncWorkspaceRightpanelWidth());
+    window._workspaceRightpanelWidthObserver.observe(panel);
+  }else if(!window._workspaceRightpanelWidthResizeBound){
+    window._workspaceRightpanelWidthResizeBound=true;
+    window.addEventListener('resize',syncWorkspaceRightpanelWidth);
+  }
   let isDragging=false;
   handle.addEventListener('mousedown',function(e){
     isDragging=true;
@@ -10188,6 +10402,7 @@ function initSplitPane(){
       if(!isDragging) return;
       const newW=Math.max(250,Math.min(maxW,startW-(ev.clientX-startX)));
       panel.style.flex=`0 0 ${newW}px`;
+      syncWorkspaceRightpanelWidth();
     };
     const onUp=function(){
       isDragging=false;
@@ -10199,6 +10414,7 @@ function initSplitPane(){
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
       try{localStorage.setItem('sidekick-rightpanel-width',panel.style.flex);}catch(_){}
+      syncWorkspaceRightpanelWidth();
     };
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
@@ -10208,6 +10424,7 @@ function initSplitPane(){
     const saved=localStorage.getItem('sidekick-rightpanel-width');
     if(saved) panel.style.flex=saved;
   }catch(_){}
+  syncWorkspaceRightpanelWidth();
 }
 
 

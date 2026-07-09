@@ -27,12 +27,14 @@ Config-Validierung läuft über `sidekick doctor`.
 | `shared.sessions.Session` | 6 (Basisfelder) | `~/.sidekick/state/webui/sessions/` |
 | `web.api.models.Session` | 30+ (agent state, streaming, ...) | `~/.sidekick/state/webui/sessions/` |
 
-**Status:** ⚠️ Gleicher Storage-Pfad, aber unterschiedliche Objektmodelle.
-**Konsequenz:** Sessions aus der CLI sind im WebUI sichtbar, aber WebUI-
-spezifische Felder (agent state, streaming, compression anchor) sind nur
-über die WebUI-API zugänglich.
+**Status:** ⚠️ Gleicher Storage-Pfad, unterschiedliche Objektmodelle, aber
+`shared.sessions` erhält WebUI-spezifische JSON-Felder jetzt beim Laden,
+Speichern sowie in den Listen-/Status-Snapshots.
+**Konsequenz:** Sessions aus der CLI sind im WebUI sichtbar, und WebUI-
+spezifische Felder bleiben beim Roundtrip über `shared.sessions` erhalten.
 **Workaround:** Keiner nötig — beide lesen/schreiben dasselbe JSON-Verzeichnis.
-**Geplant für:** v0.6.0 oder später (kein akuter Blocker)
+**Geplant für:** ein späteres Modell-Fusion- oder Adapter-Refactor, falls wir
+die Klassen irgendwann vollständig vereinheitlichen wollen.
 
 ---
 
@@ -61,13 +63,13 @@ erhalten.
 
 ---
 
-## Windows CI fehlt
+## Windows CI
 
-**Status:** ⚠️ Noch nicht aktiviert
-**Details:** CI läuft auf Ubuntu (full) und macOS (subset). Windows ist
-vorbereitet aber noch nicht getestet. Hauptrisiken: Shell-Kompatibilität,
-Pfad-Separator, Python-Binary-Name.
-**Geplant für:** v0.6.0 oder später
+**Status:** ✅ Aktiv
+**Details:** CI läuft auf Ubuntu (full) sowie auf macOS und Windows (smoke).
+Der Windows-Runner prüft die gleichen user-facing Smoke-Gates wie macOS, ohne
+den Linux-Fullsuite-Run zu duplizieren.
+**Resolved in:** v0.6.0
 
 ---
 
@@ -96,8 +98,8 @@ Warnings.
 | Issue | Status | Seit | Blocking |
 |-------|--------|------|----------|
 | Gateway Warnings | ✅ Non-blocking | v0.3.0 | ❌ |
-| Session-Layer Divergenz | ⚠️ Workaround | — | ❌ |
+| Session-Layer Divergenz | ⚠️ Reduziert | — | ❌ |
 | CLI HERMES_* Referenzen | ✅ Legacy compat | — | ❌ |
 | WebUI hermes-* Keys | ✅ Residual | v0.2.0 | ❌ |
-| Windows CI | ⚠️ Nicht aktiv | — | ❌ |
+| Windows CI | ✅ Aktiv | v0.6.0 | ❌ |
 | hermes-Alias | ✅ Dokumentiert | v0.1.0 | ❌ |

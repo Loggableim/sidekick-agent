@@ -11,10 +11,9 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
+from web.api._home import get_webui_home
 from web.api.auth import is_auth_enabled
 from web.api.config import (
-    DEFAULT_MODEL,
-    DEFAULT_WORKSPACE,
     _FALLBACK_MODELS,
     _SIDEKICK_FOUND,
     _PROVIDER_DISPLAY,
@@ -218,7 +217,7 @@ def _get_active_hermes_home() -> Path:
 
         return get_active_hermes_home()
     except ImportError:
-        return Path.home() / ".sidekick"
+        return get_webui_home()
 
 
 def _load_env_file(env_path: Path) -> dict[str, str]:
@@ -901,9 +900,8 @@ def get_onboarding_status() -> dict:
     return {
         "completed": bool(settings.get("onboarding_completed")) or auto_completed or config_auto_completed,
         "settings": {
-            "default_model": settings.get("default_model") or DEFAULT_MODEL,
-            "default_workspace": settings.get("default_workspace")
-            or str(DEFAULT_WORKSPACE),
+            "default_model": settings.get("default_model"),
+            "default_workspace": settings.get("default_workspace"),
             "password_enabled": is_auth_enabled(),
             "bot_name": settings.get("bot_name") or "Nova",
             "nova_character": settings.get("nova_character") or "nova",
