@@ -3385,6 +3385,66 @@ def test_game_mode_chat_start_routes_nova_local_models_to_ollama_cloud_deepseek(
     assert captured["normalized_model"] is True
 
 
+def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="nova-session",
+        profile="default",
+        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: r"C:\\sidekick\\home\\spaces\\nova")
+    monkeypatch.setattr(
+        routes,
+        "_resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("qwen3:4b", "ollama", False),
+    )
+    monkeypatch.setattr(
+        routes,
+        "resolve_active_provider_context",
+        lambda: {"provider": "ollama", "model": "qwen3:4b", "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
+    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+
+    payload = routes._handle_chat_start(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "nova-session",
+            "message": "hello nova",
+            "workspace": r"C:\\sidekick\\home\\spaces\\nova",
+        },
+    )
+
+    assert payload["stream_id"] == "stream-1"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["model_provider"] == "ollama-cloud"
+    assert captured["normalized_model"] is True
+
+
 def test_image_generation_tool_returns_game_mode_error(monkeypatch, tmp_path):
     from web.api import config as cfg
     from tools import image_generation_tool as image_tool

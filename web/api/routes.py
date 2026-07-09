@@ -10519,24 +10519,32 @@ def _game_mode_nova_remote_model_state(
     provider_context: dict | None = None,
     *,
     space_slug: str | None = None,
+    workspace: str | None = None,
 ) -> tuple[str, str | None, bool] | None:
     """Route Nova chat turns to Ollama Cloud when Game Mode blocks local models."""
     if not is_game_mode_enabled():
         return None
-    if str(space_slug or "").strip().lower() != "nova":
+    context = provider_context if isinstance(provider_context, dict) else {}
+    inferred_space_slug = str(space_slug or "").strip().lower()
+    if not inferred_space_slug:
+        workspace_name = str(workspace or context.get("workspace") or "").strip()
+        if workspace_name:
+            try:
+                inferred_space_slug = Path(workspace_name).name.strip().lower()
+            except Exception:
+                inferred_space_slug = ""
+    if inferred_space_slug != "nova":
         return None
 
-    context = provider_context if isinstance(provider_context, dict) else {}
     requested_model = str(model or context.get("model") or "").strip()
     requested_provider = str(model_provider or context.get("provider") or "").strip()
     requested_base_url = str(context.get("base_url") or "").strip()
 
     try:
-        resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(
+        _resolved_model, resolved_provider, resolved_base_url = resolve_model_provider(
             model_with_provider_context(requested_model, requested_provider or None)
         )
     except Exception:
-        resolved_model = requested_model
         resolved_provider = requested_provider
         resolved_base_url = requested_base_url
 
@@ -10679,6 +10687,7 @@ def _handle_goal_command(handler, body):
             model,
             model_provider,
             space_slug=space_slug,
+            workspace=workspace,
         )
         if game_mode_nova_override:
             model, model_provider, normalized_model = game_mode_nova_override
@@ -10811,6 +10820,7 @@ def _handle_chat_start(handler, body, diag=None):
             model_provider,
             provider_context,
             space_slug=space_slug,
+            workspace=workspace,
         )
         if game_mode_nova_override:
             model, model_provider, normalized_model = game_mode_nova_override
@@ -10897,6 +10907,7 @@ def _handle_plan_accept(handler, body):
             or getattr(s, "space", None)
             or ""
         ).strip().lower() or None,
+        workspace=workspace,
     )
     if game_mode_nova_override:
         model, model_provider, normalized_model = game_mode_nova_override
@@ -10957,6 +10968,7 @@ def _handle_plan_revise(handler, body):
             or getattr(s, "space", None)
             or ""
         ).strip().lower() or None,
+        workspace=workspace,
     )
     if game_mode_nova_override:
         model, model_provider, normalized_model = game_mode_nova_override
@@ -11056,6 +11068,7 @@ def _handle_chat_sync(handler, body):
                     or getattr(s, "space", None)
                     or ""
                 ).strip().lower() or None,
+                workspace=workspace,
             )
             if game_mode_nova_override:
                 _model, _provider, _normalized_model = game_mode_nova_override
