@@ -26,7 +26,7 @@ def _ensure_project_root() -> None:
 _ensure_project_root()
 
 from sidekick_cli import __version__ as __version__  # single source of truth
-__release_date__ = "2026.7.9"
+__release_date__ = "2026.7.10"
 __all__ = ["__version__", "__release_date__"]
 
 
