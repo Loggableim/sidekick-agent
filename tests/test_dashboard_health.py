@@ -2464,6 +2464,18 @@ def test_appstore_mail_setup_prefill_uses_default_inbox_when_present():
     assert "currentConfig.inboxes.length > 0 ? currentConfig.inboxes[0] : {}" not in setup_block
 
 
+def test_mail_panel_prefers_current_inbox_then_default_then_first():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function loadMailPanel() {")
+    save = panels_js.index("async function _mailSwitchInbox(", start)
+    block = panels_js[start:save]
+
+    assert "_currentMailInboxId" in block
+    assert "inboxes.find(i => i.id === _currentMailInboxId)" in block
+    assert "inboxes.find(i=>i.default)" in block
+    assert "_mailSwitchInbox(selectedInbox.id);" in block
+
+
 def test_appstore_mail_keeps_special_ui_state_even_when_installed():
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
     setup_start = panels_js.index("async function _appstoreOpenMailSettings() {")

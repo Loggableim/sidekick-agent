@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Mail now reopens on the active inbox when available, then the default inbox, before falling back to the first inbox** so reopening the Mail panel no longer jumps to the wrong mailbox.
 - **Reasoning-effort copy in the WebUI now shows the intended brain glyph and separators** instead of `??`/`?`, so the reasoning picker toast and tooltip both read correctly.
 - **Static WebUI placeholders in the composer, goal banner, sandbox toggle, agent wizard, and mail panels now use real icons and labels** instead of `?`/`??`, so hidden UI surfaces no longer fall back to question marks when opened.
 - **Slash-command help, toasts, and list separators in `web/static/commands.js` now use the intended glyphs** instead of mojibake, so `/help`, `/skills`, `/personality`, `/exec`, and `/image` read correctly again.

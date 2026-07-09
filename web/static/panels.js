@@ -10202,8 +10202,13 @@ async function loadMailPanel() {
     const data = await _mailApi('/api/mail/folders');
     const inboxes = data.inboxes || [];
     inboxSelector.innerHTML = inboxes.map(i=>`<option value="${i.id}">${i.label}</option>`).join('');
-    if (inboxes.length>0) {
-      _mailSwitchInbox(inboxes[0].id);
+    const selectedInbox = inboxes.find(i => i.id === _currentMailInboxId)
+      || inboxes.find(i=>i.default)
+      || inboxes[0]
+      || null;
+    if (selectedInbox) {
+      inboxSelector.value = selectedInbox.id;
+      _mailSwitchInbox(selectedInbox.id);
     }
   } catch(e) {
     console.warn('Mail load error', e);
