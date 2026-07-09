@@ -270,6 +270,24 @@ def test_background_cron_jobs_prune_legacy_nova_jobs(monkeypatch, tmp_path):
     }
 
 
+def test_background_tick_updates_substrate_heartbeat_fields(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_now", lambda: "2026-07-09T12:00:00+00:00")
+
+    result = lifecycle.background_tick()
+    substrate = json.loads((tmp_path / "home" / "spaces" / "nova" / "substrate_state.json").read_text(encoding="utf-8"))
+    events = lifecycle.load_events(limit=1, include_private=True)
+
+    assert result["ok"] is True
+    assert substrate["last_heartbeat"] == "2026-07-09T12:00:00+00:00"
+    assert substrate["last_lifecycle_heartbeat"] == "2026-07-09T12:00:00+00:00"
+    assert substrate["lifecycle_status"] == "alive"
+    assert events[0]["steps"][-1] == "substrate_done"
+
+
 def test_nova_status_degrades_when_cron_storage_write_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 

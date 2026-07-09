@@ -949,7 +949,9 @@ def background_tick() -> dict[str, Any]:
         data = _read_json(substrate, {})
         if not isinstance(data, dict):
             data = {}
-        data["last_lifecycle_heartbeat"] = _now()
+        heartbeat_at = _now()
+        data["last_heartbeat"] = heartbeat_at
+        data["last_lifecycle_heartbeat"] = heartbeat_at
         data["lifecycle_status"] = "alive"
         _write_json(substrate, data)
         _update_event(event, step="substrate_done", status="completed", completed_at=_now())
