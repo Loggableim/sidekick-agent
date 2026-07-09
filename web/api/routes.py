@@ -3637,6 +3637,22 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
         sidekick_home = _routes_active_home()
         mail_path = sidekick_home / "spaces" / space_slug / "mail.json"
         mail_path.parent.mkdir(parents=True, exist_ok=True)
+        existing_config = None
+        if mail_path.exists():
+            try:
+                raw_existing = json.loads(mail_path.read_text(encoding="utf-8"))
+                if isinstance(raw_existing, dict):
+                    existing_config = raw_existing
+            except Exception:
+                existing_config = None
+        if existing_config:
+            existing_inboxes = existing_config.get("inboxes", [])
+            if isinstance(existing_inboxes, list) and len(existing_inboxes) > 1:
+                merged_config = dict(existing_config)
+                merged_config["inboxes"] = [inboxes[0]] + [
+                    ib for ib in existing_inboxes[1:] if isinstance(ib, dict)
+                ]
+                config = merged_config
         mail_path.write_text(
             json.dumps(config, indent=2, ensure_ascii=False),
             encoding="utf-8",
