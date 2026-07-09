@@ -62,36 +62,64 @@ def _normalize_ollama_root(raw_url: str) -> str:
     return urllib.parse.urlunparse(rebuilt).rstrip("/")
 
 
+def _is_local_ollama_base_url(raw_url: str) -> bool:
+    """Return True for local Ollama endpoints that actually consume VRAM."""
+    try:
+        normalized = _normalize_ollama_root(raw_url)
+        return bool(normalized) and cfg._base_url_points_at_local_server(normalized)
+    except Exception:
+        return False
+
+
 def _ollama_base_urls() -> list[str]:
-    urls = {_normalize_ollama_root(os.getenv("OLLAMA_HOST", ""))}
+    urls: set[str] = set()
+
+    def consider(value: Any, *hints: Any, allow_env: bool = False) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        normalized = _normalize_ollama_root(text)
+        if not _is_local_ollama_base_url(normalized):
+            return
+        hint_text = " ".join(str(item or "").strip().lower() for item in hints)
+        if allow_env or "ollama" in hint_text or "ollama" in normalized.lower():
+            urls.add(normalized)
+
+    consider(os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"), allow_env=True)
     try:
         conf = cfg.get_config()
     except Exception:
         conf = {}
 
-    def consider(value: Any) -> None:
-        text = str(value or "").strip()
-        if text and "ollama" in text.lower():
-            urls.add(_normalize_ollama_root(text))
-
     if isinstance(conf, dict):
         model_cfg = conf.get("model") or {}
         if isinstance(model_cfg, dict):
-            consider(model_cfg.get("base_url"))
+            consider(
+                model_cfg.get("base_url"),
+                model_cfg.get("provider"),
+                model_cfg.get("name"),
+                "model",
+            )
         providers = conf.get("providers") or {}
         if isinstance(providers, dict):
             for key, entry in providers.items():
-                if str(key).strip().lower() == "ollama" and isinstance(entry, dict):
-                    consider(entry.get("base_url"))
+                if isinstance(entry, dict):
+                    consider(
+                        entry.get("base_url"),
+                        key,
+                        entry.get("name"),
+                        entry.get("provider"),
+                    )
         custom = conf.get("custom_providers") or []
         if isinstance(custom, list):
             for entry in custom:
                 if not isinstance(entry, dict):
                     continue
-                name = str(entry.get("name") or entry.get("provider") or "").lower()
-                base_url = str(entry.get("base_url") or "")
-                if "ollama" in name or "ollama" in base_url.lower():
-                    consider(base_url)
+                consider(
+                    entry.get("base_url"),
+                    entry.get("name"),
+                    entry.get("provider"),
+                )
     return sorted(urls)
 
 

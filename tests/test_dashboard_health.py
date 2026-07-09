@@ -3741,6 +3741,37 @@ def test_game_mode_resource_release_cancels_local_runs_and_unloads_ollama(monkey
     assert payload["gpu_processes"]["after"]["non_sidekick_top"][0]["process"] == "VRChat.exe"
 
 
+def test_game_mode_resource_release_skips_ollama_cloud_endpoints(monkeypatch):
+    from web.api import game_mode
+
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com/v1")
+    monkeypatch.setattr(
+        game_mode.cfg,
+        "get_config",
+        lambda: {
+            "model": {"provider": "ollama-cloud", "base_url": "https://ollama.com/v1"},
+            "providers": {"ollama-cloud": {"base_url": "https://ollama.com/v1"}},
+            "custom_providers": [{"name": "Ollama Cloud", "base_url": "https://ollama.com/v1"}],
+        },
+    )
+    with game_mode.cfg.ACTIVE_RUNS_LOCK:
+        game_mode.cfg.ACTIVE_RUNS.clear()
+
+    def fail_loaded_models(base_url):
+        raise AssertionError(f"Game Mode release should not inspect remote Ollama URL: {base_url}")
+
+    monkeypatch.setattr(game_mode, "_cancel_stream", lambda stream_id: False)
+    monkeypatch.setattr(game_mode, "_loaded_ollama_models", fail_loaded_models)
+    monkeypatch.setattr(game_mode, "_terminate_known_local_model_servers", lambda: [])
+    monkeypatch.setattr(game_mode, "_release_local_image_generation_queues", lambda: {"queues": []})
+    monkeypatch.setattr(game_mode, "_gpu_process_memory_snapshot", lambda: {"available": True, "top": []})
+
+    payload = game_mode.release_game_mode_resources()
+
+    assert payload["ollama"]["checked"] == []
+    assert payload["ollama"]["unloaded"] == []
+
+
 def test_game_mode_release_targets_all_nova_local_model_ports():
     from web.api import game_mode
 
