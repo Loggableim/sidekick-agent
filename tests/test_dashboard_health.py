@@ -260,6 +260,27 @@ def test_profile_delete_default_returns_delete_specific_error(monkeypatch):
     assert "Cannot delete the default profile" in response["payload"]["error"]
 
 
+def test_admin_reload_succeeds_without_compact_attr(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "j", lambda _handler, payload, status=200, extra_headers=None: {"status": status, "payload": payload})
+
+    reloaded_models = SimpleNamespace(get_session=object(), Session=object())
+
+    monkeypatch.setattr("importlib.reload", lambda module: reloaded_models)
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/admin/reload"),
+    )
+
+    assert response["status"] == 200
+    assert response["payload"]["status"] == "ok"
+    assert response["payload"]["reloaded"] == "api.models"
+
+
 def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
