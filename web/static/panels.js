@@ -7024,7 +7024,12 @@ function _renderAppstoreAppPage(container, app) {
   const isMailApp = app.key === 'imap-mail';
   let installLabel, installDisabled, installAction, uninstallAction;
 
-  if (isInstalled) {
+  if (isMailApp) {
+    installLabel = isSpaceActive ? 'Mail verwalten' : 'Mail einrichten';
+    installDisabled = '';
+    installAction = 'onclick="_appstoreOpenMailSettings()"';
+    uninstallAction = '';
+  } else if (isInstalled) {
     installLabel = '✓ Installiert · v' + esc(app.status.version_installed || app.version || '?');
     installDisabled = 'disabled';
     installAction = '';
@@ -7033,11 +7038,6 @@ function _renderAppstoreAppPage(container, app) {
     installLabel = 'Demnächst verfügbar';
     installDisabled = 'disabled';
     installAction = '';
-    uninstallAction = '';
-  } else if (isMailApp) {
-    installLabel = isSpaceActive ? 'Mail verwalten' : 'Mail einrichten';
-    installDisabled = '';
-    installAction = 'onclick="_appstoreOpenMailSettings()"';
     uninstallAction = '';
   } else {
     installLabel = 'Installieren';
@@ -7256,23 +7256,23 @@ function _buildAppstoreCardHtml(app) {
   const isMailApp = app.key === 'imap-mail';
   let btnClass, btnLabel, btnAction;
 
-  if (isInstalled) {
-    btnClass = 'appstore-card-btn appstore-card-btn-success';
-    btnLabel = '✓ Installiert';
-    btnAction = 'onclick="event.stopPropagation();_appstoreUninstall(\'' + esc(app.key) + '\')"';
-  } else if (isPlanned) {
-    btnClass = 'appstore-card-btn appstore-card-btn-disabled';
-    btnLabel = 'Demnächst';
-    btnAction = 'disabled';
-  } else if (isMailApp) {
-    btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
-    btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
-    btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
-  } else {
-    btnClass = 'appstore-card-btn appstore-card-btn-primary';
-    btnLabel = 'Installieren';
-    btnAction = 'onclick="event.stopPropagation();_appstoreStartInstall(\'' + esc(app.key) + '\')"';
-  }
+    if (isMailApp) {
+      btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+      btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+      btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
+    } else if (isInstalled) {
+      btnClass = 'appstore-card-btn appstore-card-btn-success';
+      btnLabel = '✓ Installiert';
+      btnAction = 'onclick="event.stopPropagation();_appstoreUninstall(\'' + esc(app.key) + '\')"';
+    } else if (isPlanned) {
+      btnClass = 'appstore-card-btn appstore-card-btn-disabled';
+      btnLabel = 'Demnächst';
+      btnAction = 'disabled';
+    } else {
+      btnClass = 'appstore-card-btn appstore-card-btn-primary';
+      btnLabel = 'Installieren';
+      btnAction = 'onclick="event.stopPropagation();_appstoreStartInstall(\'' + esc(app.key) + '\')"';
+    }
   return '<div class="appstore-card" onclick="_appstoreNavigate(\'app:' + esc(app.key) + '\')">' +
     '<div class="appstore-card-icon-wrap">' + app.icon + '</div>' +
     '<div class="appstore-card-body">' +
@@ -7298,7 +7298,11 @@ function _buildAppstoreGridCardHtml(app) {
   const isPlanned = app.availability === 'planned';
   const isMailApp = app.key === 'imap-mail';
   let btnClass, btnLabel, btnAction;
-  if (isInstalled) {
+  if (isMailApp) {
+    btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+    btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+    btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
+  } else if (isInstalled) {
     btnClass = 'appstore-card-btn appstore-card-btn-success';
     btnLabel = (typeof t === 'function' ? t('appstore_installed') : '✓ Installiert');
     btnAction = 'onclick="event.stopPropagation();_appstoreUninstall(\'' + esc(app.key) + '\')"';
@@ -7306,10 +7310,6 @@ function _buildAppstoreGridCardHtml(app) {
     btnClass = 'appstore-card-btn appstore-card-btn-disabled';
     btnLabel = 'Demnächst';
     btnAction = 'disabled';
-  } else if (isMailApp) {
-    btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
-    btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
-    btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
   } else {
     btnClass = 'appstore-card-btn appstore-card-btn-primary';
     btnLabel = (typeof t === 'function' ? t('appstore_install') : 'Installieren');
@@ -8008,20 +8008,13 @@ async function _appstoreOpenMailSettings() {
     '<div class="appstore-setup-modal" style="max-width:760px;">' +
       '<div class="appstore-setup-header">' +
         '<div><div class="appstore-setup-title">📧 Mail einrichten</div>' +
-        '<div class="appstore-setup-subtitle">E-Mail und Passwort eingeben. Sidekick erkennt den Anbieter automatisch und aktiviert die Mail-App im aktuellen Space.</div></div>' +
+        '<div class="appstore-setup-subtitle">E-Mail und Passwort eingeben. Sidekick erkennt den Anbieter automatisch, richtet den Space ein und aktiviert Mail im Hintergrund.</div></div>' +
         '<button class="appstore-modal-close" onclick="var e=document.getElementById(\'mailAppSettingsOverlay\');if(e)e.style.display=\'none\'">✕</button>' +
       '</div>' +
       '<div class="appstore-setup-body" style="display:grid;gap:14px;">' +
-        '<div class="appstore-step-hint">Bekannte Anbieter werden automatisch erkannt. Bei unbekannten Domains versucht Sidekick generische IMAP/SMTP-Hostnamen. Du musst normalerweise nur E-Mail und Passwort ausfüllen.</div>' +
-        '<label class="appstore-step-field"><span>Account-ID / Alias</span><input id="mailAppAccountId" class="appstore-step-input" value="' + esc(inbox.id || '') + '" placeholder="mail"></label>' +
+        '<div class="appstore-step-hint">Bekannte Anbieter werden automatisch erkannt. Bei unbekannten Domains versucht Sidekick generische IMAP/SMTP-Hostnamen. Du musst nur E-Mail und Passwort eingeben.</div>' +
         '<label class="appstore-step-field"><span>E-Mail-Adresse</span><input id="mailAppEmail" class="appstore-step-input" type="email" value="' + esc(inbox.imap_user || inbox.smtp_user || '') + '" placeholder="name@example.com"></label>' +
         '<label class="appstore-step-field"><span>Passwort</span><input id="mailAppPassword" class="appstore-step-input" type="password" placeholder="App-Passwort oder normales Passwort"></label>' +
-        '<label class="appstore-step-field"><span>Anzeige-Name</span><input id="mailAppLabel" class="appstore-step-input" value="' + esc(inbox.label || inbox.id || '') + '" placeholder="Arbeitsmail"></label>' +
-        '<label class="appstore-step-toggle-wrap" style="margin-top:2px;">' +
-          '<input type="checkbox" id="mailAppActivate" class="appstore-step-toggle" checked>' +
-          '<span class="appstore-step-toggle-slider"></span>' +
-          '<span class="appstore-step-toggle-label">In diesem Space aktivieren</span>' +
-        '</label>' +
         '<div id="mailAppSettingsStatus" style="font-size:12px;color:var(--muted);line-height:1.5;"></div>' +
       '</div>' +
       '<div class="appstore-setup-footer">' +
@@ -8043,9 +8036,6 @@ async function _appstoreSaveMailSettings(btn) {
   const status = document.getElementById('mailAppSettingsStatus');
   const email = (document.getElementById('mailAppEmail')?.value || '').trim();
   const password = document.getElementById('mailAppPassword')?.value || '';
-  const accountId = (document.getElementById('mailAppAccountId')?.value || '').trim();
-  const label = (document.getElementById('mailAppLabel')?.value || '').trim();
-  const activate = !!(document.getElementById('mailAppActivate') && document.getElementById('mailAppActivate').checked);
 
   if (!email || !password) {
     if (status) status.textContent = 'Bitte E-Mail-Adresse und Passwort ausfüllen.';
@@ -8064,9 +8054,7 @@ async function _appstoreSaveMailSettings(btn) {
       body: JSON.stringify({
         email: email,
         password: password,
-        account_id: accountId,
-        label: label,
-        activate: activate,
+        activate: true,
       }),
     });
 

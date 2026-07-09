@@ -3642,6 +3642,16 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
             encoding="utf-8",
         )
 
+        install_result = install_app(
+            "imap-mail",
+            {
+                "email": email,
+                "account_id": str(inboxes[0].get("id", "")).strip() if inboxes else "",
+                "label": str(inboxes[0].get("label", "")).strip() if inboxes else "",
+                "provider": str(result.get("provider", "Mail")).strip(),
+            },
+        )
+
         activation_changed = False
         if bool(activate):
             try:
@@ -3660,6 +3670,8 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
                 "mail_path": str(mail_path),
                 "space_active": bool(activate),
                 "activation_changed": activation_changed,
+                "installed": bool(install_result.get("success")),
+                "install_error": install_result.get("error"),
             }
         )
         return j(handler, payload)

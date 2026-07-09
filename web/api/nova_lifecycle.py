@@ -504,22 +504,24 @@ def _run_local_script(script: str, *args: str, timeout: int = 20) -> dict[str, A
 def _game_mode_enabled() -> bool:
     # ═══ PRIMARY: game_mode.lock — ULTIMATIVE Barriere ═══
     try:
-        lock_file = Path("C:/sidekick/home/state/game_mode.lock")
+        from web.api import config as cfg
+        lock_file = cfg.SETTINGS_FILE.parent / "game_mode.lock"
         if lock_file.exists():
             return True
     except Exception:
         pass
 
     try:
-        from web.api.config import is_game_mode_enabled
+        from web.api import config as cfg
 
-        if bool(is_game_mode_enabled()):
+        if bool(cfg.is_game_mode_enabled()):
             return True
     except Exception:
         pass
     # Secondary check: watchdog state file
     try:
-        wd_path = Path("C:/sidekick/home/state/gpu_watchdog_state.json")
+        from web.api import config as cfg
+        wd_path = cfg.SETTINGS_FILE.parent / "gpu_watchdog_state.json"
         if wd_path.exists():
             wd = json.loads(wd_path.read_text(encoding="utf-8"))
             if wd.get("last_game_mode") is True:

@@ -603,6 +603,8 @@ def install_app(manifest_key: str, values: dict) -> dict:
     """
     manifests = discover_manifests()
     manifest = next((m for m in manifests if m.get("key") == manifest_key), None)
+    if not manifest and manifest_key == "imap-mail":
+        manifest = _builtin_mail_manifest()
     if not manifest:
         return {
             "success": False,

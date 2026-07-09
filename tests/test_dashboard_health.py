@@ -2451,6 +2451,18 @@ def test_appstore_mail_contract_exposes_builtin_mail_app_and_setup_flow():
     assert "_appstoreSyncMailButtons()" in panels_js
 
 
+def test_appstore_mail_keeps_special_ui_state_even_when_installed():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    setup_start = panels_js.index("async function _appstoreOpenMailSettings() {")
+    setup_fn = panels_js[setup_start:setup_start + 2600]
+
+    assert "mailAppEmail" in setup_fn
+    assert "mailAppPassword" in setup_fn
+    assert "mailAppAccountId" not in setup_fn
+    assert "mailAppLabel" not in setup_fn
+    assert "mailAppActivate" not in setup_fn
+
+
 def test_appstore_imap_mail_manifest_matches_auto_setup_contract():
     from web.api._home import get_webui_home
 

@@ -295,6 +295,40 @@ def test_dream_tick_defers_in_game_mode_before_model_health(monkeypatch, tmp_pat
     assert events[0]["steps"][-1] == "game_mode_deferred"
 
 
+def test_game_mode_enabled_uses_current_settings_parent(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.config as cfg
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(cfg, "is_game_mode_enabled", lambda: False)
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "home" / "state" / "webui" / "settings.json")
+
+    settings_parent = tmp_path / "home" / "state" / "webui"
+    settings_parent.mkdir(parents=True, exist_ok=True)
+    lock_file = settings_parent / "game_mode.lock"
+    lock_file.write_text("1", encoding="utf-8")
+
+    real_path = lifecycle.Path
+
+    def fake_path(value):
+        if value == "C:/sidekick/home/state/game_mode.lock":
+            return tmp_path / "hardcoded" / "game_mode.lock"
+        if value == "C:/sidekick/home/state/gpu_watchdog_state.json":
+            return tmp_path / "hardcoded" / "gpu_watchdog_state.json"
+        return real_path(value)
+
+    monkeypatch.setattr(lifecycle, "Path", fake_path)
+
+    assert lifecycle._game_mode_enabled() is True
+
+    lock_file.unlink()
+    wd_file = settings_parent / "gpu_watchdog_state.json"
+    wd_file.write_text(json.dumps({"last_game_mode": True}), encoding="utf-8")
+
+    assert lifecycle._game_mode_enabled() is True
+
+
 def test_nova_status_skips_local_model_health_in_game_mode(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
