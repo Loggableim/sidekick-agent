@@ -1071,7 +1071,9 @@ from tools.mail_folders import _handler as _folders_handler
 from tools.mail_read import _handler as _read_handler
 from tools.mail_search import _handler as _search_handler
 from tools.mail_send import _handler as _send_handler
+from tools.mail_imap import get_imap as _mail_get_imap
 from tools.mail_imap import get_space_config as _mail_get_space_config
+from tools.mail_imap import release_imap as _mail_release_imap
 from tools.mail_imap import suggest_mail_config as _mail_suggest_config
 
 
@@ -3653,6 +3655,30 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
                     ib for ib in existing_inboxes[1:] if isinstance(ib, dict)
                 ]
                 config = merged_config
+
+        validation_error = None
+        validation_conn = None
+        try:
+            validation_conn = _mail_get_imap(config["inboxes"][0])
+        except Exception as exc:
+            validation_error = str(exc)
+        finally:
+            if validation_conn is not None:
+                try:
+                    _mail_release_imap(validation_conn)
+                except Exception:
+                    pass
+        if validation_error:
+            return j(
+                handler,
+                {
+                    "success": False,
+                    "error": f"Mail connection failed: {validation_error}",
+                    "config": config,
+                },
+                status=400,
+            )
+
         mail_path.write_text(
             json.dumps(config, indent=2, ensure_ascii=False),
             encoding="utf-8",

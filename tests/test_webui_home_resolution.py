@@ -359,6 +359,8 @@ def test_mail_setup_post_saves_synthesized_config_and_activates_mail_app(monkeyp
 
     monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
     monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(routes, "_mail_get_imap", lambda *_args, **_kwargs: object(), raising=False)
+    monkeypatch.setattr(routes, "_mail_release_imap", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setattr(
         routes,
         "j",
@@ -422,6 +424,8 @@ def test_mail_setup_post_uses_builtin_mail_manifest_when_store_manifest_missing(
 
     monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
     monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(routes, "_mail_get_imap", lambda *_args, **_kwargs: object(), raising=False)
+    monkeypatch.setattr(routes, "_mail_release_imap", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setattr(
         routes,
         "j",
@@ -476,6 +480,8 @@ def test_mail_setup_post_reports_install_recording_failure(monkeypatch, tmp_path
 
     monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
     monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(routes, "_mail_get_imap", lambda *_args, **_kwargs: object(), raising=False)
+    monkeypatch.setattr(routes, "_mail_release_imap", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setattr(
         routes,
         "j",
@@ -518,6 +524,8 @@ def test_mail_setup_post_reports_activation_failure(monkeypatch, tmp_path):
 
     monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
     monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(routes, "_mail_get_imap", lambda *_args, **_kwargs: object(), raising=False)
+    monkeypatch.setattr(routes, "_mail_release_imap", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setattr(
         routes,
         "j",
@@ -548,6 +556,57 @@ def test_mail_setup_post_reports_activation_failure(monkeypatch, tmp_path):
     assert payload["activation_changed"] is False
     assert "activate boom" in payload["error"]
     assert (active_home / "spaces" / "demo" / "mail.json").exists()
+
+
+def test_mail_setup_post_validates_mail_connection_before_persisting(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import sys
+
+    active_home = tmp_path / "active-home"
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.routes", None)
+    routes = importlib.import_module("web.api.routes")
+
+    install_calls = []
+
+    monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(
+        routes,
+        "_mail_get_imap",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("login failed")),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        routes,
+        "install_app",
+        lambda *args, **kwargs: install_calls.append((args, kwargs)) or {"success": True},
+    )
+    monkeypatch.setattr(
+        routes,
+        "j",
+        lambda _handler, payload, status=200, **_kw: {"status": status, "payload": payload},
+    )
+
+    response = routes._handle_mail_setup_post(
+        object(),
+        SimpleNamespace(query=""),
+        {
+            "email": "ada@gmail.com",
+            "password": "app-password",
+            "activate": True,
+        },
+    )
+
+    assert response["status"] == 400
+    payload = response["payload"]
+    assert payload["success"] is False
+    assert "login failed" in payload["error"]
+    assert install_calls == []
+    assert not (active_home / "spaces" / "demo" / "mail.json").exists()
 
 
 def test_mail_setup_post_preserves_additional_inboxes(monkeypatch, tmp_path):
@@ -589,6 +648,8 @@ def test_mail_setup_post_preserves_additional_inboxes(monkeypatch, tmp_path):
 
     monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
     monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(routes, "_mail_get_imap", lambda *_args, **_kwargs: object(), raising=False)
+    monkeypatch.setattr(routes, "_mail_release_imap", lambda *_args, **_kwargs: None, raising=False)
     monkeypatch.setattr(
         routes,
         "j",
