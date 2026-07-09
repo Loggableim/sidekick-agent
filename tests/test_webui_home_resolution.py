@@ -462,6 +462,48 @@ def test_mail_setup_post_uses_builtin_mail_manifest_when_store_manifest_missing(
     assert installed["imap-mail"]["version"] == "1.0.0"
 
 
+def test_mail_setup_post_reports_install_recording_failure(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import sys
+
+    active_home = tmp_path / "active-home"
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("HERMES_HOME", str(active_home))
+
+    sys.modules.pop("web.api.routes", None)
+    routes = importlib.import_module("web.api.routes")
+
+    monkeypatch.setattr(routes, "get_active_webui_home", lambda: active_home)
+    monkeypatch.setattr(routes, "_workspace_slug_from_request", lambda *_args, **_kwargs: "demo")
+    monkeypatch.setattr(
+        routes,
+        "j",
+        lambda _handler, payload, status=200, **_kw: {"status": status, "payload": payload},
+    )
+    monkeypatch.setattr(
+        routes,
+        "install_app",
+        lambda *_args, **_kwargs: {"success": False, "error": "boom"},
+    )
+
+    response = routes._handle_mail_setup_post(
+        object(),
+        SimpleNamespace(query=""),
+        {
+            "email": "ada@gmail.com",
+            "password": "app-password",
+            "activate": True,
+        },
+    )
+
+    assert response["status"] == 500
+    payload = response["payload"]
+    assert payload["success"] is False
+    assert payload["install_error"] == "boom"
+    assert (active_home / "spaces" / "demo" / "mail.json").exists()
+
+
 def test_mail_suggest_config_falls_back_to_generic_imap_and_warns():
     from tools import mail_imap
 

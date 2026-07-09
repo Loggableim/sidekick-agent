@@ -3674,6 +3674,10 @@ def _handle_mail_setup_post(handler, parsed, body) -> bool:
                 "install_error": install_result.get("error"),
             }
         )
+        if not install_result.get("success", False):
+            payload["success"] = False
+            payload["error"] = install_result.get("error") or "Failed to record Mail installation"
+            return j(handler, payload, status=500)
         return j(handler, payload)
     except Exception as exc:
         logger.exception("mail_setup_post failed")
