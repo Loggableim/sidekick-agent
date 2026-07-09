@@ -100,8 +100,8 @@ _MAIL_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
         "use_ssl": False,
         "smtp_host": "127.0.0.1",
         "smtp_port": 1025,
-        "smtp_use_tls": False,
-        "note": "Proton Mail benötigt den Proton Mail Bridge Dienst. Die Standard-IMAP/SMTP-Server sind nicht direkt nutzbar.",
+        "smtp_use_tls": True,
+        "note": "Proton Mail benötigt den Proton Mail Bridge Dienst. Die lokalen IMAP/SMTP-Ports werden über eine gesicherte Bridge-Verbindung genutzt.",
     },
 )
 

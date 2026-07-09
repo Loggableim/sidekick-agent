@@ -814,6 +814,22 @@ def test_mail_suggest_config_falls_back_to_generic_imap_and_warns():
     assert inbox["confidence"] == "fallback"
 
 
+def test_mail_suggest_config_uses_proton_bridge_tls_settings():
+    from tools import mail_imap
+
+    result = mail_imap.suggest_mail_config("user@proton.me", "secret")
+
+    assert result["success"] is True
+    assert result["provider"] == "Proton Mail"
+    inbox = result["config"]["inboxes"][0]
+    assert inbox["imap_host"] == "127.0.0.1"
+    assert inbox["imap_port"] == 1143
+    assert inbox["use_ssl"] is False
+    assert inbox["smtp_host"] == "127.0.0.1"
+    assert inbox["smtp_port"] == 1025
+    assert inbox["smtp_use_tls"] is True
+
+
 def test_mail_resolve_space_slug_normalizes_user_task_case():
     from tools.mail_imap import resolve_space_slug
 
