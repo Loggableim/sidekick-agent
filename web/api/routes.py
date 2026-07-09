@@ -12089,6 +12089,29 @@ def _handle_session_compress(handler, body):
         resolved_model, resolved_provider, resolved_base_url = _cfg.resolve_model_provider(
             _cfg.model_with_provider_context(s.model, getattr(s, "model_provider", None))
         )
+        game_mode_nova_override = _game_mode_nova_remote_model_state(
+            resolved_model,
+            resolved_provider,
+            {"provider": resolved_provider, "model": resolved_model, "base_url": resolved_base_url},
+            space_slug=str(
+                getattr(s, "workspace_slug", None)
+                or getattr(s, "space_slug", None)
+                or getattr(s, "space", None)
+                or ""
+            ).strip().lower() or None,
+            workspace=str(getattr(s, "workspace", None) or "") or None,
+        )
+        if game_mode_nova_override:
+            resolved_model, resolved_provider, _normalized_model = game_mode_nova_override
+            resolved_base_url = None
+
+        game_mode_payload = _game_mode_guard_payload_for_model(
+            resolved_model,
+            resolved_provider,
+            {"provider": resolved_provider, "model": resolved_model, "base_url": resolved_base_url},
+        )
+        if game_mode_payload:
+            return j(handler, game_mode_payload, status=409)
 
         resolved_api_key = None
         try:
@@ -12713,6 +12736,30 @@ def _handle_handoff_summary(handler, body):
             pass
 
         resolved_model, resolved_provider, resolved_base_url = _cfg.resolve_model_provider(resolved_model)
+        game_mode_nova_override = _game_mode_nova_remote_model_state(
+            resolved_model,
+            resolved_provider,
+            {"provider": resolved_provider, "model": resolved_model, "base_url": resolved_base_url},
+            space_slug=str(
+                getattr(s_obj, "workspace_slug", None)
+                or getattr(s_obj, "space_slug", None)
+                or getattr(s_obj, "space", None)
+                or ""
+            ).strip().lower() or None,
+            workspace=str(getattr(s_obj, "workspace", None) or "") or None,
+        )
+        if game_mode_nova_override:
+            resolved_model, resolved_provider, _normalized_model = game_mode_nova_override
+            resolved_base_url = None
+
+        game_mode_payload = _game_mode_guard_payload_for_model(
+            resolved_model,
+            resolved_provider,
+            {"provider": resolved_provider, "model": resolved_model, "base_url": resolved_base_url},
+        )
+        if game_mode_payload:
+            return j(handler, game_mode_payload, status=409)
+
         provider_context = _cfg.resolve_active_provider_context()
         if not resolved_provider and provider_context.get("provider"):
             resolved_provider = provider_context.get("provider")
