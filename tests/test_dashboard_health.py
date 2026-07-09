@@ -2464,6 +2464,21 @@ def test_appstore_mail_setup_prefill_uses_default_inbox_when_present():
     assert "currentConfig.inboxes.length > 0 ? currentConfig.inboxes[0] : {}" not in setup_block
 
 
+def test_appstore_setup_overlay_uses_fullscreen_modal_shell():
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert re.search(
+        r"\.appstore-overlay,\.appstore-setup-overlay\{\s*position:fixed;inset:0;z-index:10000;\s*display:flex;align-items:center;justify-content:center;\s*background:rgba\(0,0,0,0\.5\);backdrop-filter:blur\(4px\);\s*animation:appstoreFadeIn \.15s ease-out;\s*\}",
+        style_css,
+    )
+    assert re.search(
+        r"\.appstore-overlay-closing,\.appstore-setup-overlay-closing\{\s*opacity:0;transition:opacity \.2s;\s*\}",
+        style_css,
+    )
+    assert "@media(max-width:600px)" in style_css
+    assert re.search(r"\.appstore-overlay,\.appstore-setup-overlay\{\s*align-items:stretch;padding:0;\s*\}", style_css)
+
+
 def test_mail_panel_prefers_current_inbox_then_default_then_first():
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
     start = panels_js.index("async function loadMailPanel() {")

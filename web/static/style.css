@@ -7986,13 +7986,13 @@ body.focus-mode aside.rightpanel {
 .appstore-detail-uninstall-btn:hover{background:rgba(239,83,80,0.1);}
 
 /* â”€â”€ Appstore Setup-Assistent Overlay â”€â”€ */
-.appstore-overlay{
+.appstore-overlay,.appstore-setup-overlay{
   position:fixed;inset:0;z-index:10000;
   display:flex;align-items:center;justify-content:center;
   background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);
   animation:appstoreFadeIn .15s ease-out;
 }
-.appstore-overlay-closing{
+.appstore-overlay-closing,.appstore-setup-overlay-closing{
   opacity:0;transition:opacity .2s;
 }
 @keyframes appstoreFadeIn{
@@ -8282,7 +8282,7 @@ body.focus-mode aside.rightpanel {
 
 /* Responsive: fullscreen modal on <600px */
 @media(max-width:600px){
-  .appstore-overlay{align-items:stretch;padding:0;}
+  .appstore-overlay,.appstore-setup-overlay{align-items:stretch;padding:0;}
   .appstore-modal{
     width:100%;max-width:100vw;max-height:100vh;
     border-radius:0;border:none;

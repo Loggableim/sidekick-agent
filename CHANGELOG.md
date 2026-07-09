@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Appstore Mail setup now opens as a fullscreen modal overlay again** instead of a bottom-sheet strip, because the setup class now shares the same backdrop/positioning rules as the main appstore overlay.
 - **Mail now reopens on the active inbox when available, then the default inbox, before falling back to the first inbox** so reopening the Mail panel no longer jumps to the wrong mailbox.
 - **Reasoning-effort copy in the WebUI now shows the intended brain glyph and separators** instead of `??`/`?`, so the reasoning picker toast and tooltip both read correctly.
 - **Static WebUI placeholders in the composer, goal banner, sandbox toggle, agent wizard, and mail panels now use real icons and labels** instead of `?`/`??`, so hidden UI surfaces no longer fall back to question marks when opened.
