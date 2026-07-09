@@ -183,6 +183,61 @@ def test_delegate_task_returns_tool_error_for_blocked_game_mode_child(monkeypatc
     assert "local model requests are blocked" in result.lower()
 
 
+def test_delegate_task_surfaces_non_game_mode_child_build_errors(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as web_cfg
+
+    monkeypatch.setattr(web_cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    web_cfg.save_settings({"game_mode_enabled": False})
+
+    import tools.delegate_tool as delegate_tool
+
+    monkeypatch.setattr(
+        delegate_tool,
+        "_resolve_delegation_credentials",
+        lambda cfg, parent_agent: {
+            "model": "qwen3:4b",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "token",
+            "api_mode": "chat_completions",
+        },
+    )
+    monkeypatch.setattr(
+        delegate_tool,
+        "_build_child_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    parent = SimpleNamespace(
+        _delegate_depth=0,
+        _credential_pool=None,
+        provider="openrouter",
+        base_url="https://openrouter.ai/api/v1",
+        model="gpt-4.1",
+        api_key="x",
+        api_mode="chat_completions",
+        session_id="s1",
+        platform="cli",
+        _session_db=None,
+        _fallback_chain=None,
+        providers_allowed=None,
+        providers_ignored=None,
+        providers_order=None,
+        provider_sort=None,
+        openrouter_min_coding_score=None,
+        max_tokens=None,
+        reasoning_config=None,
+        prefill_messages=None,
+        _active_children=[],
+        _active_children_lock=None,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        delegate_tool.delegate_task(goal="hello", parent_agent=parent)
+
+
 def test_gateway_detached_mode_handles_unset_env(monkeypatch):
     monkeypatch.delenv("SIDEKICK_GATEWAY_DETACHED", raising=False)
 

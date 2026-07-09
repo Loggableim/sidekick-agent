@@ -2070,14 +2070,17 @@ def delegate_task(
                     ),
                     role=effective_role,
                 )
-            except Exception as exc:
+            except RuntimeError as exc:
+                message = str(exc)
+                if "Game Mode is active" not in message:
+                    raise
                 logger.warning(
-                    "delegate_task: failed to build child agent for task %s: %s",
+                    "delegate_task: blocked child agent for task %s in Game Mode: %s",
                     i,
                     exc,
                     exc_info=True,
                 )
-                return tool_error(str(exc))
+                return tool_error(message)
             # Override with correct parent tool names (before child construction mutated global)
             child._delegate_saved_tool_names = _parent_tool_names
             children.append((i, t, child))
