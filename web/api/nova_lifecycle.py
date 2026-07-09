@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -124,6 +125,33 @@ _LEGACY_NOVA_CRON_JOB_SCRIPTS = frozenset({
     "substrate.py once",
     "entity_kernel.py tick",
 })
+
+
+def _is_legacy_nova_cron_job_name(value: Any) -> bool:
+    """Return True for the legacy Nova cron names, including display suffixes."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if text in _LEGACY_NOVA_CRON_JOB_NAMES:
+        return True
+    # Some dashboards decorate the legacy label with a schedule suffix such as
+    # "(5m)". Keep the match strict to the historical capitalized legacy names
+    # so we do not accidentally prune the current lowercase job names.
+    return any(text.startswith(f"{name} (") for name in _LEGACY_NOVA_CRON_JOB_NAMES)
+
+
+def _normalize_nova_cron_job_script(value: Any) -> str:
+    """Return a canonical comparison key for Nova cron scripts."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+_LEGACY_NOVA_CRON_JOB_SCRIPT_KEYS = frozenset(
+    _normalize_nova_cron_job_script(script) for script in _LEGACY_NOVA_CRON_JOB_SCRIPTS
+)
 
 
 @dataclass(frozen=True)
@@ -1204,8 +1232,8 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
             job_name = str(job.get("name") or "").strip()
             job_script = str(job.get("script") or "").strip()
             if (
-                job_name in _LEGACY_NOVA_CRON_JOB_NAMES
-                or job_script in _LEGACY_NOVA_CRON_JOB_SCRIPTS
+                _is_legacy_nova_cron_job_name(job_name)
+                or _normalize_nova_cron_job_script(job_script) in _LEGACY_NOVA_CRON_JOB_SCRIPT_KEYS
             ):
                 legacy_jobs.append(job)
                 continue

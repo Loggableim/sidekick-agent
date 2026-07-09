@@ -324,6 +324,62 @@ def test_background_cron_jobs_prune_legacy_nova_jobs_even_if_metadata_drifted(mo
     }
 
 
+def test_background_cron_jobs_prune_legacy_nova_jobs_with_display_suffix(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "22f6a477b2f9",
+                        "name": "Nova Substrate Heartbeat (5m)",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "legacy_substrate_wrapper.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "id": "1cc50ad5bfb8",
+                        "name": "Nova Entity Kernel Tick (15m)",
+                        "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+                        "schedule_display": "every 15m",
+                        "script": "legacy_entity_kernel_wrapper.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    names = {job["name"] for job in jobs}
+
+    assert result["ok"] is True
+    assert len(result["active"]) == 3
+    assert len(jobs) == 3
+    assert "Nova Substrate Heartbeat (5m)" not in names
+    assert "Nova Entity Kernel Tick (15m)" not in names
+    assert names == {
+        "Nova substrate heartbeat",
+        "Nova background tick",
+        "Nova dream/reflection tick",
+    }
+
+
 def test_background_tick_updates_substrate_heartbeat_fields(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
