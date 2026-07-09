@@ -214,6 +214,62 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     assert result["mode"] == "sidekick_cron_no_agent"
 
 
+def test_background_cron_jobs_prune_legacy_nova_jobs(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "22f6a477b2f9",
+                        "name": "Nova Substrate Heartbeat",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "substrate.py once",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "id": "1cc50ad5bfb8",
+                        "name": "Nova Entity Kernel Tick",
+                        "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+                        "schedule_display": "every 15m",
+                        "script": "entity_kernel.py tick",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    names = {job["name"] for job in jobs}
+
+    assert result["ok"] is True
+    assert len(result["active"]) == 3
+    assert len(jobs) == 3
+    assert "Nova Substrate Heartbeat" not in names
+    assert "Nova Entity Kernel Tick" not in names
+    assert names == {
+        "Nova substrate heartbeat",
+        "Nova background tick",
+        "Nova dream/reflection tick",
+    }
+
+
 def test_nova_status_degrades_when_cron_storage_write_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -326,6 +382,25 @@ def test_game_mode_enabled_uses_current_settings_parent(monkeypatch, tmp_path):
     wd_file = settings_parent / "gpu_watchdog_state.json"
     wd_file.write_text(json.dumps({"last_game_mode": True}), encoding="utf-8")
 
+    assert lifecycle._game_mode_enabled() is True
+
+
+def test_game_mode_enabled_accepts_legacy_state_dir_lock(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.config as cfg
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "home" / "state" / "webui" / "settings.json")
+    monkeypatch.setattr(cfg, "load_settings", lambda: {"game_mode_enabled": False})
+
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    legacy_lock.parent.mkdir(parents=True, exist_ok=True)
+    legacy_lock.write_text("1", encoding="utf-8")
+
+    assert cfg.is_game_mode_enabled() is True
+
+    monkeypatch.setattr(cfg, "is_game_mode_enabled", lambda: False)
     assert lifecycle._game_mode_enabled() is True
 
 

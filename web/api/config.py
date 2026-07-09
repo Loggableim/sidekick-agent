@@ -191,13 +191,15 @@ def _discover_python(agent_dir: Path) -> str:
     Locate a Python executable that has the Nova agent dependencies installed.
 
     Priority:
-      1. HERMES_WEBUI_PYTHON env var
+      1. SIDEKICK_WEBUI_PYTHON / legacy HERMES_WEBUI_PYTHON env var
       2. Agent venv at <agent_dir>/venv/bin/python
       3. Local .venv inside this repo
       4. System python3
     """
-    if os.getenv("SIDEKICK_WEBUI_PYTHON"):
-        return os.getenv("SIDEKICK_WEBUI_PYTHON")
+    for env_name in ("SIDEKICK_WEBUI_PYTHON", "HERMES_WEBUI_PYTHON"):
+        value = os.getenv(env_name)
+        if value:
+            return value
 
     if agent_dir:
         venv_py = agent_dir / "venv" / "bin" / "python"
@@ -4585,14 +4587,13 @@ def is_game_mode_enabled() -> bool:
     """Return whether Game Mode is currently blocking local GPU work.
 
     Checks in priority order:
-    1. game_mode.lock file (ULTIMATIVE barrier — survives settings resets)
+    1. game_mode.lock file in the active or legacy state dir
     2. settings.json game_mode_enabled flag
     """
     try:
-        # PRIMARY: Lock-Datei — ultimative Barriere
-        lock_file = SETTINGS_FILE.parent / "game_mode.lock"
-        if lock_file.exists():
-            return True
+        for lock_file in _game_mode_lock_paths():
+            if lock_file.exists():
+                return True
     except Exception:
         pass
 
@@ -4600,6 +4601,15 @@ def is_game_mode_enabled() -> bool:
         return bool(load_settings().get("game_mode_enabled", False))
     except Exception:
         return False
+
+
+def _game_mode_lock_paths() -> tuple[Path, ...]:
+    state_dir = SETTINGS_FILE.parent
+    paths = [state_dir / "game_mode.lock"]
+    legacy_lock = state_dir.parent / "game_mode.lock"
+    if legacy_lock != paths[0]:
+        paths.append(legacy_lock)
+    return tuple(paths)
 
 
 def game_mode_blocks_local_model_request(provider_id: str | None, base_url: str | None = "") -> bool:

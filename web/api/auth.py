@@ -20,6 +20,7 @@ from web.api.config import load_settings
 logger = logging.getLogger(__name__)
 
 PASSWORD_ENV_VARS = ("SIDEKICK_WEBUI_PASSWORD", "HERMES_WEBUI_PASSWORD")
+SESSION_TTL_ENV_VARS = ("SIDEKICK_WEBUI_SESSION_TTL", "HERMES_WEBUI_SESSION_TTL")
 
 
 def _state_dir() -> Path:
@@ -45,15 +46,17 @@ SESSION_TTL = 86400 * 30  # 30 days
 def _resolve_session_ttl() -> int:
     """Resolve session TTL from env > settings > default.
 
-    Priority mirrors get_password_hash(): HERMES_WEBUI_SESSION_TTL env var
-    first, then settings.json, falling back to ``SESSION_TTL`` (30 days).
+    Priority mirrors get_password_hash(): SIDEKICK_WEBUI_SESSION_TTL /
+    legacy HERMES_WEBUI_SESSION_TTL env vars first, then settings.json,
+    falling back to ``SESSION_TTL`` (30 days).
     Clamped to [60s, 1 year] to prevent runaway cookies or self-lockout.
     """
-    env_v = (os.getenv('SIDEKICK_WEBUI_SESSION_TTL', '')).strip()
-    if env_v.isdigit():
-        val = int(env_v)
-        if 60 <= val <= 86400 * 365:
-            return val
+    for env_name in SESSION_TTL_ENV_VARS:
+        env_v = (os.getenv(env_name, '')).strip()
+        if env_v.isdigit():
+            val = int(env_v)
+            if 60 <= val <= 86400 * 365:
+                return val
     s = load_settings()
     v = s.get('session_ttl_seconds')
     if isinstance(v, int) and 60 <= v <= 86400 * 365:

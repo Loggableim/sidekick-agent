@@ -390,7 +390,7 @@ def _aiagent_import_error_detail() -> str:
     lines = ["AIAgent not available -- check that Sidekick agent is on sys.path"]
     lines.append("")
     lines.append(f"  python:  {_sys.executable}")
-    agent_dir = _os.environ.get("SIDEKICK_WEBUI_AGENT_DIR") or _os.environ.get("SIDEKICK_WEBUI_AGENT_DIR")
+    agent_dir = _os.environ.get("SIDEKICK_WEBUI_AGENT_DIR") or _os.environ.get("HERMES_WEBUI_AGENT_DIR")
     if agent_dir:
         lines.append(f"  SIDEKICK_WEBUI_AGENT_DIR: {agent_dir}")
     else:

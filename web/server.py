@@ -27,7 +27,15 @@ from pathlib import Path
 # A test that legitimately needs real outbound spawns the server with the env
 # var unset (no current callers — every test_server-using test should be
 # mockable).
-if (os.environ.get("SIDEKICK_WEBUI_TEST_NETWORK_BLOCK") or "").strip() in ("1", "true", "yes"):
+def _test_network_block_enabled() -> bool:
+    return (
+        os.environ.get("SIDEKICK_WEBUI_TEST_NETWORK_BLOCK")
+        or os.environ.get("HERMES_WEBUI_TEST_NETWORK_BLOCK")
+        or ""
+    ).strip() in ("1", "true", "yes")
+
+
+if _test_network_block_enabled():
     _REAL_CREATE_CONN = socket.create_connection
     _REAL_SOCK_CONNECT = socket.socket.connect
 

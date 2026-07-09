@@ -96,6 +96,32 @@ def test_build_web_runtime_picks_explicit_host_port(monkeypatch, tmp_path):
     assert runtime.port == 9999
 
 
+def test_discover_python_accepts_legacy_env_var(monkeypatch):
+    monkeypatch.delenv("SIDEKICK_WEBUI_PYTHON", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_PYTHON", r"C:\legacy\python.exe")
+    from web.api import config as web_config
+
+    assert web_config._discover_python(None) == r"C:\legacy\python.exe"
+
+
+def test_test_network_block_accepts_legacy_env_var(monkeypatch):
+    monkeypatch.delenv("SIDEKICK_WEBUI_TEST_NETWORK_BLOCK", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_TEST_NETWORK_BLOCK", "1")
+    import web.server as web_server
+
+    assert web_server._test_network_block_enabled() is True
+
+
+def test_aiagent_import_error_detail_accepts_legacy_agent_dir(monkeypatch):
+    monkeypatch.delenv("SIDEKICK_WEBUI_AGENT_DIR", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_AGENT_DIR", r"C:\legacy\sidekick-agent")
+    import web.api.streaming as streaming
+
+    detail = streaming._aiagent_import_error_detail()
+    assert "C:\\legacy\\sidekick-agent" in detail
+    assert "SIDEKICK_WEBUI_AGENT_DIR" in detail
+
+
 def test_constants_paths_follow_sidekick_home(monkeypatch, tmp_path):
     home = tmp_path / "sidekick-home"
     monkeypatch.setenv("SIDEKICK_HOME", str(home))

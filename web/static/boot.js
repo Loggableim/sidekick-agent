@@ -1819,6 +1819,21 @@ function _bootTimeout(promise, ms, label) {
   });
 }
 
+async function _syncGameModeStateFromServer() {
+  try {
+    const status = await _bootTimeout(api('/api/game-mode/status'), 10000, 'game mode status');
+    window._gameModeEnabled = !!(status && status.game_mode_enabled);
+    try { localStorage.setItem('sidekick-game-mode-enabled', window._gameModeEnabled ? '1' : '0'); } catch (_err) {}
+    if (typeof syncGameModeButton === 'function') syncGameModeButton();
+    return window._gameModeEnabled;
+  } catch (e) {
+    console.warn('[boot] game mode status sync failed', e);
+    return window._gameModeEnabled === true;
+  }
+}
+
+(window)._syncGameModeStateFromServer = _syncGameModeStateFromServer;
+
 (async()=>{
   // Load send key preference
   let _bootSettings={};
@@ -1862,6 +1877,7 @@ function _bootTimeout(promise, ms, label) {
       setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
+    await _syncGameModeStateFromServer();
     applyBotName();
     if(typeof syncGameModeButton==='function')syncGameModeButton();
     // TTS: apply enabled state on boot so buttons show/hide correctly (#499)

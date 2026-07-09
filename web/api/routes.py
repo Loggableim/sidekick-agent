@@ -4197,7 +4197,7 @@ def handle_get(handler, parsed) -> bool:
         # had no way to know — see issue #1139 / #1560.
         settings["password_env_var"] = bool(
             os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
-            or os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
+            or os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
         )
         # Inject the running version so the UI badge stays in sync with git tags
         # without any manual release step.
@@ -7211,11 +7211,11 @@ def handle_post(handler, parsed) -> bool:
         if requested_password or requested_clear_password:
             if (
                 os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
-                or os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
+                or os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
             ):
                 return bad(
                     handler,
-                    "SIDEKICK_WEBUI_PASSWORD env var is set — it overrides the settings password. "
+                    "SIDEKICK_WEBUI_PASSWORD / HERMES_WEBUI_PASSWORD env var is set — it overrides the settings password. "
                     "Unset the env var and restart the server before changing the password here.",
                     409,
                 )
@@ -7269,7 +7269,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -7306,7 +7306,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -7341,7 +7341,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:

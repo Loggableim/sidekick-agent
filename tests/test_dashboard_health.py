@@ -3437,6 +3437,157 @@ def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path
     assert payload == {"ok": True, "game_mode_enabled": True}
 
 
+def test_settings_endpoint_exposes_legacy_password_env_var(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_WEBUI_PASSWORD", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "legacy-secret")
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({})
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(handler, urlparse("/api/settings"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["password_env_var"] is True
+
+
+def test_settings_post_rejects_password_change_when_legacy_password_env_var_set(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_WEBUI_PASSWORD", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "legacy-secret")
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({})
+    body = json.dumps({"_set_password": "new-password"}).encode("utf-8")
+
+    class _Handler:
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+            "Host": "127.0.0.1",
+        }
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_post(handler, urlparse("/api/settings"))
+
+    assert handled is None
+    assert handler.status_code == 409
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["ok"] is False
+    assert "overrides the settings password" in payload["error"]["message"]
+
+
+def test_onboarding_probe_accepts_legacy_open_env_var(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_WEBUI_ONBOARDING_OPEN", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_ONBOARDING_OPEN", "1")
+    from web.api import auth
+    from web.api import routes
+
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: False)
+    seen = {}
+
+    def fake_probe(provider, base_url, api_key):
+        seen["args"] = (provider, base_url, api_key)
+        return {"ok": True, "provider": provider, "base_url": base_url, "api_key": api_key}
+
+    monkeypatch.setattr(routes, "probe_provider_endpoint", fake_probe)
+    body = json.dumps({"provider": "ollama", "base_url": "http://example.com", "api_key": "secret"}).encode("utf-8")
+
+    class _Handler:
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+            "Host": "127.0.0.1",
+        }
+        client_address = ("203.0.113.10", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_post(handler, urlparse("/api/onboarding/probe"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["ok"] is True
+    assert seen["args"] == ("ollama", "http://example.com", "secret")
+
+
+def test_session_ttl_accepts_legacy_env_var(monkeypatch, tmp_path):
+    monkeypatch.setenv("HERMES_WEBUI_SESSION_TTL", "600")
+    monkeypatch.delenv("SIDEKICK_WEBUI_SESSION_TTL", raising=False)
+    from web.api import auth
+
+    monkeypatch.setattr(auth, "load_settings", lambda: {})
+
+    assert auth._resolve_session_ttl() == 600
+
+
 def test_media_endpoint_serves_allowed_local_file(monkeypatch, tmp_path):
     import io
     from urllib.parse import quote, urlparse
@@ -3637,6 +3788,8 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     assert "game_mode_toggle" in titlebar_actions
     assert "settingsGameModeEnabled" in index_html
     assert "window._gameModeEnabled=!!s.game_mode_enabled" in boot_js
+    assert "_syncGameModeStateFromServer" in boot_js
+    assert "api('/api/game-mode/status')" in boot_js
     assert "function syncGameModeButton()" in panels_js
     assert "async function toggleGameMode()" in panels_js
     assert "function _gameModeReleaseSummary(release)" in panels_js

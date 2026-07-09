@@ -5990,9 +5990,13 @@ async function toggleGameMode(){
   syncGameModeButton();
   try{
     const saved=await api('/api/settings',{method:'POST',body:JSON.stringify({game_mode_enabled:next})});
-    window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
-    _persistGameModeUiState(window._gameModeEnabled);
-    syncGameModeButton();
+    if(typeof window._syncGameModeStateFromServer==='function'){
+      await window._syncGameModeStateFromServer();
+    }else{
+      window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
+      _persistGameModeUiState(window._gameModeEnabled);
+      syncGameModeButton();
+    }
     if(typeof showToast==='function'){
       let message=t(window._gameModeEnabled?'game_mode_enabled_toast':'game_mode_disabled_toast');
       if(window._gameModeEnabled) message+=_gameModeReleaseSummary(saved&&saved.game_mode_release);
@@ -6095,8 +6099,12 @@ async function _autosavePreferencesSettings(payload){
       if(typeof renderMessages==='function') renderMessages();
     }
     if(payload&&payload.game_mode_enabled!==undefined){
-      window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
-      syncGameModeButton();
+      if(typeof window._syncGameModeStateFromServer==='function'){
+        await window._syncGameModeStateFromServer();
+      }else{
+        window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
+        syncGameModeButton();
+      }
     }
     _settingsPreferencesAutosaveRetryPayload=null;
     _setPreferencesAutosaveStatus('saved');
@@ -6292,6 +6300,9 @@ async function loadSettingsPanel(){
         syncGameModeButton();
         _schedulePreferencesAutosave();
       },{once:false});
+    }
+    if(typeof window._syncGameModeStateFromServer==='function'){
+      await window._syncGameModeStateFromServer();
     }
     const showUsageCb=$('settingsShowTokenUsage');
     if(showUsageCb){showUsageCb.checked=!!settings.show_token_usage;showUsageCb.addEventListener('change',_schedulePreferencesAutosave,{once:false});}
@@ -8871,6 +8882,9 @@ async function saveSettings(andClose){
         }
       }
       _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showTps,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
+      if(typeof window._syncGameModeStateFromServer==='function'){
+        await window._syncGameModeStateFromServer();
+      }
       showToast(t(saved.auth_just_enabled?'settings_saved_pw':'settings_saved_pw_updated'));
       _settingsDirty=false;
       _resetSettingsPanelState();
@@ -8890,6 +8904,9 @@ async function saveSettings(andClose){
       }
     }
     _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showTps,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
+    if(typeof window._syncGameModeStateFromServer==='function'){
+      await window._syncGameModeStateFromServer();
+    }
     showToast(t('settings_saved'));
     _settingsDirty=false;
     _resetSettingsPanelState();

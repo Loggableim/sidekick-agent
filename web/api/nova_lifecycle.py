@@ -8,6 +8,7 @@ repository asset.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -21,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from web.api.nova_paths import get_nova_space_root
+
+logger = logging.getLogger(__name__)
 
 VISIBILITY_ORDER = {"public": 0, "private": 1, "sensitive": 2}
 NOVA_STALE_EVENT_SECONDS = 300
@@ -113,6 +116,14 @@ NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
         "action": "dream_tick",
     },
 )
+_LEGACY_NOVA_CRON_JOB_NAMES = frozenset({
+    "Nova Substrate Heartbeat",
+    "Nova Entity Kernel Tick",
+})
+_LEGACY_NOVA_CRON_JOB_SCRIPTS = frozenset({
+    "substrate.py once",
+    "entity_kernel.py tick",
+})
 
 
 @dataclass(frozen=True)
@@ -502,12 +513,12 @@ def _run_local_script(script: str, *args: str, timeout: int = 20) -> dict[str, A
 
 
 def _game_mode_enabled() -> bool:
-    # ═══ PRIMARY: game_mode.lock — ULTIMATIVE Barriere ═══
     try:
         from web.api import config as cfg
-        lock_file = cfg.SETTINGS_FILE.parent / "game_mode.lock"
-        if lock_file.exists():
-            return True
+
+        for lock_file in cfg._game_mode_lock_paths():
+            if lock_file.exists():
+                return True
     except Exception:
         pass
 
@@ -521,11 +532,12 @@ def _game_mode_enabled() -> bool:
     # Secondary check: watchdog state file
     try:
         from web.api import config as cfg
-        wd_path = cfg.SETTINGS_FILE.parent / "gpu_watchdog_state.json"
-        if wd_path.exists():
-            wd = json.loads(wd_path.read_text(encoding="utf-8"))
-            if wd.get("last_game_mode") is True:
-                return True
+        state_dir = cfg.SETTINGS_FILE.parent
+        for wd_path in (state_dir / "gpu_watchdog_state.json", state_dir.parent / "gpu_watchdog_state.json"):
+            if wd_path.exists():
+                wd = json.loads(wd_path.read_text(encoding="utf-8"))
+                if wd.get("last_game_mode") is True:
+                    return True
     except Exception:
         pass
     return False
@@ -1101,7 +1113,29 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
     active: list[dict[str, Any]] = []
     created: list[str] = []
     updated: list[str] = []
+    pruned: list[str] = []
     try:
+        cleaned_jobs: list[dict[str, Any]] = []
+        legacy_jobs: list[dict[str, Any]] = []
+        for job in jobs:
+            job_name = str(job.get("name") or "").strip()
+            job_script = str(job.get("script") or "").strip()
+            if (
+                bool(job.get("no_agent"))
+                and str(job.get("deliver") or "").strip().lower() in {"", "local"}
+                and (job_name in _LEGACY_NOVA_CRON_JOB_NAMES or job_script in _LEGACY_NOVA_CRON_JOB_SCRIPTS)
+            ):
+                legacy_jobs.append(job)
+                continue
+            cleaned_jobs.append(job)
+        if legacy_jobs:
+            runtime_cron_jobs.save_jobs(cleaned_jobs)
+            pruned.extend(str(job.get("id") or "") for job in legacy_jobs if str(job.get("id") or "").strip())
+            jobs = cleaned_jobs
+            logger.info(
+                "Pruned legacy Nova cron jobs: %s",
+                ", ".join(str(job.get("id") or job.get("name") or "?") for job in legacy_jobs),
+            )
         for spec in NOVA_CRON_SPECS:
             existing = next((job for job in jobs if job.get("name") == spec["name"] or job.get("id") == spec["id"]), None)
             updates = {
@@ -1160,6 +1194,7 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
         "written_scripts": written_scripts,
         "created": created,
         "updated": updated,
+        "pruned": pruned,
         "active": active,
     }
 
