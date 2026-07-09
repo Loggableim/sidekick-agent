@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_managed_message_handles_unset_env(monkeypatch):
     monkeypatch.delenv("SIDEKICK_MANAGED", raising=False)
 
@@ -110,6 +113,22 @@ def test_oneshot_allows_ollama_cloud_deepseek_v4_flash_in_game_mode(monkeypatch,
     assert captured["model"] == "deepseek-v4-flash"
     assert captured["base_url"] == "https://ollama.com/v1"
     assert capsys.readouterr().out == "remote ok\n"
+
+
+def test_run_agent_blocks_local_models_in_game_mode(monkeypatch, tmp_path):
+    from web.api import config as web_cfg
+
+    monkeypatch.setattr(web_cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    web_cfg.save_settings({"game_mode_enabled": True})
+
+    from run_agent import AIAgent
+
+    with pytest.raises(RuntimeError, match="Game Mode is active"):
+        AIAgent(
+            provider="ollama",
+            base_url="http://127.0.0.1:11434",
+            model="qwen3:4b",
+        )
 
 
 def test_gateway_detached_mode_handles_unset_env(monkeypatch):

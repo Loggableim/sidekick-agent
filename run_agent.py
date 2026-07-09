@@ -1233,6 +1233,22 @@ class AIAgent:
         else:
             self.api_mode = "chat_completions"
 
+        # Game Mode must never spin up local GPU-backed model endpoints.
+        # Keep this check early so direct AIAgent construction fails before any
+        # transport warmup or provider-specific client initialization.
+        try:
+            from web.api.config import game_mode_blocked_payload, game_mode_blocks_local_model_request
+        except Exception:
+            game_mode_blocked_payload = None
+            game_mode_blocks_local_model_request = None
+        if game_mode_blocks_local_model_request and game_mode_blocks_local_model_request(self.provider, self.base_url):
+            payload = game_mode_blocked_payload() if game_mode_blocked_payload else {}
+            message = str((payload.get("error") or {}).get("message") or "").strip()
+            raise RuntimeError(
+                message
+                or "Game Mode is active. Local model requests are blocked so GPU/VRAM resources stay available for games."
+            )
+
         # Eagerly warm the transport cache so import errors surface at init,
         # not mid-conversation.  Also validates the api_mode is registered.
         try:
