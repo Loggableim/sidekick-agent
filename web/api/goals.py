@@ -448,6 +448,13 @@ def _goal_status_payload(state: Any, *, default_message: str | None = None) -> D
         }
     if status == "paused":
         reason = str(getattr(state, "paused_reason", "") or "")
+        exhausted = "budget exhausted" in reason.lower() or "turn budget exhausted" in reason.lower()
+        if exhausted:
+            return {
+                "message": f"⏸ Goal paused — {turns_used}/{budget_label} turns used. Use /goal resume to keep going, or /goal clear to stop.",
+                "message_key": "goal_paused_budget_exhausted",
+                "message_args": [turns_used, budget_label],
+            }
         return {
             "message": f"⏸ Goal (paused, {turns_used}/{budget_label}{' — ' + reason if reason else ''}): {goal}",
             "message_key": "goal_status_paused",

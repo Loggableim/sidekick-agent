@@ -124,6 +124,35 @@ def test_webui_goal_resume_keeps_paused_when_budget_exhausted(monkeypatch, tmp_p
     assert saved == {}
 
 
+def test_webui_goal_command_resume_uses_budget_exhausted_message(monkeypatch):
+    from cli.goals import GoalState
+    from web.api import goals as goal_api
+
+    class FakeManager:
+        def __init__(self):
+            self.state = GoalState(
+                goal="Ship it",
+                status="paused",
+                turns_used=20,
+                max_turns=20,
+                paused_reason="turn budget exhausted (20/20)",
+                consecutive_parse_failures=0,
+            )
+
+        def resume(self):
+            return self.state
+
+    fake_mgr = FakeManager()
+    monkeypatch.setattr(goal_api, "_manager", lambda *args, **kwargs: fake_mgr)
+
+    payload = goal_api.goal_command_payload("goal-session", "resume")
+
+    assert payload["goal"]["status"] == "paused"
+    assert payload["message_key"] == "goal_paused_budget_exhausted"
+    assert payload["message_args"] == [20, "20"]
+    assert "turns used" in payload["message"].lower()
+
+
 def test_webui_goal_command_passes_custom_and_unlimited_budget(monkeypatch):
     from web.api import goals as goal_api
     from web.api import routes
@@ -293,8 +322,9 @@ def test_webui_goal_command_resume_reports_budget_exhausted(monkeypatch):
     payload = goal_api.goal_command_payload("goal-session", "resume")
 
     assert payload["goal"]["status"] == "paused"
-    assert payload["message_key"] == "goal_status_paused"
-    assert "paused" in payload["message"].lower()
+    assert payload["message_key"] == "goal_paused_budget_exhausted"
+    assert payload["message_args"] == [20, "20"]
+    assert "turns used" in payload["message"].lower()
 
 
 def test_cli_goal_command_resume_reports_budget_exhausted(monkeypatch):
