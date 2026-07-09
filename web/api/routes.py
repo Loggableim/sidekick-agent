@@ -8116,7 +8116,11 @@ def _handle_agents_post(handler, parsed, body):
             profile_name = body.get("profile_name", slug)
             result = _sp.run(
                 ["hermes", "profile", "create", profile_name, "--clone-from", "default", "--no-alias"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
             )
             # Update der agents table
             update_agent(slug, {"profile": profile_name})

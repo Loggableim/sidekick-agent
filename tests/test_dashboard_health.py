@@ -281,6 +281,42 @@ def test_admin_reload_succeeds_without_compact_attr(monkeypatch):
     assert response["payload"]["reloaded"] == "api.models"
 
 
+def test_agent_profile_creation_uses_utf8_subprocess_capture(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import agents
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr("web.api.helpers.j", lambda _handler, payload, status=200, extra_headers=None: {"status": status, "payload": payload})
+    monkeypatch.setattr("web.api.helpers.bad", lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}})
+    monkeypatch.setattr(agents, "get_agent", lambda _slug: object())
+    monkeypatch.setattr(agents, "update_agent", lambda _slug, _updates: None)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"profile_name": "über-profile"})
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="Profil angelegt ✓", stderr="")
+
+    monkeypatch.setattr(routes.subprocess, "run", fake_run)
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/agents/nova/profile"),
+    )
+
+    assert response["status"] == 200
+    assert response["payload"]["ok"] is True
+    assert response["payload"]["profile"] == "über-profile"
+    assert response["payload"]["output"] == "Profil angelegt ✓"
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
+
+
 def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
