@@ -380,6 +380,77 @@ def test_background_cron_jobs_prune_legacy_nova_jobs_with_display_suffix(monkeyp
     }
 
 
+def test_background_cron_jobs_clear_stale_error_state_on_current_nova_jobs(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "Nova substrate heartbeat",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "nova_substrate_heartbeat.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "error",
+                        "last_status": "error",
+                        "last_error": "boom",
+                        "last_delivery_error": "delivery boom",
+                    },
+                    {
+                        "id": "j2",
+                        "name": "Nova background tick",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "nova_background_tick.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "error",
+                        "last_status": "error",
+                        "last_error": "boom",
+                        "last_delivery_error": "delivery boom",
+                    },
+                    {
+                        "id": "j3",
+                        "name": "Nova dream/reflection tick",
+                        "schedule": {"kind": "interval", "minutes": 30, "display": "every 30m"},
+                        "schedule_display": "every 30m",
+                        "script": "nova_dream_reflection_tick.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "error",
+                        "last_status": "error",
+                        "last_error": "boom",
+                        "last_delivery_error": "delivery boom",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+
+    assert result["ok"] is True
+    assert [job["state"] for job in jobs] == ["scheduled", "scheduled", "scheduled"]
+    assert [job["last_status"] for job in jobs] == [None, None, None]
+    assert [job["last_error"] for job in jobs] == [None, None, None]
+    assert [job["last_delivery_error"] for job in jobs] == [None, None, None]
+    assert all(job["enabled"] is True for job in jobs)
+
+
 def test_background_tick_updates_substrate_heartbeat_fields(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 

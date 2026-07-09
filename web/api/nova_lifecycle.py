@@ -1255,6 +1255,12 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
                 "no_agent": True,
                 "deliver": "local",
                 "enabled": True,
+                "state": "scheduled",
+                "paused_at": None,
+                "paused_reason": None,
+                "last_status": None,
+                "last_error": None,
+                "last_delivery_error": None,
             }
             if existing:
                 schedule_display = str(existing.get("schedule_display") or "")
