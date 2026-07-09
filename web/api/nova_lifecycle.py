@@ -962,7 +962,7 @@ def background_tick() -> dict[str, Any]:
 
 
 def _game_mode_remote_dream_reflection() -> dict[str, Any]:
-    """Run Nova's dream/reflection tick through the remote DeepSeek path."""
+    """Run Nova's dream/reflection tick through the Ollama Cloud DeepSeek path."""
     recent_events = load_events(limit=3, include_private=True)
     event_lines = []
     for item in recent_events:
@@ -978,7 +978,7 @@ def _game_mode_remote_dream_reflection() -> dict[str, Any]:
     )
     user_prompt = (
         "Game Mode is active, so use the remote DeepSeek V4 Flash connection "
-        "via opencode-go instead of any local model.\n\n"
+        "via Ollama Cloud instead of any local model.\n\n"
         "Recent Nova lifecycle events:\n"
         f"{recent_summary}\n\n"
         "Respond with a short dream reflection in German."
@@ -987,7 +987,7 @@ def _game_mode_remote_dream_reflection() -> dict[str, Any]:
         from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
 
         response = call_llm(
-            provider="opencode-go",
+            provider="ollama-cloud",
             model="deepseek-v4-flash",
             messages=[
                 {"role": "system", "content": system_prompt},
@@ -1001,20 +1001,20 @@ def _game_mode_remote_dream_reflection() -> dict[str, Any]:
         if not content:
             return {
                 "ok": False,
-                "provider": "opencode-go",
+                "provider": "ollama-cloud",
                 "model": "deepseek-v4-flash",
                 "error": "remote dream returned empty content",
             }
         return {
             "ok": True,
-            "provider": "opencode-go",
+            "provider": "ollama-cloud",
             "model": "deepseek-v4-flash",
             "content": content,
         }
     except Exception as exc:
         return {
             "ok": False,
-            "provider": "opencode-go",
+            "provider": "ollama-cloud",
             "model": "deepseek-v4-flash",
             "error": repr(exc),
         }

@@ -384,14 +384,14 @@ def test_dream_tick_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_path):
 
     assert result["ok"] is True
     assert result["game_mode_enabled"] is True
-    assert result["remote_provider"] == "opencode-go"
+    assert result["remote_provider"] == "ollama-cloud"
     assert result["remote_model"] == "deepseek-v4-flash"
     assert "DeepSeek V4 Flash" in result["narrative_preview"]
-    assert captured["provider"] == "opencode-go"
+    assert captured["provider"] == "ollama-cloud"
     assert captured["model"] == "deepseek-v4-flash"
     assert events[0]["status"] == "completed"
     assert events[0]["steps"][-1] == "dream_remote_done"
-    assert events[0]["remote_provider"] == "opencode-go"
+    assert events[0]["remote_provider"] == "ollama-cloud"
     assert events[0]["remote_model"] == "deepseek-v4-flash"
 
 
