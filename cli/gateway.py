@@ -86,7 +86,7 @@ def _get_service_pids() -> set:
                 result = subprocess.run(
                     scope_args + ["list-units", "sidekick-gateway*",
                                   "--plain", "--no-legend", "--no-pager"],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
                 )
                 for line in result.stdout.strip().splitlines():
                     parts = line.split()
@@ -97,7 +97,7 @@ def _get_service_pids() -> set:
                         show = subprocess.run(
                             scope_args + ["show", svc,
                                           "--property=MainPID", "--value"],
-                            capture_output=True, text=True, timeout=5,
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
                         )
                         pid = int(show.stdout.strip())
                         if pid > 0:
@@ -113,7 +113,7 @@ def _get_service_pids() -> set:
             label = get_launchd_label()
             result = subprocess.run(
                 ["launchctl", "list", label],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
             )
             if result.returncode == 0:
                 # Output: "PID\tStatus\tLabel" header, then one data line
@@ -158,6 +158,8 @@ def _get_parent_pid(pid: int) -> int | None:
             ["ps", "-o", "ppid=", "-p", str(pid)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -424,6 +426,8 @@ def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> li
                     ["ps", "-A", "eww", "-o", "pid=,command="],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=10,
                 )
                 if result.returncode != 0:
