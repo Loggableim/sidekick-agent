@@ -11,13 +11,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
 from tools.mail_imap import (
-    get_inbox_config,
     get_imap,
     get_space_config,
-    list_inboxes,
+    resolve_space_slug,
     release_imap,
 )
 from tools.registry import registry
@@ -49,10 +47,7 @@ SCHEMA = {
 # ---------------------------------------------------------------------------
 
 def _get_space_slug(kw: dict) -> str:
-    slug = kw.get("user_task", "")
-    if not slug:
-        slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "default")
-    return slug or "default"
+    return resolve_space_slug(kw)
 
 
 def _parse_folder_line(line: bytes) -> dict | None:

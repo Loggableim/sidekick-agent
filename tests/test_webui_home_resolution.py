@@ -449,6 +449,28 @@ def test_mail_search_prefers_sidekick_workspace_env_when_user_task_missing(monke
     assert result["error"] == "Inbox not found"
 
 
+def test_mail_search_prefers_hermes_workspace_env_when_user_task_missing(monkeypatch):
+    from tools import mail_search
+
+    captured = {}
+
+    monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
+
+    def fake_get_inbox_config(space_slug, inbox_id):
+        captured["space_slug"] = space_slug
+        captured["inbox_id"] = inbox_id
+        return None
+
+    monkeypatch.setattr(mail_search, "get_inbox_config", fake_get_inbox_config)
+
+    result = json.loads(mail_search._handler({"inbox_id": "work", "query": "test"}))
+
+    assert captured["space_slug"] == "legacy-demo"
+    assert captured["inbox_id"] == "work"
+    assert result["error"] == "Inbox not found"
+
+
 def test_mail_send_prefers_sidekick_workspace_env_when_user_task_missing(monkeypatch):
     from tools import mail_send
 
@@ -478,6 +500,48 @@ def test_mail_send_prefers_sidekick_workspace_env_when_user_task_missing(monkeyp
     assert captured["space_slug"] == "demo"
     assert captured["inbox_id"] == "work"
     assert result["error"] == "Inbox not found"
+
+
+def test_mail_read_prefers_hermes_workspace_env_when_user_task_missing(monkeypatch):
+    from tools import mail_read
+
+    captured = {}
+
+    monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
+
+    def fake_get_inbox_config(space_slug, inbox_id):
+        captured["space_slug"] = space_slug
+        captured["inbox_id"] = inbox_id
+        return None
+
+    monkeypatch.setattr(mail_read, "get_inbox_config", fake_get_inbox_config)
+
+    result = json.loads(mail_read._handler({"inbox_id": "work"}))
+
+    assert captured["space_slug"] == "legacy-demo"
+    assert captured["inbox_id"] == "work"
+    assert result["error"] == "Inbox not found"
+
+
+def test_mail_folders_prefers_hermes_workspace_env_when_user_task_missing(monkeypatch):
+    from tools import mail_folders
+
+    captured = {}
+
+    monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.setenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
+
+    def fake_get_space_config(space_slug):
+        captured["space_slug"] = space_slug
+        return None
+
+    monkeypatch.setattr(mail_folders, "get_space_config", fake_get_space_config)
+
+    result = json.loads(mail_folders._handler({"inbox_id": "work"}))
+
+    assert captured["space_slug"] == "legacy-demo"
+    assert result["error"] == "No mail config found for this space"
 
 
 def test_space_engine_uses_active_profile_home_after_import(monkeypatch, tmp_path):

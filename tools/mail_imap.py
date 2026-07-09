@@ -247,6 +247,28 @@ def _load_mail_config_from_env() -> dict | None:
     return {"inboxes": [inbox], "source": "env"}
 
 
+def resolve_space_slug(kw: dict[str, Any] | None = None, *, default: str = "default") -> str:
+    """Resolve the active workspace slug for mail tools.
+
+    Resolution order:
+    1. ``kw['user_task']`` from the tool framework
+    2. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE``
+    3. ``HERMES_WEBUI_ACTIVE_WORKSPACE`` for legacy compatibility
+    4. ``default`` (usually ``"default"``)
+    """
+    kw = kw or {}
+    slug = str(kw.get("user_task", "") or "").strip()
+    if slug:
+        return slug
+    slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    if slug:
+        return slug
+    slug = os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    if slug:
+        return slug
+    return default
+
+
 def _resolve_mail_home(home: Path | None = None) -> Path:
     """Return the mail home directory for the current request context.
 

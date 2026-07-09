@@ -6,13 +6,12 @@ This module registers the ``mail_search`` tool. It uses the shared IMAP helpers 
 
 import json
 import logging
-import os
 import email
 
 from tools.mail_imap import (
-    get_space_config,
     get_inbox_config,
     get_imap,
+    resolve_space_slug,
     release_imap,
     parse_mail_summary,
 )
@@ -37,13 +36,9 @@ def _get_space_slug(kw: dict) -> str:
     """Determine the active space slug.
 
     The caller may pass the slug in ``kw['user_task']``.  If not present, fall back
-    to the ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` environment variable, and finally to
-    ``'default'``.
+    to the active workspace environment variables and finally to ``'default'``.
     """
-    slug = kw.get("user_task", "")
-    if not slug:
-        slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "default")
-    return slug or "default"
+    return resolve_space_slug(kw)
 
 
 def _handler(args: dict, **kw) -> str:
