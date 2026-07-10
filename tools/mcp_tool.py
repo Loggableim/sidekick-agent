@@ -2120,6 +2120,35 @@ def _interpolate_env_vars(value):
     return value
 
 
+def _normalize_firecrawl_mcp_config(name: str, cfg: dict) -> dict:
+    """Upgrade the legacy Firecrawl stdio config to the hosted HTTP endpoint."""
+    if name != "firecrawl" or not isinstance(cfg, dict) or "url" in cfg:
+        return cfg
+
+    command = str(cfg.get("command") or "").strip().lower()
+    args = cfg.get("args") or []
+    if "firecrawl-mcp" not in command and not any(
+        "firecrawl-mcp" in str(arg).lower() for arg in args
+    ):
+        return cfg
+
+    api_key = str(os.environ.get("FIRECRAWL_API_KEY") or "").strip()
+    if api_key:
+        from urllib.parse import quote
+
+        url = f"https://mcp.firecrawl.dev/{quote(api_key, safe='')}/v2/mcp"
+    else:
+        url = "https://mcp.firecrawl.dev/v2/mcp"
+
+    normalized = dict(cfg)
+    normalized["url"] = url
+    normalized.pop("command", None)
+    normalized.pop("args", None)
+    normalized.pop("env", None)
+    normalized.pop("transport", None)
+    return normalized
+
+
 def _load_mcp_config() -> Dict[str, dict]:
     """Read ``mcp_servers`` from the Sidekick config file.
 
@@ -2153,6 +2182,7 @@ def _load_mcp_config() -> Dict[str, dict]:
                     name, ", ".join(unresolved),
                 )
                 continue
+            interpolated = _normalize_firecrawl_mcp_config(name, interpolated)
             resolved[name] = interpolated
         return resolved
     except Exception as exc:

@@ -31,6 +31,44 @@ def test_default_github_mcp_skips_without_pat(monkeypatch):
     assert "github" not in servers
 
 
+def test_firecrawl_mcp_stdio_config_normalizes_to_hosted_http(monkeypatch):
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-key")
+
+    import cli.config as cli_config
+
+    monkeypatch.setattr(
+        cli_config,
+        "load_config",
+        lambda: {
+            "mcp_servers": {
+                "firecrawl": {
+                    "command": "npx",
+                    "args": ["-y", "firecrawl-mcp"],
+                    "env": {"FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"},
+                    "timeout": 45,
+                    "connect_timeout": 12,
+                    "enabled": True,
+                }
+            }
+        },
+    )
+    monkeypatch.setattr("cli.env_loader.load_hermes_dotenv", lambda: None)
+
+    from tools.mcp_tool import _load_mcp_config
+
+    servers = _load_mcp_config()
+
+    assert "firecrawl" in servers
+    firecrawl = servers["firecrawl"]
+    assert firecrawl["url"] == "https://mcp.firecrawl.dev/fc-test-key/v2/mcp"
+    assert firecrawl["timeout"] == 45
+    assert firecrawl["connect_timeout"] == 12
+    assert firecrawl["enabled"] is True
+    assert "command" not in firecrawl
+    assert "args" not in firecrawl
+    assert "env" not in firecrawl
+
+
 def test_oneshot_provider_without_model_handles_unset_model_env(monkeypatch, capsys):
     monkeypatch.delenv("SIDEKICK_INFERENCE_MODEL", raising=False)
 
