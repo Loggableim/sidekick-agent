@@ -1551,6 +1551,9 @@ def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     assert "function _gameModeAllowsNovaRemoteFallback(spaceSlug)" in messages_js
     assert "localProviders.has(p)" in messages_js
     assert "p.startsWith('custom:')&&localProviders.has(p.slice(7))" in messages_js
+    assert "local-gpu" in messages_js
+    assert "local-cpu" in messages_js
+    assert "local-qwen" in messages_js
     assert "qwen-local" in messages_js
     assert "m.startsWith('@ollama:')" in messages_js
     assert "const cfg=window._activeSpaceConfig;" in messages_js
@@ -3407,6 +3410,9 @@ def test_game_mode_setting_persists_and_detects_local_model_servers(monkeypatch,
     assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))["game_mode_enabled"] is True
     assert cfg.game_mode_blocks_local_model_request("ollama", "") is True
     assert cfg.game_mode_blocks_local_model_request("custom:local-gpu", "http://127.0.0.1:8080/v1") is True
+    assert cfg.game_mode_blocks_local_model_request("local-gpu", "") is True
+    assert cfg.game_mode_blocks_local_model_request("local-cpu", "") is True
+    assert cfg.game_mode_blocks_local_model_request("local-qwen", "") is True
     assert cfg.game_mode_blocks_local_model_request("custom:qwen-local", "http://127.0.0.1:8082/v1") is True
     assert cfg.game_mode_blocks_local_model_request("openai", "https://api.openai.com/v1") is False
 

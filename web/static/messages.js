@@ -57,7 +57,7 @@ function _gameModeWouldBlockClientModel(model, provider, spaceSlug){
   if(_gameModeAllowsNovaRemoteFallback(spaceSlug)) return false;
   const p=String(provider||'').trim().toLowerCase();
   const m=String(model||'').trim().toLowerCase();
-  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai','qwen-local']);
+  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai','local-gpu','local-cpu','local-qwen','qwen-local']);
   if(localProviders.has(p)) return true;
   if(p.startsWith('custom:')&&localProviders.has(p.slice(7))) return true;
   return m.startsWith('@ollama:')||m.startsWith('ollama:')||m.includes('@ollama:');
