@@ -140,7 +140,7 @@ def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> st
         result = subprocess.run(
             ["git", "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -157,7 +157,7 @@ def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> st
         result = subprocess.run(
             ["git", "remote", "show", remote],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -176,7 +176,7 @@ def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> st
             result = subprocess.run(
                 ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}"],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=5,
                 cwd=str(repo_dir),
             )
@@ -197,7 +197,7 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
     try:
         result = subprocess.run(
             ["git", "ls-remote", _UPSTREAM_REPO_URL, "refs/heads/master"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
     except Exception:
         return None
@@ -226,7 +226,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     try:
         result = subprocess.run(
             ["git", "rev-list", "--count", f"HEAD..{compare_ref}"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
             cwd=str(repo_dir),
         )
         if result.returncode == 0:
@@ -305,7 +305,7 @@ def _git_short_hash(repo_dir: Path, rev: str) -> Optional[str]:
         result = subprocess.run(
             ["git", "rev-parse", "--short=8", rev],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -335,7 +335,7 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
         result = subprocess.run(
             ["git", "rev-list", "--count", f"{upstream_ref}..HEAD"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -371,7 +371,7 @@ def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
         result = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=3,
             cwd=str(repo_dir),
         )

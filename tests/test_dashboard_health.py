@@ -4326,6 +4326,52 @@ def test_settings_post_clears_game_mode_lock_when_disabling(monkeypatch, tmp_pat
     assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is False
 
 
+def test_game_mode_status_prefers_lock_file_over_disabled_setting(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from web.api import config as cfg
+    from web.api import routes
+
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
+    cfg.save_settings({"game_mode_enabled": False})
+    active_lock.parent.mkdir(parents=True, exist_ok=True)
+    active_lock.write_text("stale", encoding="utf-8")
+
+    assert cfg.is_game_mode_enabled() is True
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(handler, urlparse("/api/game-mode/status"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload == {"ok": True, "game_mode_enabled": True}
+
+
 def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path):
     import io
     from urllib.parse import urlparse
