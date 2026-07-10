@@ -4886,6 +4886,18 @@ def test_session_list_loads_projects_in_parallel_with_sessions():
     assert await_projects < second_render
 
 
+def test_session_list_projects_abort_falls_back_silently():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    render_start = sessions_js.index("async function renderSessionList()")
+    render_end = sessions_js.index("let _gatewaySSE", render_start)
+    body = sessions_js[render_start:render_end]
+
+    assert "if (listAbortController.signal.aborted || e?._sidekickTimedOut || e?.name === 'AbortError') {" in body
+    assert "return {projects: []};" in body
+    assert "console.warn('renderSessionList projects unavailable, continuing without projects', e);" in body
+
+
 def test_space_deeplink_initializes_active_workspace():
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     sw_js = Path("web/static/sw.js").read_text(encoding="utf-8")

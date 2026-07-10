@@ -2283,7 +2283,9 @@ async function renderSessionList(){
       2500,
       'projects'
     ).catch((e) => {
-      if (listAbortController.signal.aborted) throw e;
+      if (listAbortController.signal.aborted || e?._sidekickTimedOut || e?.name === 'AbortError') {
+        return {projects: []};
+      }
       console.warn('renderSessionList projects unavailable, continuing without projects', e);
       return {projects: []};
     });
