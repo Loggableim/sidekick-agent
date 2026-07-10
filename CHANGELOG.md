@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Game Mode watchdog now leaves Nova's remote-safe dream/reflection tick enabled and only pauses jobs explicitly flagged for Game Mode blocking** so Ollama Cloud DeepSeek V4 Flash keeps running in Game Mode instead of being shut off by a name-based heuristic.
 - **OpenRouter auxiliary clients now read `OPENROUTER_API_KEY` through the shared dotenv-aware config fallback** so goal-judge and other text tasks can still bootstrap from `.env` when the process environment is empty.
 - **The MCP stdio proxy now survives Windows narrow encodings while forwarding JSON-RPC and stderr noise** so unicode output no longer kills Firecrawl or other stdio-backed servers with a `charmap` encode failure.
 - **Firecrawl MCP now normalizes the legacy local `npx firecrawl-mcp` config to the hosted Firecrawl HTTP endpoint** so MCP discovery stops trying to launch a broken local server and uses the supported transport instead.

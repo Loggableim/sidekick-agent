@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import importlib
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 
@@ -44,6 +45,32 @@ def test_cron_scheduler_script_runs_outside_repo_cwd(tmp_path):
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_run_job_script_uses_utf8_text_mode(monkeypatch, tmp_path):
+    import runtime.cron.scheduler as scheduler
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    (scripts_dir / "wake_gate.py").write_text("print('wakeAgent: true')\n", encoding="utf-8")
+
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="wakeAgent: true\n", stderr="")
+
+    monkeypatch.setattr(scheduler, "_sidekick_home", tmp_path)
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+
+    ok, output = scheduler._run_job_script("wake_gate.py")
+
+    assert ok is True
+    assert output == "wakeAgent: true"
+    assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
 
 
 def test_load_jobs_removes_stale_tmp_files(monkeypatch, tmp_path):

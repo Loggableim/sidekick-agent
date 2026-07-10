@@ -101,6 +101,7 @@ NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
         "schedule": "every 1m",
         "script": "nova_substrate_heartbeat.py",
         "action": "background_tick",
+        "game_mode_pause": False,
     },
     {
         "id": "nova-background-tick",
@@ -108,6 +109,7 @@ NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
         "schedule": "every 5m",
         "script": "nova_background_tick.py",
         "action": "background_tick",
+        "game_mode_pause": False,
     },
     {
         "id": "nova-dream-reflection-tick",
@@ -115,6 +117,7 @@ NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
         "schedule": "every 30m",
         "script": "nova_dream_reflection_tick.py",
         "action": "dream_tick",
+        "game_mode_pause": False,
     },
 )
 _LEGACY_NOVA_CRON_JOB_NAMES = frozenset({
@@ -1261,6 +1264,7 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
                 "last_status": None,
                 "last_error": None,
                 "last_delivery_error": None,
+                "game_mode_pause": bool(spec.get("game_mode_pause", False)),
             }
             if existing:
                 schedule_display = str(existing.get("schedule_display") or "")
@@ -1278,6 +1282,7 @@ def ensure_background_cron_jobs() -> dict[str, Any]:
                     script=str(spec["script"]),
                     no_agent=True,
                 )
+                job = update_job(str(job["id"]), updates) or job
                 created.append(str(job.get("id")))
             active.append(
                 {

@@ -211,6 +211,8 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
         "Nova background tick",
         "Nova dream/reflection tick",
     }
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    assert all(job.get("game_mode_pause") is False for job in jobs)
     assert result["mode"] == "sidekick_cron_no_agent"
 
 

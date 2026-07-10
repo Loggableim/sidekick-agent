@@ -156,3 +156,78 @@ def test_watchdog_ignores_legacy_true_when_active_settings_are_disabled(tmp_path
     assert not lock_path.exists()
     assert json.loads(active_settings.read_text(encoding="utf-8"))["game_mode_enabled"] is False
     assert json.loads(legacy_settings.read_text(encoding="utf-8"))["game_mode_enabled"] is False
+
+
+def test_pause_nova_crons_keeps_remote_safe_dream_reflection_tick_enabled(tmp_path, monkeypatch):
+    watchdog = _load_watchdog_module()
+
+    home = tmp_path / "home"
+    jobs_path = home / "cron" / "jobs.json"
+    jobs_path.parent.mkdir(parents=True, exist_ok=True)
+    jobs_path.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "dream-reflection",
+                        "name": "Nova dream/reflection tick",
+                        "enabled": True,
+                        "state": "scheduled",
+                        "paused_at": None,
+                        "paused_reason": None,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(watchdog, "CRON_JOBS_FILE", jobs_path)
+
+    paused = watchdog.pause_nova_crons()
+    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))["jobs"]
+
+    assert paused == 0
+    assert jobs[0]["enabled"] is True
+    assert jobs[0]["state"] == "scheduled"
+    assert jobs[0]["paused_at"] is None
+    assert jobs[0]["paused_reason"] is None
+
+
+def test_pause_nova_crons_pauses_explicitly_flagged_gpu_jobs(tmp_path, monkeypatch):
+    watchdog = _load_watchdog_module()
+
+    home = tmp_path / "home"
+    jobs_path = home / "cron" / "jobs.json"
+    jobs_path.parent.mkdir(parents=True, exist_ok=True)
+    jobs_path.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "gpu-job",
+                        "name": "Nova legacy GPU tick",
+                        "enabled": True,
+                        "state": "scheduled",
+                        "paused_at": None,
+                        "paused_reason": None,
+                        "game_mode_pause": True,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(watchdog, "CRON_JOBS_FILE", jobs_path)
+
+    paused = watchdog.pause_nova_crons()
+    jobs = json.loads(jobs_path.read_text(encoding="utf-8"))["jobs"]
+
+    assert paused == 1
+    assert jobs[0]["enabled"] is False
+    assert jobs[0]["state"] == "paused"
+    assert jobs[0]["paused_at"] is not None
+    assert jobs[0]["paused_reason"] == "Game Mode block - GPU free (flagged job)"
