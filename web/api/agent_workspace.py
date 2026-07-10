@@ -117,6 +117,7 @@ def _call_llm(messages: list, timeout: int = 30) -> Optional[str]:
             return response.choices[0].message.content
     except Exception:
         logger.debug("Agent workspace Game Mode remote fallback failed", exc_info=True)
+        return None
 
     if not api_key or len(api_key) < 10:
         logger.warning("No valid API key for LLM call")

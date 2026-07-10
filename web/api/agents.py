@@ -969,6 +969,7 @@ def _call_llm(messages: list, timeout: int = 15) -> Optional[str]:
             return text or None
     except Exception:
         logger.debug("Agent LLM Game Mode remote fallback failed", exc_info=True)
+        return None
 
     if not api_key or len(api_key) < 10:
         logger.warning("No valid OpenRouter API key found")
