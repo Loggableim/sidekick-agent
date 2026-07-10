@@ -146,7 +146,7 @@ from runtime.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
     MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
     SIDEKICK_AGENT_HELP_GUIDANCE,
-    KANBAN_GUIDANCE,
+    KANBAN_GUIDANCE, CORE_WORK_GUIDANCE,
 )
 from runtime.model_metadata import (
     fetch_model_metadata,
@@ -5690,6 +5690,11 @@ class AIAgent:
         if not _soul_loaded:
             # Fallback to hardcoded identity
             stable_parts.append(DEFAULT_AGENT_IDENTITY)
+
+        # The active SOUL.md is a user-editable persona. Keep the core work
+        # protocol separate so every profile follows the same evidence,
+        # scope, and verification standards without overwriting that persona.
+        stable_parts.append(CORE_WORK_GUIDANCE)
 
         # Pointer to the sidekick-agent skill + docs for user questions about Sidekick itself.
         stable_parts.append(SIDEKICK_AGENT_HELP_GUIDANCE)
