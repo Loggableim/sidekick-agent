@@ -468,7 +468,14 @@ def _prepare_local_audio(file_path: str, work_dir: str) -> tuple[Optional[str], 
     command = [ffmpeg, "-y", "-i", file_path, converted_path]
 
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         return converted_path, None
     except subprocess.CalledProcessError as e:
         details = e.stderr.strip() or e.stdout.strip() or str(e)
@@ -508,7 +515,15 @@ def _transcribe_local_command(file_path: str, model_name: str) -> Dict[str, Any]
                 language=_quote_shell_arg(language),
                 model=_quote_shell_arg(normalized_model),
             )
-            subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+            subprocess.run(
+                command,
+                shell=True,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
 
             txt_files = sorted(Path(output_dir).glob("*.txt"))
             if not txt_files:
