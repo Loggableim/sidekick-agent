@@ -352,6 +352,53 @@ def judge_goal(
         # No substantive reply this turn — almost certainly not done yet.
         return "continue", "empty response (nothing to evaluate)", False
 
+    prompt = JUDGE_USER_PROMPT_TEMPLATE.format(
+        goal=_truncate(goal, 2000),
+        response=_truncate(last_response, _JUDGE_RESPONSE_SNIPPET_CHARS),
+    )
+
+    try:
+        from web.api.config import is_game_mode_enabled
+    except Exception:
+        is_game_mode_enabled = lambda: False  # type: ignore[assignment]
+
+    # In Game Mode, keep the judge off local GPUs and use the same remote
+    # DeepSeek path Nova already uses for chat/title/fact extraction.
+    if is_game_mode_enabled():
+        try:
+            from runtime.auxiliary_client import call_llm
+        except Exception as exc:
+            logger.debug("goal judge: remote fallback import failed: %s", exc)
+            return "continue", "auxiliary client unavailable", False
+
+        try:
+            resp = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=200,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            logger.info(
+                "goal judge: Game Mode remote call failed (%s) — falling through to continue",
+                exc,
+            )
+            return "continue", f"judge error: {type(exc).__name__}", False
+        raw = ""
+        try:
+            raw = resp.choices[0].message.content or ""
+        except Exception:
+            raw = ""
+        done, reason, parse_failed = _parse_judge_response(raw)
+        verdict = "done" if done else "continue"
+        logger.info("goal judge: verdict=%s reason=%s", verdict, _truncate(reason, 120))
+        return verdict, reason, parse_failed
+
     try:
         from runtime.auxiliary_client import get_text_auxiliary_client
     except Exception as exc:
@@ -366,11 +413,6 @@ def judge_goal(
 
     if client is None or not model:
         return "continue", "no auxiliary client configured", False
-
-    prompt = JUDGE_USER_PROMPT_TEMPLATE.format(
-        goal=_truncate(goal, 2000),
-        response=_truncate(last_response, _JUDGE_RESPONSE_SNIPPET_CHARS),
-    )
 
     try:
         resp = client.chat.completions.create(
