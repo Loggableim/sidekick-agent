@@ -1308,6 +1308,13 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
 
 
 def _try_openrouter(explicit_api_key: str = None) -> Tuple[Optional[OpenAI], Optional[str]]:
+    def _resolved_openrouter_key() -> str:
+        try:
+            from cli.config import get_env_value
+            return str(get_env_value("OPENROUTER_API_KEY") or "").strip()
+        except Exception:
+            return str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+
     pool_present, entry = _select_pool_entry("openrouter")
     if pool_present:
         or_key = explicit_api_key or _pool_runtime_api_key(entry)
@@ -1318,7 +1325,7 @@ def _try_openrouter(explicit_api_key: str = None) -> Tuple[Optional[OpenAI], Opt
         return OpenAI(api_key=or_key, base_url=base_url,
                        default_headers=build_or_headers()), _OPENROUTER_MODEL
 
-    or_key = explicit_api_key or os.getenv("OPENROUTER_API_KEY")
+    or_key = explicit_api_key or _resolved_openrouter_key()
     if not or_key:
         return None, None
     logger.debug("Auxiliary client: OpenRouter")
@@ -1328,13 +1335,20 @@ def _try_openrouter(explicit_api_key: str = None) -> Tuple[Optional[OpenAI], Opt
 
 def _describe_openrouter_unavailable() -> str:
     """Return a more precise OpenRouter auth failure reason for logs."""
+    def _resolved_openrouter_key() -> str:
+        try:
+            from cli.config import get_env_value
+            return str(get_env_value("OPENROUTER_API_KEY") or "").strip()
+        except Exception:
+            return str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+
     pool_present, entry = _select_pool_entry("openrouter")
     if pool_present:
         if entry is None:
             return "OpenRouter credential pool has no usable entries (credentials may be exhausted)"
         if not _pool_runtime_api_key(entry):
             return "OpenRouter credential pool entry is missing a runtime API key"
-    if not str(os.getenv("OPENROUTER_API_KEY") or "").strip():
+    if not _resolved_openrouter_key():
         return "OPENROUTER_API_KEY not set"
     return "no usable OpenRouter credentials found"
 

@@ -10,7 +10,7 @@ import importlib
 import sys
 import types
 
-__version__ = "0.8.76"
+__version__ = "0.8.77"
 __release_date__ = "2026.7.10"
 
 _ROUTE_MAP: dict[str, str] = {

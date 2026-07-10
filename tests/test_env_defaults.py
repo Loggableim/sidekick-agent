@@ -363,6 +363,23 @@ def test_openrouter_cache_headers_handle_unset_env(monkeypatch):
     assert headers["X-OpenRouter-Cache-TTL"] == "600"
 
 
+def test_openrouter_client_reads_key_from_dotenv_when_pool_missing(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    import cli.config as cfg
+    import runtime.auxiliary_client as auxiliary_client
+
+    monkeypatch.setattr(cfg, "get_env_value", lambda key: "dotenv-openrouter-key" if key == "OPENROUTER_API_KEY" else None)
+    monkeypatch.setattr(auxiliary_client, "_select_pool_entry", lambda provider: (False, None))
+    auxiliary_client._evict_cached_clients("openrouter")
+
+    client, model = auxiliary_client._try_openrouter()
+
+    assert client is not None
+    assert model == "google/gemini-3-flash-preview"
+    assert str(getattr(client, "api_key", "")) == "dotenv-openrouter-key"
+
+
 def test_shell_hooks_accept_env_handles_unset_env(monkeypatch):
     monkeypatch.delenv("SIDEKICK_ACCEPT_HOOKS", raising=False)
 

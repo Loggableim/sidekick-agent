@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **OpenRouter auxiliary clients now read `OPENROUTER_API_KEY` through the shared dotenv-aware config fallback** so goal-judge and other text tasks can still bootstrap from `.env` when the process environment is empty.
 - **The MCP stdio proxy now survives Windows narrow encodings while forwarding JSON-RPC and stderr noise** so unicode output no longer kills Firecrawl or other stdio-backed servers with a `charmap` encode failure.
 - **Firecrawl MCP now normalizes the legacy local `npx firecrawl-mcp` config to the hosted Firecrawl HTTP endpoint** so MCP discovery stops trying to launch a broken local server and uses the supported transport instead.
 - **Nova Game Mode title and fact helpers now route through Ollama Cloud DeepSeek V4 Flash instead of falling back to local models** so Game Mode keeps Nova useful without touching local GPU-backed endpoints.
