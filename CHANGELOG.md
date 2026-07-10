@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Nova's router-primary provider pool now keeps `gpt:oss-20b` as the configured slot but reports and selects `deepseek-v4-flash` in Game Mode** so the router health view matches the live remote-safe runtime.
 - **GPU Game Mode watchdog now retries transient Windows `jobs.json` replace failures** so the cron pausing path no longer dies on `PermissionError` when another process briefly holds the file.
 - **Local transcription subprocesses now force UTF-8 with replacement on Windows** so ffmpeg conversion and local STT command wrappers stop crashing on cp1252 decode errors.
 - **Game Mode watchdog now leaves Nova's remote-safe dream/reflection tick enabled and only pauses jobs explicitly flagged for Game Mode blocking** so Ollama Cloud DeepSeek V4 Flash keeps running in Game Mode instead of being shut off by a name-based heuristic.
