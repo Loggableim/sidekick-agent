@@ -1424,6 +1424,7 @@ _LOCAL_SERVER_PROVIDERS = {
     "koboldcpp",    # local llama.cpp UI fork
     "textgen",      # text-generation-webui (oobabooga) OpenAI-compat extension
     "localai",      # LocalAI project (#1625 Opus NIT)
+    "qwen-local",   # Nova's local Qwen-backed provider alias
 }
 
 

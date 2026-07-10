@@ -57,7 +57,7 @@ function _gameModeWouldBlockClientModel(model, provider, spaceSlug){
   if(_gameModeAllowsNovaRemoteFallback(spaceSlug)) return false;
   const p=String(provider||'').trim().toLowerCase();
   const m=String(model||'').trim().toLowerCase();
-  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai']);
+  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai','qwen-local']);
   if(localProviders.has(p)) return true;
   if(p.startsWith('custom:')&&localProviders.has(p.slice(7))) return true;
   return m.startsWith('@ollama:')||m.startsWith('ollama:')||m.includes('@ollama:');
@@ -346,6 +346,8 @@ async function send(){
     const startData=await api('/api/chat/start',{method:'POST',body:JSON.stringify({
       session_id:activeSid,message:msgText,
       model:selectedModelState.model,workspace:S.session.workspace,
+      workspace_slug:selectedWorkspaceSlug,
+      space_slug:selectedWorkspaceSlug,
       model_provider:selectedModelState.model_provider,
       profile:S.activeProfile||S.session.profile||'default',
       mode: window._composerMode||'action',

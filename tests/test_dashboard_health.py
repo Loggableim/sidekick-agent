@@ -1551,6 +1551,7 @@ def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     assert "function _gameModeAllowsNovaRemoteFallback(spaceSlug)" in messages_js
     assert "localProviders.has(p)" in messages_js
     assert "p.startsWith('custom:')&&localProviders.has(p.slice(7))" in messages_js
+    assert "qwen-local" in messages_js
     assert "m.startsWith('@ollama:')" in messages_js
     assert "const cfg=window._activeSpaceConfig;" in messages_js
     assert "if(slug&&activeSpace&&slug!==activeSpace) return false;" in messages_js
@@ -1560,6 +1561,8 @@ def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     assert "const selectedModelState=_currentComposerModelState();" in messages_js
     assert "if(_gameModeWouldBlockClientModel(selectedModelState.model,selectedModelState.model_provider,selectedWorkspaceSlug))" in messages_js
     assert "model:selectedModelState.model" in messages_js
+    assert "workspace_slug:selectedWorkspaceSlug" in messages_js
+    assert "space_slug:selectedWorkspaceSlug" in messages_js
     assert "model_provider:selectedModelState.model_provider" in messages_js
     assert "ollama-cloud" not in messages_js[messages_js.index("function _gameModeWouldBlockClientModel"):messages_js.index("async function send")]
 
@@ -3404,6 +3407,7 @@ def test_game_mode_setting_persists_and_detects_local_model_servers(monkeypatch,
     assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))["game_mode_enabled"] is True
     assert cfg.game_mode_blocks_local_model_request("ollama", "") is True
     assert cfg.game_mode_blocks_local_model_request("custom:local-gpu", "http://127.0.0.1:8080/v1") is True
+    assert cfg.game_mode_blocks_local_model_request("custom:qwen-local", "http://127.0.0.1:8082/v1") is True
     assert cfg.game_mode_blocks_local_model_request("openai", "https://api.openai.com/v1") is False
 
 
