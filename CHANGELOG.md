@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **GPU Game Mode watchdog now retries transient Windows `jobs.json` replace failures** so the cron pausing path no longer dies on `PermissionError` when another process briefly holds the file.
 - **Local transcription subprocesses now force UTF-8 with replacement on Windows** so ffmpeg conversion and local STT command wrappers stop crashing on cp1252 decode errors.
 - **Game Mode watchdog now leaves Nova's remote-safe dream/reflection tick enabled and only pauses jobs explicitly flagged for Game Mode blocking** so Ollama Cloud DeepSeek V4 Flash keeps running in Game Mode instead of being shut off by a name-based heuristic.
 - **OpenRouter auxiliary clients now read `OPENROUTER_API_KEY` through the shared dotenv-aware config fallback** so goal-judge and other text tasks can still bootstrap from `.env` when the process environment is empty.

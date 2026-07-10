@@ -231,3 +231,26 @@ def test_pause_nova_crons_pauses_explicitly_flagged_gpu_jobs(tmp_path, monkeypat
     assert jobs[0]["state"] == "paused"
     assert jobs[0]["paused_at"] is not None
     assert jobs[0]["paused_reason"] == "Game Mode block - GPU free (flagged job)"
+
+
+def test_write_json_retries_transient_permission_error(tmp_path, monkeypatch):
+    watchdog = _load_watchdog_module()
+
+    target = tmp_path / "jobs.json"
+    target.write_text(json.dumps({"jobs": []}), encoding="utf-8")
+
+    calls = {"count": 0}
+    original_replace = Path.replace
+
+    def fake_replace(self, other):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise PermissionError("target file is busy")
+        return original_replace(self, other)
+
+    monkeypatch.setattr(Path, "replace", fake_replace)
+
+    watchdog.write_json(target, {"jobs": [{"id": "1"}]})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"jobs": [{"id": "1"}]}
+    assert calls["count"] == 3
