@@ -3061,7 +3061,7 @@ def _pid_alive(pid: Optional[int]) -> bool:
                 ["ps", "-o", "stat=", "-p", str(int(pid))],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=1,
                 check=False,
             )

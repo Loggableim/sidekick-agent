@@ -195,3 +195,37 @@ def test_tools_config_agent_browser_setup_uses_utf8_encoding(monkeypatch, tmp_pa
     assert captured["kwargs"]["text"] is True
     assert captured["kwargs"]["encoding"] == "utf-8"
     assert captured["kwargs"]["errors"] == "replace"
+
+
+def test_selected_production_modules_use_utf8_for_text_subprocesses():
+    modules = [
+        "shared/agent_bridge.py",
+        "cli/copilot_auth.py",
+        "cli/gateway_windows.py",
+        "cli/kanban_db.py",
+        "tools/checkpoint_manager.py",
+        "tools/environments/docker.py",
+        "tools/environments/singularity.py",
+        "tools/environments/ssh.py",
+        "tools/morph_apply.py",
+        "tools/morph_warpgrep.py",
+        "tools/sidekick_memory.py",
+        "tools/skills_hub.py",
+        "tools/tirith_security.py",
+        "tools/tts_tool.py",
+        "tools/voice_mode.py",
+        "tools/web_tools.py",
+    ]
+
+    missing: list[str] = []
+    for rel in modules:
+        text = Path(rel).read_text(encoding="utf-8")
+        lines = text.splitlines()
+        for index, line in enumerate(lines, 1):
+            if "text=True" not in line or "subprocess" not in "\n".join(lines[max(0, index - 3): min(len(lines), index + 3)]):
+                continue
+            window = "\n".join(lines[max(0, index - 3): min(len(lines), index + 3)])
+            if "encoding=" not in window and "errors=" not in window:
+                missing.append(f"{rel}:{index}:{line.strip()}")
+
+    assert not missing, "\n".join(missing)

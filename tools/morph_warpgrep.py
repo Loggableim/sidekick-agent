@@ -84,7 +84,7 @@ def run_grep(root: str, pattern: str, path: str = ".", glob: str | None = None) 
         cmd.extend(["--glob", glob])
     cmd.extend([pattern, search_path])
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=10, cwd=root)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, cwd=root)
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         return f"Error: {e}"
     output = r.stdout.strip()

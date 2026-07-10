@@ -1389,14 +1389,27 @@ def title_from(messages, fallback: str=DEFAULT_SESSION_TITLE):
 def _generate_title_via_ollama(messages) -> str | None:
     """Generate a short title via local Ollama (qwen3:4b).
 
-    Uses the first user + assistant message as context. Returns None on
-    any error/timeout so callers can fall back gracefully.
+    In Game Mode, route the same title request through Ollama Cloud DeepSeek
+    instead of the local model so Nova can keep working without touching GPU
+    local model servers.
+    Returns None on any error/timeout so callers can fall back gracefully.
     """
     try:
         from web.api import config as cfg
 
         if cfg.is_game_mode_enabled():
-            return None
+            from web.api.streaming import _first_exchange_snippets, _sanitize_generated_title, generate_title_raw_via_aux
+
+            user_msg, asst_msg = _first_exchange_snippets(messages)
+            raw_title, _status = generate_title_raw_via_aux(
+                user_msg,
+                asst_msg,
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+            )
+            title = _sanitize_generated_title(raw_title or "")
+            return title[:80] if title else None
+
         import json
         import urllib.request
 
@@ -1454,24 +1467,17 @@ def _extract_facts_via_llamacpp(messages, session_id: str, title: str = "") -> s
     Uses /v1/completions because this build of llama-server has a bug
     in /v1/chat/completions. Tries GPU (port 8080) first,
     falls back to CPU (port 8081).
-    Returns a formatted string block ready for appending to MEMORY.md,
-    or None on error.
+    In Game Mode, route the same extraction through Ollama Cloud DeepSeek
+    instead of local llama.cpp so Nova can keep appending facts without local
+    GPU work.
+    Returns a formatted string block ready for appending to MEMORY.md, or
+    None on error.
     """
     import json
     import urllib.request
     import urllib.error
 
-    try:
-        from web.api import config as cfg
-
-        if cfg.is_game_mode_enabled():
-            return None
-    except Exception:
-        pass
-
-    def _call_llama(port: int) -> str | None:
-        """Try llama.cpp on given port, return facts or None."""
-        # Build conversation text from messages
+    def _conversation_text() -> str:
         parts = []
         for m in messages:
             content = m.get('content', '')
@@ -1486,29 +1492,61 @@ def _extract_facts_via_llamacpp(messages, session_id: str, title: str = "") -> s
 
         conversation = "\n".join(parts)
         if not conversation:
-            return None
+            return ""
 
         # Truncate to max 6000 chars to fit context window
         if len(conversation) > 6000:
             conversation = conversation[:6000] + "\n[truncated...]"
+        return conversation
 
-        prompt = (
-            "Extract key facts from this conversation.\n"
-            "Sort them into these categories:\n\n"
-            "[PREFERENCE] - User preferences, likes/dislikes, opinions, style choices\n"
-            "[DECISION] - Decisions made, choices, conclusions, agreements\n"
-            "[FACT] - Technical facts, knowledge, discovered information, configuration\n"
-            "[WORKFLOW] - Processes, methods, recurring patterns, commands\n\n"
-            "Rules:\n"
-            "- Write facts in the SAME LANGUAGE as the conversation\n"
-            "- Be specific and concise (max 2 sentences per fact)\n"
-            "- Include version numbers, paths, commands, port numbers where relevant\n"
-            "- Skip greetings, small talk, meta-discussion about the conversation itself\n"
-            "- If nothing useful found, respond with: [NO FACTS]\n\n"
-            f"Conversation:\n{conversation}\n\n"
-            "Facts:"
-        )
+    conversation = _conversation_text()
+    if not conversation:
+        return None
 
+    prompt = (
+        "Extract key facts from this conversation.\n"
+        "Sort them into these categories:\n\n"
+        "[PREFERENCE] - User preferences, likes/dislikes, opinions, style choices\n"
+        "[DECISION] - Decisions made, choices, conclusions, agreements\n"
+        "[FACT] - Technical facts, knowledge, discovered information, configuration\n"
+        "[WORKFLOW] - Processes, methods, recurring patterns, commands\n\n"
+        "Rules:\n"
+        "- Write facts in the SAME LANGUAGE as the conversation\n"
+        "- Be specific and concise (max 2 sentences per fact)\n"
+        "- Include version numbers, paths, commands, port numbers where relevant\n"
+        "- Skip greetings, small talk, meta-discussion about the conversation itself\n"
+        "- If nothing useful found, respond with: [NO FACTS]\n\n"
+        f"Conversation:\n{conversation}\n\n"
+        "Facts:"
+    )
+
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
+
+            response = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": conversation},
+                ],
+                temperature=0.2,
+                max_tokens=512,
+                timeout=30,
+            )
+            facts = extract_content_or_reasoning(response).strip()
+            if not facts or facts == "[NO FACTS]":
+                return None
+            title_line = f" ({title})" if title else ""
+            return f"§\n[SESSION: {session_id}]{title_line}\n{facts}\n"
+    except Exception:
+        pass
+
+    def _call_llama(port: int) -> str | None:
+        """Try llama.cpp on given port, return facts or None."""
         # Use /v1/completions because /v1/chat/completions is buggy in this
         # llama-server build.  Wrap the prompt in Llama 3 instruct format so
         # the model sees the right chat structure.

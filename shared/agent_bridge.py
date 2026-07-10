@@ -41,7 +41,7 @@ def run_assistant_once(prompt: str, timeout_seconds: int = 45) -> BridgeResult:
         result = subprocess.run(
             [command, "-z", prompt, "--ignore-user-config", "--ignore-rules"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout_seconds,
             cwd=str(Path.cwd()),
             env=_bridge_env(),

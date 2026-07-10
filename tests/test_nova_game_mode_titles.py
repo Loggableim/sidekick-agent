@@ -33,23 +33,37 @@ def test_async_ollama_title_uses_remote_deepseek_in_game_mode(monkeypatch):
     assert session.title == "DeepSeek V4 Flash title"
 
 
-def test_generate_title_via_ollama_returns_none_in_game_mode(monkeypatch, tmp_path):
+def test_generate_title_via_ollama_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_path):
     from web.api import config as cfg
     from web.api import models
 
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": True})
-    monkeypatch.setattr(
-        "urllib.request.urlopen",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Ollama must not be called in Game Mode")),
-    )
+    calls = []
+
+    def fake_generate_title_raw_via_aux(user_text, assistant_text, provider="", model="", base_url=""):
+        calls.append(
+            {
+                "user_text": user_text,
+                "assistant_text": assistant_text,
+                "provider": provider,
+                "model": model,
+                "base_url": base_url,
+            }
+        )
+        return "Game Mode DeepSeek title", "llm_aux"
+
+    monkeypatch.setattr("web.api.streaming.generate_title_raw_via_aux", fake_generate_title_raw_via_aux)
 
     assert models._generate_title_via_ollama(
         [
             {"role": "user", "content": "Erstelle eine kurze Projektüberschrift."},
             {"role": "assistant", "content": "Klar."},
         ]
-    ) is None
+    ) == "Game Mode DeepSeek title"
+    assert calls, "Game Mode should route title generation through Ollama Cloud"
+    assert calls[0]["provider"] == "ollama-cloud"
+    assert calls[0]["model"] == "deepseek-v4-flash"
 
 
 def test_streaming_title_aux_forces_remote_deepseek_in_game_mode(monkeypatch, tmp_path):

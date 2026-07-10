@@ -41,7 +41,7 @@ def _syntax_check(path: Path) -> str | None:
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "py_compile", str(path)],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
             )
             if result.returncode != 0:
                 return result.stderr.strip() or result.stdout.strip() or "Syntax error"

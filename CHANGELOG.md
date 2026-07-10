@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **Nova Game Mode title and fact helpers now route through Ollama Cloud DeepSeek V4 Flash instead of falling back to local models** so Game Mode keeps Nova useful without touching local GPU-backed endpoints.
 - **Game Mode toggles now synchronise the lockfile and watchdog state immediately** so enabling or disabling Game Mode no longer waits for the watchdog cron to catch up.
 - **Appstore Mail setup now opens as a fullscreen modal overlay again** instead of a bottom-sheet strip, because the setup class now shares the same backdrop/positioning rules as the main appstore overlay.
 - **Mail now reopens on the active inbox when available, then the default inbox, before falling back to the first inbox** so reopening the Mail panel no longer jumps to the wrong mailbox.
