@@ -78,6 +78,22 @@ function _showGameModeClientBlock(){
   if(typeof showToast==='function') showToast(msg,5000,'warning');
 }
 
+function _currentComposerModelState(){
+  const sel=$('modelSelect');
+  const selectedModel=String((sel&&sel.value)||(S.session&&S.session.model)||'').trim();
+  const fallbackProvider=S.session&&S.session.model_provider ? String(S.session.model_provider).trim() : null;
+  if(typeof _modelStateForSelect==='function'){
+    const state=_modelStateForSelect(sel,selectedModel);
+    if(state&&typeof state==='object'){
+      return {
+        model:String(state.model||selectedModel||'').trim(),
+        model_provider:state.model_provider ? String(state.model_provider).trim() : fallbackProvider,
+      };
+    }
+  }
+  return {model:selectedModel, model_provider:fallbackProvider};
+}
+
 let _isSendingChat=false;
 
 async function send(){
@@ -104,6 +120,8 @@ async function send(){
   if(!text&&!S.pendingFiles.length)return;
   // Don't send while an inline message edit is active
   if(document.querySelector('.msg-edit-area'))return;
+
+  const selectedModelState=_currentComposerModelState();
 
   // Dismiss handoff hint when user sends a message (resets seen_at).
   if(S.session&&S.session.session_id&&typeof _dismissHandoffHint==='function'){
@@ -148,7 +166,7 @@ async function send(){
         S.pendingFiles=[];renderTray();
       } else if(busyMode==='interrupt'){
         // Queue the message, then cancel so drain re-sends it.
-        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:selectedModelState.model,model_provider:selectedModelState.model_provider,profile:S.activeProfile||'default'});
         updateQueueBadge(S.session.session_id);
         $('msg').value='';autoResize();_collapseExpandIfOpen();
         S.pendingFiles=[];renderTray();
@@ -161,7 +179,7 @@ async function send(){
       } else {
         // Default: queue mode (current behavior). Also the fallback for
         // 'steer' mode when no stream is active or _trySteer is unavailable.
-        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:selectedModelState.model,model_provider:selectedModelState.model_provider,profile:S.activeProfile||'default'});
         $('msg').value='';autoResize();_collapseExpandIfOpen();
         S.pendingFiles=[];renderTray();
         updateQueueBadge(S.session.session_id);
@@ -259,9 +277,7 @@ async function send(){
     (typeof _activeSpace!=='undefined'&&_activeSpace)||
     ''
   ).trim().toLowerCase();
-  const selectedModel=S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'';
-  const selectedProvider=S.session&&S.session.model_provider||null;
-  if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider,selectedWorkspaceSlug)){
+  if(_gameModeWouldBlockClientModel(selectedModelState.model,selectedModelState.model_provider,selectedWorkspaceSlug)){
     _showGameModeClientBlock();
     return;
   }
@@ -329,8 +345,8 @@ async function send(){
   try{
     const startData=await api('/api/chat/start',{method:'POST',body:JSON.stringify({
       session_id:activeSid,message:msgText,
-      model:S.session.model||$('modelSelect').value,workspace:S.session.workspace,
-      model_provider:S.session.model_provider||null,
+      model:selectedModelState.model,workspace:S.session.workspace,
+      model_provider:selectedModelState.model_provider,
       profile:S.activeProfile||S.session.profile||'default',
       mode: window._composerMode||'action',
       chat_mode: S.mode||'chat',
@@ -415,7 +431,7 @@ async function send(){
       stopApprovalPolling();
       stopClarifyPolling();
       // Keep the user's attempted turn by queueing it for after the current run.
-      queueSessionMessage(activeSid,{text:msgText,files:[],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+      queueSessionMessage(activeSid,{text:msgText,files:[],model:selectedModelState.model,model_provider:selectedModelState.model_provider,profile:S.activeProfile||'default'});
       updateQueueBadge(activeSid);
       if(conflictStreamId&&S.session&&S.session.session_id===activeSid){
         S.activeStreamId=conflictStreamId;
@@ -1937,10 +1953,11 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
         const txt=String(d.text||'').trim();
         if(!txt||sid!==activeSid) return;
         if(typeof queueSessionMessage==='function'){
+          const composerModelState=_currentComposerModelState();
           queueSessionMessage(sid,{
             text:txt,files:[],
-            model:S.session&&S.session.model||'',
-            model_provider:S.session&&S.session.model_provider||null,
+            model:composerModelState.model,
+            model_provider:composerModelState.model_provider,
             profile:S.activeProfile||'default',
           });
           if(typeof updateQueueBadge==='function') updateQueueBadge(sid);

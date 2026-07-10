@@ -1556,8 +1556,11 @@ def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     assert "if(slug&&activeSpace&&slug!==activeSpace) return false;" in messages_js
     assert "cfg&&typeof cfg==='object'&&cfg.nova&&typeof cfg.nova==='object'&&cfg.nova.enabled" in messages_js
     assert "const selectedWorkspaceSlug=String(" in messages_js
-    assert "selectedProvider=S.session&&S.session.model_provider||null" in messages_js
-    assert "if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider,selectedWorkspaceSlug))" in messages_js
+    assert "function _currentComposerModelState()" in messages_js
+    assert "const selectedModelState=_currentComposerModelState();" in messages_js
+    assert "if(_gameModeWouldBlockClientModel(selectedModelState.model,selectedModelState.model_provider,selectedWorkspaceSlug))" in messages_js
+    assert "model:selectedModelState.model" in messages_js
+    assert "model_provider:selectedModelState.model_provider" in messages_js
     assert "ollama-cloud" not in messages_js[messages_js.index("function _gameModeWouldBlockClientModel"):messages_js.index("async function send")]
 
     catch_start = messages_js.index("const gameModeBlocked=!!(e&&e.data&&e.data.error&&e.data.error.code==='game_mode_enabled')")
