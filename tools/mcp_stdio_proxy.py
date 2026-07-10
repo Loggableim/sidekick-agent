@@ -25,6 +25,25 @@ def is_jsonrpc_stdout_line(line: str) -> bool:
     return isinstance(payload, dict) and payload.get("jsonrpc") == "2.0"
 
 
+def _write_text(stream, text: str) -> None:
+    """Write *text* to a text stream without crashing on narrow encodings."""
+    try:
+        stream.write(text)
+        stream.flush()
+        return
+    except UnicodeEncodeError:
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            buffer.write(text.encode("utf-8", errors="replace"))
+            flush = getattr(buffer, "flush", None)
+            if flush is not None:
+                flush()
+            return
+        safe_text = text.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+        stream.write(safe_text)
+        stream.flush()
+
+
 def _forward_stdin(child_stdin) -> None:
     try:
         for line in sys.stdin:
@@ -46,18 +65,16 @@ def _forward_stdout(child_stdout, command_name: str) -> None:
     try:
         for line in child_stdout:
             if is_jsonrpc_stdout_line(line):
-                sys.stdout.write(line)
-                sys.stdout.flush()
+                _write_text(sys.stdout, line)
                 continue
             stripped = line.rstrip("\n")
             if stripped:
-                sys.stderr.write(
-                    f"[mcp-stdio-proxy] dropped non-JSON stdout from {command_name}: {stripped}\n"
+                _write_text(
+                    sys.stderr,
+                    f"[mcp-stdio-proxy] dropped non-JSON stdout from {command_name}: {stripped}\n",
                 )
-                sys.stderr.flush()
     except Exception as exc:
-        sys.stderr.write(f"[mcp-stdio-proxy] stdout forwarder stopped: {exc}\n")
-        sys.stderr.flush()
+        _write_text(sys.stderr, f"[mcp-stdio-proxy] stdout forwarder stopped: {exc}\n")
 
 
 def main(argv: Iterable[str] | None = None) -> int:

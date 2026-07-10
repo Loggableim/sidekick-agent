@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
+- **The MCP stdio proxy now survives Windows narrow encodings while forwarding JSON-RPC and stderr noise** so unicode output no longer kills Firecrawl or other stdio-backed servers with a `charmap` encode failure.
 - **Firecrawl MCP now normalizes the legacy local `npx firecrawl-mcp` config to the hosted Firecrawl HTTP endpoint** so MCP discovery stops trying to launch a broken local server and uses the supported transport instead.
 - **Nova Game Mode title and fact helpers now route through Ollama Cloud DeepSeek V4 Flash instead of falling back to local models** so Game Mode keeps Nova useful without touching local GPU-backed endpoints.
 - **Game Mode toggles now synchronise the lockfile and watchdog state immediately** so enabling or disabling Game Mode no longer waits for the watchdog cron to catch up.
