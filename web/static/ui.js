@@ -2626,7 +2626,7 @@ function syncWorkflowChip(){
   const browserPermissionBtn=$('browserPermissionBtn');
   const browserOpen=document.body&&document.body.classList.contains('browser-drawer-open');
   const browserMode=String((browserPermissionBtn&&browserPermissionBtn.dataset&&browserPermissionBtn.dataset.state) || (browserPermissionBtn&&browserPermissionBtn.getAttribute('aria-pressed')==='true' ? 'control' : 'none')).trim().toLowerCase();
-  const browser=(browserOpen ? 'browser open' : 'browser closed')+' · '+(browserMode==='control' ? 'control' : (browserMode==='read' ? 'read' : 'locked'));
+  const browser=(browserOpen ? 'open' : 'closed')+' · '+(browserMode==='control' ? 'control' : (browserMode==='read' ? 'read' : 'locked'));
   const webBackend=_workflowWebBackendState();
   const review=_workflowReviewState();
   const research=_workflowResearchModeState();

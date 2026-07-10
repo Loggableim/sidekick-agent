@@ -4766,6 +4766,7 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
     titlebar_start = index_html.index('<div class="titlebar-actions" id="titlebarActions">')
@@ -4796,6 +4797,7 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     assert "btn.removeAttribute('data-i18n-title')" in panels_js
     assert "btn.removeAttribute('title')" in panels_js
     assert "btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off')" in panels_js
+    assert "browser browser" not in ui_js
     assert "game_mode_enabled" in panels_js
     assert ".game-mode-toggle-btn" in style_css
     assert ".game-mode-toggle-btn.active" in style_css

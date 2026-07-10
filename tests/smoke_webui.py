@@ -364,7 +364,7 @@ def run_smoke() -> Result:
                     )
                     topbar_clean = all(v is None for v in topbar_tooltips.values())
                     composer_clean = all(v is None for v in composer_tooltips.values())
-                    _mark(result, "desktop browser layout", ok and topbar_clean and composer_clean and "browser closed" in workflow_before.lower() and "browser open" in workflow_open.lower() and "browser closed" in workflow_restored.lower() and queue_empty_hidden and browser_empty_ok and busy_visible and busy_hidden and bool(busy_text.strip()) and "is-loading" in busy_loading, detail)
+                    _mark(result, "desktop browser layout", ok and topbar_clean and composer_clean and "browser browser" not in workflow_before.lower() and "browser browser" not in workflow_open.lower() and "browser browser" not in workflow_restored.lower() and "browser closed" in workflow_before.lower() and "browser open" in workflow_open.lower() and "browser closed" in workflow_restored.lower() and queue_empty_hidden and browser_empty_ok and busy_visible and busy_hidden and bool(busy_text.strip()) and "is-loading" in busy_loading, detail)
                     _mark(result, "theme toggle restores state", dark_after != dark_before and dark_restored == dark_before, f"before={dark_before} after={dark_after} restored={dark_restored}")
                 finally:
                     browser.close()
