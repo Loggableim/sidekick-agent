@@ -4793,7 +4793,8 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     assert "No Sidekick local GPU processes found." in panels_js
     assert "Top remaining GPU users:" in panels_js
     assert "Local GPU workload still detected:" in panels_js
-    assert "btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off')" in panels_js
+    assert "btn.removeAttribute('data-i18n-title')" in panels_js
+    assert "btn.removeAttribute('title')" in panels_js
     assert "btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off')" in panels_js
     assert "game_mode_enabled" in panels_js
     assert ".game-mode-toggle-btn" in style_css
