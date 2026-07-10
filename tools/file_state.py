@@ -24,7 +24,7 @@ Plus ``lock_path(path)`` — a context-manager returning a per-path lock to
 wrap the whole read→modify→write block. And ``writes_since(task_id,
 since_ts, paths)`` for the subagent-completion reminder in delegate_tool.
 
-All methods are no-ops when ``HERMES_DISABLE_FILE_STATE_GUARD=1`` is set.
+All methods are no-ops when ``SIDEKICK_DISABLE_FILE_STATE_GUARD=1`` is set.
 
 This module is intentionally separate from ``_read_tracker`` in
 ``file_tools.py`` — that tracker is per-task and handles consecutive-read

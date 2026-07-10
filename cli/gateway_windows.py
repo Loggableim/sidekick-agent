@@ -133,8 +133,8 @@ def _should_fall_back(code: int, detail: str) -> bool:
 def get_task_name() -> str:
     """Scheduled Task name, scoped per profile.
 
-    Default profile: ``Hermes_Gateway``
-    Named profile X: ``Hermes_Gateway_<X>``
+    Default profile: ``Sidekick_Gateway``
+    Named profile X: ``Sidekick_Gateway_<X>``
     """
     _assert_windows()
     # Local import to avoid circular module initialization during sidekick_cli boot.
@@ -155,8 +155,8 @@ def get_task_script_path() -> Path:
     """The generated ``gateway.cmd`` wrapper that the schtasks entry invokes.
 
     Lives under ``%LOCALAPPDATA%\\sidekick\\gateway-service\\<task_name>.cmd``
-    (or ``<HERMES_HOME>/gateway-service/<task_name>.cmd`` so per-profile
-    Hermes installs stay self-contained).
+    (or ``<SIDEKICK_HOME>/gateway-service/<task_name>.cmd`` so per-profile
+    Sidekick installs stay self-contained).
     """
     _assert_windows()
     from cli.config import get_sidekick_home
@@ -197,14 +197,14 @@ def get_startup_entry_path() -> Path:
 def _build_gateway_cmd_script(
     python_path: str,
     working_dir: str,
-    hermes_home: str,
+    sidekick_home: str,
     profile_arg: str,
 ) -> str:
     """Build the ``gateway.cmd`` wrapper content (CRLF-terminated).
 
     The script:
       - cd's into the project directory
-      - exports HERMES_HOME, PYTHONIOENCODING, VIRTUAL_ENV
+      - exports SIDEKICK_HOME, PYTHONIOENCODING, VIRTUAL_ENV
       - invokes ``python -m sidekick_cli.main [--profile X] gateway run --replace``
 
     We intentionally do NOT inline PATH overrides here — cmd.exe inherits
@@ -213,11 +213,11 @@ def _build_gateway_cmd_script(
     """
     lines = ["@echo off", f"rem {_TASK_DESCRIPTION}"]
     lines.append(f"cd /d {_quote_cmd_script_arg(working_dir)}")
-    lines.append(f'set "HERMES_HOME={hermes_home}"')
+    lines.append(f'set "SIDEKICK_HOME={sidekick_home}"')
     lines.append('set "PYTHONIOENCODING=utf-8"')
-    lines.append('set "HERMES_GATEWAY_DETACHED=1"')
+    lines.append('set "SIDEKICK_GATEWAY_DETACHED=1"')
     # VIRTUAL_ENV lets the gateway's own python detection find the venv
-    # if someone imports hermes_constants-based logic during startup.
+    # if someone imports sidekick_constants-based logic during startup.
     venv_dir = str(Path(python_path).resolve().parent.parent)
     lines.append(f'set "VIRTUAL_ENV={venv_dir}"')
 
@@ -254,10 +254,10 @@ def _write_task_script() -> Path:
 
     python_path = get_python_path()
     working_dir = str(PROJECT_ROOT)
-    hermes_home = str(Path(get_sidekick_home()).resolve())
-    profile_arg = _profile_arg(hermes_home)
+    sidekick_home = str(Path(get_sidekick_home()).resolve())
+    profile_arg = _profile_arg(sidekick_home)
 
-    content = _build_gateway_cmd_script(python_path, working_dir, hermes_home, profile_arg)
+    content = _build_gateway_cmd_script(python_path, working_dir, sidekick_home, profile_arg)
     script_path = get_task_script_path()
     script_path.write_text(content, encoding="utf-8", newline="")
     return script_path
@@ -360,8 +360,8 @@ def _build_gateway_argv() -> tuple[list[str], str, dict[str, str]]:
 
     python_exe = _derive_venv_pythonw(get_python_path())
     working_dir = str(PROJECT_ROOT)
-    hermes_home = str(Path(get_sidekick_home()).resolve())
-    profile_arg = _profile_arg(hermes_home)
+    sidekick_home = str(Path(get_sidekick_home()).resolve())
+    profile_arg = _profile_arg(sidekick_home)
 
     argv = [python_exe, "-m", "sidekick_cli.main"]
     if profile_arg:
@@ -369,9 +369,9 @@ def _build_gateway_argv() -> tuple[list[str], str, dict[str, str]]:
     argv.extend(["gateway", "run", "--replace"])
 
     env_overlay = {
-        "HERMES_HOME": hermes_home,
+        "SIDEKICK_HOME": sidekick_home,
         "PYTHONIOENCODING": "utf-8",
-        "HERMES_GATEWAY_DETACHED": "1",
+        "SIDEKICK_GATEWAY_DETACHED": "1",
         "VIRTUAL_ENV": str(Path(python_exe).resolve().parent.parent),
     }
     return argv, working_dir, env_overlay
@@ -529,11 +529,11 @@ def _report_gateway_start(via: str) -> None:
 def _print_next_steps() -> None:
     from cli.config import get_sidekick_home
 
-    hermes_home = Path(get_sidekick_home()).resolve()
+    sidekick_home = Path(get_sidekick_home()).resolve()
     print()
     print("Next steps:")
     print("  sidekick gateway status                      # Check status")
-    print(f"  type {hermes_home}\\logs\\gateway.log       # View logs")
+    print(f"  type {sidekick_home}\\logs\\gateway.log       # View logs")
 
 
 def uninstall() -> None:

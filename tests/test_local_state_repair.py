@@ -4,8 +4,8 @@ import sqlite3
 from pathlib import Path
 
 
-def _make_legacy_home(tmp_path):
-    src = tmp_path / "hermes-home"
+def _make_source_home(tmp_path):
+    src = tmp_path / "previous-home"
     src.mkdir()
     (src / "spaces" / "alpha").mkdir(parents=True)
     (src / "spaces" / "beta").mkdir(parents=True)
@@ -41,7 +41,7 @@ def _make_legacy_home(tmp_path):
 def test_local_state_repair_dry_run_counts_without_copying(tmp_path):
     from cli.local_state_repair import build_repair_plan
 
-    src = _make_legacy_home(tmp_path)
+    src = _make_source_home(tmp_path)
     dst = tmp_path / "sidekick-home"
 
     plan = build_repair_plan(src, dst)
@@ -60,7 +60,7 @@ def test_local_state_repair_dry_run_counts_without_copying(tmp_path):
 def test_local_state_repair_apply_backs_up_and_preserves_conflicts(tmp_path):
     from cli.local_state_repair import apply_repair_plan, build_repair_plan
 
-    src = _make_legacy_home(tmp_path)
+    src = _make_source_home(tmp_path)
     dst = tmp_path / "sidekick-home"
     (dst / "spaces" / "alpha").mkdir(parents=True)
     (dst / "spaces" / "alpha" / "keep.txt").write_text("existing", encoding="utf-8")
@@ -80,7 +80,7 @@ def test_local_state_repair_apply_backs_up_and_preserves_conflicts(tmp_path):
 def test_local_state_repair_rejects_known_bad_yaml_without_leaking_secret(tmp_path):
     from cli.local_state_repair import build_repair_plan
 
-    src = _make_legacy_home(tmp_path)
+    src = _make_source_home(tmp_path)
     (src / "config.yaml").write_text(
         "\n".join(
             [
@@ -103,7 +103,7 @@ def test_local_state_repair_rejects_known_bad_yaml_without_leaking_secret(tmp_pa
     assert any("config.yaml" in warning for warning in plan.warnings)
 
 
-def test_local_state_repair_defaults_target_to_current_sidekick_home(monkeypatch, tmp_path):
+def test_local_state_repair_requires_an_explicit_source(monkeypatch, tmp_path):
     from types import SimpleNamespace
 
     from cli import local_state_repair as repair_mod
@@ -123,8 +123,8 @@ def test_local_state_repair_defaults_target_to_current_sidekick_home(monkeypatch
     args = SimpleNamespace(source=None, target=None, apply=False, no_user_env=False)
     exit_code = repair_mod.run_local_state_repair(args)
 
-    assert exit_code == 0
-    assert captured["target"] == expected_target
+    assert exit_code == 2
+    assert captured == {}
 
 
 def test_local_state_repair_dry_run_missing_source_returns_nonzero(capsys):

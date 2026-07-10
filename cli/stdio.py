@@ -2,7 +2,7 @@
 
 On Windows, Python's ``sys.stdout``/``sys.stderr`` default to the console's
 active code page (often ``cp1252``, sometimes ``cp437``, occasionally ``cp932``
-on Japanese locales, etc.).  Hermes's banners, tool output feed, and slash
+on Japanese locales, etc.).  Sidekick's banners, tool output feed, and slash
 command listings all contain Unicode: box-drawing characters (``─┌┐└┘├┤``),
 mathematical and geometric symbols (``◆ ◇ ◎ ▣ ⚔ ⚖ →``), and user-supplied
 text in any language.  Printing those to a cp1252 console raises
@@ -47,7 +47,7 @@ def _flip_console_code_page_to_utf8() -> None:
     """Set the attached console's input and output code pages to UTF-8.
 
     Uses ``SetConsoleCP`` / ``SetConsoleOutputCP`` via ``ctypes``.  Failure
-    is silent — if there's no attached console (e.g. Hermes is running
+    is silent — if there's no attached console (e.g. Sidekick is running
     behind a redirected stdout, under a service, or inside a PTY-less CI
     runner) these calls simply return 0 and we move on.
 
@@ -90,7 +90,7 @@ def configure_windows_stdio() -> bool:
     Returns ``True`` if anything was actually changed, ``False`` on
     non-Windows or on a repeat call.
 
-    Set ``HERMES_DISABLE_WINDOWS_UTF8=1`` in the environment to opt out
+    Set ``SIDEKICK_DISABLE_WINDOWS_UTF8=1`` in the environment to opt out
     (for diagnosing encoding-related bugs by forcing the old cp1252 path).
 
     Also sets a sensible default ``EDITOR`` on Windows if none is already
@@ -149,7 +149,7 @@ def configure_windows_stdio() -> bool:
     # degraded output over a stack trace.
     _reconfigure_stream(sys.stdout)
     _reconfigure_stream(sys.stderr)
-    # stdin is re-configured for completeness; Hermes's interactive
+    # stdin is re-configured for completeness; Sidekick's interactive
     # input path uses prompt_toolkit which manages its own encoding,
     # but batch/pipe input benefits from UTF-8 decoding on stdin too.
     _reconfigure_stream(sys.stdin)
@@ -167,7 +167,7 @@ def _default_windows_editor() -> str:
        blocking editor (``subprocess.call(["notepad", file])`` blocks until
        the user closes the window).  This is the "always-works" default.
 
-    The prompt_toolkit buffer's ``open_in_editor`` and Hermes's
+    The prompt_toolkit buffer's ``open_in_editor`` and Sidekick's
     ``sidekick config edit`` both honour ``$EDITOR``.  Users who prefer a
     different editor can override:
 
@@ -176,8 +176,8 @@ def _default_windows_editor() -> str:
     - Notepad++: ``$env:EDITOR = "'C:\\Program Files\\Notepad++\\notepad++.exe' -multiInst -nosession"``
     - Neovim: ``$env:EDITOR = "nvim"``  (if installed)
 
-    Set this before launching Hermes (User env var in Windows Settings, or
-    export in a PowerShell profile) and Hermes picks it up automatically.
+    Set this before launching Sidekick (User env var in Windows Settings, or
+    export in a PowerShell profile) and Sidekick picks it up automatically.
     """
     import shutil
 
@@ -193,21 +193,21 @@ def _default_windows_editor() -> str:
 
 
 def _augment_path_with_known_tools() -> None:
-    """Prepend well-known Hermes-managed tool directories to os.environ['PATH'].
+    """Prepend well-known Sidekick-managed tool directories to os.environ['PATH'].
 
     Fixes the "User PATH was just updated but my process can't see it" gap on
     Windows.  When install.ps1 runs, it adds entries like
-    ``%LOCALAPPDATA%\\hermes\\git\\bin`` to the User PATH via
+    ``%LOCALAPPDATA%\\sidekick\\git\\bin`` to the User PATH via
     ``SetEnvironmentVariable(..., "User")``.  That write propagates to newly
     *spawned* processes only — already-running shells (including the one the
     user invokes ``sidekick`` from right after install) retain their old PATH.
 
-    Any subprocess Hermes spawns — bash, ``rg``, ``grep``, ``npm`` — inherits
+    Any subprocess Sidekick spawns — bash, ``rg``, ``grep``, ``npm`` — inherits
     that stale PATH and reports commands as missing even though they're on
     disk.  Symptom: ``search_files`` reports "rg/find not available" when
     the user clearly just installed ripgrep.
 
-    Patch-up strategy: add the known Hermes-managed tool directories to our
+    Patch-up strategy: add the known Sidekick-managed tool directories to our
     PATH at startup so subprocess calls resolve correctly.  No-op on POSIX
     and when the directories don't exist.  The User PATH broadcast still
     happens in the background for future shells; this just smooths over
@@ -225,13 +225,13 @@ def _augment_path_with_known_tools() -> None:
     # should match so this prefill fully mirrors what a fresh shell would
     # see on next launch.
     candidate_dirs = [
-        os.path.join(local_appdata, "hermes", "git", "cmd"),
-        os.path.join(local_appdata, "hermes", "git", "bin"),
-        os.path.join(local_appdata, "hermes", "git", "usr", "bin"),
-        # Hermes venv Scripts directory — host of the hermes.exe shim itself,
+        os.path.join(local_appdata, "sidekick", "git", "cmd"),
+        os.path.join(local_appdata, "sidekick", "git", "bin"),
+        os.path.join(local_appdata, "sidekick", "git", "usr", "bin"),
+        # Sidekick venv Scripts directory — host of the sidekick.exe shim itself,
         # also where any pip-installed console scripts land.  Usually already
-        # on PATH when the user invokes hermes, but harmless to include.
-        os.path.join(local_appdata, "hermes", "hermes-agent", "venv", "Scripts"),
+        # on PATH when the user invokes sidekick, but harmless to include.
+        os.path.join(local_appdata, "sidekick", "sidekick-agent", "venv", "Scripts"),
         # WinGet packages directory — where ``winget install`` drops CLI
         # shims by default (ripgrep lands here as rg.exe).  Covers the case
         # of a system-Git install + ripgrep-via-winget that isn't yet on

@@ -1,3 +1,0 @@
-[     275ms] [LOG] [spaces] loaded. Active: nova @ http://127.0.0.1:9119/static/spaces.js?v=v0.8.6-89-g181006d-dirty-6a4e4f24:1480
-[     283ms] [LOG] [Enhancements] Loaded: 2,3,6,8,12,13,14,15,16,17,18,19,20,21,22,23,27,28,29,30 @ http://127.0.0.1:9119/static/enhancements.js?v=v0.8.6-89-g181006d-dirty-6a4e4f24:1181
-[     297ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:9119/session/5d8a8db4cc02?cachebust=1783477607091:0

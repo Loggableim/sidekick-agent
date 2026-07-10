@@ -73,8 +73,8 @@ def _resolve_auth_path() -> Optional[str]:
     # Try common sidekick home locations
     candidates = [
         os.path.expanduser("~/.sidekick/auth.json"),
-        "/c/HermesPortable/home/auth.json",
-        "C:\\HermesPortable\\home\\auth.json",
+        "/c/SidekickPortable/home/auth.json",
+        "C:\\SidekickPortable\\home\\auth.json",
     ]
     for c in candidates:
         if os.path.exists(c):

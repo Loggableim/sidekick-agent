@@ -31,7 +31,7 @@ from web.api.providers import _write_env_file  # shared impl with _ENV_LOCK (#11
 from web.api.workspace import get_last_workspace, load_workspaces
 
 logger = logging.getLogger(__name__)
-_SKIP_ONBOARDING_ENVS = ("SIDEKICK_WEBUI_SKIP_ONBOARDING", "HERMES_WEBUI_SKIP_ONBOARDING")
+_SKIP_ONBOARDING_ENVS = ("SIDEKICK_WEBUI_SKIP_ONBOARDING",)
 
 
 def _skip_onboarding_env() -> str:
@@ -90,7 +90,7 @@ _SUPPORTED_PROVIDER_SETUPS = {
     },
     "lmstudio": {
         "label": "LM Studio",
-        # Canonical env var matches the agent CLI runtime (hermes_cli/auth.py:182,
+        # Canonical env var matches the agent CLI runtime (sidekick_cli/auth.py:182,
         # api_key_env_vars=("LM_API_KEY",)).  Onboarding writes this name so the
         # agent runtime actually picks up the key on the next chat — pre-#1499/#1500
         # the WebUI wrote LMSTUDIO_API_KEY which the agent runtime ignored, masked
@@ -211,11 +211,11 @@ _UNSUPPORTED_PROVIDER_NOTE = (
 )
 
 
-def _get_active_hermes_home() -> Path:
+def _get_active_profile_home() -> Path:
     try:
-        from web.api.profiles import get_active_hermes_home
+        from web.api.profiles import get_active_profile_home
 
-        return get_active_hermes_home()
+        return get_active_profile_home()
     except ImportError:
         return get_webui_home()
 
@@ -555,7 +555,7 @@ def _provider_api_key_present(
                 return True
 
     # For providers not in _SUPPORTED_PROVIDER_SETUPS (e.g. minimax-cn, deepseek,
-    # xai, etc.), ask the hermes_cli auth registry — it knows every provider's env
+    # xai, etc.), ask the sidekick_cli auth registry — it knows every provider's env
     # var names and can check os.environ for a valid key.
     # Exclude known OAuth/token-flow providers — those are handled separately by
     # _provider_oauth_authenticated() and should not be short-circuited here.
@@ -594,7 +594,7 @@ def _oauth_payload_has_token(payload: dict) -> bool:
 
 
 
-def _provider_oauth_authenticated(provider: str, hermes_home: "Path") -> bool:
+def _provider_oauth_authenticated(provider: str, sidekick_home: "Path") -> bool:
     """Return True if the provider has valid OAuth credentials.
 
     Reads the profile-scoped auth.json directly so onboarding respects the
@@ -614,7 +614,7 @@ def _provider_oauth_authenticated(provider: str, hermes_home: "Path") -> bool:
     try:
         import json as _j
 
-        auth_path = hermes_home / "auth.json"
+        auth_path = sidekick_home / "auth.json"
         if not auth_path.exists():
             return False
         store = _j.loads(auth_path.read_text(encoding="utf-8"))
@@ -649,7 +649,7 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
     provider = _extract_current_provider(cfg)
     model = _extract_current_model(cfg)
     base_url = _extract_current_base_url(cfg)
-    env_values = _load_env_file(_get_active_hermes_home() / ".env")
+    env_values = _load_env_file(_get_active_profile_home() / ".env")
 
     provider_configured = bool(provider and model)
     provider_ready = False
@@ -681,7 +681,7 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
                     provider_ready = _provider_api_key_present(provider, cfg, env_values)
                 if not provider_ready and meta.get("oauth_provider"):
                     provider_ready = _provider_oauth_authenticated(
-                        str(meta.get("oauth_provider")), _get_active_hermes_home()
+                        str(meta.get("oauth_provider")), _get_active_profile_home()
                     )
         else:
             # Unknown provider — may be an OAuth flow (openai-codex, copilot, etc.)
@@ -690,7 +690,7 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
             # third-party providers), then OAuth auth.json.
             provider_ready = (
                 _provider_api_key_present(provider, cfg, env_values)
-                or _provider_oauth_authenticated(provider, _get_active_hermes_home())
+                or _provider_oauth_authenticated(provider, _get_active_profile_home())
             )
 
     chat_ready = bool(_SIDEKICK_FOUND and imports_ok and provider_ready)
@@ -739,7 +739,7 @@ def _status_from_runtime(cfg: dict, imports_ok: bool) -> dict:
         "current_provider": provider or None,
         "current_model": model or None,
         "current_base_url": base_url or None,
-        "env_path": str(_get_active_hermes_home() / ".env"),
+        "env_path": str(_get_active_profile_home() / ".env"),
     }
 
 
@@ -785,10 +785,10 @@ def _build_setup_catalog(cfg: dict) -> dict:
 
     # Flag whether the currently-configured provider is OAuth-based (not in the
     # API-key flow).  The frontend uses this to show a confirmation card instead
-    # of a key input when the user has already authenticated via 'hermes auth'.
+    # of a key input when the user has already authenticated via 'sidekick auth'.
     current_is_oauth = (
         current_provider not in _SUPPORTED_PROVIDER_SETUPS and bool(current_provider)
-    ) or _provider_oauth_authenticated(current_provider, _get_active_hermes_home())
+    ) or _provider_oauth_authenticated(current_provider, _get_active_profile_home())
 
     return {
         "providers": providers,
@@ -879,7 +879,7 @@ def get_onboarding_status() -> dict:
     )
 
     # Persist the flag so it survives future transient import failures (e.g. after
-    # a git branch switch in the hermes-agent repo).  Without this, a CLI-configured
+    # a git branch switch in the sidekick-agent repo).  Without this, a CLI-configured
     # user who never ran the wizard has no onboarding_completed flag — any momentary
     # imports_ok=False during restart makes chat_ready=False, config_auto_completed=False,
     # and the wizard reappears with a broken dropdown that clobbers their config.
@@ -978,7 +978,7 @@ def apply_onboarding_setup(body: dict) -> dict:
         }
 
     cfg = _load_yaml_config(config_path)
-    env_path = _get_active_hermes_home() / ".env"
+    env_path = _get_active_profile_home() / ".env"
     env_values = _load_env_file(env_path)
 
     if not api_key and not _provider_api_key_present(provider, cfg, env_values):
@@ -988,7 +988,7 @@ def apply_onboarding_setup(body: dict) -> dict:
         # via Claude Code) are also allowed once their server-side OAuth/link
         # marker is present.
         oauth_ready = bool(provider_meta.get("oauth_provider")) and _provider_oauth_authenticated(
-            str(provider_meta.get("oauth_provider")), _get_active_hermes_home()
+            str(provider_meta.get("oauth_provider")), _get_active_profile_home()
         )
         if not provider_meta.get("key_optional") and not oauth_ready:
             raise ValueError(f"{provider_meta['env_var']} is required")
@@ -1013,11 +1013,11 @@ def apply_onboarding_setup(body: dict) -> dict:
     if api_key:
         _write_env_file(env_path, {provider_meta["env_var"]: api_key})
 
-    # Reload the hermes_cli provider/config cache so the next streaming call
+    # Reload the sidekick_cli provider/config cache so the next streaming call
     # picks up the new key without requiring a server restart.
     try:
         from web.api.profiles import _reload_dotenv
-        _reload_dotenv(_get_active_hermes_home())
+        _reload_dotenv(_get_active_profile_home())
     except Exception:
         logger.debug("Failed to reload dotenv")
 
@@ -1028,11 +1028,11 @@ def apply_onboarding_setup(body: dict) -> dict:
         os.environ[provider_meta["env_var"]] = api_key
 
     try:
-        # hermes_cli may cache config at import time; ask it to reload if possible.
+        # sidekick_cli may cache config at import time; ask it to reload if possible.
         from cli.config import reload as _cli_reload
         _cli_reload()
     except Exception:
-        logger.debug("Failed to reload hermes_cli config")
+        logger.debug("Failed to reload sidekick_cli config")
 
     reload_config()
     return get_onboarding_status()

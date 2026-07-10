@@ -40,7 +40,7 @@ if (_urlActiveSpace) {
   try { localStorage.setItem('sidekick-active-workspace', _urlActiveSpace); } catch (_) {}
 }
 let _spacesCache = [];
-window._hermesSpaceSwitchRev = Number(window._hermesSpaceSwitchRev || 0);
+window._sidekickSpaceSwitchRev = Number(window._sidekickSpaceSwitchRev || 0);
 let _spacesPanelRenderRev = 0;
 
 // â”€â”€ Workspace color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -142,12 +142,12 @@ function _publishSpaceGlobals() {
 }
 
 function _spaceSwitchRev() {
-  return Number(window._hermesSpaceSwitchRev || 0);
+  return Number(window._sidekickSpaceSwitchRev || 0);
 }
 
 function _beginSpaceSwitch() {
-  window._hermesSpaceSwitchRev = _spaceSwitchRev() + 1;
-  return window._hermesSpaceSwitchRev;
+  window._sidekickSpaceSwitchRev = _spaceSwitchRev() + 1;
+  return window._sidekickSpaceSwitchRev;
 }
 
 function _isCurrentSpaceSwitch(rev, slug) {
@@ -538,7 +538,7 @@ async function deleteSpace(slug) {
     await api('/api/space/delete', {
       method: 'POST',
       body: JSON.stringify({ slug }),
-      headers: {'X-Hermes-Workspace': DEFAULT_SPACE_SLUG},
+      headers: {'X-Sidekick-Workspace': DEFAULT_SPACE_SLUG},
     });
     _spacesCache = _spacesCache.filter(s => s.slug !== slug);
     if (wasActive) {

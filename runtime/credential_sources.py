@@ -4,7 +4,7 @@ Sidekick seeds its credential pool from many places:
 
     env:<VAR>     — os.environ / ~/.sidekick/.env
     claude_code   — ~/.claude/.credentials.json
-    hermes_pkce   — ~/.sidekick/.anthropic_oauth.json
+    sidekick_pkce   — ~/.sidekick/.anthropic_oauth.json
     device_code   — auth.json providers.<provider> (openai-codex, ...)
     qwen-cli      — ~/.qwen/oauth_creds.json
     gh_cli        — gh auth token
@@ -21,7 +21,7 @@ unify here is **removal**:
 Before this module, every source had an ad-hoc removal branch in
 ``auth_remove_command``, and several sources had no branch at all — so
 ``auth remove`` silently reverted on the next ``load_pool()`` call for
-openai-codex device_code, hermes_pkce, copilot gh_cli, and
+openai-codex device_code, sidekick_pkce, copilot gh_cli, and
 custom-config sources.
 
 Now every source registers a ``RemovalStep`` that does exactly three things
@@ -204,7 +204,7 @@ def _remove_claude_code(provider: str, removed) -> RemovalResult:
     ])
 
 
-def _remove_hermes_pkce(provider: str, removed) -> RemovalResult:
+def _remove_sidekick_pkce(provider: str, removed) -> RemovalResult:
     """~/.sidekick/.anthropic_oauth.json is ours — delete it outright."""
     from runtime._compat.shim_constants import get_sidekick_home
 
@@ -368,7 +368,7 @@ def _register_all_sources() -> None:
     ))
     register(RemovalStep(
         provider="anthropic", source_id="sidekick_pkce",
-        remove_fn=_remove_hermes_pkce,
+        remove_fn=_remove_sidekick_pkce,
         description="~/.sidekick/.anthropic_oauth.json",
     ))
     register(RemovalStep(

@@ -3,9 +3,18 @@ import struct
 import sys
 from pathlib import Path
 
+import os
+import pytest
 
-MODULE_PATH = Path("C:/HermesPortable/home/cockpit/nova_stt.py")
-DASHBOARD_PATH = Path("C:/HermesPortable/home/cockpit/dashboard_server.py")
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
+
+
+MODULE_PATH = Path("C:/SidekickPortable/home/cockpit/nova_stt.py")
+DASHBOARD_PATH = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py")
 COCKPIT_DIR = DASHBOARD_PATH.parent
 
 
@@ -165,14 +174,14 @@ def test_vosk_stream_exposes_reset_for_tts_echo_flush():
 
 
 def test_dashboard_stt_routes_partial_wake_word():
-    server = Path("C:/HermesPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
+    server = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
 
     assert "wake_event = session.accept_partial(event[\"text\"])" in server
     assert "\"type\": \"stt_wake\"" in server
 
 
 def test_dashboard_exposes_selectable_stt_providers():
-    server = Path("C:/HermesPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
+    server = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
 
     assert '"whisper-large-v3-turbo"' in server
     assert '"fish-audio"' in server
@@ -186,8 +195,8 @@ def test_dashboard_exposes_selectable_stt_providers():
 
 
 def test_dashboard_followup_has_hard_idle_timeout():
-    server = Path("C:/HermesPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
-    js = Path("C:/HermesPortable/home/cockpit/dashboard/app.js").read_text(encoding="utf-8")
+    server = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
+    js = Path("C:/SidekickPortable/home/cockpit/dashboard/app.js").read_text(encoding="utf-8")
 
     assert "capture_started_at = time.monotonic()" in server
     assert "capture_until = capture_started_at + seconds" in server
@@ -243,7 +252,7 @@ def test_dashboard_followup_transcribes_captured_audio_without_waiting_for_vosk_
 
 
 def test_dashboard_provider_status_is_cached_and_fast():
-    server = Path("C:/HermesPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
+    server = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py").read_text(encoding="utf-8")
 
     assert "_providers_cache" in server
     assert "(now - _providers_cache_ts) < 45" in server

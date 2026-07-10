@@ -10,7 +10,7 @@
 | Release | Fokus | Status |
 |---------|-------|--------|
 | v0.1.0 | Migration: alles in einem Repo | ✅ |
-| v0.2.0 | Rebrand: kein user-facing Hermes mehr | ✅ |
+| v0.2.0 | Rebrand: kein user-facing Sidekick mehr | ✅ |
 | v0.3.0 | Session Contract, Gateway, CI | ✅ |
 | v0.4.0 | Error Handling, Doctor, Troubleshooting | ✅ |
 | v0.5.0 | Streaming, Diagnostics, macOS CI | ✅ |
@@ -37,7 +37,7 @@ contract test are now in the repo.
 | Lücke | Impact |
 |-------|--------|
 | Windows CI aktiv | Windows smoke tests laufen jetzt in CI |
-| Kein automatisierter Hermes-Branding-Regressionstest | Könnte bei Änderungen again auftauchen |
+| Kein automatisierter Sidekick-Branding-Regressionstest | Könnte bei Änderungen again auftauchen |
 | Kein Browser-E2E-Test | Statische JS-Contracts sind jetzt abgedeckt |
 
 ### Produktqualität (🟢 Niedrig)
@@ -92,7 +92,7 @@ Inhalt:
 **Ziel:** Aktuelle Repo-Beschreibung statt alter Migrations-Doku.
 
 Inhalt:
-- Kurze Historie (was war cids-hermes-agent/webui)
+- Kurze Historie (was war cids-sidekick-agent/webui)
 - Aktuelle Struktur (Sidekick monorepo)
 - Wohin die Reise geht (keine weitere Migration nötig)
 
@@ -112,13 +112,13 @@ Schritte:
 **Aufwand:** 0.5h
 **Risiko:** 🟡 Mittel — Shell-Kompatibilität, unbekannte Windows-Fehler
 
-### E. Hermes-Branding-Regressionstest
+### E. Sidekick-Branding-Regressionstest
 
-**Ziel:** Automatisiertes Failen, wenn neuer user-facing Hermes-Text eingefügt wird.
+**Ziel:** Automatisiertes Failen, wenn neuer user-facing Sidekick-Text eingefügt wird.
 
 Schritte:
 - Grep-basierter Test in `tests/`: Durchsucht `cli/main.py`, `web/static/`, `README.md`
-  nach bestimmten Hermes-Mustern
+  nach bestimmten Sidekick-Mustern
 - Failt nur bei user-facing Texten (nicht bei Legacy-Env-Var-Referenzen)
 - `tests/smoke_all.py` integrieren
 
@@ -150,6 +150,6 @@ Schritte:
 2. `docs/config-reference.md` listet alle Config-Keys mit Defaults
 3. `docs/consolidation.md` ist auf aktuellen Stand (keine veraltete Migration)
 4. Windows CI läuft (mindestens CLI-Smoke-subset)
-5. Branding-Regressionstest failt bei neuen Hermes-Referenzen
+5. Branding-Regressionstest failt bei neuen Sidekick-Referenzen
 6. Smoke 21/21 (Branding + frontend contract)
-7. Kein LastBrowser, keine user-facing Hermes, keine neuen Features
+7. Kein LastBrowser, keine user-facing Sidekick, keine neuen Features

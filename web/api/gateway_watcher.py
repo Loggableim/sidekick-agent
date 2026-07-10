@@ -6,7 +6,7 @@ to gateway sessions (telegram, discord, slack, etc.). When changes are
 detected, it pushes notifications to all subscribed SSE clients.
 
 This enables real-time session list updates in the sidebar without
-requiring any changes to hermes-agent.
+requiring any changes to sidekick-agent.
 """
 import hashlib
 import logging
@@ -37,11 +37,11 @@ def _snapshot_hash(sessions: list) -> str:
 def _get_state_db_path() -> Path:
     """Resolve state.db path for the active profile."""
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
-    return hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    return sidekick_home / 'state.db'
 
 
 def _get_agent_sessions_from_db() -> list:

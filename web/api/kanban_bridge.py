@@ -1,7 +1,7 @@
-"""Hermes Kanban bridge for the WebUI.
+"""Sidekick Kanban bridge for the WebUI.
 
 This module exposes a full CRUD API under ``/api/kanban/*`` while keeping
-Nova's ``hermes_cli.kanban_db`` as the only source of truth.
+Nova's ``sidekick_cli.kanban_db`` as the only source of truth.
 
 Supported operations:
 - Task CRUD (create, read, patch, bulk update, archive)
@@ -32,11 +32,11 @@ _KANBAN_LOCAL = threading.local()
 def set_workspace_kanban(workspace_root: str | None) -> None:
     """Override the kanban DB home for the *current thread*.
 
-    When *workspace_root* is a path (e.g. ``~/.hermes/workspaces/projekt-x``),
-    ``_conn()`` will set ``HERMES_KANBAN_HOME`` to that path so the Hermes
+    When *workspace_root* is a path (e.g. ``~/.sidekick/workspaces/projekt-x``),
+    ``_conn()`` will set ``SIDEKICK_KANBAN_HOME`` to that path so the Sidekick
     Agent kanban library creates/opens ``kanban.db`` inside it.
 
-    Pass ``None`` to use the default global HERMES_KANBAN_HOME.
+    Pass ``None`` to use the default global SIDEKICK_KANBAN_HOME.
     """
     _KANBAN_LOCAL.home = workspace_root
 
@@ -122,10 +122,10 @@ def _conn(board=None):
     _ws_home = _get_ws_kanban_home()
     if _ws_home:
         old_home = os.environ.get("SIDEKICK_KANBAN_HOME")
-        old_hermes_home = os.environ.get("HERMES_KANBAN_HOME")
+        old_sidekick_home = os.environ.get("SIDEKICK_KANBAN_HOME")
         try:
             os.environ["SIDEKICK_KANBAN_HOME"] = _ws_home
-            os.environ["HERMES_KANBAN_HOME"] = _ws_home
+            os.environ["SIDEKICK_KANBAN_HOME"] = _ws_home
             kb = _kb()
             kb.init_db(board=board)
             return kb.connect(board=board)
@@ -134,10 +134,10 @@ def _conn(board=None):
                 os.environ["SIDEKICK_KANBAN_HOME"] = old_home
             else:
                 os.environ.pop("SIDEKICK_KANBAN_HOME", None)
-            if old_hermes_home:
-                os.environ["HERMES_KANBAN_HOME"] = old_hermes_home
+            if old_sidekick_home:
+                os.environ["SIDEKICK_KANBAN_HOME"] = old_sidekick_home
             else:
-                os.environ.pop("HERMES_KANBAN_HOME", None)
+                os.environ.pop("SIDEKICK_KANBAN_HOME", None)
     kb = _kb()
     kb.init_db(board=board)
     return kb.connect(board=board)
@@ -1191,7 +1191,7 @@ def handle_kanban_get(handler, parsed) -> bool | None:
             return j(handler, payload) or True
         return False
     except ImportError as exc:
-        # hermes_cli not installed (webui-only deploy). Return a clean 503
+        # sidekick_cli not installed (webui-only deploy). Return a clean 503
         # "kanban unavailable" rather than a 500 so the frontend's existing
         # try/catch surfaces a useful toast.
         return bad(handler, f"kanban unavailable: {exc}", status=503)

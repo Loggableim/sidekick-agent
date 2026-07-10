@@ -226,7 +226,8 @@ def _install_fakes(web_server, home: Path):
     import cli.model_switch as model_switch
     import runtime._compat.shim_state as shim_state
     import web.api.config as config_api
-    from web.api import space_engine
+    from web.api import routes, space_engine
+    from web.api.helpers import j
 
     web_server.load_workspaces = lambda: [{"path": r"C:\\sidekick\\home\\workspace", "name": "Home"}]
     web_server.get_last_workspace = lambda: r"C:\\sidekick\\home\\workspace"
@@ -235,26 +236,31 @@ def _install_fakes(web_server, home: Path):
         _FakeSpace("nova", "Nova", r"C:\\sidekick\\home\\spaces\\nova"),
         _FakeSpace("research", "Research", r"C:\\sidekick\\home\\spaces\\research"),
     ]
-    web_server._is_old_frontend = lambda: False
-
     shim_state.SessionDB = _FakeSessionDB
 
-    web_server._proxy_sync = lambda method, path, headers, body: (
-        200,
-        b"{\"ok\":true}",
-        {
-            "Content-Type": "application/json; charset=utf-8",
-            "Set-Cookie": "profile=default; Path=/; SameSite=Lax",
-            "Content-Disposition": 'attachment; filename="session.json"',
-            "Cache-Control": "no-store",
-            "X-Accel-Buffering": "no",
-            "Connection": "close",
-        },
-        "application/json; charset=utf-8",
-    )
-    web_server._proxy_stream = lambda method, path, headers, body: iter(
-        [b"event: ping\n", b"data: {}\n", b"\n"]
-    )
+    original_handle_get = routes.handle_get
+
+    def bridge_smoke_get(handler, parsed):
+        if parsed.path == "/api/chat/stream":
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            handler.wfile.write(b"event: ping\ndata: {}\n\n")
+            return True
+        if parsed.path == "/api/not-native-route":
+            return j(
+                handler,
+                {"ok": True},
+                extra_headers={
+                    "Set-Cookie": "profile=default; Path=/; SameSite=Lax",
+                    "Content-Disposition": 'attachment; filename="session.json"',
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        return original_handle_get(handler, parsed)
+
+    routes.handle_get = bridge_smoke_get
 
     model_switch.list_authenticated_providers = lambda **kwargs: [
         {
@@ -296,7 +302,7 @@ def run_smoke() -> Result:
 
         _install_fakes(web_server, home)
         client = TestClient(web_server.app)
-        headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+        headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
 
         def get(path: str):
             return client.get(path, headers=headers)
@@ -440,7 +446,7 @@ def run_smoke() -> Result:
 
         resp = client.get("/api/not-native-route", headers=headers)
         payload = resp.json()
-        _mark(result, "proxy header passthrough", resp.status_code == 200 and payload.get("ok") is True and resp.headers.get("set-cookie"), f"status={resp.status_code}")
+        _mark(result, "bridge header passthrough", resp.status_code == 200 and payload.get("ok") is True and resp.headers.get("set-cookie"), f"status={resp.status_code}")
 
     return result
 

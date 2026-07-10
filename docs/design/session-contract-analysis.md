@@ -59,10 +59,10 @@ The remaining difference is the object form, not the storage root.
 ## Historical plan
 
 1. `web/api/config.py` STATE_DIR on canonical path
-   (`SIDEKICK_WEBUI_STATE_DIR > HERMES_WEBUI_STATE_DIR > ~/.sidekick/state/webui/`)
-2. Legacy migration: one-time copy `~/.hermes/webui/sessions/*` -> new path
+   (`SIDEKICK_WEBUI_STATE_DIR > SIDEKICK_WEBUI_STATE_DIR > ~/.sidekick/state/webui/`)
+2. Legacy migration: one-time copy `~/.sidekick/webui/sessions/*` -> new path
 3. `web/api/session_ops.py` thin wrappers over `shared.sessions`
-4. Env-var chain: `SIDEKICK_WEBUI_STATE_DIR` wins over `HERMES_WEBUI_STATE_DIR`
+4. Env-var chain: `SIDEKICK_WEBUI_STATE_DIR` wins over `SIDEKICK_WEBUI_STATE_DIR`
 5. `shared.runtime.web_state_dir()` and `web.api.config.STATE_DIR` on same logic
 
 All of the above are now implemented in the current tree.

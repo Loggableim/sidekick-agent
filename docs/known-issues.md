@@ -1,105 +1,22 @@
-# Sidekick — Known Issues (v0.5.0)
+# Sidekick Known Issues
 
-**Stand:** Tag `v0.5.0` (Commit `129322f`)
+**Status:** development branch for v0.8.81.
 
----
+## Session model convergence
 
-## Gateway import warnings (non-blocking)
+`shared.sessions.Session` is the lightweight cross-surface session model.
+`web.api.models.Session` adds WebUI runtime state. Both use the same storage
+root and preserve unknown WebUI metadata during round-trips, but their object
+shapes are not yet unified.
 
-```
-Warning: config validation failed: cannot import name 'print_config_warnings'
-Warning: deprecation check failed: cannot import name 'warn_deprecated_cwd_env_vars'
-```
+**Impact:** low for normal session use; changes to session persistence must
+exercise both the CLI and WebUI contracts.
 
-**Status:** ✅ Kosmetisch, keine funktionalen Auswirkungen
-**Ursache:** `sidekick_cli.config` routet via Shim zu `runtime.config`, dort
-die Startup-Funktionen als No-Ops implementiert.
-**Details:** `runtime/config.py` enthält Stub-Implementierungen. Die echte
-Config-Validierung läuft über `sidekick doctor`.
-**Resolved in:** v0.3.0 (Stubs)
+## Web route modernization
 
----
+FastAPI is the only HTTP server. A portion of the WebUI API still uses a
+handler-style route module through an in-process adapter while endpoints are
+converted to native FastAPI handlers.
 
-## Session-Layer: zwei Datenmodelle
-
-| Modell | Felder | Persistenz |
-|--------|--------|------------|
-| `shared.sessions.Session` | 6 (Basisfelder) | `~/.sidekick/state/webui/sessions/` |
-| `web.api.models.Session` | 30+ (agent state, streaming, ...) | `~/.sidekick/state/webui/sessions/` |
-
-**Status:** ⚠️ Gleicher Storage-Pfad, unterschiedliche Objektmodelle, aber
-`shared.sessions` erhält WebUI-spezifische JSON-Felder jetzt beim Laden,
-Speichern sowie in den Listen-/Status-Snapshots.
-**Konsequenz:** Sessions aus der CLI sind im WebUI sichtbar, und WebUI-
-spezifische Felder bleiben beim Roundtrip über `shared.sessions` erhalten.
-**Workaround:** Keiner nötig — beide lesen/schreiben dasselbe JSON-Verzeichnis.
-**Geplant für:** ein späteres Modell-Fusion- oder Adapter-Refactor, falls wir
-die Klassen irgendwann vollständig vereinheitlichen wollen.
-
----
-
-## CLI-Help-Text: `HERMES_*` Env-Var-Referenzen
-
-In `sidekick --help` erscheinen noch `HERMES_INFERENCE_MODEL`,
-`HERMES_INFERENCE_PROVIDER` und `HERMES_ACCEPT_HOOKS` als Argument-
-Dokumentation.
-
-**Status:** ✅ Bewusst erhalten (Legacy-Kompatibilität für Bestandssetups)
-**Details:** Die Env-Vars funktionieren weiterhin. Neue Nutzer sehen
-`SIDEKICK_*` als kanonische Namen.
-
----
-
-## WebUI localStorage: `hermes-*` Legacy-Keys
-
-Einige CSS-Klassen und localStorage-Keys verwenden noch `hermes-`-Präfix.
-
-**Status:** ✅ Kosmetisch, Seiteneffektfrei. Migrations-Shim in `boot.js`
-kopiert alte Keys beim ersten Laden.
-**Details:** In v0.2.0 wurden alle produktiven Storage-Keys von `hermes-*`
-auf `sidekick-*` migriert. Die alten Keys bleiben für Browser-Kompatibilität
-erhalten.
-**Resolved in:** v0.2.0
-
----
-
-## Windows CI
-
-**Status:** ✅ Aktiv
-**Details:** CI läuft auf Ubuntu (full) sowie auf macOS und Windows (smoke).
-Der Windows-Runner prüft die gleichen user-facing Smoke-Gates wie macOS, ohne
-den Linux-Fullsuite-Run zu duplizieren.
-**Resolved in:** v0.6.0
-
----
-
-## `hermes` CLI-Alias
-
-```bash
-hermes --help   # → sidekick
-```
-
-**Status:** ✅ Dokumentierter Legacy-Alias in `pyproject.toml`.
-Beide Binarys zeigen auf denselben Entrypoint.
-
----
-
-## Gateway await-Bug (gefixt)
-
-**Status:** ✅ Kein bekanntes Problem
-**Details:** Ein pre-existing `await` in einer sync-Funktion wurde in v0.1.0
-behoben (`asyncio.run_coroutine_threadsafe`). Gateway importiert ohne
-Warnings.
-
----
-
-## Zusammenfassung
-
-| Issue | Status | Seit | Blocking |
-|-------|--------|------|----------|
-| Gateway Warnings | ✅ Non-blocking | v0.3.0 | ❌ |
-| Session-Layer Divergenz | ⚠️ Reduziert | — | ❌ |
-| CLI HERMES_* Referenzen | ✅ Legacy compat | — | ❌ |
-| WebUI hermes-* Keys | ✅ Residual | v0.2.0 | ❌ |
-| Windows CI | ✅ Aktiv | v0.6.0 | ❌ |
-| hermes-Alias | ✅ Dokumentiert | v0.1.0 | ❌ |
+**Impact:** WebUI endpoint work must be tested against the FastAPI server and
+the in-process route bridge.

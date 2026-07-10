@@ -5,13 +5,22 @@ import inspect
 import json
 import sys
 from pathlib import Path
+
+import os
+import pytest
+
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
 import asyncio
 
 
 NOVA_DIR = Path(r"C:\sidekick\home\spaces\nova")
 HUB_PATH = NOVA_DIR / "hub.py"
 HUB_SPEAK_PATH = NOVA_DIR / "hub_speak.py"
-DASHBOARD_PATH = Path(r"C:\HermesPortable\home\cockpit\dashboard_server.py")
+DASHBOARD_PATH = Path(r"C:\SidekickPortable\home\cockpit\dashboard_server.py")
 COCKPIT_DIR = DASHBOARD_PATH.parent
 VOICE_ID = "d130be0856b3419a8d73b0a94db4a1dc"
 
@@ -105,7 +114,7 @@ def test_nova_hub_audio_cache_is_dashboard_static_dir():
     config = hub.load_config()
     dashboard_targets = [target for target in config["targets"] if target.get("type") == "dashboard"]
 
-    assert config["audio_cache"] == r"C:\HermesPortable\home\cockpit\tts_audio"
+    assert config["audio_cache"] == r"C:\SidekickPortable\home\cockpit\tts_audio"
     assert dashboard_targets
     assert dashboard_targets[0]["url"] == "http://192.168.1.110:8765/api/nova/say"
 

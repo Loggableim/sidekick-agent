@@ -15,8 +15,8 @@ def check_dashboard_frontend_contract() -> None:
     assert index_html.index("static/api-auth.js") < index_html.index("static/boot.js")
 
     boot_js = BOOT_JS.read_text(encoding="utf-8")
-    assert "if(k && k.startsWith('hermes-'))" in boot_js
-    assert "localStorage.setItem(keys[i].replace('hermes-','sidekick-'), v);" in boot_js
+    assert "if(k && k.startsWith('sidekick-'))" in boot_js
+    assert "localStorage.setItem(keys[i].replace('sidekick-','sidekick-'), v);" in boot_js
     assert "window.toggleFileTreePanel=function(force){return toggleWorkspacePanel(force);};" in boot_js
 
     onboarding_js = ONBOARDING_JS.read_text(encoding="utf-8")

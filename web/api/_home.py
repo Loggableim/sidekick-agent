@@ -1,8 +1,6 @@
 """Shared helper for resolving the WebUI home directory.
 
-The WebUI uses repo-local ``home/`` as the development fallback when no
-explicit home env vars are set. Production installs still honor the
-explicit ``SIDEKICK_HOME`` / ``HERMES_HOME`` environment variables.
+The WebUI uses the Sidekick user home when no explicit home is configured.
 """
 
 from __future__ import annotations
@@ -16,13 +14,12 @@ def get_webui_home() -> Path:
 
     Precedence:
     1. ``SIDEKICK_HOME``
-    2. ``HERMES_HOME``
-    3. repo-local ``home/`` directory
+    2. ``~/.sidekick``
     """
-    raw_home = (os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME") or "").strip()
+    raw_home = os.getenv("SIDEKICK_HOME", "").strip()
     if raw_home:
         return Path(raw_home).expanduser().resolve()
-    return Path(__file__).resolve().parents[2] / "home"
+    return (Path.home() / ".sidekick").resolve()
 
 
 def get_active_webui_home() -> Path:
@@ -33,11 +30,11 @@ def get_active_webui_home() -> Path:
     existing environment-based fallback for startup code and standalone use.
     """
     try:
-        from web.api.profiles import get_active_hermes_home, get_active_profile_name
+        from web.api.profiles import get_active_profile_home, get_active_profile_name
 
         active_profile = str(get_active_profile_name() or "").strip()
         if active_profile and active_profile != "default":
-            return Path(get_active_hermes_home()).expanduser().resolve()
+            return Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
         pass
     return get_webui_home()

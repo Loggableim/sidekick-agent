@@ -9,7 +9,7 @@ Each Space (= workspace) has its own:
 
 Directory layout::
 
-    HERMES_HOME/workspaces/
+    SIDEKICK_HOME/workspaces/
       nova/                     → fresh-install default Sidekick space
         workspace.yaml
         sessions/
@@ -38,7 +38,7 @@ WORKSPACES_ROOT: Path = _DEFAULT_WORKSPACES_ROOT
 
 
 def _workspaces_root() -> Path:
-    configured = os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR") or os.getenv("HERMES_WEBUI_WORKSPACES_DIR", "")
+    configured = os.getenv("SIDEKICK_WEBUI_WORKSPACES_DIR", "")
     if configured:
         return Path(configured).expanduser().resolve()
     if WORKSPACES_ROOT != _DEFAULT_WORKSPACES_ROOT:
@@ -312,8 +312,8 @@ def resolve_active_workspace() -> Workspace:
 
     Fallback chain:
       1. ``set_active_workspace()`` value
-      2. ``HERMES_WEBUI_ACTIVE_WORKSPACE`` env var
-      3. ``nova`` (or ``HERMES_WEBUI_DEFAULT_SPACE``)
+      2. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` env var
+      3. ``nova`` (or ``SIDEKICK_WEBUI_DEFAULT_SPACE``)
 
     Never returns ``None``.
     """

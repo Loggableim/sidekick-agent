@@ -717,7 +717,7 @@ const TerminalStream = {
         };
         // Also dispatch a custom event so tool cards can react
         try {
-          window.dispatchEvent(new CustomEvent('hermes:terminal-error', {
+          window.dispatchEvent(new CustomEvent('sidekick:terminal-error', {
             detail: { code: code, text: exitText || _terminalBufferText() },
           }));
         } catch (_) {}

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 _agents_db_path: Path = None
 _agents_data_dir: Path = None
 _WEBUI_SESSION_DIR: Path = None
-_HERMES_SESSION_DIR: Path = None
+_SIDEKICK_SESSION_DIR: Path = None
 
 # ── DB Lock ─────────────────────────────────────────────────────────────────
 _db_lock = threading.Lock()
@@ -59,7 +59,7 @@ AGENT_TEMPLATES = {
         ),
         "color": "#3B82F6",
         "tools": ["terminal", "file", "web", "delegation", "kanban"],
-        "workdir_suggestion": "C:\\Users\\logga\\hermes-webui",
+        "workdir_suggestion": "C:\\Users\\logga\\sidekick-webui",
     },
     "project-manager": {
         "name": "Projektmanager",
@@ -224,15 +224,15 @@ AGENT_TEMPLATES = {
 
 # ── Datenbank-Initialisierung ───────────────────────────────────────────────
 
-def init_agents_db(data_dir: Path, webui_session_dir: Path, hermes_session_dir: Optional[Path] = None):
+def init_agents_db(data_dir: Path, webui_session_dir: Path, sidekick_session_dir: Optional[Path] = None):
     """Initialisiere die Agents-Datenbank. Muss beim Serverstart aufgerufen werden."""
-    global _agents_db_path, _agents_data_dir, _WEBUI_SESSION_DIR, _HERMES_SESSION_DIR
+    global _agents_db_path, _agents_data_dir, _WEBUI_SESSION_DIR, _SIDEKICK_SESSION_DIR
 
     _agents_data_dir = data_dir / "agents"
     _agents_data_dir.mkdir(parents=True, exist_ok=True)
     _agents_db_path = data_dir / "agents.db"
     _WEBUI_SESSION_DIR = webui_session_dir
-    _HERMES_SESSION_DIR = hermes_session_dir
+    _SIDEKICK_SESSION_DIR = sidekick_session_dir
 
     with _db_lock, closing(_get_conn()) as conn:
         _ensure_schema(conn)

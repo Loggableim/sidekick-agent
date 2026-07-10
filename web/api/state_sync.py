@@ -2,7 +2,7 @@
 Sidekick -- Optional state.db sync bridge.
 
 Mirrors WebUI session metadata (token usage, title, model) into the
-hermes-agent state.db so that /insights, session lists, and cost
+sidekick-agent state.db so that /insights, session lists, and cost
 tracking include WebUI activity.
 
 This is opt-in via the 'sync_to_insights' setting (default: off).
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def _get_state_db():
     """Get a SessionDB instance for the active profile's state.db.
-    Returns None if hermes_state is not importable or DB is unavailable.
+    Returns None if sidekick_state is not importable or DB is unavailable.
     Each caller is responsible for calling db.close() when done.
     """
     try:
@@ -33,13 +33,13 @@ def _get_state_db():
         return None
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        logger.debug("Failed to resolve hermes home, using default")
-        hermes_home = get_webui_home()
+        logger.debug("Failed to resolve sidekick home, using default")
+        sidekick_home = get_webui_home()
 
-    db_path = hermes_home / 'state.db'
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return None
 

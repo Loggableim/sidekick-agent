@@ -44,7 +44,7 @@ TLS_ENABLED = TLS_CERT is not None and TLS_KEY is not None
 
 # ── State directory (env-overridable, never inside repo) ──────────────────────
 def _resolve_state_dir_from_env() -> Path:
-    configured_home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
+    configured_home = os.getenv("SIDEKICK_HOME")
     default_state = (
         Path(configured_home).expanduser() / "state" / "webui"
         if configured_home
@@ -130,17 +130,17 @@ def _discover_agent_dir() -> Path:
     Locate the agent checkout.
 
     In the monorepo, ``run_agent.py`` lives at the repo root.  The old
-    split-repo search path (scanning sibling ``hermes-agent`` directories)
+    split-repo search path (scanning sibling ``sidekick-agent`` directories)
     is preserved as a legacy fallback for transitional setups.
 
     Priority:
-      1. SIDEKICK_WEBUI_AGENT_DIR / HERMES_WEBUI_AGENT_DIR env var
+      1. SIDEKICK_WEBUI_AGENT_DIR env var
       2. This repo root (monorepo — run_agent.py is in-repo)
       3. Sidekick home / sidekick-agent   -- e.g. ~/.sidekick/sidekick-agent
-      4. Hermes home (legacy fallback)     -- e.g. ~/.hermes/hermes-agent
-      5. Sibling of this repo              -- ../hermes-agent (legacy)
+      4. Sidekick home (legacy fallback)     -- e.g. ~/.sidekick/sidekick-agent
+      5. Sibling of this repo              -- ../sidekick-agent (legacy)
       6. HOME / sidekick-agent             -- ~/sidekick-agent
-      7. HOME / hermes-agent               -- ~/hermes-agent (legacy)
+      7. HOME / sidekick-agent               -- ~/sidekick-agent (legacy)
     """
     candidates = []
 
@@ -155,29 +155,29 @@ def _discover_agent_dir() -> Path:
     # 3. Sidekick home directory (Sidekick install default)
     candidates.append(HOME / ".sidekick" / "sidekick-agent")
 
-    # 4. Hermes home (legacy fallback)
-    candidates.append(HOME / ".hermes" / "hermes-agent")
+    # 4. Sidekick home (legacy fallback)
+    candidates.append(HOME / ".sidekick" / "sidekick-agent")
 
     # 5. ~/sidekick-agent (direct checkout)
     candidates.append(HOME / "sidekick-agent")
 
-    # 6. ~/hermes-agent (legacy fallback)
-    candidates.append(HOME / "hermes-agent")
+    # 6. ~/sidekick-agent (legacy fallback)
+    candidates.append(HOME / "sidekick-agent")
 
     # 7. XDG_DATA_HOME / sidekick-agent
     xdg_data = Path(os.getenv("XDG_DATA_HOME", str(HOME / ".local" / "share")))
     candidates.append(xdg_data.expanduser() / "sidekick-agent")
-    candidates.append(xdg_data.expanduser() / "hermes-agent")  # legacy fallback
+    candidates.append(xdg_data.expanduser() / "sidekick-agent")  # legacy fallback
 
     # 8. Windows: LOCALAPPDATA\\sidekick\\sidekick-agent (Sidekick installer default)
     local_appdata = os.getenv("LOCALAPPDATA")
     if local_appdata:
         candidates.append(Path(local_appdata) / "sidekick" / "sidekick-agent")
-        candidates.append(Path(local_appdata) / "hermes" / "hermes-agent")
+        candidates.append(Path(local_appdata) / "sidekick" / "sidekick-agent")
 
-    # 9. System-wide install paths (e.g. /opt/hermes-agent, /usr/local/hermes-agent)
+    # 9. System-wide install paths (e.g. /opt/sidekick-agent, /usr/local/sidekick-agent)
     for sys_prefix in ("/opt", "/usr/local", "/usr/local/share"):
-        candidates.append(Path(sys_prefix) / "hermes-agent")
+        candidates.append(Path(sys_prefix) / "sidekick-agent")
 
     for path in candidates:
         if path.exists() and (path / "run_agent.py").exists():
@@ -191,12 +191,12 @@ def _discover_python(agent_dir: Path) -> str:
     Locate a Python executable that has the Nova agent dependencies installed.
 
     Priority:
-      1. SIDEKICK_WEBUI_PYTHON / legacy HERMES_WEBUI_PYTHON env var
+      1. SIDEKICK_WEBUI_PYTHON env var
       2. Agent venv at <agent_dir>/venv/bin/python
       3. Local .venv inside this repo
       4. System python3
     """
-    for env_name in ("SIDEKICK_WEBUI_PYTHON", "HERMES_WEBUI_PYTHON"):
+    for env_name in ("SIDEKICK_WEBUI_PYTHON",):
         value = os.getenv(env_name)
         if value:
             return value
@@ -239,19 +239,19 @@ def _discover_python(agent_dir: Path) -> str:
 _AGENT_DIR = _discover_agent_dir()
 PYTHON_EXE = _discover_python(_AGENT_DIR)
 
-# ── Inject agent dir into sys.path so Hermes modules are importable ──────────
+# ── Inject agent dir into sys.path so Sidekick modules are importable ──────────
 
 # When users (or CI builds) run `pip install --target .` or
-# `pip install -t .` inside the hermes-agent checkout, third-party
+# `pip install -t .` inside the sidekick-agent checkout, third-party
 # package directories (openai/, pydantic/, requests/, etc.) end up
-# alongside real Hermes source files.  Putting _AGENT_DIR at the
+# alongside real Sidekick source files.  Putting _AGENT_DIR at the
 # FRONT of sys.path means Python resolves `import pydantic` from that
 # local directory — which breaks whenever the host platform differs
 # from the container (e.g. macOS .so files inside a Linux image).
 #
 # Fix: insert _AGENT_DIR at the END of sys.path.  Python searches
 # entries in order, so site-packages resolves pip packages correctly,
-# and Hermes-specific modules (run_agent, hermes/, etc.) still
+# and Sidekick-specific modules (run_agent, sidekick/, etc.) still
 # resolve because they do not exist in site-packages.
 
 if _AGENT_DIR is not None:
@@ -312,9 +312,9 @@ def _get_config_path() -> Path:
     if env_override:
         return Path(env_override).expanduser()
     try:
-        from web.api.profiles import get_active_hermes_home
+        from web.api.profiles import get_active_profile_home
 
-        return get_active_hermes_home() / "config.yaml"
+        return get_active_profile_home() / "config.yaml"
     except ImportError:
         return get_webui_home() / "config.yaml"
 
@@ -428,7 +428,7 @@ def _save_yaml_config_file(config_path: Path, config_data: dict) -> None:
     try:
         import yaml as _yaml
     except ImportError as exc:
-        raise RuntimeError("PyYAML is required to write Hermes config.yaml") from exc
+        raise RuntimeError("PyYAML is required to write Sidekick config.yaml") from exc
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -492,7 +492,7 @@ def resolve_default_workspace(raw: str | Path | None = None) -> Path:
             return candidate
     raise RuntimeError(
         "Could not create or access any usable workspace directory. "
-        "Set HERMES_WEBUI_DEFAULT_WORKSPACE to a writable path."
+        "Set SIDEKICK_WEBUI_DEFAULT_WORKSPACE to a writable path."
     )
 
 
@@ -500,7 +500,7 @@ def resolve_default_workspace(raw: str | Path | None = None) -> Path:
 def _discover_default_workspace() -> Path:
     """
     Resolve the default workspace in order:
-      1. HERMES_WEBUI_DEFAULT_WORKSPACE env var
+      1. SIDEKICK_WEBUI_DEFAULT_WORKSPACE env var
       2. ~/workspace if it already exists
       3. ~/work if it already exists
       4. ~/workspace (create if needed)
@@ -540,18 +540,18 @@ def print_startup_config() -> None:
             "      The server will start but agent features will not work.\n"
             "\n"
             "      To fix, set one of:\n"
-            "        export HERMES_WEBUI_AGENT_DIR=/path/to/hermes-agent\n"
-            "        export HERMES_HOME=/path/to/.hermes\n"
+            "        export SIDEKICK_WEBUI_AGENT_DIR=/path/to/sidekick-agent\n"
+            "        export SIDEKICK_HOME=/path/to/.sidekick\n"
             "\n"
-            "      Or clone hermes-agent as a sibling of this repo:\n"
-            "        git clone <hermes-agent-repo> ../hermes-agent\n",
+            "      Or clone sidekick-agent as a sibling of this repo:\n"
+            "        git clone <sidekick-agent-repo> ../sidekick-agent\n",
             flush=True,
         )
 
 
 def verify_sidekick_imports() -> tuple:
     """
-    Attempt to import the key Hermes modules.
+    Attempt to import the key Sidekick modules.
     Returns (ok: bool, missing: list[str], errors: dict[str, str]).
     """
     required = ["run_agent", "sidekick_app"]
@@ -730,7 +730,7 @@ _FALLBACK_MODELS = [
     #   ❌ qwen/qwen3-coder:free → 429
     #   ❌ qwen/qwen3-next:free → 429
     #   ❌ meta-llama/llama-3.3/3.2 → 429
-    #   ❌ nousresearch/hermes-3 → 429
+    #   ❌ nousresearch/sidekick-3 → 429
     #   ❌ dolphin-venice → 429
     #   ❌ nvidia/nemotron-3-nano-* → empty content
     #   ❌ nvidia/nemotron-nano-9b-v2:free → empty content
@@ -750,7 +750,7 @@ _FALLBACK_MODELS = [
 ]
 
 
-# Provider display names for known Hermes provider IDs
+# Provider display names for known Sidekick provider IDs
 _PROVIDER_DISPLAY = {
     "nous": "Nous Portal",
     "openrouter": "OpenRouter",
@@ -773,11 +773,11 @@ _PROVIDER_DISPLAY = {
 # normalisation the provider lands in the ``else`` branch of the group
 # builder and no models are returned — the bug behind #815.
 #
-# This table is authoritative for the WebUI.  When ``hermes_cli.models``
+# This table is authoritative for the WebUI.  When ``sidekick_cli.models``
 # is importable we also merge its ``_PROVIDER_ALIASES`` on top so any
 # new aliases added to the agent automatically apply.  Keeping the local
 # copy means the fix works even in environments where the agent tree is
-# not on ``sys.path`` (CI, installs without hermes-agent cloned
+# not on ``sys.path`` (CI, installs without sidekick-agent cloned
 # alongside the WebUI).
 _PROVIDER_ALIASES = {
     "glm": "zai",
@@ -818,7 +818,7 @@ _PROVIDER_ALIASES = {
     "xiaomi-mimo": "xiaomi",
     # Legacy alias — earlier WebUI builds wrote ``provider: local`` for unknown
     # loopback endpoints, but ``local`` is not registered in
-    # ``hermes_cli.auth.PROVIDER_REGISTRY``. Routing it through ``custom``
+    # ``sidekick_cli.auth.PROVIDER_REGISTRY``. Routing it through ``custom``
     # lets the agent's auxiliary client take the ``no-key-required``
     # OpenAI-compat path. See #1384.
     "local": "custom",
@@ -831,7 +831,7 @@ def _resolve_provider_alias(name: str) -> str:
     """Return the canonical provider slug for *name*.
 
     Applies the WebUI's local alias table first, then merges any
-    additional aliases the agent provides (when hermes_cli is on
+    additional aliases the agent provides (when sidekick_cli is on
     sys.path). Lookup is case-insensitive and whitespace-trimmed.
     Unknown names pass through unchanged.
     """
@@ -956,7 +956,7 @@ def _canonicalise_provider_id(name: object) -> str:
     (#1568). Then attempts alias resolution but only if the alias target
     is itself a known canonical id in ``_PROVIDER_DISPLAY`` —  this avoids
     converting ``x-ai`` (canonical in WebUI's data structures) to ``xai``
-    (the hermes_cli alias target which the WebUI doesn't index by).
+    (the sidekick_cli alias target which the WebUI doesn't index by).
 
     Examples::
 
@@ -981,7 +981,7 @@ def _canonicalise_provider_id(name: object) -> str:
         return raw
     # Try alias resolution. Only accept the result if it's itself a
     # canonical id in _PROVIDER_DISPLAY — that prevents aliases pointing
-    # at non-canonical strings (legacy, hermes_cli-specific) from leaking
+    # at non-canonical strings (legacy, sidekick_cli-specific) from leaking
     # in. Falls back to the normalised input otherwise.
     resolved = _resolve_provider_alias(raw)
     if resolved and resolved.lower() in _PROVIDER_DISPLAY:
@@ -1075,7 +1075,7 @@ _PROVIDER_MODELS = {
         {"id": "glm-5.2",          "label": "GLM-5.2"},
         {"id": "minimax-m3",       "label": "MiniMax M3"},
     ],
-    # 'gemini' is the hermes_cli provider ID for Google AI Studio
+    # 'gemini' is the sidekick_cli provider ID for Google AI Studio
     # Model IDs are bare — sent directly to:
     #   https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
     "gemini": [
@@ -1413,7 +1413,7 @@ def _deduplicate_model_ids(groups: list[dict]) -> None:
 #      Reuses the same private-IP detection logic used elsewhere in
 #      api/config.py for SSRF host trust.
 _LOCAL_SERVER_PROVIDERS = {
-    "lmstudio",     # canonical (in hermes_cli.models.CANONICAL_PROVIDERS)
+    "lmstudio",     # canonical (in sidekick_cli.models.CANONICAL_PROVIDERS)
     "lm-studio",    # alias used in some custom_providers configs (#1625 Opus NIT)
     "ollama",       # via custom_providers, common pattern
     "llamacpp",     # via custom_providers
@@ -1880,7 +1880,7 @@ def model_with_provider_context(model_id: str, model_provider: str | None = None
 
 
 def get_effective_default_model(config_data: dict | None = None) -> str:
-    """Resolve the effective Hermes default model from config, then env overrides."""
+    """Resolve the effective Sidekick default model from config, then env overrides."""
     active_cfg = config_data if config_data is not None else cfg
     default_model = os.getenv("SIDEKICK_WEBUI_DEFAULT_MODEL")
 
@@ -1901,7 +1901,7 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
 
 
 # ── Reasoning config (CLI parity for /reasoning) ─────────────────────────────
-# Mirrors hermes_constants.parse_reasoning_effort so WebUI can validate without
+# Mirrors sidekick_constants.parse_reasoning_effort so WebUI can validate without
 # importing from the agent tree (which may not be installed).  Any drift here
 # will show up in the shared test suite since both sides accept the same set.
 VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
@@ -2103,8 +2103,8 @@ def set_reasoning_effort(effort: str, model_id=None, model_provider=None) -> dic
     return get_reasoning_status(model_id, model_provider)
 
 
-def set_hermes_default_model(model_id: str) -> dict:
-    """Persist the Hermes default model in config.yaml and reload runtime config."""
+def set_sidekick_default_model(model_id: str) -> dict:
+    """Persist the Sidekick default model in config.yaml and reload runtime config."""
     selected_model = str(model_id or "").strip()
     if not selected_model:
         raise ValueError("model is required")
@@ -2124,9 +2124,9 @@ def set_hermes_default_model(model_id: str) -> dict:
             selected_model
         )
         # Persist the resolved bare/slash form, NOT the `@provider:` prefix. The
-        # prefix is a WebUI-internal routing hint that the hermes-agent CLI does
+        # prefix is a WebUI-internal routing hint that the sidekick-agent CLI does
         # not understand — if we wrote `@nous:anthropic/claude-opus-4.6` to
-        # config.yaml, a user who ran `hermes` in the terminal right after
+        # config.yaml, a user who ran `sidekick` in the terminal right after
         # saving via WebUI would have the agent send that literal string to the
         # Nous API, which would reject it (Nous expects `anthropic/claude-opus-4.6`,
         # not the prefixed form). The Settings picker handles the resulting
@@ -2189,7 +2189,7 @@ _provider_models_invalidated_ts: dict[str, float] = {}  # provider_id -> timesta
 # signal is somehow missed, but the cache will always be warm after the first
 # page load following a server start.
 # Cache file lives inside STATE_DIR so each server instance (different
-# HERMES_WEBUI_STATE_DIR / port) has its own file and test runs never
+# SIDEKICK_WEBUI_STATE_DIR / port) has its own file and test runs never
 # pollute the production server's cache. Also works on macOS and Windows
 # where /dev/shm does not exist.
 def _current_webui_version() -> str | None:
@@ -2235,11 +2235,11 @@ _models_cache_path = STATE_DIR / "models_cache.json"
 def _get_auth_store_path() -> Path:
     """Return the auth.json path for the active Nova profile."""
     try:
-        from web.api.profiles import get_active_hermes_home as _gah
+        from web.api.profiles import get_active_profile_home as _gah
 
         return _gah() / "auth.json"
     except ImportError:
-        return HOME / ".hermes" / "auth.json"  # legacy fallback
+        return HOME / ".sidekick" / "auth.json"  # legacy fallback
 
 
 def _read_auth_store() -> dict:
@@ -2257,7 +2257,7 @@ def _read_auth_store() -> dict:
 
 
 def _runtime_provider_status(requested: str | None = None) -> dict:
-    """Best-effort provider context from the Hermes runtime resolver."""
+    """Best-effort provider context from the Sidekick runtime resolver."""
     try:
         from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
         import sidekick_cli.runtime_provider as _runtime_provider
@@ -2748,13 +2748,13 @@ def _get_label_for_model(model_id: str, existing_groups: list) -> str:
 
 
 def _read_live_provider_model_ids(provider_id: str) -> list[str]:
-    """Return live model IDs from Hermes CLI for a provider, or [] on failure.
+    """Return live model IDs from Sidekick CLI for a provider, or [] on failure.
 
     WebUI's static ``_PROVIDER_MODELS`` table is only a fallback.  The agent CLI
     owns the provider registry and catalog-discovery logic, so ordinary picker
-    groups should ask ``hermes_cli.models.provider_model_ids()`` first (#1240).
+    groups should ask ``sidekick_cli.models.provider_model_ids()`` first (#1240).
     Provider aliases are tried as a secondary lookup because WebUI keeps a few
-    display-facing IDs (for example ``google`` / ``x-ai``) that Hermes CLI may
+    display-facing IDs (for example ``google`` / ``x-ai``) that Sidekick CLI may
     normalize internally.
     """
     pid = str(provider_id or "").strip()
@@ -2778,7 +2778,7 @@ def _read_live_provider_model_ids(provider_id: str) -> list[str]:
         try:
             live_ids = _provider_model_ids(candidate) or []
         except Exception:
-            logger.debug("Failed to load %s models from hermes_cli", candidate)
+            logger.debug("Failed to load %s models from sidekick_cli", candidate)
             continue
         result: list[str] = []
         for mid in live_ids:
@@ -2792,7 +2792,7 @@ def _read_live_provider_model_ids(provider_id: str) -> list[str]:
 
 
 def _models_from_live_provider_ids(provider_id: str, live_ids: list[str]) -> list[dict]:
-    """Convert Hermes CLI model ids into WebUI picker model entries."""
+    """Convert Sidekick CLI model ids into WebUI picker model entries."""
     formatter = _format_ollama_label if provider_id in ("ollama", "ollama-cloud") else None
     models: list[dict] = []
     seen: set[str] = set()
@@ -2853,7 +2853,7 @@ def get_available_models() -> dict:
 
     Discovery order:
       1. Read config.yaml 'model' section for active provider info
-      2. Check for known API keys in env or ~/.hermes/.env
+      2. Check for known API keys in env or ~/.sidekick/.env
       3. Fetch models from custom endpoint if base_url is configured
       4. Fall back to hardcoded model list (OpenRouter-style)
 
@@ -3099,7 +3099,7 @@ def get_available_models() -> dict:
 
         all_env: dict = {}
 
-        _hermes_auth_used = False
+        _sidekick_auth_used = False
         try:
             from cli.models import list_available_providers as _lap
             from cli.auth import get_auth_status as _gas
@@ -3114,11 +3114,11 @@ def get_available_models() -> dict:
                 except Exception:
                     logger.debug("Failed to get key source for provider %s", _p.get("id", "unknown"))
                 detected_providers.add(_p["id"])
-            _hermes_auth_used = True
+            _sidekick_auth_used = True
 
             # Belt-and-braces: list_available_providers() is the primary signal
             # for OAuth providers, but its `authenticated` field can disagree
-            # with `get_auth_status(<id>).logged_in` on some hermes_cli versions
+            # with `get_auth_status(<id>).logged_in` on some sidekick_cli versions
             # (the two fields are computed via different code paths). When the
             # disagreement happens for Nous Portal, the Settings → Providers
             # card renders the live catalog (because api/providers.py iterates
@@ -3132,25 +3132,25 @@ def get_available_models() -> dict:
             except Exception:
                 logger.debug("Failed to check Nous Portal auth status")
         except Exception:
-            logger.debug("Failed to detect auth providers from hermes")
+            logger.debug("Failed to detect auth providers from sidekick")
 
-        if not _hermes_auth_used:
+        if not _sidekick_auth_used:
             try:
-                from web.api.profiles import get_active_hermes_home as _gah2
+                from web.api.profiles import get_active_profile_home as _gah2
 
-                hermes_env_path = _gah2() / ".env"
+                sidekick_env_path = _gah2() / ".env"
             except ImportError:
-                hermes_env_path = HOME / ".hermes" / ".env"  # legacy fallback
+                sidekick_env_path = HOME / ".sidekick" / ".env"  # legacy fallback
             env_keys = {}
-            if hermes_env_path.exists():
+            if sidekick_env_path.exists():
                 try:
-                    for line in hermes_env_path.read_text(encoding="utf-8").splitlines():
+                    for line in sidekick_env_path.read_text(encoding="utf-8").splitlines():
                         line = line.strip()
                         if line and not line.startswith("#") and "=" in line:
                             k, v = line.split("=", 1)
                             env_keys[k.strip()] = v.strip().strip('"').strip("'")
                 except Exception:
-                    logger.debug("Failed to parse hermes env file")
+                    logger.debug("Failed to parse sidekick env file")
             all_env = {**env_keys}
             for k in (
                 "ANTHROPIC_API_KEY",
@@ -3207,7 +3207,7 @@ def get_available_models() -> dict:
                 detected_providers.add("opencode-zen")
             if all_env.get("OPENCODE_GO_API_KEY"):
                 detected_providers.add("opencode-go")
-            # LM Studio: detect via LM_API_KEY + LM_BASE_URL in ~/.hermes/.env
+            # LM Studio: detect via LM_API_KEY + LM_BASE_URL in ~/.sidekick/.env
             if all_env.get("LM_API_KEY") and all_env.get("LM_BASE_URL"):
                 detected_providers.add("lmstudio")
 
@@ -3311,7 +3311,7 @@ def get_available_models() -> dict:
                                 # ``provider: local`` here used to break
                                 # compression mid-conversation because ``local``
                                 # is not a registered provider in
-                                # ``hermes_cli.auth.PROVIDER_REGISTRY`` — see #1384.
+                                # ``sidekick_cli.auth.PROVIDER_REGISTRY`` — see #1384.
                                 provider = "custom"
                     except ValueError:
                         pass
@@ -3331,8 +3331,8 @@ def get_available_models() -> dict:
                                     break
                 if not api_key:
                     api_key_vars = (
-                        "HERMES_API_KEY",
-                        "HERMES_OPENAI_API_KEY",
+                        "SIDEKICK_API_KEY",
+                        "SIDEKICK_OPENAI_API_KEY",
                         "OPENAI_API_KEY",
                         "LOCAL_API_KEY",
                         "OPENROUTER_API_KEY",
@@ -3557,7 +3557,7 @@ def get_available_models() -> dict:
                 provider_name = _PROVIDER_DISPLAY.get(pid, pid.title())
                 if pid == "openrouter":
                     # OpenRouter has two model surfaces:
-                    #   (1) curated tool-supporting catalog via hermes_cli.models.fetch_openrouter_models()
+                    #   (1) curated tool-supporting catalog via sidekick_cli.models.fetch_openrouter_models()
                     #       — the canonical agent-ready list, applies a tool-support filter
                     #       (Kilo-Org/kilocode#9068) that hides image/completion-only models
                     #   (2) free-tier `:free` variants — newly-added models OpenRouter ships
@@ -3585,7 +3585,7 @@ def get_available_models() -> dict:
                                     seen_ids.add(mid)
                                     raw_models.append({"id": mid, "label": mid})
                         except Exception:
-                            logger.warning("Failed to load OpenRouter curated catalog from hermes_cli")
+                            logger.warning("Failed to load OpenRouter curated catalog from sidekick_cli")
 
                     # Free-tier live fetch — bypasses the tool-support filter so models
                     # OpenRouter has flagged free but hasn't yet annotated with tools=[]
@@ -3632,7 +3632,7 @@ def get_available_models() -> dict:
                                 "qwen/qwen3-next-80b-a3b-instruct:free",
                                 "meta-llama/llama-3.3-70b-instruct:free",
                                 "meta-llama/llama-3.2-3b-instruct:free",
-                                "nousresearch/hermes-3-llama-3.1-405b:free",
+                                "nousresearch/sidekick-3-llama-3.1-405b:free",
                                 "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
                                 "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
                                 "nvidia/nemotron-3-nano-30b-a3b:free",
@@ -3687,7 +3687,7 @@ def get_available_models() -> dict:
                             for mid in (_provider_model_ids("ollama-cloud") or [])
                         ]
                     except Exception:
-                        logger.warning("Failed to load Ollama Cloud models from hermes_cli")
+                        logger.warning("Failed to load Ollama Cloud models from sidekick_cli")
 
                     if raw_models:
                         models = _apply_provider_prefix(raw_models, pid, active_provider)
@@ -3739,7 +3739,7 @@ def get_available_models() -> dict:
                     # Nous Portal exposes a curated catalog (~30 models on most
                     # accounts, up to several hundred for enterprise tiers) via
                     # inference-api.nousresearch.com. Like ollama-cloud, we
-                    # live-fetch through hermes_cli.models.provider_model_ids()
+                    # live-fetch through sidekick_cli.models.provider_model_ids()
                     # rather than relying on the static four-entry list, which
                     # chronically drifts out of date (#1538).
                     #
@@ -3759,7 +3759,7 @@ def get_available_models() -> dict:
 
                         live_ids = _provider_model_ids("nous") or []
                     except Exception:
-                        logger.warning("Failed to load Nous Portal models from hermes_cli")
+                        logger.warning("Failed to load Nous Portal models from sidekick_cli")
                         live_ids = []
                         live_fetch_failed = True
 
@@ -3812,10 +3812,10 @@ def get_available_models() -> dict:
                             "omitting from picker (will retry on next cache rebuild)"
                         )
                     else:
-                        # hermes_cli unavailable / raised — fall back to the
+                        # sidekick_cli unavailable / raised — fall back to the
                         # curated 4-entry static list so the picker is never
                         # empty in this degraded state. This matches pre-#1538
-                        # behaviour for environments without hermes_cli (test
+                        # behaviour for environments without sidekick_cli (test
                         # envs, package mismatches, isolated WebUI builds).
                         raw_models = copy.deepcopy(_PROVIDER_MODELS.get("nous", []))
 
@@ -3839,7 +3839,7 @@ def get_available_models() -> dict:
                     # Two-tier lookup, each in its own try so a failure in one
                     # does not abort the other (the bug pattern that broke
                     # tests/test_issue1527_lmstudio_base_url_classification on
-                    # CI environments where hermes_cli isn't importable —
+                    # CI environments where sidekick_cli isn't importable —
                     # ImportError in the cli tier was hijacking the whole
                     # branch and silently skipping the urlopen fallback).
                     raw_models = []
@@ -3848,7 +3848,7 @@ def get_available_models() -> dict:
                         from cli.models import provider_model_ids as _provider_model_ids
                         lm_ids = _provider_model_ids("lmstudio") or []
                     except Exception:
-                        logger.debug("hermes_cli LM Studio lookup unavailable; using urlopen fallback")
+                        logger.debug("sidekick_cli LM Studio lookup unavailable; using urlopen fallback")
 
                     if lm_ids:
                         raw_models = [{"id": mid, "label": mid} for mid in lm_ids]
@@ -3894,7 +3894,7 @@ def get_available_models() -> dict:
 
                     # User-configured model allowlists are explicit local
                     # source-of-truth and should still beat auto-discovery.
-                    # Otherwise, ask Hermes CLI first so WebUI tracks the same
+                    # Otherwise, ask Sidekick CLI first so WebUI tracks the same
                     # live catalog as the agent/CLI picker; WebUI's static
                     # _PROVIDER_MODELS table is now a fallback only (#1240).
                     if isinstance(provider_cfg, dict) and "models" in provider_cfg:
@@ -4379,7 +4379,7 @@ _SETTINGS_DEFAULTS = {
     "session_endless_scroll": False,  # auto-load older transcript pages while scrolling upward
     "language": "en",  # UI locale code; must match a key in static/i18n.js LOCALES
     "bot_name": os.getenv(
-        "HERMES_WEBUI_BOT_NAME", "Nova"
+        "SIDEKICK_WEBUI_BOT_NAME", "Nova"
     ),  # display name for the assistant
     "sound_enabled": False,  # play notification sound when assistant finishes
     "notifications_enabled": False,  # browser notification when tab is in background
@@ -4647,7 +4647,7 @@ def game_mode_blocked_payload(kind: str = "local_model") -> dict:
 
 
 # Apply saved settings on startup (override env-derived defaults)
-# Exception: if HERMES_WEBUI_DEFAULT_WORKSPACE is explicitly set in the
+# Exception: if SIDEKICK_WEBUI_DEFAULT_WORKSPACE is explicitly set in the
 # environment, it wins over whatever settings.json has stored.  Persisted
 # config must never shadow an explicit env-var override (Docker deployments
 # rely on this — otherwise deleting settings.json is the only escape).
@@ -4685,4 +4685,4 @@ try:
 
     init_profile_state()
 except ImportError:
-    pass  # hermes_cli not available -- default profile only
+    pass  # sidekick_cli not available -- default profile only

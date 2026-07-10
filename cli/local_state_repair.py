@@ -4,6 +4,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 import zipfile
 from dataclasses import dataclass, field
@@ -75,7 +76,7 @@ def _redact(text: str) -> str:
 
 
 def repair_known_config_yaml(text: str) -> tuple[str, bool]:
-    """Repair the observed HermesPortable custom_providers indentation slip.
+    """Repair a known ``custom_providers`` indentation slip.
 
     A root-level ``key_env`` between two provider entries makes the whole YAML
     invalid. The safe interpretation is that the key belongs to the previous
@@ -315,9 +316,13 @@ def _print_result(result: RepairResult) -> None:
 
 
 def run_local_state_repair(args: Any) -> int:
-    from runtime._compat.shim_constants import get_sidekick_home
+    from shared.constants import get_sidekick_home
 
-    source = Path(getattr(args, "source", None) or r"C:\hermesportable\home")
+    source_value = str(getattr(args, "source", "") or "").strip()
+    if not source_value:
+        print("--from PATH is required; state import is always explicit", file=sys.stderr)
+        return 2
+    source = Path(source_value)
     target = Path(getattr(args, "target", None) or get_sidekick_home())
     apply = bool(getattr(args, "apply", False))
     set_user_env = apply and not bool(getattr(args, "no_user_env", False))

@@ -10,15 +10,12 @@ Usage:
 """
 
 import asyncio
-import atexit
-import functools
 import hmac
 import importlib.util
 import json
 import logging
 import os
 import secrets
-import socket
 import subprocess
 import sys
 import threading
@@ -68,15 +65,16 @@ from web.api.oauth import (
 try:
     from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
-    from starlette.requests import ClientDisconnect
 except ImportError:
     raise SystemExit(
         "Web UI requires fastapi and uvicorn.\n"
         f"Install with: {sys.executable} -m pip install 'fastapi' 'uvicorn[standard]'"
     ) from None
+
+from web.api.fastapi_bridge import dispatch_route
 
 # WEB_DIST: where the built frontend lives. Falls back through several
 # reasonable locations because the monorepo has the SPA assets in different
@@ -161,8 +159,32 @@ def _start_dashboard_cron_ticker() -> None:
     }
 
 
+def _release_game_mode_resources_on_startup() -> None:
+    """Release local model resources when Game Mode persisted across a restart."""
+    try:
+        from web.api import config as config_mod
+
+        if not config_mod.is_game_mode_enabled():
+            return
+    except Exception:
+        _log.warning("Game Mode startup check failed", exc_info=True)
+        return
+
+    try:
+        from web.api.game_mode import (
+            release_game_mode_resources,
+            sync_game_mode_runtime_state,
+        )
+
+        sync_game_mode_runtime_state(True, action="blocked", details={"source": "startup"})
+        release_game_mode_resources()
+    except Exception:
+        _log.warning("Game Mode startup release failed", exc_info=True)
+
+
 app.router.on_startup.append(_install_asyncio_disconnect_exception_filter)
 app.router.on_startup.append(_start_dashboard_cron_ticker)
+app.router.on_startup.append(_release_game_mode_resources_on_startup)
 
 
 def _webui_version_token() -> str:
@@ -191,7 +213,7 @@ def _webui_version_token() -> str:
 # Injected into the SPA HTML so only the legitimate web UI can use it.
 # ---------------------------------------------------------------------------
 _SESSION_TOKEN = secrets.token_urlsafe(32)
-_SESSION_HEADER_NAME = "X-Hermes-Session-Token"
+_SESSION_HEADER_NAME = "X-Sidekick-Session-Token"
 
 _STREAMING_EXACT_PATHS: frozenset[str] = frozenset({
     "/api/chat/stream",
@@ -210,7 +232,7 @@ _STREAMING_PREFIXES: tuple[str, ...] = (
 
 
 def _is_streaming_api_path(path: str) -> bool:
-    """True for long-lived SSE endpoints that must not use buffered proxying."""
+    """True for long-lived SSE endpoints that may authenticate via query token."""
     clean_path = str(path or "").split("?", 1)[0].rstrip("/")
     return clean_path in _STREAMING_EXACT_PATHS or any(
         clean_path.startswith(prefix) for prefix in _STREAMING_PREFIXES
@@ -224,7 +246,7 @@ def _allows_query_session_token(request: Request) -> bool:
     return _is_streaming_api_path(request.url.path)
 
 # In-browser Chat tab (/chat, /api/pty, …).  Off unless ``sidekick dashboard --tui``
-# or HERMES_DASHBOARD_TUI=1.  Set from :func:`start_server`.
+# Set from :func:`start_server`.
 _DASHBOARD_EMBEDDED_CHAT_ENABLED = False
 
 # Simple rate limiter for the reveal endpoint
@@ -401,6 +423,18 @@ async def auth_middleware(request: Request, call_next):
                 content={"detail": "Unauthorized"},
             )
     return await call_next(request)
+
+
+@app.get("/login", include_in_schema=False)
+async def login_page(request: Request):
+    """Serve the password-login page through the authenticated route module.
+
+    The SPA fallback cannot serve this path: its boot requests are password
+    protected and would redirect back to ``/login`` with an ever-growing
+    ``next`` value. The in-process route adapter preserves the route module's
+    explicit public-login handling.
+    """
+    return await dispatch_route(request)
 
 
 # ---------------------------------------------------------------------------
@@ -779,7 +813,7 @@ async def get_status():
     return {
         "version": __version__,
         "release_date": __release_date__,
-        "hermes_home": str(get_sidekick_home()),
+        "sidekick_home": str(get_sidekick_home()),
         "config_path": str(get_config_path()),
         "env_path": str(get_env_path()),
         "config_version": current_ver,
@@ -820,7 +854,7 @@ def _run_git(path: Path, *args: str) -> Optional[str]:
 
 
 def _resolve_workspace_path() -> Path:
-    """Resolve the workspace directory from config, falling back to hermes_home."""
+    """Resolve the workspace directory from config, falling back to sidekick_home."""
     try:
         raw = cfg_get("terminal.cwd", ".")
         if raw and raw != ".":
@@ -966,7 +1000,7 @@ _ACTION_LOG_DIR: Path = get_sidekick_home() / "logs"
 # Short ``name`` (from the URL) → absolute log file path.
 _ACTION_LOG_FILES: Dict[str, str] = {
     "gateway-restart": "gateway-restart.log",
-    "hermes-update": "hermes-update.log",
+    "sidekick-update": "sidekick-update.log",
 }
 
 # ``name`` → most recently spawned Popen handle.  Used so ``status`` can
@@ -974,7 +1008,7 @@ _ACTION_LOG_FILES: Dict[str, str] = {
 _ACTION_PROCS: Dict[str, subprocess.Popen] = {}
 
 
-def _spawn_hermes_action(subcommand: List[str], name: str) -> subprocess.Popen:
+def _spawn_sidekick_action(subcommand: List[str], name: str) -> subprocess.Popen:
     """Spawn ``sidekick <subcommand>`` detached and record the Popen handle.
 
     Uses the running interpreter's ``sidekick_cli.main`` module so the action
@@ -995,7 +1029,7 @@ def _spawn_hermes_action(subcommand: List[str], name: str) -> subprocess.Popen:
         "stdin": subprocess.DEVNULL,
         "stdout": log_file,
         "stderr": subprocess.STDOUT,
-        "env": {**os.environ, "HERMES_NONINTERACTIVE": "1"},
+        "env": {**os.environ, "SIDEKICK_NONINTERACTIVE": "1"},
     }
     if sys.platform == "win32":
         popen_kwargs["creationflags"] = (
@@ -1129,7 +1163,7 @@ async def reorder_discord_channel(channel_id: str, body: DiscordReorderPayload):
 async def restart_gateway():
     """Kick off a ``sidekick gateway restart`` in the background."""
     try:
-        proc = _spawn_hermes_action(["gateway", "restart"], "gateway-restart")
+        proc = _spawn_sidekick_action(["gateway", "restart"], "gateway-restart")
     except Exception as exc:
         _log.exception("Failed to spawn gateway restart")
         raise HTTPException(status_code=500, detail=f"Failed to restart gateway: {exc}") from exc
@@ -1140,18 +1174,18 @@ async def restart_gateway():
     }
 
 
-@app.post("/api/hermes/update")
-async def update_hermes():
+@app.post("/api/sidekick/update")
+async def update_sidekick():
     """Kick off ``sidekick update`` in the background."""
     try:
-        proc = _spawn_hermes_action(["update"], "hermes-update")
+        proc = _spawn_sidekick_action(["update"], "sidekick-update")
     except Exception as exc:
-        _log.exception("Failed to spawn hermes update")
+        _log.exception("Failed to spawn Sidekick update")
         raise HTTPException(status_code=500, detail=f"Failed to start update: {exc}") from exc
     return {
         "ok": True,
         "pid": proc.pid,
-        "name": "hermes-update",
+        "name": "sidekick-update",
     }
 
 
@@ -1188,7 +1222,6 @@ def _workspace_slug_from_request(request: Request) -> str:
     """Return the active Space slug supplied by the WebUI, if any."""
     value = (
         request.query_params.get("workspace")
-        or request.headers.get("X-Hermes-Workspace")
         or request.headers.get("X-Sidekick-Workspace")
         or ""
     )
@@ -1468,14 +1501,12 @@ def _stream_is_active_for_space(stream_id: str, slug: str) -> bool:
     if not stream_id:
         return False
     try:
-        path = "/api/chat/stream/status?stream_id=" + urllib.parse.quote(stream_id)
-        if slug:
-            path += "&workspace=" + urllib.parse.quote(slug)
-        status, body, _headers, _ct = _proxy_sync("GET", path, {"X-Hermes-Workspace": slug}, None)
-        if status != 200:
-            return False
-        payload = json.loads(body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body))
-        return bool(payload.get("active"))
+        # The WebUI and route handlers now share a process.  Reading the
+        # stream registry directly avoids an internal HTTP round trip and the
+        # former random-port compatibility server.
+        from web.api.config import STREAMS
+
+        return stream_id in STREAMS
     except Exception:
         _log.debug("Failed to check space stream status for %s", stream_id, exc_info=True)
         return False
@@ -1588,7 +1619,7 @@ def _slice_session_messages(session: dict[str, Any], *, load_messages: bool, msg
 async def get_space_session_detail(request: Request):
     workspace_slug = _workspace_slug_from_request(request)
     if not workspace_slug:
-        return await _proxy_request_to_stdlib(request)
+        return await dispatch_route(request)
 
     sid = str(request.query_params.get("session_id") or "").strip()
     if not sid:
@@ -1758,7 +1789,7 @@ async def search_sessions(request: Request, q: str = "", limit: int = 20):
 def _normalize_config_for_web(config: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize config for the web UI.
 
-    Hermes supports ``model`` as either a bare string (``"anthropic/claude-sonnet-4"``)
+    Sidekick supports ``model`` as either a bare string (``"anthropic/claude-sonnet-4"``)
     or a dict (``{default: ..., provider: ..., base_url: ...}``).  The schema is built
     from DEFAULT_CONFIG where ``model`` is a string, but user configs often have the
     dict form.  Normalize to the string form so the frontend schema matches.
@@ -2370,37 +2401,37 @@ def _truncate_token(value: Optional[str], visible: int = 6) -> str:
 def _anthropic_oauth_status() -> Dict[str, Any]:
     """Combined status across the three Anthropic credential sources we read.
 
-    Hermes resolves Anthropic creds in this order at runtime:
-    1. ``~/.sidekick/.anthropic_oauth.json`` — Hermes-managed PKCE flow
+    Sidekick resolves Anthropic creds in this order at runtime:
+    1. ``~/.sidekick/.anthropic_oauth.json`` — Sidekick-managed PKCE flow
     2. ``~/.claude/.credentials.json`` — Claude Code CLI credentials (auto)
     3. ``ANTHROPIC_TOKEN`` / ``ANTHROPIC_API_KEY`` env vars
     The dashboard reports the highest-priority source that's actually present.
     """
     try:
         from runtime.anthropic_adapter import (
-            read_hermes_oauth_credentials,
+            read_sidekick_oauth_credentials,
             read_claude_code_credentials,
-            _HERMES_OAUTH_FILE,
+            _SIDEKICK_OAUTH_FILE,
         )
     except ImportError:
         read_claude_code_credentials = None  # type: ignore
-        read_hermes_oauth_credentials = None  # type: ignore
-        _HERMES_OAUTH_FILE = None  # type: ignore
+        read_sidekick_oauth_credentials = None  # type: ignore
+        _SIDEKICK_OAUTH_FILE = None  # type: ignore
 
-    hermes_creds = None
-    if read_hermes_oauth_credentials:
+    sidekick_creds = None
+    if read_sidekick_oauth_credentials:
         try:
-            hermes_creds = read_hermes_oauth_credentials()
+            sidekick_creds = read_sidekick_oauth_credentials()
         except Exception:
-            hermes_creds = None
-    if hermes_creds and hermes_creds.get("accessToken"):
+            sidekick_creds = None
+    if sidekick_creds and sidekick_creds.get("accessToken"):
         return {
             "logged_in": True,
-            "source": "hermes_pkce",
-            "source_label": f"Sidekick PKCE ({_HERMES_OAUTH_FILE})",
-            "token_preview": _truncate_token(hermes_creds.get("accessToken")),
-            "expires_at": hermes_creds.get("expiresAt"),
-            "has_refresh_token": bool(hermes_creds.get("refreshToken")),
+            "source": "sidekick_pkce",
+            "source_label": f"Sidekick PKCE ({_SIDEKICK_OAUTH_FILE})",
+            "token_preview": _truncate_token(sidekick_creds.get("accessToken")),
+            "expires_at": sidekick_creds.get("expiresAt"),
+            "has_refresh_token": bool(sidekick_creds.get("refreshToken")),
         }
 
     cc_creds = None
@@ -2436,8 +2467,8 @@ def _claude_code_only_status() -> Dict[str, Any]:
     """Surface Claude Code CLI credentials as their own provider entry.
 
     Independent of the Anthropic entry above so users can see whether their
-    Claude Code subscription tokens are actively flowing into Hermes even
-    when they also have a separate Hermes-managed PKCE login.
+    Claude Code subscription tokens are actively flowing into Sidekick even
+    when they also have a separate Sidekick-managed PKCE login.
     """
     try:
         from runtime.anthropic_adapter import read_claude_code_credentials
@@ -2569,7 +2600,7 @@ async def list_oauth_providers():
         docs_url        external docs/portal link for the "Learn more" link
         status:
           logged_in        bool — currently has usable creds
-          source           short slug ("hermes_pkce", "claude_code", ...)
+          source           short slug ("sidekick_pkce", "claude_code", ...)
           source_label     human-readable origin (file path, env var name)
           token_preview    last N chars of the token, never the full token
           expires_at       ISO timestamp string or null
@@ -2602,15 +2633,15 @@ async def disconnect_oauth_provider(provider_id: str, request: Request):
                    f"Available: {', '.join(sorted(valid_ids))}",
         )
 
-    # Anthropic and claude-code clear the same Hermes-managed PKCE file
+    # Anthropic and claude-code clear the same Sidekick-managed PKCE file
     # AND forget the Claude Code import. We don't touch ~/.claude/* directly
     # — that's owned by the Claude Code CLI; users can re-auth there if they
     # want to undo a disconnect.
     if provider_id in {"anthropic", "claude-code"}:
         try:
-            from runtime.anthropic_adapter import _HERMES_OAUTH_FILE
-            if _HERMES_OAUTH_FILE.exists():
-                _HERMES_OAUTH_FILE.unlink()
+            from runtime.anthropic_adapter import _SIDEKICK_OAUTH_FILE
+            if _SIDEKICK_OAUTH_FILE.exists():
+                _SIDEKICK_OAUTH_FILE.unlink()
         except Exception:
             pass
         # Also clear the credential pool entry if present.
@@ -2673,7 +2704,7 @@ _oauth_sessions: Dict[str, Dict[str, Any]] = {}
 _oauth_sessions_lock = threading.Lock()
 
 # Import OAuth constants from canonical source instead of duplicating.
-# Guarded so hermes web still starts if anthropic_adapter is unavailable;
+# Guarded so sidekick web still starts if anthropic_adapter is unavailable;
 # Phase 2 endpoints will return 501 in that case.
 try:
     from runtime.anthropic_adapter import (
@@ -2715,19 +2746,19 @@ def _new_oauth_session(provider_id: str, flow: str) -> tuple[str, Dict[str, Any]
 
 
 def _save_anthropic_oauth_creds(access_token: str, refresh_token: str, expires_at_ms: int) -> None:
-    """Persist Anthropic PKCE creds to both Hermes file AND credential pool.
+    """Persist Anthropic PKCE creds to both Sidekick file AND credential pool.
 
     Mirrors what auth_commands.add_command does so the dashboard flow leaves
     the system in the same state as ``sidekick auth add anthropic``.
     """
-    from runtime.anthropic_adapter import _HERMES_OAUTH_FILE
+    from runtime.anthropic_adapter import _SIDEKICK_OAUTH_FILE
     payload = {
         "accessToken": access_token,
         "refreshToken": refresh_token,
         "expiresAt": expires_at_ms,
     }
-    _HERMES_OAUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _HERMES_OAUTH_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    _SIDEKICK_OAUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SIDEKICK_OAUTH_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     # Best-effort credential-pool insert. Failure here doesn't invalidate
     # the file write — pool registration only matters for the rotation
     # strategy, not for runtime credential resolution.
@@ -3496,6 +3527,24 @@ async def nova_status_endpoint():
     return get_nova_status()
 
 
+class NovaYoloToggle(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/nova/yolo")
+async def nova_yolo_status_endpoint():
+    from web.api.nova_lifecycle import load_nova_yolo_state
+
+    return load_nova_yolo_state()
+
+
+@app.post("/api/nova/yolo")
+async def nova_yolo_toggle_endpoint(body: NovaYoloToggle):
+    from web.api.nova_lifecycle import set_nova_yolo_enabled
+
+    return set_nova_yolo_enabled(body.enabled)
+
+
 @app.get("/api/nova/personality")
 async def nova_personality_endpoint(scope: str = "public"):
     from web.api.nova_lifecycle import personality_snapshot
@@ -4163,12 +4212,12 @@ def _resolve_chat_argv(
     function to inject a tiny fake command (``cat``, ``sh -c 'printf …'``)
     so nothing has to build Node or the TUI bundle.
 
-    Session resume is propagated via the ``HERMES_TUI_RESUME`` env var —
+    Session resume is propagated via the ``SIDEKICK_TUI_RESUME`` env var —
     matching what ``sidekick_cli.main._launch_tui`` does for the CLI path.
     Appending ``--resume <id>`` to argv doesn't work because ``ui-tui`` does
     not parse its argv.
 
-    `sidecar_url` (when set) is forwarded as ``HERMES_TUI_SIDECAR_URL`` so
+    `sidecar_url` (when set) is forwarded as ``SIDEKICK_TUI_SIDECAR_URL`` so
     the spawned ``tui_gateway.entry`` can mirror dispatcher emits to the
     dashboard's ``/api/pub`` endpoint (see :func:`pub_ws`).
     """
@@ -4183,16 +4232,16 @@ def _resolve_chat_argv(
     # makes browser-side transcript scrolling feel broken. Keep the terminal
     # build unchanged for native CLI usage; only disable mouse tracking for
     # the dashboard PTY path.
-    env.setdefault("HERMES_TUI_DISABLE_MOUSE", "1")
+    env.setdefault("SIDEKICK_TUI_DISABLE_MOUSE", "1")
 
     if resume:
         latest_resume, _latest_path = _session_latest_descendant(resume)
         if latest_resume:
             resume = latest_resume
-        env["HERMES_TUI_RESUME"] = resume
+        env["SIDEKICK_TUI_RESUME"] = resume
 
     if sidecar_url:
-        env["HERMES_TUI_SIDECAR_URL"] = sidecar_url
+        env["SIDEKICK_TUI_SIDECAR_URL"] = sidecar_url
 
     return list(argv), str(cwd) if cwd else None, env
 
@@ -4382,7 +4431,7 @@ async def gateway_ws(ws: WebSocket) -> None:
 # /api/pub + /api/events — chat-tab event broadcast.
 #
 # The PTY-side ``tui_gateway.entry`` opens /api/pub at startup (driven by
-# HERMES_TUI_SIDECAR_URL set in /api/pty's PTY env) and writes every
+# SIDEKICK_TUI_SIDECAR_URL set in /api/pty's PTY env) and writes every
 # dispatcher emit through it.  The dashboard fans those frames out to any
 # subscriber that opened /api/events on the same channel id.  This is what
 # gives the React sidebar its tool-call feed without breaking the PTY
@@ -4466,7 +4515,7 @@ async def events_ws(ws: WebSocket) -> None:
 def _normalise_prefix(raw: Optional[str]) -> str:
     """Normalise an X-Forwarded-Prefix header value.
 
-    Returns a string like ``"/hermes"`` (no trailing slash) or ``""`` when
+    Returns a string like ``"/sidekick"`` (no trailing slash) or ``""`` when
     no prefix is set / the header is malformed. We deliberately reject
     anything containing ``..`` or non-printable bytes so a hostile proxy
     can't inject HTML via the prefix.
@@ -4494,10 +4543,10 @@ def mount_spa(application: FastAPI):
     separate (unauthenticated) token-dispensing endpoint.
 
     When served behind a path-prefix reverse proxy (e.g.
-    ``mission-control.tilos.com/hermes/*`` -> local Caddy -> :9119), the
-    proxy injects ``X-Forwarded-Prefix: /hermes`` on every request. We
+    ``mission-control.tilos.com/sidekick/*`` -> local Caddy -> :9119), the
+    proxy injects ``X-Forwarded-Prefix: /sidekick`` on every request. We
     rewrite the served ``index.html`` so absolute asset URLs (``/assets/...``)
-    and the SPA's runtime ``__HERMES_BASE_PATH__`` honour that prefix
+    and the SPA's runtime ``__SIDEKICK_BASE_PATH__`` honours that prefix
     without rebuilding the bundle.
     """
     if not WEB_DIST.exists():
@@ -4514,7 +4563,7 @@ def mount_spa(application: FastAPI):
     def _serve_index(prefix: str = ""):
         """Return index.html with the session token + base-path injected.
 
-        ``prefix`` is the normalised ``X-Forwarded-Prefix`` (e.g. ``/hermes``)
+        ``prefix`` is the normalised ``X-Forwarded-Prefix`` (e.g. ``/sidekick``)
         or empty string when served at root.
         """
         html = _index_path.read_text(encoding="utf-8").replace(
@@ -4522,9 +4571,9 @@ def mount_spa(application: FastAPI):
         )
         chat_js = "true" if _DASHBOARD_EMBEDDED_CHAT_ENABLED else "false"
         token_script = (
-            f'<script>window.__HERMES_SESSION_TOKEN__="{_SESSION_TOKEN}";'
-            f"window.__HERMES_DASHBOARD_EMBEDDED_CHAT__={chat_js};"
-            f'window.__HERMES_BASE_PATH__="{prefix}";</script>'
+            f'<script>window.__SIDEKICK_SESSION_TOKEN__="{_SESSION_TOKEN}";'
+            f"window.__SIDEKICK_DASHBOARD_EMBEDDED_CHAT__={chat_js};"
+            f'window.__SIDEKICK_BASE_PATH__="{prefix}";</script>'
         )
         if prefix:
             # Rewrite absolute asset URLs baked into the Vite build so the
@@ -4544,8 +4593,8 @@ def mount_spa(application: FastAPI):
     # When served behind a path-prefix proxy, the built CSS contains
     # absolute ``url(/fonts/...)`` and ``url(/ds-assets/...)`` references.
     # Browsers resolve those against the document origin, which means
-    # under ``/hermes`` they'd hit ``mission-control.tilos.com/fonts/...``
-    # (the MC Pages app), not the Hermes backend. Intercept CSS asset
+    # under ``/sidekick`` they'd hit ``mission-control.tilos.com/fonts/...``
+    # (the MC Pages app), not the Sidekick backend. Intercept CSS asset
     # requests BEFORE the StaticFiles mount and rewrite the absolute paths
     # when a prefix is in play.
     @application.get("/assets/{filename}.css")
@@ -4908,7 +4957,7 @@ def _discover_dashboard_plugins() -> list:
     Checks three plugin sources (same as sidekick_cli.plugins):
     1. User plugins:    ~/.sidekick/plugins/<name>/dashboard/manifest.json
     2. Bundled plugins: <repo>/plugins/<name>/dashboard/manifest.json  (memory/, etc.)
-    3. Project plugins: ./.hermes/plugins/  (only if HERMES_ENABLE_PROJECT_PLUGINS)
+    3. Project plugins: ./.sidekick/plugins/  (only if SIDEKICK_ENABLE_PROJECT_PLUGINS)
     """
     plugins = []
     seen_names: set = set()
@@ -4921,7 +4970,7 @@ def _discover_dashboard_plugins() -> list:
         (bundled_root, "bundled"),
     ]
     if os.environ.get("SIDEKICK_ENABLE_PROJECT_PLUGINS"):
-        search_dirs.append((Path.cwd() / ".hermes" / "plugins", "project"))
+        search_dirs.append((Path.cwd() / ".sidekick" / "plugins", "project"))
 
     for plugins_root, source in search_dirs:
         if not plugins_root.is_dir():
@@ -5332,7 +5381,7 @@ def _mount_plugin_api_routes():
             _log.warning("Plugin %s declares api=%s but file not found", plugin["name"], api_file_name)
             continue
         try:
-            module_name = f"hermes_dashboard_plugin_{plugin['name']}"
+            module_name = f"sidekick_dashboard_plugin_{plugin['name']}"
             spec = importlib.util.spec_from_file_location(module_name, api_path)
             if spec is None or spec.loader is None:
                 continue
@@ -5586,350 +5635,14 @@ async def onboarding_probe(body: dict | None = None):
 
 
 # ── API proxy / fallback ─────────────────────────────────────────────────────────
-# The old frontend (web/static/) was designed for the stdlib HTTP server
-# (web/server.py + web/api/routes.py) which has ~100+ API routes.  The FastAPI
-# server only has a subset.  When the old frontend is served (no new Vite
-# dashboard build), we proxy unknown /api/* requests to an internal stdlib
-# server instance so all routes continue to work.
-# ============================================================================
-
-_STDLIB_PORT: int | None = None
-_STDLIB_PROC: subprocess.Popen | None = None
-_STDLIB_LOCK = threading.Lock()
-_PROXY_RESPONSE_HEADERS = {
-    "set-cookie",
-    "content-disposition",
-    "cache-control",
-    "accept-ranges",
-    "content-range",
-    "x-accel-buffering",
-}
-_PROXY_DROP_HEADERS = {
-    "host",
-    "content-length",
-    "transfer-encoding",
-    "connection",
-    "accept-encoding",
-}
-# The legacy WebUI fires several short API requests per space/session switch.
-# Keep a back-pressure guard, but do not turn normal UI bursts into visible 503s.
-_PROXY_MAX_IN_FLIGHT = 64
-_PROXY_ACQUIRE_TIMEOUT_SECONDS = 8.0
-_PROXY_SYNC_TIMEOUT_SECONDS = 20
-_PROXY_STREAM_TIMEOUT_SECONDS = 300
-_PROXY_SEMAPHORE = threading.BoundedSemaphore(_PROXY_MAX_IN_FLIGHT)
-
-
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return int(s.getsockname()[1])
-
-
-def _is_old_frontend() -> bool:
-    """True when the old web/static/ frontend is being served (needs stdlib backend)."""
-    try:
-        static_index = WEB_DIST / "index.html"
-        if not static_index.exists():
-            return False
-        # New dashboard build serves from cli/web_dist/ or web_dist/ at repo root.
-        dist_name = str(WEB_DIST.resolve()).lower()
-        if "web_dist" in dist_name or "cli\\web_dist" in dist_name:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def _stdlib_python_executable() -> str:
-    repo_root = Path(__file__).resolve().parents[1]
-    candidates = [
-        repo_root / ".venv" / "Scripts" / "python.exe",
-        repo_root / ".venv" / "bin" / "python",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
-    return sys.executable
-
-
-def _cleanup_stale_stdlib_backends() -> None:
-    """Best-effort cleanup for orphaned legacy ``web.server`` proxy children.
-
-    Windows users often close/restart the dashboard process directly. In that
-    case Python ``atexit`` hooks do not run and the random-port stdlib backend
-    can survive as an orphan. ``_ensure_stdlib_backend`` calls this only before
-    spawning a fresh backend for the current dashboard, so any existing
-    ``python -m web.server`` process is stale and safe to remove.
-    """
-    if os.name != "nt":
-        return
-    try:
-        script = r"""
-$procs = Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -match '(^|\s)-m\s+web\.server(\s|$)' }
-foreach ($p in $procs) {
-  $pidToKill = [int]$p.ProcessId
-  taskkill /PID $pidToKill /T /F 2>$null | Out-Null
-}
-"""
-        subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=8,
-            check=False,
-        )
-    except Exception:
-        _log.debug("Failed to clean stale stdlib backends", exc_info=True)
-
-
-def _ensure_stdlib_backend() -> int:
-    """Start the stdlib API server on a random port if not running. Thread-safe."""
-    global _STDLIB_PORT, _STDLIB_PROC
-    if _STDLIB_PORT is not None:
-        if _STDLIB_PORT != 0 and _STDLIB_PROC is not None and _STDLIB_PROC.poll() is not None:
-            _STDLIB_PORT = None
-            _STDLIB_PROC = None
-        else:
-            return _STDLIB_PORT
-    with _STDLIB_LOCK:
-        if _STDLIB_PORT is not None:
-            if _STDLIB_PORT != 0 and _STDLIB_PROC is not None and _STDLIB_PROC.poll() is not None:
-                _STDLIB_PORT = None
-                _STDLIB_PROC = None
-            else:
-                return _STDLIB_PORT
-        if not _is_old_frontend():
-            _STDLIB_PORT = 0  # sentinel: never start
-            return 0
-        _cleanup_stale_stdlib_backends()
-        port = _find_free_port()
-        env = os.environ.copy()
-        env["SIDEKICK_WEBUI_PORT"] = str(port)
-        env["SIDEKICK_WEBUI_SKIP_ONBOARDING"] = "1"
-        _STDLIB_PROC = subprocess.Popen(
-            [_stdlib_python_executable(), "-m", "web.server"],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        # Wait for readiness. On Windows the legacy backend can spend several
-        # seconds importing the large route module before binding the port.
-        for _ in range(70):
-            try:
-                req = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/health", method="GET"
-                )
-                with urllib.request.urlopen(req, timeout=1) as resp:
-                    if resp.status == 200:
-                        _STDLIB_PORT = port
-                        return port
-            except Exception:
-                time.sleep(0.3)
-        # Timeout — kill the process and raise
-        _STDLIB_PROC.kill()
-        _STDLIB_PROC = None
-        raise RuntimeError(
-            f"Stdlib API backend did not start on port {port} within 20s"
-        )
-
-
-def _stop_stdlib_backend() -> None:
-    global _STDLIB_PORT, _STDLIB_PROC
-    proc = _STDLIB_PROC
-    _STDLIB_PROC = None
-    _STDLIB_PORT = None
-    if proc is None:
-        return
-    try:
-        if proc.poll() is None:
-            if os.name == "nt":
-                subprocess.run(
-                    ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=10,
-                    check=False,
-                )
-            else:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-    except Exception:
-        _log.debug("Failed to stop stdlib backend", exc_info=True)
-
-
-atexit.register(_stop_stdlib_backend)
-try:
-    app.router.on_shutdown.append(_stop_stdlib_backend)
-except Exception:
-    _log.debug("Could not register stdlib backend shutdown handler", exc_info=True)
-
-
-def _forward_request_headers(headers: dict) -> dict[str, str]:
-    forwarded = {
-        str(k): str(v)
-        for k, v in headers.items()
-        if str(k).lower() not in _PROXY_DROP_HEADERS
-    }
-    original_host = ""
-    for key, value in headers.items():
-        if str(key).lower() == "host":
-            original_host = str(value).strip()
-            break
-    if original_host:
-        forwarded.setdefault("X-Forwarded-Host", original_host)
-        forwarded.setdefault("X-Real-Host", original_host)
-    return forwarded
-
-
-def _safe_proxy_response_headers(headers: dict[str, str]) -> dict[str, str]:
-    safe: dict[str, str] = {}
-    for key, value in headers.items():
-        lk = key.lower()
-        if lk in _PROXY_RESPONSE_HEADERS:
-            safe[key] = value
-    return safe
-
-
-def _proxy_sync(
-    method: str, path: str, headers: dict, body: bytes | None
-) -> tuple[int, bytes, dict[str, str], str | None]:
-    """Forward a single HTTP request to the stdlib backend.
-
-    Returns (status, body, response_headers, content_type).
-    """
-    port = _ensure_stdlib_backend()
-    if port == 0:
-        return 502, b'{"error":"stdlib backend not available"}', {"content-type": "application/json"}, "application/json"
-
-    url = f"http://127.0.0.1:{port}{path}"
-    req = urllib.request.Request(url, data=body, method=method)
-    for k, v in _forward_request_headers(headers).items():
-        req.add_header(k, v)
-    req.add_header("Connection", "close")
-    if not _PROXY_SEMAPHORE.acquire(timeout=_PROXY_ACQUIRE_TIMEOUT_SECONDS):
-        return (
-            503,
-            b'{"error":"legacy proxy busy"}',
-            {"content-type": "application/json", "connection": "close"},
-            "application/json",
-        )
-    try:
-        with urllib.request.urlopen(req, timeout=_PROXY_SYNC_TIMEOUT_SECONDS) as resp:
-            resp_body = resp.read()
-            resp_headers = dict(resp.getheaders())
-            ct = resp_headers.get("Content-Type", resp_headers.get("content-type", "application/json"))
-            resp_headers.setdefault("Connection", "close")
-            return resp.status, resp_body, resp_headers, ct
-    except urllib.error.HTTPError as e:
-        try:
-            err_body = e.read()
-        finally:
-            try:
-                e.close()
-            except Exception:
-                pass
-        err_headers = dict(e.headers)
-        ct = err_headers.get("Content-Type", err_headers.get("content-type", "application/json"))
-        err_headers.setdefault("Connection", "close")
-        return e.code, err_body, err_headers, ct
-    except urllib.error.URLError as e:
-        return 502, json.dumps({"error": f"proxy failed: {e.reason}"}).encode(), {"content-type": "application/json", "connection": "close"}, "application/json"
-    except (ConnectionResetError, TimeoutError, OSError) as e:
-        return 502, json.dumps({"error": f"proxy failed: {e}"}).encode(), {"content-type": "application/json", "connection": "close"}, "application/json"
-    finally:
-        _PROXY_SEMAPHORE.release()
-
-
-def _proxy_stream(
-    method: str, path: str, headers: dict, body: bytes | None
-):
-    """Generator that yields chunks from the stdlib backend (for SSE / streaming)."""
-    port = _ensure_stdlib_backend()
-    if port == 0:
-        yield b'{"error":"stdlib backend not available"}'
-        return
-    url = f"http://127.0.0.1:{port}{path}"
-    req = urllib.request.Request(url, data=body, method=method)
-    for k, v in _forward_request_headers(headers).items():
-        req.add_header(k, v)
-    req.add_header("Connection", "close")
-    resp = None
-    try:
-        resp = urllib.request.urlopen(req, timeout=_PROXY_STREAM_TIMEOUT_SECONDS)
-        while True:
-            chunk = resp.readline()
-            if not chunk:
-                break
-            yield chunk
-    except Exception:
-        yield b""
-    finally:
-        if resp is not None:
-            try:
-                resp.close()
-            except Exception:
-                pass
-
-
-async def _proxy_request_to_stdlib(request: Request) -> Response:
-    full_path = request.url.path
-    if request.url.query:
-        full_path += "?" + request.url.query
-
-    try:
-        body = await request.body()
-    except ClientDisconnect:
-        return Response(content=b"", status_code=499)
-    headers = dict(request.headers)
-    loop = asyncio.get_event_loop()
-    status, resp_body, resp_headers, content_type = await loop.run_in_executor(
-        None,
-        functools.partial(_proxy_sync, request.method, full_path, headers, body),
-    )
-    return Response(
-        content=resp_body,
-        status_code=status,
-        media_type=content_type,
-        headers=_safe_proxy_response_headers(resp_headers),
-    )
-
-
 @app.api_route(
     "/api/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
     include_in_schema=False,
 )
-async def api_stdlib_proxy(request: Request, path: str):
-    """Proxy /api/* requests that no FastAPI route matched → stdlib backend."""
-    # Build the full path + query string
-    full_path = "/api/" + path
-    if request.url.query:
-        full_path += "?" + request.url.query
-
-    is_stream = _is_streaming_api_path(full_path)
-
-    if is_stream:
-        try:
-            body = await request.body()
-        except ClientDisconnect:
-            return Response(content=b"", status_code=499)
-        headers = dict(request.headers)
-        loop = asyncio.get_event_loop()
-        gen = await loop.run_in_executor(
-            None,
-            functools.partial(_proxy_stream, request.method, full_path, headers, body),
-        )
-        return StreamingResponse(
-            gen, media_type="text/event-stream",
-            headers={"Cache-Control": "no-store", "Connection": "keep-alive"},
-        )
-
-    return await _proxy_request_to_stdlib(request)
+async def api_route_bridge(request: Request, path: str):
+    """Run unmatched API routes through the in-process FastAPI bridge."""
+    return await dispatch_route(request)
 
 
 mount_spa(app)

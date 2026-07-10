@@ -433,7 +433,7 @@ class TelegramAdapter(BasePlatformAdapter):
                 return value
         for path in (
             sidekick_home() / "auth.json",
-            Path("C:/HermesPortable/home/auth.json"),
+            Path("C:/SidekickPortable/home/auth.json"),
         ):
             value = self._read_fish_key_from_auth(path)
             if value:

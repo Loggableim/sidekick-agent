@@ -16,7 +16,7 @@ from runtime._compat.shim_constants import get_sidekick_home
 
 
 # ---------------------------------------------------------------------------
-# Curses-based interactive picker (same pattern as hermes tools)
+# Curses-based interactive picker (same pattern as sidekick tools)
 # ---------------------------------------------------------------------------
 
 def _curses_select(title: str, items: list[tuple[str, str]], default: int = 0) -> int:
@@ -207,8 +207,8 @@ def cmd_setup_provider(provider_name: str) -> None:
         config["memory"] = {}
 
     if hasattr(provider, "post_setup"):
-        hermes_home = str(get_sidekick_home())
-        provider.post_setup(hermes_home, config)
+        sidekick_home = str(get_sidekick_home())
+        provider.post_setup(sidekick_home, config)
         return
 
     # Fallback: generic schema-based setup (same as cmd_setup)
@@ -258,8 +258,8 @@ def cmd_setup(args) -> None:
     # If the provider has a post_setup hook, delegate entirely to it.
     # The hook handles its own config, connection test, and activation.
     if hasattr(provider, "post_setup"):
-        hermes_home = str(get_sidekick_home())
-        provider.post_setup(hermes_home, config)
+        sidekick_home = str(get_sidekick_home())
+        provider.post_setup(sidekick_home, config)
         return
 
     schema = provider.get_config_schema() if hasattr(provider, "get_config_schema") else []
@@ -335,10 +335,10 @@ def cmd_setup(args) -> None:
     save_config(config)
 
     # Write non-secret config to provider's native location
-    hermes_home = str(get_sidekick_home())
+    sidekick_home = str(get_sidekick_home())
     if provider_config and hasattr(provider, "save_config"):
         try:
-            provider.save_config(provider_config, hermes_home)
+            provider.save_config(provider_config, sidekick_home)
         except Exception as e:
             print(f"  Failed to write provider config: {e}")
 

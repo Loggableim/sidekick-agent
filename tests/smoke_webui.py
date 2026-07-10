@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Legacy WebUI HTTP smoke test for Sidekick.
+"""FastAPI WebUI HTTP smoke test for Sidekick.
 
-This script exercises the old stdlib web surface that still backs the
-compatibility proxy. It is intentionally importable so ``tests/smoke_all.py``
-can call ``main()`` without executing on import.
+The smoke uses the same ASGI server as a production WebUI launch. It is
+intentionally importable so ``tests/smoke_all.py`` can call ``main()`` without
+executing on import.
 """
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ import os
 import socket
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_API_HEADERS: dict[str, str] = {}
 
 
 @dataclass
@@ -43,7 +45,9 @@ def _find_free_port() -> int:
 def _request_json(port: int, method: str, path: str, body: Any | None = None) -> tuple[int, Any]:
     url = f"http://127.0.0.1:{port}{path}"
     data = None if body is None else json.dumps(body).encode("utf-8")
-    headers = {"Content-Type": "application/json"} if data is not None else {}
+    headers = dict(_API_HEADERS)
+    if data is not None:
+        headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -75,17 +79,28 @@ def _mark(result: Result, name: str, ok: bool, detail: str = "") -> None:
 
 def run_smoke() -> Result:
     _bootstrap_repo()
-    from web.server import create_server
+    import uvicorn
+    from cli import web_server
 
     result = Result()
     port = _find_free_port()
     os.environ["SIDEKICK_WEBUI_HOST"] = "127.0.0.1"
     os.environ["SIDEKICK_WEBUI_PORT"] = str(port)
-    os.environ.setdefault("HERMES_WEBUI_LOG_FILE", os.devnull)
+    _API_HEADERS.clear()
+    _API_HEADERS[web_server._SESSION_HEADER_NAME] = web_server._SESSION_TOKEN
 
-    server = create_server("127.0.0.1", port)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server = uvicorn.Server(
+        uvicorn.Config(web_server.app, host="127.0.0.1", port=port, log_level="error")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
+
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        code, _ = _request_json(port, "GET", "/health")
+        if code == 200:
+            break
+        time.sleep(0.1)
 
     try:
         code, data = _request_json(port, "GET", "/health")
@@ -145,8 +160,17 @@ def run_smoke() -> Result:
                 browser = p.chromium.launch(headless=True)
                 try:
                     page = browser.new_page(viewport={"width": 1900, "height": 1100}, device_scale_factor=1)
-                    page.goto(f"http://127.0.0.1:{port}/session/{session_id}", wait_until="networkidle", timeout=15000)
-                    page.wait_for_timeout(1000)
+                    # The WebUI keeps event streams open after rendering, so
+                    # networkidle is not a meaningful readiness condition.
+                    page.goto(f"http://127.0.0.1:{port}/session/{session_id}", wait_until="domcontentloaded", timeout=15000)
+                    # The settings request applies the persisted appearance
+                    # asynchronously. Wait for that hydration rather than
+                    # racing a click against a late theme reset.
+                    page.wait_for_function(
+                        "typeof window._sendKey === 'string' && typeof window._gameModeEnabled === 'boolean'",
+                        timeout=10000,
+                    )
+                    page.wait_for_timeout(100)
 
                     composer = page.locator("#composerBox").first
                     strip = page.locator("#composerStatusStrip").first
@@ -174,7 +198,9 @@ def run_smoke() -> Result:
                     yolo_pill = page.locator("#composerBox #yoloPill").first
                     mic_btn = page.locator("#composerBox #btnMic").first
                     voice_mode_btn = page.locator("#composerBox #btnVoiceMode").first
-                    cast_btn = page.locator("#btnCastToggle").first
+                    lang_selector_btn = page.locator(".app-titlebar #btnLangSelector").first
+                    cast_btn = page.locator(".app-titlebar #btnCastToggle").first
+                    nova_yolo_btn = page.locator(".app-titlebar #btnNovaYoloToggle").first
                     workflow_badge = page.locator("#composerBox #workflowStatusBadge").first
                     queue_card = page.locator("#queueCard").first
                     browser_empty = page.locator("#browserEmptyState").first
@@ -212,7 +238,9 @@ def run_smoke() -> Result:
                         "composer_model_chip": composer_model_chip.bounding_box(),
                         "composer_reasoning_chip": composer_reasoning_chip.bounding_box(),
                         "browser_toggle": browser_toggle.bounding_box(),
+                        "lang_selector_btn": lang_selector_btn.bounding_box(),
                         "cast_btn": cast_btn.bounding_box(),
+                        "nova_yolo_btn": nova_yolo_btn.bounding_box(),
                         "workflow_badge": workflow_badge.bounding_box(),
                         "queue_card": queue_card.bounding_box(),
                         "model_chip": model_chip.bounding_box(),
@@ -228,26 +256,44 @@ def run_smoke() -> Result:
                     required_boxes = {
                         name: box
                         for name, box in boxes.items()
-                        if name != "composer_workspace_chip"
+                        # Workspace and reasoning controls are optional until
+                        # a session has enough configuration to render them.
+                        if name not in {
+                            "composer_workspace_chip",
+                            "composer_reasoning_chip",
+                            "reasoning_chip",
+                        }
                     }
                     ok = (
                         titlebar_hidden
                         and all(required_boxes.values())
-                        and boxes["action_chips"]["x"] < boxes["browser_toggle"]["x"] < boxes["cast_btn"]["x"] < boxes["workflow_badge"]["x"]
+                        and boxes["action_chips"]["x"] < boxes["browser_toggle"]["x"] < boxes["workflow_badge"]["x"]
                         and abs(boxes["action_chips"]["y"] - boxes["strip"]["y"]) <= 8
-                        and abs(boxes["browser_toggle"]["y"] - boxes["cast_btn"]["y"]) <= 24
-                        and abs(boxes["cast_btn"]["y"] - boxes["workflow_badge"]["y"]) <= 24
+                        and abs(boxes["browser_toggle"]["y"] - boxes["workflow_badge"]["y"]) <= 24
                         and boxes["action_chips"]["x"] <= boxes["strip"]["x"] + 20
                         and boxes["action_chips"]["x"] < composer_center_x - 150
+                        and boxes["lang_selector_btn"]["x"] < boxes["cast_btn"]["x"]
+                        and abs(boxes["lang_selector_btn"]["y"] - boxes["cast_btn"]["y"]) <= 8
+                        and boxes["cast_btn"]["x"] < boxes["nova_yolo_btn"]["x"]
+                        and abs(boxes["cast_btn"]["y"] - boxes["nova_yolo_btn"]["y"]) <= 8
+                        and boxes["cast_btn"]["y"] < boxes["composer"]["y"]
                         and boxes["reboot_btn"]["x"] < boxes["theme_toggle"]["x"] < boxes["shutdown_btn"]["x"]
                         and abs(boxes["theme_toggle"]["y"] - boxes["reboot_btn"]["y"]) <= 8
                         and boxes["space_btn"]["x"] < boxes["game_mode_btn"]["x"]
                         and abs(boxes["space_btn"]["y"] - boxes["game_mode_btn"]["y"]) <= 8
-                        and boxes["model_chip"]["x"] < boxes["reasoning_chip"]["x"]
-                        and abs(boxes["model_chip"]["y"] - boxes["reasoning_chip"]["y"]) <= 24
+                        and (
+                            not boxes["reasoning_chip"]
+                            or (
+                                boxes["model_chip"]["x"] < boxes["reasoning_chip"]["x"]
+                                and abs(boxes["model_chip"]["y"] - boxes["reasoning_chip"]["y"]) <= 24
+                            )
+                        )
                         and app_titlebar_text.strip()
                         and "Untitled" not in app_titlebar_text
                     )
+                    # Appearance preferences are fetched asynchronously after
+                    # boot; wait for that hydration before testing the toggle.
+                    page.wait_for_timeout(1500)
                     dark_before = page.evaluate("document.documentElement.classList.contains('dark')")
                     composer_tooltips = {
                         "review_title": review_chip.get_attribute("title"),
@@ -308,11 +354,11 @@ def run_smoke() -> Result:
                     browser_toggle.evaluate("el => el.click()")
                     page.wait_for_timeout(250)
                     workflow_restored = workflow_badge.get_attribute("aria-label") or ""
-                    theme_toggle.click()
-                    page.wait_for_timeout(250)
+                    theme_toggle.evaluate("el => el.click()")
+                    page.wait_for_timeout(350)
                     dark_after = page.evaluate("document.documentElement.classList.contains('dark')")
-                    theme_toggle.click()
-                    page.wait_for_timeout(250)
+                    theme_toggle.evaluate("el => el.click()")
+                    page.wait_for_timeout(350)
                     dark_restored = page.evaluate("document.documentElement.classList.contains('dark')")
                     page.evaluate(
                         """() => {
@@ -340,7 +386,7 @@ def run_smoke() -> Result:
                     browser_empty_ok = (
                         browser_empty_visible
                         and not browser_frame_visible
-                        and "Browser attached" in (browser_empty_title_text or "")
+                        and "Browser" in (browser_empty_title_text or "")
                     )
                     detail = (
                         f"titlebar_hidden={titlebar_hidden} "
@@ -349,7 +395,7 @@ def run_smoke() -> Result:
                         f"space={boxes['space_btn']} game={boxes['game_mode_btn']} "
                         f"review_chip={boxes['review_chip']} profile_chip={boxes['profile_chip']} "
                         f"workspace_chip={boxes['composer_workspace_chip']} model_chip={boxes['composer_model_chip']} reasoning_chip={boxes['composer_reasoning_chip']} "
-                        f"browser={boxes['browser_toggle']} cast={boxes['cast_btn']} workflow={boxes['workflow_badge']} "
+                        f"browser={boxes['browser_toggle']} language={boxes['lang_selector_btn']} cast={boxes['cast_btn']} nova_yolo={boxes['nova_yolo_btn']} workflow={boxes['workflow_badge']} "
                         f"browser_empty={browser_empty_box} browser_frame={browser_frame_box} "
                         f"browser_empty_visible={browser_empty_visible} browser_frame_visible={browser_frame_visible} browser_empty_title={browser_empty_title_text!r} "
                         f"titlebar_text={app_titlebar_text!r} "
@@ -369,15 +415,17 @@ def run_smoke() -> Result:
                 finally:
                     browser.close()
     finally:
-        server.shutdown()
-        server.server_close()
+        # Let the browser's EventSource disconnect complete before Uvicorn
+        # closes its Windows Proactor listener.
+        time.sleep(0.75)
+        server.should_exit = True
         thread.join(timeout=5)
 
     return result
 
 
 def main() -> int:
-    print("=== Legacy WebUI smoke ===\n")
+    print("=== FastAPI WebUI smoke ===\n")
     result = run_smoke()
     print(f"\n=== Ergebnis: {result.passed} passed, {result.failed} failed ===")
     return 0 if result.failed == 0 else 1

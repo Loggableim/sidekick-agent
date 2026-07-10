@@ -1,4 +1,4 @@
-"""Shared constants for Hermes Agent.
+"""Shared constants for Sidekick Agent.
 
 Import-safe module with no dependencies — can be imported from anywhere
 without risk of circular imports.
@@ -12,22 +12,22 @@ _profile_fallback_warned: bool = False
 
 
 def get_sidekick_home() -> Path:
-    """Return the Hermes home directory (default: ~/.sidekick).
+    """Return the Sidekick home directory (default: ~/.sidekick).
 
-    Reads HERMES_HOME env var, falls back to ~/.sidekick.
+    Reads SIDEKICK_HOME env var, falls back to ~/.sidekick.
     This is the single source of truth — all other copies should import this.
 
-    When ``HERMES_HOME`` is unset but an ``active_profile`` file indicates
+    When ``SIDEKICK_HOME`` is unset but an ``active_profile`` file indicates
     a non-default profile is active, logs a loud one-shot warning to
     ``errors.log`` so cross-profile data corruption is diagnosable instead
     of silent.  Behavior is unchanged otherwise — we still return
     ``~/.sidekick`` — because raising here would brick 30+ module-level
     callers that import this at load time.  Subprocess spawners are
-    expected to propagate ``HERMES_HOME`` explicitly (see the systemd
-    template in ``hermes_cli/gateway.py`` and the kanban dispatcher in
-    ``hermes_cli/kanban_db.py``).  See https://github.com/NousResearch/hermes-agent/issues/18594.
+    expected to propagate ``SIDEKICK_HOME`` explicitly (see the systemd
+    template in ``sidekick_cli/gateway.py`` and the kanban dispatcher in
+    ``sidekick_cli/kanban_db.py``).  See https://github.com/NousResearch/sidekick-agent/issues/18594.
     """
-    val = os.environ.get("HERMES_HOME", "").strip()
+    val = os.environ.get("SIDEKICK_HOME", "").strip()
     if val:
         return Path(val)
 
@@ -36,10 +36,10 @@ def get_sidekick_home() -> Path:
     global _profile_fallback_warned
     if not _profile_fallback_warned:
         try:
-            # Inline the default-root resolution from get_default_hermes_root()
+            # Inline the default-root resolution from get_default_sidekick_root()
             # to stay import-safe (this function is called from module scope
             # in 30+ files; we cannot afford to trigger logging setup here).
-            active_path = (Path.home() / ".hermes" / "active_profile")
+            active_path = (Path.home() / ".sidekick" / "active_profile")
             active = active_path.read_text().strip() if active_path.exists() else ""
         except (UnicodeDecodeError, OSError):
             active = ""
@@ -52,11 +52,11 @@ def get_sidekick_home() -> Path:
             # on consoles where a StreamHandler is already attached.
             import sys
             msg = (
-                f"[HERMES_HOME fallback] HERMES_HOME is unset but active "
+                f"[SIDEKICK_HOME fallback] SIDEKICK_HOME is unset but active "
                 f"profile is {active!r}. Falling back to ~/.sidekick, which "
                 f"is the DEFAULT profile — not {active!r}. Any data this "
                 f"process writes will land in the wrong profile. The "
-                f"subprocess spawner should pass HERMES_HOME explicitly "
+                f"subprocess spawner should pass SIDEKICK_HOME explicitly "
                 f"(see issue #18594)."
             )
             try:
@@ -65,33 +65,33 @@ def get_sidekick_home() -> Path:
             except Exception:
                 pass
 
-    return Path.home() / ".hermes"
+    return Path.home() / ".sidekick"
 
 
-def get_default_hermes_root() -> Path:
-    """Return the root Hermes directory for profile-level operations.
+def get_default_sidekick_root() -> Path:
+    """Return the root Sidekick directory for profile-level operations.
 
     In standard deployments this is ``~/.sidekick``.
 
-    In Docker or custom deployments where ``HERMES_HOME`` points outside
-    ``~/.sidekick`` (e.g. ``/opt/data``), returns ``HERMES_HOME`` directly
+    In Docker or custom deployments where ``SIDEKICK_HOME`` points outside
+    ``~/.sidekick`` (e.g. ``/opt/data``), returns ``SIDEKICK_HOME`` directly
     — that IS the root.
 
-    In profile mode where ``HERMES_HOME`` is ``<root>/profiles/<name>``,
+    In profile mode where ``SIDEKICK_HOME`` is ``<root>/profiles/<name>``,
     returns ``<root>`` so that ``profile list`` can see all profiles.
     Works both for standard (``~/.sidekick/profiles/coder``) and Docker
     (``/opt/data/profiles/coder``) layouts.
 
     Import-safe — no dependencies beyond stdlib.
     """
-    native_home = Path.home() / ".hermes"
-    env_home = os.environ.get("HERMES_HOME", "")
+    native_home = Path.home() / ".sidekick"
+    env_home = os.environ.get("SIDEKICK_HOME", "")
     if not env_home:
         return native_home
     env_path = Path(env_home)
     try:
         env_path.resolve().relative_to(native_home.resolve())
-        # HERMES_HOME is under ~/.sidekick (normal or profile mode)
+        # SIDEKICK_HOME is under ~/.sidekick (normal or profile mode)
         return native_home
     except ValueError:
         pass
@@ -103,7 +103,7 @@ def get_default_hermes_root() -> Path:
     if env_path.parent.name == "profiles":
         return env_path.parent.parent
 
-    # Not a profile path — HERMES_HOME itself is the root
+    # Not a profile path — SIDEKICK_HOME itself is the root
     return env_path
 
 
@@ -111,9 +111,9 @@ def get_optional_skills_dir(default: Path | None = None) -> Path:
     """Return the optional-skills directory, honoring package-manager wrappers.
 
     Packaged installs may ship ``optional-skills`` outside the Python package
-    tree and expose it via ``HERMES_OPTIONAL_SKILLS``.
+    tree and expose it via ``SIDEKICK_OPTIONAL_SKILLS``.
     """
-    override = os.getenv("HERMES_OPTIONAL_SKILLS", "").strip()
+    override = os.getenv("SIDEKICK_OPTIONAL_SKILLS", "").strip()
     if override:
         return Path(override)
     if default is not None:
@@ -121,16 +121,16 @@ def get_optional_skills_dir(default: Path | None = None) -> Path:
     return get_sidekick_home() / "optional-skills"
 
 
-def get_hermes_dir(new_subpath: str, old_name: str) -> Path:
-    """Resolve a Hermes subdirectory with backward compatibility.
+def get_sidekick_dir(new_subpath: str, old_name: str) -> Path:
+    """Resolve a Sidekick subdirectory with backward compatibility.
 
     New installs get the consolidated layout (e.g. ``cache/images``).
     Existing installs that already have the old path (e.g. ``image_cache``)
     keep using it — no migration required.
 
     Args:
-        new_subpath: Preferred path relative to HERMES_HOME (e.g. ``"cache/images"``).
-        old_name: Legacy path relative to HERMES_HOME (e.g. ``"image_cache"``).
+        new_subpath: Preferred path relative to SIDEKICK_HOME (e.g. ``"cache/images"``).
+        old_name: Legacy path relative to SIDEKICK_HOME (e.g. ``"image_cache"``).
 
     Returns:
         Absolute ``Path`` — old location if it exists on disk, otherwise the new one.
@@ -143,13 +143,13 @@ def get_hermes_dir(new_subpath: str, old_name: str) -> Path:
 
 
 def display_sidekick_home() -> str:
-    """Return a user-friendly display string for the current HERMES_HOME.
+    """Return a user-friendly display string for the current SIDEKICK_HOME.
 
     Uses ``~/`` shorthand for readability::
 
         default:  ``~/.sidekick``
         profile:  ``~/.sidekick/profiles/coder``
-        custom:   ``/opt/hermes-custom``
+        custom:   ``/opt/sidekick-custom``
 
     Use this in **user-facing** print/log messages instead of hardcoding
     ``~/.sidekick``.  For code that needs a real ``Path``, use
@@ -165,9 +165,9 @@ def display_sidekick_home() -> str:
 def get_subprocess_home() -> str | None:
     """Return a per-profile HOME directory for subprocesses, or None.
 
-    When ``{HERMES_HOME}/home/`` exists on disk, subprocesses should use it
+    When ``{SIDEKICK_HOME}/home/`` exists on disk, subprocesses should use it
     as ``HOME`` so system tools (git, ssh, gh, npm …) write their configs
-    inside the Hermes data directory instead of the OS-level ``/root`` or
+    inside the Sidekick data directory instead of the OS-level ``/root`` or
     ``~/``.  This provides:
 
     * **Docker persistence** — tool configs land inside the persistent volume.
@@ -179,10 +179,10 @@ def get_subprocess_home() -> str | None:
     Activation is directory-based: if the ``home/`` subdirectory doesn't
     exist, returns ``None`` and behavior is unchanged.
     """
-    hermes_home = os.getenv("HERMES_HOME")
-    if not hermes_home:
+    sidekick_home = os.getenv("SIDEKICK_HOME")
+    if not sidekick_home:
         return None
-    profile_home = os.path.join(hermes_home, "home")
+    profile_home = os.path.join(sidekick_home, "home")
     if os.path.isdir(profile_home):
         return profile_home
     return None
@@ -277,22 +277,22 @@ def is_container() -> bool:
 
 
 def get_config_path() -> Path:
-    """Return the path to ``config.yaml`` under HERMES_HOME.
+    """Return the path to ``config.yaml`` under SIDEKICK_HOME.
 
     Replaces the ``get_sidekick_home() / "config.yaml"`` pattern repeated
-    in 7+ files (skill_utils.py, hermes_logging.py, hermes_time.py, etc.).
+    in 7+ files (skill_utils.py, sidekick_logging.py, sidekick_time.py, etc.).
     """
     return get_sidekick_home() / "config.yaml"
 
 
 def get_skills_dir() -> Path:
-    """Return the path to the skills directory under HERMES_HOME."""
+    """Return the path to the skills directory under SIDEKICK_HOME."""
     return get_sidekick_home() / "skills"
 
 
 
 def get_env_path() -> Path:
-    """Return the path to the ``.env`` file under HERMES_HOME."""
+    """Return the path to the ``.env`` file under SIDEKICK_HOME."""
     return get_sidekick_home() / ".env"
 
 

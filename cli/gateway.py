@@ -33,7 +33,7 @@ from cli.config import (
     save_env_value,
 )
 # display_sidekick_home is imported lazily at call sites to avoid ImportError
-# when hermes_constants is cached from a pre-update version during `sidekick update`.
+# when sidekick_constants is cached from a pre-update version during `sidekick update`.
 from cli.setup import (
     print_header, print_info, print_success, print_warning, print_error,
     prompt, prompt_choice, prompt_yes_no,
@@ -318,17 +318,17 @@ def _scan_gateway_pids(exclude_pids: set[int], all_profiles: bool = False) -> li
             return (
                 f"--profile {current_profile_name}" in command
                 or f"-p {current_profile_name}" in command
-                or f"HERMES_HOME={current_home}" in command
+                or f"SIDEKICK_HOME={current_home}" in command
             )
 
         # Default-profile case: no profile flag in argv. Accept as long as
-        # the command doesn't advertise *some other* profile. HERMES_HOME
+        # the command doesn't advertise *some other* profile. SIDEKICK_HOME
         # may be passed via env (not visible in wmic/CIM command line) so
         # its absence is NOT disqualifying — only a non-matching explicit
-        # HERMES_HOME= in argv is.
+        # SIDEKICK_HOME= in argv is.
         if "--profile " in command or " -p " in command:
             return False
-        if "HERMES_HOME=" in command and f"HERMES_HOME={current_home}" not in command:
+        if "SIDEKICK_HOME=" in command and f"SIDEKICK_HOME={current_home}" not in command:
             return False
         return True
 
@@ -705,18 +705,18 @@ def _read_systemd_unit_environment(system: bool = False) -> dict[str, str]:
 
 
 def _sync_sidekick_home_from_systemd_unit(system: bool) -> None:
-    """When acting on a system-scope unit, adopt its ``HERMES_HOME``.
+    """When acting on a system-scope unit, adopt its ``SIDEKICK_HOME``.
 
-    Under ``sudo``, ``HERMES_HOME`` is stripped and ``HOME=/root``, so
-    :func:`get_sidekick_home` falls back to ``/root/.hermes`` — the wrong
-    profile. The unit file pins ``HERMES_HOME`` for the actual gateway
+    Under ``sudo``, ``SIDEKICK_HOME`` is stripped and ``HOME=/root``, so
+    :func:`get_sidekick_home` falls back to ``/root/.sidekick`` — the wrong
+    profile. The unit file pins ``SIDEKICK_HOME`` for the actual gateway
     process, so we mirror that into our own environment to make
     ``read_runtime_status`` / ``get_running_pid`` read the correct files.
     """
     if not system:
         return
     env = _read_systemd_unit_environment(system=True)
-    unit_home = env.get("HERMES_HOME", "").strip()
+    unit_home = env.get("SIDEKICK_HOME", "").strip()
     if not unit_home:
         return
     current = os.environ.get("SIDEKICK_HOME", "").strip()
@@ -1127,7 +1127,7 @@ def kill_gateway_processes(force: bool = False, exclude_pids: set | None = None,
 
 
 def stop_profile_gateway() -> bool:
-    """Stop only the gateway for the current profile (HERMES_HOME-scoped).
+    """Stop only the gateway for the current profile (SIDEKICK_HOME-scoped).
 
     Uses the PID file written by start_gateway(), so it only kills the
     gateway belonging to this profile — not gateways from other profiles.
@@ -1236,7 +1236,7 @@ def _windows_gateway_should_absorb_console_controls() -> bool:
 
     Foreground ``sidekick gateway run`` must remain interruptible from
     PowerShell/CMD. Detached service-style launches opt in via
-    ``HERMES_GATEWAY_DETACHED=1``; older wrappers without the env marker are
+    ``SIDEKICK_GATEWAY_DETACHED=1``; older wrappers without the env marker are
     treated as detached when no interactive stdin is attached.
     """
     if not is_windows():
@@ -1261,17 +1261,17 @@ SERVICE_DESCRIPTION = "Sidekick Agent Gateway - Messaging Platform Integration"
 
 
 def _profile_suffix() -> str:
-    """Derive a service-name suffix from the current HERMES_HOME.
+    """Derive a service-name suffix from the current SIDEKICK_HOME.
 
     Returns ``""`` for the default root, the profile name for
     ``<root>/profiles/<name>``, or a short hash for any other path.
-    Works correctly in Docker (HERMES_HOME=/opt/data) and standard deployments.
+    Works correctly in Docker (SIDEKICK_HOME=/opt/data) and standard deployments.
     """
     import hashlib
     import re
-    from runtime._compat.shim_constants import get_default_hermes_root
+    from runtime._compat.shim_constants import get_default_sidekick_root
     home = get_sidekick_home().resolve()
-    default = get_default_hermes_root().resolve()
+    default = get_default_sidekick_root().resolve()
     if home == default:
         return ""
     # Detect <root>/profiles/<name> pattern → use the profile name
@@ -1283,25 +1283,25 @@ def _profile_suffix() -> str:
             return parts[0]
     except ValueError:
         pass
-    # Fallback: short hash for arbitrary HERMES_HOME paths
+    # Fallback: short hash for arbitrary SIDEKICK_HOME paths
     return hashlib.sha256(str(home).encode()).hexdigest()[:8]
 
 
-def _profile_arg(hermes_home: str | None = None) -> str:
-    """Return ``--profile <name>`` only when HERMES_HOME is a named profile.
+def _profile_arg(sidekick_home: str | None = None) -> str:
+    """Return ``--profile <name>`` only when SIDEKICK_HOME is a named profile.
 
     For ``~/.sidekick/profiles/<name>``, returns ``"--profile <name>"``.
     For the default profile or hash-based custom paths, returns the empty string.
 
     Args:
-        hermes_home: Optional explicit HERMES_HOME path. Defaults to the current
+        sidekick_home: Optional explicit SIDEKICK_HOME path. Defaults to the current
             ``get_sidekick_home()`` value. Should be passed when generating a
             service definition for a different user (e.g. system service).
     """
     import re
-    from runtime._compat.shim_constants import get_default_hermes_root
-    home = Path(hermes_home or str(get_sidekick_home())).resolve()
-    default = get_default_hermes_root().resolve()
+    from runtime._compat.shim_constants import get_default_sidekick_root
+    home = Path(sidekick_home or str(get_sidekick_home())).resolve()
+    default = get_default_sidekick_root().resolve()
     if home == default:
         return ""
     profiles_root = (default / "profiles").resolve()
@@ -1316,11 +1316,11 @@ def _profile_arg(hermes_home: str | None = None) -> str:
 
 
 def get_service_name() -> str:
-    """Derive a systemd service name scoped to this HERMES_HOME.
+    """Derive a systemd service name scoped to this SIDEKICK_HOME.
 
     Default ``~/.sidekick`` returns ``sidekick-gateway`` (backward compatible).
     Profile ``~/.sidekick/profiles/coder`` returns ``sidekick-gateway-coder``.
-    Any other HERMES_HOME appends a short hash for uniqueness.
+    Any other SIDEKICK_HOME appends a short hash for uniqueness.
     """
     suffix = _profile_suffix()
     if not suffix:
@@ -1605,7 +1605,7 @@ def _legacy_unit_search_paths() -> list[tuple[bool, Path]]:
     ]
 
 
-def _find_legacy_hermes_units() -> list[tuple[str, Path, bool]]:
+def _find_legacy_sidekick_units() -> list[tuple[str, Path, bool]]:
     """Return ``[(unit_name, unit_path, is_system)]`` for legacy Sidekick gateway units.
 
     Detects unit files installed by older Sidekick versions that used a
@@ -1643,9 +1643,9 @@ def _find_legacy_hermes_units() -> list[tuple[str, Path, bool]]:
     return results
 
 
-def has_legacy_hermes_units() -> bool:
+def has_legacy_sidekick_units() -> bool:
     """Return True when any legacy Sidekick gateway unit files exist."""
-    return bool(_find_legacy_hermes_units())
+    return bool(_find_legacy_sidekick_units())
 
 
 def print_legacy_unit_warning() -> None:
@@ -1654,7 +1654,7 @@ def print_legacy_unit_warning() -> None:
     Idempotent: prints nothing when no legacy units are detected. Safe to
     call from any status/install/setup path.
     """
-    legacy = _find_legacy_hermes_units()
+    legacy = _find_legacy_sidekick_units()
     if not legacy:
         return
     print_warning("Legacy Sidekick gateway unit(s) detected from an older install:")
@@ -1667,13 +1667,13 @@ def print_legacy_unit_warning() -> None:
     print_info("    sidekick gateway migrate-legacy")
 
 
-def remove_legacy_hermes_units(
+def remove_legacy_sidekick_units(
     interactive: bool = True,
     dry_run: bool = False,
 ) -> tuple[int, list[Path]]:
     """Stop, disable, and remove legacy Sidekick gateway unit files.
 
-    Iterates over whatever ``_find_legacy_hermes_units()`` returns — which is
+    Iterates over whatever ``_find_legacy_sidekick_units()`` returns — which is
     an explicit allowlist of legacy names (not a glob). Profile units and
     unrelated third-party services are never touched.
 
@@ -1687,7 +1687,7 @@ def remove_legacy_hermes_units(
         ``(removed_count, remaining_paths)`` — remaining includes units we
         couldn't remove (typically system-scope when not running as root).
     """
-    legacy = _find_legacy_hermes_units()
+    legacy = _find_legacy_sidekick_units()
     if not legacy:
         print("No legacy Sidekick gateway units found.")
         return 0, []
@@ -2062,8 +2062,8 @@ def _remap_path_for_user(path: str, target_home_dir: str) -> str:
     If *path* lives under ``Path.home()`` the corresponding prefix is swapped
     to *target_home_dir*; otherwise the path is returned unchanged.
 
-      /root/.hermes/hermes-agent  -> /home/alice/.hermes/hermes-agent
-      /opt/hermes                 -> /opt/hermes  (kept as-is, legacy)
+      /root/.sidekick/sidekick-agent  -> /home/alice/.sidekick/sidekick-agent
+      /opt/sidekick                 -> /opt/sidekick  (kept as-is, legacy)
 
     Note: this function intentionally does NOT resolve symlinks. A venv's
     ``bin/python`` is typically a symlink to the base interpreter (e.g. a
@@ -2083,29 +2083,29 @@ def _remap_path_for_user(path: str, target_home_dir: str) -> str:
 
 
 def _sidekick_home_for_target_user(target_home_dir: str) -> str:
-    """Remap the current HERMES_HOME to the equivalent under a target user's home.
+    """Remap the current SIDEKICK_HOME to the equivalent under a target user's home.
 
     When installing a system service via sudo, get_sidekick_home() resolves to
     root's home.  This translates it to the target user's equivalent path:
-      /root/.hermes                    → /home/alice/.hermes
-      /root/.hermes/profiles/coder     → /home/alice/.hermes/profiles/coder
-      /opt/custom-hermes               → /opt/custom-hermes  (kept as-is)
+      /root/.sidekick                    → /home/alice/.sidekick
+      /root/.sidekick/profiles/coder     → /home/alice/.sidekick/profiles/coder
+      /opt/custom-sidekick               → /opt/custom-sidekick  (kept as-is)
     """
-    current_hermes = get_sidekick_home().resolve()
-    current_default = (Path.home() / ".hermes").resolve()
-    target_default = Path(target_home_dir) / ".hermes"
+    current_sidekick = get_sidekick_home().resolve()
+    current_default = (Path.home() / ".sidekick").resolve()
+    target_default = Path(target_home_dir) / ".sidekick"
 
     # Default ~/.sidekick → remap to target user's default
-    if current_hermes == current_default:
+    if current_sidekick == current_default:
         return str(target_default)
 
     # Profile or subdir of ~/.sidekick → preserve the relative structure
     try:
-        relative = current_hermes.relative_to(current_default)
+        relative = current_sidekick.relative_to(current_default)
         return str(target_default / relative)
     except ValueError:
         # Completely custom path (not under ~/.sidekick) — keep as-is
-        return str(current_hermes)
+        return str(current_sidekick)
 
 
 def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) -> str:
@@ -2135,8 +2135,8 @@ def generate_systemd_unit(system: bool = False, run_as_user: str | None = None) 
 
     if system:
         username, group_name, home_dir = _system_service_identity(run_as_user)
-        hermes_home = _sidekick_home_for_target_user(home_dir)
-        profile_arg = _profile_arg(hermes_home)
+        sidekick_home = _sidekick_home_for_target_user(home_dir)
+        profile_arg = _profile_arg(sidekick_home)
         # Remap all paths that may resolve under the calling user's home
         # (e.g. /root/) to the target user's home so the service can
         # actually access them.
@@ -2167,7 +2167,7 @@ Environment="USER={username}"
 Environment="LOGNAME={username}"
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
-Environment="HERMES_HOME={hermes_home}"
+Environment="SIDEKICK_HOME={sidekick_home}"
 Restart=always
 RestartSec=60
 RestartMaxDelaySec=300
@@ -2184,8 +2184,8 @@ StandardError=journal
 WantedBy=multi-user.target
 """
 
-    hermes_home = str(get_sidekick_home().resolve())
-    profile_arg = _profile_arg(hermes_home)
+    sidekick_home = str(get_sidekick_home().resolve())
+    profile_arg = _profile_arg(sidekick_home)
     path_entries.extend(_build_user_local_paths(Path.home(), path_entries))
     path_entries.extend(_build_wsl_interop_paths(path_entries))
     path_entries.extend(common_bin_paths)
@@ -2202,7 +2202,7 @@ ExecStart={python_path} -m sidekick_cli.main{f" {profile_arg}" if profile_arg el
 WorkingDirectory={working_dir}
 Environment="PATH={sane_path}"
 Environment="VIRTUAL_ENV={venv_dir}"
-Environment="HERMES_HOME={hermes_home}"
+Environment="SIDEKICK_HOME={sidekick_home}"
 Restart=always
 RestartSec=60
 RestartMaxDelaySec=300
@@ -2236,7 +2236,7 @@ def _normalize_launchd_plist_for_comparison(text: str) -> str:
     normalized = _normalize_service_definition(text)
     return re.sub(
         r'(<key>PATH</key>\s*<string>)(.*?)(</string>)',
-        r'\1__HERMES_PATH__\3',
+        r'\1__SIDEKICK_PATH__\3',
         normalized,
         flags=re.S,
     )
@@ -2265,10 +2265,10 @@ def refresh_systemd_unit_if_needed(system: bool = False) -> bool:
 
     # ── Test-environment safety belt ─────────────────────────────────────
     # The user-scope unit path resolves under ``Path.home()``, which is NOT
-    # sandboxed by the test conftest (only HERMES_HOME is). If a test
-    # exercises ``run_gateway()`` with a pytest-tmp HERMES_HOME, the freshly
+    # sandboxed by the test conftest (only SIDEKICK_HOME is). If a test
+    # exercises ``run_gateway()`` with a pytest-tmp SIDEKICK_HOME, the freshly
     # generated unit bakes that ``/tmp/pytest-of-.../sidekick_test`` path into
-    # ``Environment="HERMES_HOME=..."``. Writing that to the developer's
+    # ``Environment="SIDEKICK_HOME=..."``. Writing that to the developer's
     # real user systemd unit file silently breaks their gateway on the next
     # reboot (systemd loads the polluted env, the gateway looks at an empty
     # tmp dir, and Telegram/Discord/etc. all show as "not configured").
@@ -2419,12 +2419,12 @@ def systemd_install(force: bool = False, system: bool = False, run_as_user: str 
     # flap-fight for the Telegram bot token on every gateway startup.
     # Only removes units matching _LEGACY_SERVICE_NAMES + our ExecStart
     # signature — profile units are never touched.
-    if has_legacy_hermes_units():
+    if has_legacy_sidekick_units():
         print()
         print_legacy_unit_warning()
         print()
         if prompt_yes_no("Remove the legacy unit(s) before installing?", True):
-            remove_legacy_hermes_units(interactive=False)
+            remove_legacy_sidekick_units(interactive=False)
             print()
 
     unit_path = get_systemd_unit_path(system=system)
@@ -2646,7 +2646,7 @@ def systemd_status(deep: bool = False, system: bool = False, full: bool = False)
         print_systemd_scope_conflict_warning()
         print()
 
-    if has_legacy_hermes_units():
+    if has_legacy_sidekick_units():
         print_legacy_unit_warning()
         print()
 
@@ -2748,11 +2748,11 @@ def _launchd_domain() -> str:
 def generate_launchd_plist() -> str:
     python_path = get_python_path()
     working_dir = str(PROJECT_ROOT)
-    hermes_home = str(get_sidekick_home().resolve())
+    sidekick_home = str(get_sidekick_home().resolve())
     log_dir = get_sidekick_home() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     label = get_launchd_label()
-    profile_arg = _profile_arg(hermes_home)
+    profile_arg = _profile_arg(sidekick_home)
     # Build a sane PATH for the launchd plist.  launchd provides only a
     # minimal default (/usr/bin:/bin:/usr/sbin:/sbin) which misses Homebrew,
     # nvm, cargo, etc.  We prepend venv/bin and node_modules/.bin (matching
@@ -2811,8 +2811,8 @@ def generate_launchd_plist() -> str:
         <string>{sane_path}</string>
         <key>VIRTUAL_ENV</key>
         <string>{venv_dir}</string>
-        <key>HERMES_HOME</key>
-        <string>{hermes_home}</string>
+        <key>SIDEKICK_HOME</key>
+        <string>{sidekick_home}</string>
     </dict>
     
     <key>RunAtLoad</key>
@@ -2956,7 +2956,7 @@ def _wait_for_gateway_exit(timeout: float = 10.0, force_after: float | None = 5.
 
     Uses the PID from the gateway.pid file — not launchd labels — so this
     works correctly when multiple gateway instances run under separate
-    HERMES_HOME directories.
+    SIDEKICK_HOME directories.
 
     Args:
         timeout: Total seconds to wait before giving up.
@@ -3094,13 +3094,13 @@ def _guard_official_docker_root_gateway() -> None:
     print(
         "  The image entrypoint normally drops privileges to the 'sidekick' user. "
         "If you override entrypoint in Docker Compose, include "
-        "/opt/hermes/docker/entrypoint.sh before the Sidekick command."
+        "/opt/sidekick/docker/entrypoint.sh before the Sidekick command."
     )
     print(
         "  Running the gateway as root can leave root-owned files in "
-        "$HERMES_HOME and break later non-root dashboard/gateway runs."
+        "$SIDEKICK_HOME and break later non-root dashboard/gateway runs."
     )
-    print("  Set HERMES_ALLOW_ROOT_GATEWAY=1 only if you intentionally accept this risk.")
+    print("  Set SIDEKICK_ALLOW_ROOT_GATEWAY=1 only if you intentionally accept this risk.")
     sys.exit(1)
 
 
@@ -3120,7 +3120,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
     # Detached Windows gateway runs must ignore console-control broadcasts
     # from sibling CLI processes, but foreground `sidekick gateway run` still
     # needs to obey the banner's "Press Ctrl+C to stop" contract.
-    # Service-style launchers set HERMES_GATEWAY_DETACHED=1; older wrappers
+    # Service-style launchers set SIDEKICK_GATEWAY_DETACHED=1; older wrappers
     # without the marker are handled by the non-TTY fallback.
     try:
         _stdin_is_tty = bool(sys.stdin and sys.stdin.isatty())
@@ -3192,7 +3192,7 @@ def run_gateway(verbose: int = 0, quiet: bool = False, replace: bool = False):
     # the next silent death yields evidence instead of a mystery. This
     # is diagnostic scaffolding; cheap to keep on, costs nothing during
     # normal operation, and the emitted lines are opt-in via the
-    # HERMES_GATEWAY_EXIT_DIAG env var (default: on while we're still
+    # SIDEKICK_GATEWAY_EXIT_DIAG env var (default: on while we're still
     # chasing the Windows lifecycle bug).
     import atexit as _atexit
     import traceback as _traceback
@@ -3390,7 +3390,7 @@ _PLATFORMS = [
         "setup_instructions": [
             "1. In Mattermost: Integrations → Bot Accounts → Add Bot Account",
             "   (System Console → Integrations → Bot Accounts must be enabled)",
-            "2. Give it a username (e.g. hermes) and copy the bot token",
+            "2. Give it a username (e.g. sidekick) and copy the bot token",
             "3. Works with any self-hosted Mattermost instance — enter your server URL",
             "4. To find your user ID: click your avatar (top-left) → Profile",
             "   Your user ID is displayed there — click it to copy.",
@@ -4779,7 +4779,7 @@ def gateway_setup():
         print_systemd_scope_conflict_warning()
         print()
 
-    if supports_systemd_services() and has_legacy_hermes_units():
+    if supports_systemd_services() and has_legacy_sidekick_units():
         print_legacy_unit_warning()
         print()
 
@@ -5387,4 +5387,4 @@ def _gateway_command_inner(args):
         if not supports_systemd_services() and not is_macos():
             print("Legacy unit migration only applies to systemd-based Linux hosts.")
             return
-        remove_legacy_hermes_units(interactive=not yes, dry_run=dry_run)
+        remove_legacy_sidekick_units(interactive=not yes, dry_run=dry_run)

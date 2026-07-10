@@ -63,6 +63,27 @@ def test_autonomy_guard_blocks_external_mutations_at_level_two(monkeypatch, tmp_
     assert set(autonomy["levels"]) == {0, 1, 2, 3, 4}
 
 
+def test_nova_yolo_bypasses_autonomy_guards_and_records_governance(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import (
+        guard_autonomous_action,
+        load_events,
+        load_nova_yolo_state,
+        set_nova_yolo_enabled,
+    )
+
+    assert guard_autonomous_action({"type": "read", "target": "C:/sidekick/home/auth.json"})["allowed"] is False
+
+    enabled = set_nova_yolo_enabled(True)
+    override = guard_autonomous_action({"type": "delete", "target": "C:/sidekick/home/auth.json"})
+
+    assert enabled["enabled"] is True
+    assert load_nova_yolo_state()["enabled"] is True
+    assert override == {"allowed": True, "reason": "nova_yolo_override", "autonomy_level": 2, "yolo_enabled": True}
+    assert load_events(limit=1, include_private=True)[0]["type"] == "governance"
+
+
 def test_post_turn_creates_versioned_event_and_queues_reflection(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -189,7 +210,7 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     import runtime.cron.jobs as runtime_cron_jobs
 
     wrong_home = tmp_path / "wrong-home"
-    monkeypatch.setattr(runtime_cron_jobs, "HERMES_DIR", wrong_home)
+    monkeypatch.setattr(runtime_cron_jobs, "SIDEKICK_HOME_DIR", wrong_home)
     monkeypatch.setattr(runtime_cron_jobs, "CRON_DIR", wrong_home / "cron")
     monkeypatch.setattr(runtime_cron_jobs, "JOBS_FILE", wrong_home / "cron" / "jobs.json")
     monkeypatch.setattr(runtime_cron_jobs, "OUTPUT_DIR", wrong_home / "cron" / "output")
@@ -834,8 +855,10 @@ def test_dashboard_nova_api_endpoints_require_token_and_filter_visibility(monkey
     unauthorized = client.get("/api/nova/status")
     assert unauthorized.status_code == 401
 
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
     status = client.get("/api/nova/status", headers=headers)
+    yolo_before = client.get("/api/nova/yolo", headers=headers)
+    yolo_after = client.post("/api/nova/yolo", json={"enabled": True}, headers=headers)
     personality_public = client.get("/api/nova/personality", headers=headers)
     events_private = client.get("/api/nova/events?scope=private", headers=headers)
 
@@ -843,6 +866,8 @@ def test_dashboard_nova_api_endpoints_require_token_and_filter_visibility(monkey
     assert status.json()["autonomy_level"] == 2
     assert status.json()["autonomy"]["definition"]["name"] == "read_and_analyze"
     assert status.json()["model_strategy"]["fast_classifier"]["port"] == 8081
+    assert yolo_before.json()["enabled"] is False
+    assert yolo_after.json()["enabled"] is True
     assert status.json()["cron"]["ok"] is True
     assert personality_public.status_code == 200
     assert "relationship" not in personality_public.json()

@@ -1,12 +1,11 @@
 """
 Sidekick -- Profile state management.
-Wraps hermes_cli.profiles to provide profile switching for the web UI.
 
 The web UI maintains a process-level "active profile" that determines which
-HERMES_HOME directory is used for config, skills, memory, cron, and API keys.
-Profile switches update os.environ['SIDEKICK_HOME'] / os.environ['HERMES_HOME'] and monkey-patch module-level
-cached paths in hermes-agent modules (skills_tool, skill_manager_tool,
-cron/jobs) that snapshot HERMES_HOME at import time.
+SIDEKICK_HOME directory is used for config, skills, memory, cron, and API keys.
+Profile switches update os.environ['SIDEKICK_HOME'] and monkey-patch module-level
+cached paths in Sidekick modules (skills_tool, skill_manager_tool,
+cron/jobs) that snapshot the home path at import time.
 """
 import json
 import logging
@@ -21,7 +20,7 @@ from web.api._home import get_webui_home
 
 logger = logging.getLogger(__name__)
 
-# ── Constants (match hermes_cli.profiles upstream) ─────────────────────────
+# ── Constants (match sidekick_cli.profiles upstream) ─────────────────────────
 _PROFILE_ID_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{0,63}$')
 _PROFILE_DIRS = [
     'memories', 'sessions', 'skills', 'skins',
@@ -36,7 +35,7 @@ _loaded_profile_env_keys: set[str] = set()
 
 # Thread-local profile context: set per-request by server.py, cleared after.
 # Enables per-client profile isolation (issue #798) — each HTTP request thread
-# reads its own profile from the hermes_profile cookie instead of the
+# reads its own profile from the sidekick_profile cookie instead of the
 # process-global _active_profile.
 _tls = threading.local()
 
@@ -44,20 +43,20 @@ _SKILL_HOME_MODULES = ("tools.skills_tool", "tools.skill_manager_tool")
 
 
 def _patch_skill_home_modules(home: Path) -> None:
-    """Patch imported skill modules that cache HERMES_HOME at import time."""
+    """Patch imported skill modules that cache SIDEKICK_HOME at import time."""
     for module_name in _SKILL_HOME_MODULES:
         module = sys.modules.get(module_name)
         if module is None:
             continue
         try:
-            module.HERMES_HOME = home
+            module.SIDEKICK_HOME = home
             module.SKILLS_DIR = home / "skills"
         except AttributeError:
             logger.debug("Failed to patch %s module", module_name)
 
 
 def _unwrap_profile_home_to_base(home: Path) -> Path:
-    """Return the base Hermes home when *home* is already a named profile dir."""
+    """Return the base Sidekick home when *home* is already a named profile dir."""
     if home.parent.name == 'profiles':
         return home.parent.parent
     return home
@@ -72,8 +71,8 @@ def _resolve_base_sidekick_home() -> Path:
 
     Resolution order:
       1. SIDEKICK_BASE_HOME env var (set explicitly, highest priority)
-      2. SIDEKICK_HOME / HERMES_HOME env vars, normalized through the shared
-         WebUI home resolver and then unwrapped from any profile subdir.
+      2. SIDEKICK_HOME, normalized through the shared WebUI home resolver and
+         then unwrapped from any profile subdir.
       3. ~/.sidekick (always-correct default)
 
     The bug this prevents: if SIDEKICK_HOME has already been mutated to
@@ -130,9 +129,9 @@ def _read_active_profile_file() -> str:
 #
 # `_is_root_profile(name)` answers "does this name resolve to ~/.sidekick?" and
 # is the canonical replacement for scattered `if name == 'default':` checks
-# in switch_profile, get_active_hermes_home, _validate_profile_name, etc.
+# in switch_profile, get_active_profile_home, _validate_profile_name, etc.
 #
-# Cost note: list_profiles_api() shells out via hermes_cli (non-trivial), so
+# Cost note: list_profiles_api() shells out via sidekick_cli (non-trivial), so
 # we memoize the lookup. The cache is invalidated whenever profiles are
 # created, deleted, renamed, or cloned — i.e. on every mutation site we
 # control.
@@ -171,7 +170,7 @@ def _is_root_profile(name: str) -> bool:
         if _root_profile_name_cache_loaded:
             return name in _root_profile_name_cache
     # Cache miss — populate from list_profiles_api(). Done outside the lock to
-    # avoid holding it across a hermes_cli subprocess call.
+    # avoid holding it across a sidekick_cli subprocess call.
     try:
         infos = list_profiles_api()
     except Exception:
@@ -221,7 +220,7 @@ def get_active_profile_name() -> str:
     """Return the currently active profile name.
 
     Priority:
-      1. Thread-local (set per-request from hermes_profile cookie) — issue #798
+      1. Thread-local (set per-request from sidekick_profile cookie) — issue #798
       2. Process-level default (_active_profile)
     """
     tls_name = getattr(_tls, 'profile', None)
@@ -233,7 +232,7 @@ def get_active_profile_name() -> str:
 def set_request_profile(name: str) -> None:
     """Set the per-request profile context for this thread.
 
-    Called by server.py at the start of each request when a hermes_profile
+    Called by server.py at the start of each request when a sidekick_profile
     cookie is present.  Always paired with clear_request_profile() in a
     finally block so the thread-local is released after the request.
     """
@@ -250,7 +249,7 @@ def clear_request_profile() -> None:
 
 
 def _resolve_profile_home_for_name(name: str) -> Path:
-    """Resolve a logical profile name to its Hermes home path.
+    """Resolve a logical profile name to its Sidekick home path.
 
     Root/default aliases resolve to _DEFAULT_SIDEKICK_HOME.  Valid named profiles
     resolve to _DEFAULT_SIDEKICK_HOME/profiles/<name> even when the directory has
@@ -265,8 +264,8 @@ def _resolve_profile_home_for_name(name: str) -> Path:
     return _resolve_named_profile_home(name)
 
 
-def get_active_hermes_home() -> Path:
-    """Return the HERMES_HOME path for the currently active profile.
+def get_active_profile_home() -> Path:
+    """Return the SIDEKICK_HOME path for the currently active profile.
 
     Uses get_active_profile_name() so per-request TLS context (issue #798)
     is respected, not just the process-level global.
@@ -276,10 +275,10 @@ def get_active_hermes_home() -> Path:
 
 
 # ── Cron-call profile isolation (issue: Scheduled jobs ignored active profile) ─
-# `cron.jobs` reads HERMES_HOME from os.environ (process-global) at function-
+# `cron.jobs` reads SIDEKICK_HOME from os.environ (process-global) at function-
 # call time. That bypasses our per-request thread-local profile, so the
 # `/api/crons*` endpoints always returned the process-default profile's jobs.
-# This context manager swaps HERMES_HOME (and the cached module-level constants
+# This context manager swaps SIDEKICK_HOME (and the cached module-level constants
 # in cron.jobs) for the duration of a cron call, serialized by a lock so
 # concurrent requests from different profiles don't race on the global env var.
 #
@@ -288,10 +287,10 @@ def get_active_hermes_home() -> Path:
 # multi-step read-modify-write sequences (snapshot prev → assign new → restore
 # on exit) are NOT atomic without explicit serialization. The _cron_env_lock
 # below makes the entire context-manager body run-to-completion serially, so
-# all webui access to HERMES_HOME goes through one thread at a time. Any
+# all webui access to SIDEKICK_HOME goes through one thread at a time. Any
 # subprocess.Popen() call inside `run_job` inherits the env at fork time,
 # which is also under the lock — so child processes always see a consistent
-# (own-profile) HERMES_HOME, never a half-swapped state.
+# (own-profile) SIDEKICK_HOME, never a half-swapped state.
 _cron_env_lock = threading.Lock()
 
 
@@ -311,15 +310,15 @@ def _pop_cron_profile_context_depth() -> None:
 def _home_for_scheduled_cron_job(job: dict) -> Path:
     """Resolve the profile home an auto-fired scheduler job should execute in.
 
-    Legacy jobs with no profile keep the scheduler's server-default profile.
-    Jobs pinned to a named profile execute under that profile's HERMES_HOME, so
+    Jobs with no profile keep the scheduler's server-default profile.
+    Jobs pinned to a named profile execute under that profile's SIDEKICK_HOME, so
     an in-process WebUI scheduler thread does not leak process-global config or
     .env into the agent run. If a profile was deleted after the job was saved,
     fall back to the server default rather than crashing every scheduler tick.
     """
     raw = str((job or {}).get('profile') or '').strip()
     if not raw:
-        return get_active_hermes_home()
+        return get_active_profile_home()
     if _is_root_profile(raw):
         return _DEFAULT_SIDEKICK_HOME
     if not _PROFILE_ID_RE.fullmatch(raw):
@@ -327,14 +326,14 @@ def _home_for_scheduled_cron_job(job: dict) -> Path:
             "Cron job %s has invalid profile %r; falling back to server default",
             (job or {}).get('id', '?'), raw,
         )
-        return get_active_hermes_home()
+        return get_active_profile_home()
     home = _resolve_named_profile_home(raw)
     if not home.is_dir():
         logger.warning(
             "Cron job %s references missing profile %r; falling back to server default",
             (job or {}).get('id', '?'), raw,
         )
-        return get_active_hermes_home()
+        return get_active_profile_home()
     return home
 
 
@@ -345,7 +344,7 @@ def install_cron_scheduler_profile_isolation() -> None:
     if a future/single-process deployment calls cron.scheduler.tick() from the
     WebUI worker, tick's background job path has no request TLS context. Wrap
     run_job so each auto-fired job's persisted ``profile`` field gets the same
-    HERMES_HOME isolation as the manual /api/crons/run path.
+    SIDEKICK_HOME isolation as the manual /api/crons/run path.
     """
     try:
         import cron.scheduler as _cs
@@ -372,7 +371,7 @@ def install_cron_scheduler_profile_isolation() -> None:
 
 
 class cron_profile_context_for_home:
-    """Context manager that pins HERMES_HOME to an explicit profile home path.
+    """Context manager that pins SIDEKICK_HOME to an explicit profile home path.
 
     Use this variant from worker threads that don't have TLS context (e.g. the
     background thread started by /api/crons/run). The HTTP-side variant below
@@ -388,22 +387,21 @@ class cron_profile_context_for_home:
         try:
             self._prev_env = os.environ.get('SIDEKICK_HOME')
             os.environ['SIDEKICK_HOME'] = str(self._home)
-            os.environ['HERMES_HOME'] = str(self._home)
 
             # Re-patch cron.jobs module-level constants (see main context manager
             # below for the rationale).
             self._prev_cj = None
             try:
                 import cron.jobs as _cj
-                self._prev_cj = (_cj.HERMES_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR)
-                _cj.HERMES_DIR = self._home
+                self._prev_cj = (_cj.SIDEKICK_HOME_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR)
+                _cj.SIDEKICK_HOME_DIR = self._home
                 _cj.CRON_DIR = self._home / 'cron'
                 _cj.JOBS_FILE = _cj.CRON_DIR / 'jobs.json'
                 _cj.OUTPUT_DIR = _cj.CRON_DIR / 'output'
             except (ImportError, AttributeError, NameError):
                 logger.debug("cron_profile_context_for_home: cron.jobs unavailable")
 
-            # cron.scheduler snapshots _hermes_home at import time and run_job()
+            # cron.scheduler snapshots _sidekick_home at import time and run_job()
             # reads config/.env from that module global. Patch it alongside
             # cron.jobs so manual WebUI runs actually execute under the selected
             # profile, not merely write output metadata there (#617).
@@ -411,11 +409,11 @@ class cron_profile_context_for_home:
             try:
                 import cron.scheduler as _cs
                 self._prev_cs = (
-                    getattr(_cs, '_hermes_home', None),
+                    getattr(_cs, '_sidekick_home', None),
                     getattr(_cs, '_LOCK_DIR', None),
                     getattr(_cs, '_LOCK_FILE', None),
                 )
-                _cs._hermes_home = self._home
+                _cs._sidekick_home = self._home
                 _cs._LOCK_DIR = self._home / 'cron'
                 _cs._LOCK_FILE = _cs._LOCK_DIR / '.tick.lock'
             except (ImportError, AttributeError, NameError):
@@ -430,20 +428,18 @@ class cron_profile_context_for_home:
         try:
             if self._prev_env is None:
                 os.environ.pop('SIDEKICK_HOME', None)
-                os.environ.pop('HERMES_HOME', None)
             else:
                 os.environ['SIDEKICK_HOME'] = self._prev_env
-                os.environ['HERMES_HOME'] = self._prev_env
             if self._prev_cj is not None:
                 try:
                     import cron.jobs as _cj
-                    _cj.HERMES_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR = self._prev_cj
+                    _cj.SIDEKICK_HOME_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR = self._prev_cj
                 except (ImportError, AttributeError, NameError):
                     pass
             if getattr(self, '_prev_cs', None) is not None:
                 try:
                     import cron.scheduler as _cs
-                    _cs._hermes_home, _cs._LOCK_DIR, _cs._LOCK_FILE = self._prev_cs
+                    _cs._sidekick_home, _cs._LOCK_DIR, _cs._LOCK_FILE = self._prev_cs
                 except (ImportError, AttributeError, NameError):
                     pass
         finally:
@@ -453,7 +449,7 @@ class cron_profile_context_for_home:
 
 
 class cron_profile_context:
-    """Context manager that pins HERMES_HOME to the TLS-active profile.
+    """Context manager that pins SIDEKICK_HOME to the TLS-active profile.
 
     Usage:
         with cron_profile_context():
@@ -469,9 +465,8 @@ class cron_profile_context:
         _push_cron_profile_context_depth()
         try:
             self._prev_env = os.environ.get('SIDEKICK_HOME')
-            home = get_active_hermes_home()
+            home = get_active_profile_home()
             os.environ['SIDEKICK_HOME'] = str(home)
-            os.environ['HERMES_HOME'] = str(home)
 
             # Re-patch cron.jobs module-level constants. They are snapshot at
             # import time (line 68-71 of cron/jobs.py) and don't participate in
@@ -480,8 +475,8 @@ class cron_profile_context:
             self._prev_cj = None
             try:
                 import cron.jobs as _cj
-                self._prev_cj = (_cj.HERMES_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR)
-                _cj.HERMES_DIR = home
+                self._prev_cj = (_cj.SIDEKICK_HOME_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR)
+                _cj.SIDEKICK_HOME_DIR = home
                 _cj.CRON_DIR = home / 'cron'
                 _cj.JOBS_FILE = _cj.CRON_DIR / 'jobs.json'
                 _cj.OUTPUT_DIR = _cj.CRON_DIR / 'output'
@@ -492,11 +487,11 @@ class cron_profile_context:
             try:
                 import cron.scheduler as _cs
                 self._prev_cs = (
-                    getattr(_cs, '_hermes_home', None),
+                    getattr(_cs, '_sidekick_home', None),
                     getattr(_cs, '_LOCK_DIR', None),
                     getattr(_cs, '_LOCK_FILE', None),
                 )
-                _cs._hermes_home = home
+                _cs._sidekick_home = home
                 _cs._LOCK_DIR = home / 'cron'
                 _cs._LOCK_FILE = _cs._LOCK_DIR / '.tick.lock'
             except (ImportError, AttributeError, NameError):
@@ -512,22 +507,20 @@ class cron_profile_context:
             # Restore env var
             if self._prev_env is None:
                 os.environ.pop('SIDEKICK_HOME', None)
-                os.environ.pop('HERMES_HOME', None)
             else:
                 os.environ['SIDEKICK_HOME'] = self._prev_env
-                os.environ['HERMES_HOME'] = self._prev_env
 
             # Restore cron.jobs module constants
             if self._prev_cj is not None:
                 try:
                     import cron.jobs as _cj
-                    _cj.HERMES_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR = self._prev_cj
+                    _cj.SIDEKICK_HOME_DIR, _cj.CRON_DIR, _cj.JOBS_FILE, _cj.OUTPUT_DIR = self._prev_cj
                 except (ImportError, AttributeError, NameError):
                     pass
             if getattr(self, '_prev_cs', None) is not None:
                 try:
                     import cron.scheduler as _cs
-                    _cs._hermes_home, _cs._LOCK_DIR, _cs._LOCK_FILE = self._prev_cs
+                    _cs._sidekick_home, _cs._LOCK_DIR, _cs._LOCK_FILE = self._prev_cs
                 except (ImportError, AttributeError, NameError):
                     pass
         finally:
@@ -536,8 +529,8 @@ class cron_profile_context:
         return False
 
 
-def get_hermes_home_for_profile(name: str) -> Path:
-    """Return the HERMES_HOME Path for *name* without mutating any process state.
+def get_profile_home(name: str) -> Path:
+    """Return the Sidekick home for *name* without mutating any process state.
 
     Safe to call from per-request context (streaming, session creation) because
     it reads only the filesystem — it never touches os.environ, module-level
@@ -593,7 +586,7 @@ def get_profile_runtime_env(home: Path) -> dict[str, str]:
     WebUI profile switching is per-client/cookie scoped, so it intentionally
     does not call ``switch_profile(..., process_wide=True)`` for every browser.
     Agent/tool code still consumes terminal backend settings through
-    environment variables (matching ``hermes -p <profile>``), so streaming must
+    environment variables (matching ``sidekick -p <profile>``), so streaming must
     apply the selected profile's terminal config and ``.env`` for the duration
     of that run.
     """
@@ -633,10 +626,9 @@ def get_profile_runtime_env(home: Path) -> dict[str, str]:
     return env
 
 
-def _set_hermes_home(home: Path):
-    """Set HERMES_HOME/SIDEKICK_HOME env var and monkey-patch cached module-level paths."""
+def _set_sidekick_home(home: Path):
+    """Set SIDEKICK_HOME and refresh cached module-level paths."""
     os.environ['SIDEKICK_HOME'] = str(home)
-    os.environ['HERMES_HOME'] = str(home)
 
     try:
         from web.api import config as _config
@@ -650,7 +642,7 @@ def _set_hermes_home(home: Path):
     try:
         from web.api import agent_workspace as _agent_workspace
 
-        _agent_workspace.HERMES_HOME = home
+        _agent_workspace.SIDEKICK_HOME = home
         _agent_workspace.WORKSPACES_ROOT = home / "workspaces"
     except Exception:
         logger.debug("Failed to patch web.api.agent_workspace home caches")
@@ -699,7 +691,7 @@ def _set_hermes_home(home: Path):
     # Patch cron/jobs module-level cache
     try:
         import cron.jobs as _cj
-        _cj.HERMES_DIR = home
+        _cj.SIDEKICK_HOME_DIR = home
         _cj.CRON_DIR = home / 'cron'
         _cj.JOBS_FILE = _cj.CRON_DIR / 'jobs.json'
         _cj.OUTPUT_DIR = _cj.CRON_DIR / 'output'
@@ -708,7 +700,7 @@ def _set_hermes_home(home: Path):
 
     try:
         import cron.scheduler as _cs
-        _cs._hermes_home = home
+        _cs._sidekick_home = home
         _cs._LOCK_DIR = home / 'cron'
         _cs._LOCK_FILE = _cs._LOCK_DIR / '.tick.lock'
     except (ImportError, AttributeError, NameError):
@@ -758,12 +750,12 @@ def init_profile_state() -> None:
     global _active_profile
     # Re-read the base home from the current environment before we resolve the
     # active profile.  Config.py can import this module after other tests or
-    # startup hooks have changed SIDEKICK_HOME / HERMES_HOME, and the cached
+    # startup hooks have changed SIDEKICK_HOME, and the cached
     # base home must not replay a stale directory from a previous import.
     refresh_profile_base_home_from_env()
     _active_profile = _read_active_profile_file()
-    home = get_active_hermes_home()
-    _set_hermes_home(home)
+    home = get_active_profile_home()
+    _set_sidekick_home(home)
     install_cron_scheduler_profile_isolation()
     _reload_dotenv(home)
 
@@ -788,7 +780,7 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
     # Import here to avoid circular import at module load
     from web.api.config import STREAMS, STREAMS_LOCK, reload_config
 
-    # Process-wide profile switches mutate HERMES_HOME, module-level path caches,
+    # Process-wide profile switches mutate SIDEKICK_HOME, module-level path caches,
     # os.environ-backed .env keys, and the global config cache. Keep those blocked
     # while any agent stream is active. Per-client WebUI switches are cookie/TLS
     # scoped (process_wide=False) and do not mutate those globals, so users can
@@ -813,7 +805,7 @@ def switch_profile(name: str, *, process_wide: bool = True) -> dict:
         if process_wide:
             global _active_profile
             _active_profile = name
-            _set_hermes_home(home)
+            _set_sidekick_home(home)
             _reload_dotenv(home)
 
     if process_wide:
@@ -906,7 +898,7 @@ def list_profiles_api() -> list:
         from cli.profiles import list_profiles
         infos = list_profiles()
     except ImportError:
-        # hermes_cli not available -- return just the default
+        # sidekick_cli not available -- return just the default
         return [_default_profile_dict()]
 
     active = get_active_profile_name()
@@ -927,7 +919,7 @@ def list_profiles_api() -> list:
 
 
 def _default_profile_dict() -> dict:
-    """Fallback profile dict when hermes_cli is not importable."""
+    """Fallback profile dict when sidekick_cli is not importable."""
     return {
         'name': 'default',
         'path': str(_DEFAULT_SIDEKICK_HOME),
@@ -942,7 +934,7 @@ def _default_profile_dict() -> dict:
 
 
 def _validate_profile_name(name: str):
-    """Validate profile name format (matches hermes_cli.profiles upstream)."""
+    """Validate profile name format (matches sidekick_cli.profiles upstream)."""
     if name == 'default':
         raise ValueError("Cannot create a profile named 'default' -- it is the built-in profile.")
     # Use fullmatch (not match) so a trailing newline can't sneak past the $ anchor
@@ -973,7 +965,7 @@ def _resolve_named_profile_home(name: str) -> Path:
 
 def _create_profile_fallback(name: str, clone_from: str = None,
                               clone_config: bool = False) -> Path:
-    """Create a profile directory without hermes_cli (Docker/standalone fallback)."""
+    """Create a profile directory without sidekick_cli (Docker/standalone fallback)."""
     profile_dir = _DEFAULT_SIDEKICK_HOME / 'profiles' / name
     if profile_dir.exists():
         raise FileExistsError(f"Profile '{name}' already exists.")
@@ -1050,7 +1042,7 @@ def create_profile_api(name: str, clone_from: str = None,
         _create_profile_fallback(name, clone_from, clone_config)
 
     # Resolve the profile directory from the profile list when possible.
-    # hermes_cli and the webui runtime do not always agree on the exact root,
+    # sidekick_cli and the webui runtime do not always agree on the exact root,
     # so we prefer the path returned by list_profiles_api() and fall back to the
     # standard profile location only if the profile cannot be found there yet.
     profile_path = _DEFAULT_SIDEKICK_HOME / 'profiles' / name
@@ -1070,7 +1062,7 @@ def create_profile_api(name: str, clone_from: str = None,
     _invalidate_root_profile_cache()
 
     # Find and return the newly created profile info.
-    # When hermes_cli is not importable, list_profiles_api() also falls back
+    # When sidekick_cli is not importable, list_profiles_api() also falls back
     # to the stub default-only list and won't find the new profile by name.
     # In that case, return a complete profile dict directly.
     for p in list_profiles_api():

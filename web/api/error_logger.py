@@ -2,7 +2,7 @@
 Sidekick — Structured Error Logger.
 
 Catches, stores, and exposes frontend and backend errors via a SQLite database.
-Hermes can query errors via API to debug WebUI issues without needing the browser's
+Sidekick can query errors via API to debug WebUI issues without needing the browser's
 DevTools console.
 
 Schema

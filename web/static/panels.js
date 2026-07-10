@@ -1422,7 +1422,7 @@ function _kanbanRenderMarkdownInline(escaped){
 
 function _kanbanRenderMarkdown(source){
   if (!source) return '';
-  return `<div class="hermes-kanban-md">${esc(source).split(/\r?\n/).map(line => line.trim() ? `<p>${_kanbanRenderMarkdownInline(line)}</p>` : '').join('')}</div>`;
+  return `<div class="sidekick-kanban-md">${esc(source).split(/\r?\n/).map(line => line.trim() ? `<p>${_kanbanRenderMarkdownInline(line)}</p>` : '').join('')}</div>`;
 }
 
 function _kanbanFormatDuration(seconds){
@@ -1830,7 +1830,7 @@ async function nudgeKanbanDispatcher(){
 async function runKanbanDispatcher(){
   if (_kanbanIsDispatching) return;
   // Real dispatch: claims Ready tasks and spawns worker subprocesses
-  // (one `hermes -p <assignee>` per claimed row, up to max=8 per call).
+  // (one `sidekick -p <assignee>` per claimed row, up to max=8 per call).
   // Confirmation dialog first because this actually consumes API budget on
   // each spawned worker.  Result toast surfaces what happened so users see
   // the dispatcher actually doing work.
@@ -6263,7 +6263,7 @@ async function loadSettingsPanel(){
       }catch(e){}
       _settingsSidekickDefaultModelOnOpen=(models&&models.default_model)||'';
       // Use the smart matcher so a saved bare form like "anthropic/claude-opus-4.6"
-      // (what the CLI's `hermes model` command writes) still selects the matching
+      // (what the CLI's `sidekick model` command writes) still selects the matching
       // `@nous:anthropic/claude-opus-4.6` option on a Nous setup. Without this, the
       // picker renders blank for any user whose default was persisted without the
       // @-prefix — CLI-first users, legacy installs, etc.
@@ -6415,7 +6415,7 @@ async function loadSettingsPanel(){
     // Password field: always blank (we don't send hash back)
     const pwField=$('settingsPassword');
     if(pwField){pwField.value='';pwField.addEventListener('input',_markSettingsDirty,{once:false});}
-    // #1560: when HERMES_WEBUI_PASSWORD env var is set, the settings password
+    // #1560: when SIDEKICK_WEBUI_PASSWORD env var is set, the settings password
     // field silently no-ops. Disable it + reveal the lock banner so the UI
     // tells the truth before a user tries (and the backend now also returns
     // 409 as defense-in-depth).
@@ -7895,7 +7895,7 @@ async function _appstoreRestartGateway(btn) {
     btn.textContent = 'Starte neu...';
   }
   try {
-    // Use the hermes CLI through the gateway restart endpoint
+    // Use the sidekick CLI through the gateway restart endpoint
     const result = await api('/api/gateway/restart', { method: 'POST' });
     if (btn) {
       btn.textContent = '✓ Gateway wird neu gestartet';
@@ -8465,7 +8465,7 @@ function _buildProviderCard(p){
   card.className='provider-card';
   card.dataset.provider=p.id;
   // Use the is_oauth flag from the backend — it reflects _OAUTH_PROVIDERS in providers.py.
-  // key_source can be 'oauth' (hermes auth), 'config_yaml' (token in config.yaml), or 'none'.
+  // key_source can be 'oauth' (sidekick auth), 'config_yaml' (token in config.yaml), or 'none'.
   const isOauth=p.is_oauth===true;
   // models_total reflects the complete catalog (e.g. 396 for a large-tier
   // Nous Portal account). The "models" array may be trimmed to a featured
@@ -8955,7 +8955,7 @@ const _cronNewJobIds=new Set();  // track which job IDs had new completions (unr
 
 // Auto-refresh the cron list when a job is created from chat or any external source.
 // The chat path dispatches this event when the agent response mentions cron creation.
-window.addEventListener('hermes:cron_created', () => {
+window.addEventListener('sidekick:cron_created', () => {
   if ($('cronList')) loadCrons();
 });
 

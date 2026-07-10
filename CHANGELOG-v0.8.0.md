@@ -1,15 +1,15 @@
-# v0.8.0 — Sidekick: Complete Hermes Decoupling
+# v0.8.0 — Sidekick: Complete Sidekick Decoupling
 
-**Das große Rebranding-Release.** Sidekick steht jetzt vollständig auf eigenen Beinen — alle `HERMES_*`-Env-Vars, Pfade, URLs und User-Facing-Strings wurden auf `SIDEKICK_*` migriert. Plus ein massives Installer-Overhaul und der vollständige Runtime-Port.
+**Das große Rebranding-Release.** Sidekick steht jetzt vollständig auf eigenen Beinen — alle `SIDEKICK_*`-Env-Vars, Pfade, URLs und User-Facing-Strings wurden auf `SIDEKICK_*` migriert. Plus ein massives Installer-Overhaul und der vollständige Runtime-Port.
 
 ---
 
 ## 🚀 Highlights
 
-### Rebranding — Komplette Entkopplung von Hermes
+### Rebranding — Komplette Entkopplung von Sidekick
 - **R10:** Dateinamen, Entrypoints, Docstrings auf Sidekick umgestellt
 - **R9:** Alle User-facing Strings (CLI-Name, Approval-Patterns, Symlink-Pfade)
-- **R8:** 80+ Dateien auf `SIDEKICK_*` Env-Vars mit Fallback zu `HERMES_*` migriert
+- **R8:** 80+ Dateien auf `SIDEKICK_*` Env-Vars mit Fallback zu `SIDEKICK_*` migriert
 - **R6:** `auth.py` + `cli.py` Env-Var Migration
 - **R4/R5:** Dual-Read/Write Pattern für 15 Kern-Dateien
 - **Version harmonisiert:** `v0.8.0` als single source of truth (`sidekick_cli`)

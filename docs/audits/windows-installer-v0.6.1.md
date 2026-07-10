@@ -104,7 +104,7 @@ Der Usage-Kommentar im Skriptkopf und die Fehlermeldung im äußeren Catch-Block
 | Antivirus / locked files | ⚠️ (unverändert seit v0.6.0) |
 | Pfade mit Leerzeichen | ✅ |
 | Secrets / API-Keys | ✅ |
-| Hermes / LastBrowser entfernt | ✅ |
+| Sidekick / LastBrowser entfernt | ✅ |
 | PowerShell Parse Check | ✅ |
 
 ---
@@ -123,7 +123,7 @@ Der Usage-Kommentar im Skriptkopf und die Fehlermeldung im äußeren Catch-Block
 | Pfade mit Leerzeichen | ✅ | ✅ |
 | Exit Codes | ⚠️ | ✅ |
 | Secrets / API-Keys | ✅ | ✅ |
-| Hermes / LastBrowser | ✅ | ✅ |
+| Sidekick / LastBrowser | ✅ | ✅ |
 
 ### Offene Punkte für v0.7.0+
 

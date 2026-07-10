@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 FORBIDDEN_PARTS = {
-    ".hermes",
+    ".sidekick",
     "home",
     "spaces",
     "bewusstsein",

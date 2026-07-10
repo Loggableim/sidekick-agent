@@ -37,11 +37,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[web,all]" pytest
+          python -m pip install -e ".[all,dev]"
 
       - name: Run pytest (unit tests)
         run: |
-          python -m pytest tests/ -v --tb=short
+          python -m coverage run -m pytest tests/ -v --tb=short
+          python -m coverage report
 
       - name: Run integration test
         run: |
@@ -72,8 +73,36 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[web,all]" pytest
+          python -m pip install -e ".[all,dev]"
 
       - name: Run smoke suite
         run: |
           python tests/smoke_all.py
+
+  package:
+    name: package integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel and source distribution
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m build
+          python -c "import glob, tarfile; archive = glob.glob('dist/*.tar.gz')[0]; names = tarfile.open(archive).getnames(); assert any(name.endswith('/nova/autonomy_policy.json') for name in names); assert not any('/nova/nova_data/' in name for name in names)"
+
+      - name: Install built wheel in an isolated environment
+        run: |
+          python -m venv .package-venv
+          .package-venv/bin/python -m pip install --upgrade pip
+          .package-venv/bin/python -m pip install dist/*.whl
+          .package-venv/bin/python -c "from importlib.resources import files; from pathlib import Path; import nova, providers, web; from providers import list_providers; assert (Path(web.__file__).parent / 'static' / 'index.html').is_file(); assert (Path(providers.__file__).parent / 'bundled' / 'openrouter' / '__init__.py').is_file(); assert (files(nova) / 'autonomy_policy.json').is_file(); assert any(p.name == 'openrouter' for p in list_providers()); print('wheel assets, Nova package, and provider profiles OK')"

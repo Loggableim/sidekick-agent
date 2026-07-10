@@ -5,13 +5,12 @@ import json
 from pathlib import Path
 
 
-def test_webui_home_resolution_prefers_hermes_home(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "hermes"
-    (hermes_home / "sidekick-agent").mkdir(parents=True)
-    (hermes_home / "state.db").write_text("", encoding="utf-8")
+def test_webui_home_resolution_uses_sidekick_home(monkeypatch, tmp_path):
+    sidekick_home = tmp_path / "sidekick"
+    (sidekick_home / "sidekick-agent").mkdir(parents=True)
+    (sidekick_home / "state.db").write_text("", encoding="utf-8")
 
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     from web.api import _home, agents, appstore, models, profiles, rollback, startup, state_sync
 
@@ -23,26 +22,26 @@ def test_webui_home_resolution_prefers_hermes_home(monkeypatch, tmp_path):
     importlib.reload(startup)
     importlib.reload(state_sync)
 
-    assert _home.get_webui_home() == hermes_home
-    assert profiles.get_active_hermes_home() == hermes_home
-    assert appstore._ENV_FILE == hermes_home / ".env"
-    assert appstore._CONFIG_FILE == hermes_home / "config.yaml"
-    assert startup._agent_dir() == hermes_home / "sidekick-agent"
-    assert rollback._hermes_home() == hermes_home
+    assert _home.get_webui_home() == sidekick_home
+    assert profiles.get_active_profile_home() == sidekick_home
+    assert appstore._ENV_FILE == sidekick_home / ".env"
+    assert appstore._CONFIG_FILE == sidekick_home / "config.yaml"
+    assert startup._agent_dir() == sidekick_home / "sidekick-agent"
+    assert rollback._sidekick_home() == sidekick_home
 
     monkeypatch.setattr(
         profiles,
-        "get_active_hermes_home",
+        "get_active_profile_home",
         lambda: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     monkeypatch.setattr(
         profiles,
-        "get_hermes_home_for_profile",
+        "get_profile_home",
         lambda _profile: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
-    assert models._get_profile_home("default") == hermes_home
-    assert models._active_state_db_path() == hermes_home / "state.db"
+    assert models._get_profile_home("default") == sidekick_home
+    assert models._active_state_db_path() == sidekick_home / "state.db"
 
     captured = {}
 
@@ -60,83 +59,78 @@ def test_webui_home_resolution_prefers_hermes_home(monkeypatch, tmp_path):
 
     db = state_sync._get_state_db()
     assert isinstance(db, FakeSessionDB)
-    assert captured["db_path"] == hermes_home / "state.db"
+    assert captured["db_path"] == sidekick_home / "state.db"
 
 
-def test_config_state_dir_uses_hermes_home_when_sidekick_home_missing(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "config-home"
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+def test_config_state_dir_uses_sidekick_home(monkeypatch, tmp_path):
+    sidekick_home = tmp_path / "config-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     import sys
 
     sys.modules.pop("web.api.config", None)
     config = importlib.import_module("web.api.config")
 
-    assert config.STATE_DIR == hermes_home / "state" / "webui"
+    assert config.STATE_DIR == sidekick_home / "state" / "webui"
 
 
-def test_agent_workspace_uses_hermes_home_when_sidekick_home_missing(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "agent-home"
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+def test_agent_workspace_uses_sidekick_home(monkeypatch, tmp_path):
+    sidekick_home = tmp_path / "agent-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     import sys
 
     sys.modules.pop("web.api.agent_workspace", None)
     agent_workspace = importlib.import_module("web.api.agent_workspace")
 
-    assert agent_workspace.HERMES_HOME == hermes_home
-    assert agent_workspace.WORKSPACES_ROOT == hermes_home / "workspaces"
+    assert agent_workspace.SIDEKICK_HOME == sidekick_home
+    assert agent_workspace.WORKSPACES_ROOT == sidekick_home / "workspaces"
 
 
-def test_evey_tools_uses_hermes_home_when_sidekick_home_missing(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "evey-home"
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+def test_evey_tools_uses_sidekick_home(monkeypatch, tmp_path):
+    sidekick_home = tmp_path / "evey-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     import sys
 
     sys.modules.pop("web.api.evey_tools", None)
     evey_tools = importlib.import_module("web.api.evey_tools")
 
-    assert evey_tools.get_hermes_home() == hermes_home
-    assert evey_tools.HERMES_HOME == hermes_home
-    assert evey_tools.EVEY_DIR == hermes_home / "workspace" / "evey"
+    assert evey_tools.get_sidekick_home() == sidekick_home
+    assert evey_tools.SIDEKICK_HOME == sidekick_home
+    assert evey_tools.EVEY_DIR == sidekick_home / "workspace" / "evey"
 
 
 def test_routes_helpers_use_shared_webui_home_fallback(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "routes-home"
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    sidekick_home = tmp_path / "routes-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     from web.api import profiles, routes
 
     monkeypatch.setattr(
         profiles,
-        "get_active_hermes_home",
+        "get_active_profile_home",
         lambda: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
-    assert routes._active_skills_dir() == hermes_home / "skills"
-    assert routes._gateway_session_metadata_path() == hermes_home / "sessions" / "sessions.json"
-    assert routes._llm_wiki_active_hermes_home() == hermes_home
+    assert routes._active_skills_dir() == sidekick_home / "skills"
+    assert routes._gateway_session_metadata_path() == sidekick_home / "sessions" / "sessions.json"
+    assert routes._llm_wiki_active_sidekick_home() == sidekick_home
 
 
 def test_gateway_watcher_uses_shared_webui_home_fallback(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "watcher-home"
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    sidekick_home = tmp_path / "watcher-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     from web.api import gateway_watcher, profiles
 
     monkeypatch.setattr(
         profiles,
-        "get_active_hermes_home",
+        "get_active_profile_home",
         lambda: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
-    assert gateway_watcher._get_state_db_path() == hermes_home / "state.db"
+    assert gateway_watcher._get_state_db_path() == sidekick_home / "state.db"
 
 
 def test_appstore_install_uses_active_profile_home_after_import(monkeypatch, tmp_path):
@@ -165,7 +159,7 @@ def test_appstore_install_uses_active_profile_home_after_import(monkeypatch, tmp
     (active_home / "config.yaml").write_text("model:\n  default: gpt-oss\n", encoding="utf-8")
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.appstore", None)
     appstore = importlib.import_module("web.api.appstore")
@@ -209,7 +203,7 @@ def test_evey_tools_uses_active_profile_home_after_import(monkeypatch, tmp_path)
     )
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.evey_tools", None)
     evey_tools = importlib.import_module("web.api.evey_tools")
@@ -245,7 +239,7 @@ def test_routes_use_active_profile_home_after_import(monkeypatch, tmp_path):
     media_file.write_text("active media\n", encoding="utf-8")
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -303,8 +297,7 @@ def test_mail_config_get_falls_back_to_legacy_space_yaml_gmail_accounts(monkeypa
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -349,8 +342,7 @@ def test_mail_setup_post_saves_synthesized_config_and_activates_mail_app(monkeyp
         ),
         encoding="utf-8",
     )
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -415,8 +407,7 @@ def test_mail_setup_post_uses_builtin_mail_manifest_when_store_manifest_missing(
     import sys
 
     active_home = tmp_path / "active-home"
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -475,7 +466,7 @@ def test_mail_setup_post_reports_install_recording_failure(monkeypatch, tmp_path
 
     active_home = tmp_path / "active-home"
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -520,7 +511,7 @@ def test_mail_setup_post_reports_activation_failure(monkeypatch, tmp_path):
 
     active_home = tmp_path / "active-home"
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -569,7 +560,7 @@ def test_mail_setup_post_validates_mail_connection_before_persisting(monkeypatch
 
     active_home = tmp_path / "active-home"
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -620,7 +611,7 @@ def test_mail_setup_post_validates_smtp_connection_before_persisting(monkeypatch
 
     active_home = tmp_path / "active-home"
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -697,7 +688,7 @@ def test_mail_setup_post_preserves_additional_inboxes(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -765,7 +756,7 @@ def test_mail_setup_post_clears_stale_default_flags_on_existing_inboxes(monkeypa
         encoding="utf-8",
     )
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -848,7 +839,7 @@ def test_mail_imap_prefers_active_profile_home_for_request_scoped_config(monkeyp
     )
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("tools.mail_imap", None)
     mail_imap = importlib.import_module("tools.mail_imap")
@@ -867,7 +858,7 @@ def test_mail_search_prefers_sidekick_workspace_env_when_user_task_missing(monke
 
     captured = {}
 
-    monkeypatch.delenv("HERMES_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
     monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "demo")
 
     def fake_get_inbox_config(space_slug, inbox_id):
@@ -884,13 +875,13 @@ def test_mail_search_prefers_sidekick_workspace_env_when_user_task_missing(monke
     assert result["error"] == "Inbox not found"
 
 
-def test_mail_search_prefers_hermes_workspace_env_when_user_task_missing(monkeypatch):
+def test_mail_search_prefers_sidekick_workspace_env_when_user_task_missing(monkeypatch):
     from tools import mail_search
 
     captured = {}
 
     monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
+    monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
 
     def fake_get_inbox_config(space_slug, inbox_id):
         captured["space_slug"] = space_slug
@@ -911,7 +902,7 @@ def test_mail_send_prefers_sidekick_workspace_env_when_user_task_missing(monkeyp
 
     captured = {}
 
-    monkeypatch.delenv("HERMES_WEBUI_ACTIVE_WORKSPACE", raising=False)
+    monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
     monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "demo")
 
     def fake_get_inbox_config(space_slug, inbox_id):
@@ -937,13 +928,13 @@ def test_mail_send_prefers_sidekick_workspace_env_when_user_task_missing(monkeyp
     assert result["error"] == "Inbox not found"
 
 
-def test_mail_read_prefers_hermes_workspace_env_when_user_task_missing(monkeypatch):
+def test_mail_read_prefers_sidekick_workspace_env_when_user_task_missing(monkeypatch):
     from tools import mail_read
 
     captured = {}
 
     monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
+    monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
 
     def fake_get_inbox_config(space_slug, inbox_id):
         captured["space_slug"] = space_slug
@@ -959,13 +950,13 @@ def test_mail_read_prefers_hermes_workspace_env_when_user_task_missing(monkeypat
     assert result["error"] == "Inbox not found"
 
 
-def test_mail_folders_prefers_hermes_workspace_env_when_user_task_missing(monkeypatch):
+def test_mail_folders_prefers_sidekick_workspace_env_when_user_task_missing(monkeypatch):
     from tools import mail_folders
 
     captured = {}
 
     monkeypatch.delenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
+    monkeypatch.setenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "legacy-demo")
 
     def fake_get_space_config(space_slug):
         captured["space_slug"] = space_slug
@@ -989,7 +980,7 @@ def test_space_engine_uses_active_profile_home_after_import(monkeypatch, tmp_pat
     (active_home_b / "spaces" / "beta").mkdir(parents=True)
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.space_engine", None)
     space_engine = importlib.import_module("web.api.space_engine")
@@ -1016,7 +1007,7 @@ def test_workspace_isolation_uses_active_profile_home_after_import(monkeypatch, 
     (active_home_b / "workspaces" / "beta").mkdir(parents=True)
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.workspace_isolation", None)
     workspace_isolation = importlib.import_module("web.api.workspace_isolation")
@@ -1045,7 +1036,7 @@ def test_profile_switch_refreshes_space_roots_after_import(monkeypatch):
 
     monkeypatch.setattr(Path, "home", lambda: fake_home)
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_home))
 
     sys.modules.pop("web.api.workspace", None)
     sys.modules.pop("web.api.space_engine", None)
@@ -1058,7 +1049,7 @@ def test_profile_switch_refreshes_space_roots_after_import(monkeypatch):
     workspace_isolation = importlib.import_module("web.api.workspace_isolation")
     profiles = importlib.import_module("web.api.profiles")
 
-    profiles._set_hermes_home(active_home)
+    profiles._set_sidekick_home(active_home)
 
     assert space_engine.SPACES_ROOT == active_home / "spaces"
     assert workspace_isolation.WORKSPACES_ROOT == active_home / "workspaces"
@@ -1082,7 +1073,7 @@ def test_agents_llm_config_uses_active_profile_home_after_import(monkeypatch, tm
     (active_home_b / "config.yaml").write_text("model:\n  default: model-b\n", encoding="utf-8")
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
     sys.modules.pop("web.api.agents", None)
@@ -1102,7 +1093,7 @@ def test_agents_llm_config_uses_active_profile_home_after_import(monkeypatch, tm
     assert cfg_b["model"] == "model-b"
 
 
-def test_oauth_auth_json_uses_hermes_home_when_sidekick_home_missing(monkeypatch, tmp_path):
+def test_oauth_auth_json_uses_sidekick_home(monkeypatch, tmp_path):
     import sys
 
     active_home = tmp_path / "active-home"
@@ -1112,8 +1103,7 @@ def test_oauth_auth_json_uses_hermes_home_when_sidekick_home_missing(monkeypatch
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(active_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(active_home))
 
     sys.modules.pop("web.api.oauth", None)
     oauth = importlib.import_module("web.api.oauth")
@@ -1139,14 +1129,14 @@ def test_oauth_read_auth_json_uses_active_profile_after_import(monkeypatch, tmp_
     )
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.oauth", None)
     oauth = importlib.import_module("web.api.oauth")
     profiles = importlib.import_module("web.api.profiles")
 
     monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "coder")
-    monkeypatch.setattr(profiles, "get_active_hermes_home", lambda: active_home)
+    monkeypatch.setattr(profiles, "get_active_profile_home", lambda: active_home)
 
     assert oauth.read_auth_json() == {"credential_pool": {"openai-codex": [{"id": "active"}]}}
 
@@ -1167,7 +1157,7 @@ def test_profile_switch_refreshes_state_paths_after_import(monkeypatch, tmp_path
         encoding="utf-8",
     )
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_home))
 
     sys.modules.pop("web.api.auth", None)
     sys.modules.pop("web.api.error_logger", None)
@@ -1183,7 +1173,7 @@ def test_profile_switch_refreshes_state_paths_after_import(monkeypatch, tmp_path
     config = importlib.import_module("web.api.config")
     profiles = importlib.import_module("web.api.profiles")
 
-    profiles._set_hermes_home(active_home)
+    profiles._set_sidekick_home(active_home)
 
     token = auth.create_session()
     error_id = error_logger.log_error(message="profile-switch")
@@ -1195,7 +1185,7 @@ def test_profile_switch_refreshes_state_paths_after_import(monkeypatch, tmp_path
     assert error_logger.DB_PATH == active_home / "state" / "webui" / "logs" / "errors.db"
     assert appstore._ENV_FILE == active_home / ".env"
     assert appstore._CONFIG_FILE == active_home / "config.yaml"
-    assert agent_workspace.HERMES_HOME == active_home
+    assert agent_workspace.SIDEKICK_HOME == active_home
     assert agent_workspace.WORKSPACES_ROOT == active_home / "workspaces"
     assert oauth.AUTH_JSON_PATH == active_home / "auth.json"
     assert oauth.read_auth_json() == {"credential_pool": {"openai-codex": [{"id": "active"}]}}
@@ -1220,7 +1210,7 @@ def test_session_import_uses_active_default_workspace_and_model(monkeypatch, tmp
     active_workspace.mkdir()
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_home))
     monkeypatch.setenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE", str(import_workspace))
     monkeypatch.setenv("SIDEKICK_WEBUI_DEFAULT_MODEL", "import-model")
 
@@ -1230,7 +1220,7 @@ def test_session_import_uses_active_default_workspace_and_model(monkeypatch, tmp
     routes = importlib.import_module("web.api.routes")
     profiles = importlib.import_module("web.api.profiles")
 
-    profiles._set_hermes_home(active_home)
+    profiles._set_sidekick_home(active_home)
     monkeypatch.setenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE", str(active_workspace))
     monkeypatch.setenv("SIDEKICK_WEBUI_DEFAULT_MODEL", "active-model")
     monkeypatch.setattr(
@@ -1279,7 +1269,7 @@ def test_workspace_module_refreshes_config_paths_after_import(monkeypatch, tmp_p
     (active_state / "last_workspace.txt").write_text(str(active_ws), encoding="utf-8")
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_home))
 
     sys.modules.pop("web.api.workspace", None)
     sys.modules.pop("web.api.config", None)
@@ -1287,7 +1277,7 @@ def test_workspace_module_refreshes_config_paths_after_import(monkeypatch, tmp_p
     workspace = importlib.import_module("web.api.workspace")
     profiles = importlib.import_module("web.api.profiles")
 
-    profiles._set_hermes_home(active_home)
+    profiles._set_sidekick_home(active_home)
 
     assert workspace.load_workspaces() == [{"path": str(active_ws.resolve()), "name": "active"}]
     assert workspace.get_last_workspace() == str(active_ws.resolve())
@@ -1302,19 +1292,18 @@ def test_workspace_module_refreshes_config_paths_after_import(monkeypatch, tmp_p
     ]
 
 
-def test_mail_imap_uses_hermes_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+def test_mail_imap_uses_sidekick_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
     import sys
 
-    hermes_home = tmp_path / "hermes-home"
-    space_root = hermes_home / "spaces" / "demo"
+    sidekick_home = tmp_path / "sidekick-home"
+    space_root = sidekick_home / "spaces" / "demo"
     space_root.mkdir(parents=True)
     (space_root / "mail.json").write_text(
         json.dumps({"inboxes": [{"id": "work", "imap_host": "imap.example.com"}]}),
         encoding="utf-8",
     )
 
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     sys.modules.pop("tools.mail_imap", None)
     mail_imap = importlib.import_module("tools.mail_imap")
@@ -1334,7 +1323,7 @@ def test_streaming_thread_env_sets_both_home_vars(monkeypatch, tmp_path):
     workspace.mkdir(parents=True)
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.streaming", None)
     streaming = importlib.import_module("web.api.streaming")
@@ -1342,12 +1331,9 @@ def test_streaming_thread_env_sets_both_home_vars(monkeypatch, tmp_path):
     env = streaming._build_agent_thread_env({}, str(workspace), "session-123", str(profile_home))
 
     assert env["SIDEKICK_HOME"] == str(profile_home)
-    assert env["HERMES_HOME"] == str(profile_home)
     assert env["SIDEKICK_PLATFORM"] == "webui"
     assert env["SIDEKICK_SESSION_PLATFORM"] == "webui"
-    assert env["HERMES_SESSION_PLATFORM"] == "webui"
     assert env["SIDEKICK_SESSION_KEY"] == "session-123"
-    assert env["HERMES_SESSION_KEY"] == "session-123"
 
 
 def test_streaming_restore_browser_env_is_independent_of_session_key(monkeypatch):
@@ -1355,7 +1341,6 @@ def test_streaming_restore_browser_env_is_independent_of_session_key(monkeypatch
     import sys
 
     monkeypatch.setenv("SIDEKICK_HOME", "current-sidekick")
-    monkeypatch.setenv("HERMES_HOME", "current-hermes")
     monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_SESSION_ID", "current-session")
     monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_BASE_URL", "http://current")
     monkeypatch.setenv("SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE", "current-mode")
@@ -1365,7 +1350,7 @@ def test_streaming_restore_browser_env_is_independent_of_session_key(monkeypatch
     sys.modules.pop("web.api.streaming", None)
     streaming = importlib.import_module("web.api.streaming")
 
-    streaming._restore_streaming_home_env("old-sidekick", "old-hermes")
+    streaming._restore_streaming_home_env("old-sidekick")
     streaming._restore_streaming_browser_env(
         "old-session",
         "http://old",
@@ -1374,7 +1359,6 @@ def test_streaming_restore_browser_env_is_independent_of_session_key(monkeypatch
     )
 
     assert os.environ["SIDEKICK_HOME"] == "old-sidekick"
-    assert os.environ["HERMES_HOME"] == "old-hermes"
     assert os.environ["SIDEKICK_WEBUI_BROWSER_SESSION_ID"] == "old-session"
     assert os.environ["SIDEKICK_WEBUI_BROWSER_BASE_URL"] == "http://old"
     assert os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE"] == "old-mode"
@@ -1410,7 +1394,7 @@ def test_supermemory_client_uses_active_profile_after_import(monkeypatch, tmp_pa
     monkeypatch.setitem(sys.modules, "supermemory", fake_module)
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
 
     sys.modules.pop("web.api.routes", None)
     routes = importlib.import_module("web.api.routes")
@@ -1428,76 +1412,24 @@ def test_supermemory_client_uses_active_profile_after_import(monkeypatch, tmp_pa
     assert client_b is not client_a
 
 
-def test_nova_state_snapshot_cache_tracks_active_profile_home(monkeypatch, tmp_path):
-    import os
+def test_nova_state_snapshot_uses_the_shipped_package(monkeypatch, tmp_path):
     import sys
 
-    import_path_home = tmp_path / "import-home"
-    active_home_a = tmp_path / "active-home-a"
-    active_home_b = tmp_path / "active-home-b"
-    import_snapshot = import_path_home / "spaces" / "nova" / "state_snapshot.py"
-    snapshot_a = active_home_a / "spaces" / "nova" / "state_snapshot.py"
-    snapshot_b = active_home_b / "spaces" / "nova" / "state_snapshot.py"
-    import_snapshot.parent.mkdir(parents=True)
-    snapshot_a.parent.mkdir(parents=True)
-    snapshot_b.parent.mkdir(parents=True)
-    import_snapshot.write_text(
-        'HOME_MARKER = "import"\n'
-        'def load_router_health():\n'
-        '    return {"marker": HOME_MARKER}\n',
-        encoding="utf-8",
-    )
-    snapshot_a.write_text(
-        'HOME_MARKER = "a"\n'
-        'def load_router_health():\n'
-        '    return {"marker": HOME_MARKER}\n',
-        encoding="utf-8",
-    )
-    snapshot_b.write_text(
-        'HOME_MARKER = "b"\n'
-        'def load_router_health():\n'
-        '    return {"marker": HOME_MARKER}\n',
-        encoding="utf-8",
-    )
-    fixed_mtime = 1_700_000_000
-    os.utime(import_snapshot, (fixed_mtime, fixed_mtime))
-    os.utime(snapshot_a, (fixed_mtime, fixed_mtime))
-    os.utime(snapshot_b, (fixed_mtime, fixed_mtime))
-
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
-
-    sys.modules.pop("web.api.routes", None)
-    sys.modules.pop("web.api.providers", None)
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "sidekick-home"))
     sys.modules.pop("web.api.nova_paths", None)
-    routes = importlib.import_module("web.api.routes")
-    providers = importlib.import_module("web.api.providers")
     nova_paths = importlib.import_module("web.api.nova_paths")
 
-    routes._NOVA_ROUTE_STATUS_CACHE.update({"module": None, "path": None, "mtime": None})
-    providers._NOVA_STATE_SNAPSHOT_CACHE.update({"module": None, "path": None, "mtime": None})
+    source_path = nova_paths.get_nova_state_snapshot_path()
 
-    monkeypatch.setattr(nova_paths, "get_active_webui_home", lambda: active_home_a)
-    status_a = routes._load_nova_route_status()
-    module_a = providers._load_nova_state_snapshot_module()
-
-    monkeypatch.setattr(nova_paths, "get_active_webui_home", lambda: active_home_b)
-    status_b = routes._load_nova_route_status()
-    module_b = providers._load_nova_state_snapshot_module()
-
-    assert status_a["marker"] == "a"
-    assert status_b["marker"] == "b"
-    assert module_a is not None and getattr(module_a, "HOME_MARKER", None) == "a"
-    assert module_b is not None and getattr(module_b, "HOME_MARKER", None) == "b"
+    assert source_path == Path(__file__).resolve().parents[1] / "nova" / "state_snapshot.py"
+    assert source_path.is_file()
 
 
-def test_streaming_home_restore_uses_both_variables(monkeypatch):
+def test_streaming_home_restore_uses_sidekick_home(monkeypatch):
     from web.api import streaming
 
     monkeypatch.setenv("SIDEKICK_HOME", "mutated-sidekick")
-    monkeypatch.setenv("HERMES_HOME", "mutated-hermes")
 
-    streaming._restore_streaming_home_env("original-sidekick", "original-hermes")
+    streaming._restore_streaming_home_env("original-sidekick")
 
     assert streaming.os.environ["SIDEKICK_HOME"] == "original-sidekick"
-    assert streaming.os.environ["HERMES_HOME"] == "original-hermes"

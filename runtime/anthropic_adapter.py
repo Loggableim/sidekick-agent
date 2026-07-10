@@ -420,7 +420,7 @@ def _is_kimi_family_endpoint(base_url: str | None, model: str | None = None) -> 
 
     Used to decide whether to drop Anthropic's ``thinking`` kwarg and to
     preserve unsigned reasoning_content-derived thinking blocks on replay.
-    See hermes-agent#13848, #17057.
+    See sidekick-agent#13848, #17057.
     """
     if _is_kimi_coding_endpoint(base_url):
         return True
@@ -449,7 +449,7 @@ def _is_deepseek_anthropic_endpoint(base_url: str | None) -> bool:
     policy used for Kimi's ``/coding`` endpoint.  The match is pinned to
     the ``/anthropic`` path so the OpenAI-compatible ``api.deepseek.com``
     base URL (which never reaches this adapter) is not misclassified.
-    See hermes-agent#16748.
+    See sidekick-agent#16748.
     """
     if not base_url_host_matches(base_url or "", "api.deepseek.com"):
         return False
@@ -1052,7 +1052,7 @@ def _generate_pkce() -> tuple:
     return verifier, challenge
 
 
-def run_hermes_oauth_login_pure() -> Optional[Dict[str, Any]]:
+def run_sidekick_oauth_login_pure() -> Optional[Dict[str, Any]]:
     """Run Sidekick-native OAuth PKCE flow and return credential state."""
     import time
     import webbrowser
@@ -1150,7 +1150,7 @@ def run_hermes_oauth_login_pure() -> Optional[Dict[str, Any]]:
     }
 
 
-def read_hermes_oauth_credentials() -> Optional[Dict[str, Any]]:
+def read_sidekick_oauth_credentials() -> Optional[Dict[str, Any]]:
     """Read Sidekick-managed OAuth credentials from ~/.sidekick/.anthropic_oauth.json."""
     if _SIDEKICK_OAUTH_FILE.exists():
         try:
@@ -1529,7 +1529,7 @@ def convert_messages_to_anthropic(
             # Kimi's /coding endpoint (Anthropic protocol) requires assistant
             # tool-call messages to carry reasoning_content when thinking is
             # enabled server-side.  Preserve it as a thinking block so Kimi
-            # can validate the message history.  See hermes-agent#13848.
+            # can validate the message history.  See sidekick-agent#13848.
             #
             # Accept empty string "" — _copy_reasoning_content_for_api()
             # injects "" as a tier-3 fallback for Kimi tool-call messages
@@ -1744,7 +1744,7 @@ def convert_messages_to_anthropic(
     # synthesised from reasoning_content round-trip on subsequent turns when
     # thinking is enabled.  Signed Anthropic blocks still have to be stripped
     # (neither endpoint can validate Anthropic's signatures); unsigned blocks
-    # are preserved.  See hermes-agent#13848 (Kimi) and #16748 (DeepSeek).
+    # are preserved.  See sidekick-agent#13848 (Kimi) and #16748 (DeepSeek).
     _preserve_unsigned_thinking = (
         _is_kimi_family_endpoint(base_url, model)
         or _is_deepseek_anthropic_endpoint(base_url)

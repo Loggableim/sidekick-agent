@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Copy zero-dependency agent modules from cids-hermes-agent/agent/ to sidekick/runtime/,
+Copy zero-dependency agent modules from cids-sidekick-agent/agent/ to sidekick/runtime/,
 rewriting their internal imports to match the new package structure.
 
 Modules that import NOTHING from the agent package (stdlib/external only) are copied
 as-is. Modules importing from 'utils', 'sidekick_constants', etc. get their imports
 rewritten per the mapping below.
 
-Also copies sidekick_constants.py and hermes_constants.py as reference files into
+Also copies sidekick_constants.py and sidekick_constants.py as reference files into
 runtime/_compat/.
 """
 
@@ -15,8 +15,8 @@ import os
 import shutil
 import re
 
-SRC_BASE = r"C:\HermesPortable\cids-hermes-agent"
-DST_BASE = r"C:\HermesPortable\sidekick"
+SRC_BASE = r"C:\SidekickPortable\cids-sidekick-agent"
+DST_BASE = r"C:\SidekickPortable\sidekick"
 
 SRC_AGENT = os.path.join(SRC_BASE, "agent")
 DST_RUNTIME = os.path.join(DST_BASE, "runtime")
@@ -68,8 +68,8 @@ REWRITE_RULES = [
     (r'^from sidekick_logging import', 'from runtime._compat.shim_logging import'),
     # 4. 'from sidekick_state import' → 'from runtime._compat.shim_state import'
     (r'^from sidekick_state import', 'from runtime._compat.shim_state import'),
-    # 5. 'from hermes_constants import' → 'from runtime._compat.shim_constants import'
-    (r'^from hermes_constants import', 'from runtime._compat.shim_constants import'),
+    # 5. 'from sidekick_constants import' → 'from runtime._compat.shim_constants import'
+    (r'^from sidekick_constants import', 'from runtime._compat.shim_constants import'),
     # 6. 'from sidekick_bootstrap import' → 'from runtime._compat.shim_bootstrap import'
     (r'^from sidekick_bootstrap import', 'from runtime._compat.shim_bootstrap import'),
     # 7. 'from utils import' → 'from shared.utils import'
@@ -130,7 +130,7 @@ def main():
     # Copy reference files: sidekick_constants.py → shim_constants_v2.py
     ref_files = [
         ("sidekick_constants.py", "shim_constants_v2.py"),
-        ("hermes_constants.py", "shim_constants_v1.py"),
+        ("sidekick_constants.py", "shim_constants_v1.py"),
     ]
     for src_name, dst_name in ref_files:
         src_path = os.path.join(SRC_BASE, src_name)

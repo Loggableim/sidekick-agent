@@ -71,11 +71,11 @@ def test_windows_zip_update_fallback_uses_sidekick_master_archive():
 
     assert "Loggableim/sidekick-agent" in source
     assert 'branch = "master"' in source
-    assert "NousResearch/hermes-agent" not in source
+    assert "NousResearch/sidekick-agent" not in source
     assert 'branch = "main"' not in source
 
 
-def test_import_web_server_does_not_run_git():
+def test_import_fastapi_web_server_does_not_run_git():
     script = textwrap.dedent(
         """
         import subprocess
@@ -84,13 +84,13 @@ def test_import_web_server_does_not_run_git():
 
         def blocked_run(cmd, *args, **kwargs):
             if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "git":
-                raise AssertionError("web.server import ran git")
+                raise AssertionError("cli.web_server import ran git")
             return real_run(cmd, *args, **kwargs)
 
         subprocess.run = blocked_run
 
-        import web.server
-        assert web.server.Handler.server_version
+        import cli.web_server
+        assert cli.web_server.app.title == "Sidekick Agent"
         """
     )
 
@@ -123,7 +123,7 @@ def test_web_server_run_git_uses_utf8_decode_guards(monkeypatch, tmp_path):
     assert captured["kwargs"]["errors"] == "replace"
 
 
-def test_tui_node_bootstrap_uses_hermes_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+def test_tui_node_bootstrap_uses_sidekick_home(monkeypatch, tmp_path):
     import cli.main as main
 
     repo_root = tmp_path / "repo"
@@ -133,8 +133,7 @@ def test_tui_node_bootstrap_uses_hermes_home_when_sidekick_home_is_missing(monke
 
     captured = {}
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "sidekick-home"))
     monkeypatch.setattr(main, "PROJECT_ROOT", repo_root)
     monkeypatch.setattr(main.shutil, "which", lambda _name: None)
 
@@ -146,17 +145,16 @@ def test_tui_node_bootstrap_uses_hermes_home_when_sidekick_home_is_missing(monke
 
     main._ensure_tui_node()
 
-    assert captured["env"]["HERMES_HOME"] == str(tmp_path / "hermes-home")
+    assert captured["env"]["SIDEKICK_HOME"] == str(tmp_path / "sidekick-home")
 
 
-def test_cleanup_gateway_service_restores_env_without_crashing_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+def test_cleanup_gateway_service_restores_unset_sidekick_home(monkeypatch, tmp_path):
     import cli.profiles as profiles
 
     profile_dir = tmp_path / "profiles" / "coder"
     profile_dir.mkdir(parents=True)
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     monkeypatch.setattr("platform.system", lambda: "Windows")
     monkeypatch.setattr("cli.gateway.get_service_name", lambda: "sidekick-coder")
     monkeypatch.setattr("cli.gateway.get_launchd_plist_path", lambda: tmp_path / "unused.plist")
@@ -164,4 +162,3 @@ def test_cleanup_gateway_service_restores_env_without_crashing_when_sidekick_hom
     profiles._cleanup_gateway_service("coder", profile_dir)
 
     assert os.environ.get("SIDEKICK_HOME") is None
-    assert os.environ.get("HERMES_HOME") == str(tmp_path / "hermes-home")

@@ -48,7 +48,7 @@ def load_sidekick_dotenv(
     path: Path | None = None,
     *,
     override: bool = False,
-    hermes_home: str | os.PathLike | None = None,
+    sidekick_home: str | os.PathLike | None = None,
     project_env: str | os.PathLike | None = None,
 ) -> list[Path]:
     """Load env vars from a .env file, minimal runtime shim version."""
@@ -59,8 +59,8 @@ def load_sidekick_dotenv(
     if path is not None:
         env_paths.append((Path(path), override))
     else:
-        if hermes_home is not None:
-            env_paths.append((Path(hermes_home) / ".env", True))
+        if sidekick_home is not None:
+            env_paths.append((Path(sidekick_home) / ".env", True))
         else:
             env_paths.append((get_env_path(), True))
         if project_env is not None:
@@ -77,9 +77,6 @@ def load_sidekick_dotenv(
     return loaded
 
 
-load_hermes_dotenv = load_sidekick_dotenv
-
-
 def _sanitize_env_file_if_needed(path: Path) -> None:
     """Stub — no sanitization needed in migration."""
     pass
@@ -92,6 +89,5 @@ def _format_offending_chars(value: str, limit: int = 3) -> str:
 
 __all__ = [
     "load_sidekick_dotenv",
-    "load_hermes_dotenv",
     "_sanitize_env_file_if_needed",
 ]

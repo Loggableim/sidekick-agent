@@ -6,12 +6,12 @@ var SESSION_QUEUES=window.SESSION_QUEUES||{};  // keyed by session_id for queued
 window.SESSION_QUEUES=SESSION_QUEUES;
 const MAX_UPLOAD_BYTES=20*1024*1024;
 const MAX_UPLOAD_MB=Math.round(MAX_UPLOAD_BYTES/1024/1024);
-function hermesApiUrl(path){
+function sidekickApiUrl(path){
   const rel=String(path||'').replace(/^\/+/,'');
   return new URL(rel,document.baseURI||location.href);
 }
 async function fetchJson(path,opts={}){
-  const url=hermesApiUrl(path);
+  const url=sidekickApiUrl(path);
   const headers=new Headers(opts.headers||{});
   if(opts.body!=null&&!headers.has('Content-Type')) headers.set('Content-Type','application/json');
   const res=await fetch(url.href,{credentials:'include',...opts,headers});
@@ -30,7 +30,7 @@ async function fetchJson(path,opts={}){
   }
   return data;
 }
-window.hermesApiUrl=hermesApiUrl;
+window.sidekickApiUrl=sidekickApiUrl;
 window.fetchJson=fetchJson;
 
 let _appShellScrollResetPending=false;
@@ -244,7 +244,7 @@ function initOfflineMonitor(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initOfflineMonitor,{once:true});
 else initOfflineMonitor();
 // Redirect to login when the server responds with 401 (auth session expired).
-// Handles iOS PWA standalone mode and keeps subpath mounts like /hermes/ from
+// Handles iOS PWA standalone mode and keeps subpath mounts like /sidekick/ from
 // escaping to the personal site root /login.
 function _redirectIfUnauth(res){if(res&&res.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);return true;}return false;}
 function _getSessionQueue(sid, create=false){
@@ -639,7 +639,7 @@ const CAST_RECONNECT_INTERVAL_MS=15000;
 function _castFetch(path,opts,timeoutMs=3500){
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
-  return fetch(hermesApiUrl(path).href,{credentials:'same-origin',signal:ctrl.signal,...(opts||{})}).finally(()=>clearTimeout(timer));
+  return fetch(sidekickApiUrl(path).href,{credentials:'same-origin',signal:ctrl.signal,...(opts||{})}).finally(()=>clearTimeout(timer));
 }
 
 function _cleanupCastTimers(){
@@ -1227,10 +1227,10 @@ async function _fetchLiveModels(provider, sel){
     const added=_addLiveModelsToSelect(provider,data.models,sel);
     if(added>0){
       if(typeof syncModelChip==='function') syncModelChip();
-      console.debug('[hermes] Live models loaded for',provider+':',added,'new models added');
+      console.debug('[sidekick] Live models loaded for',provider+':',added,'new models added');
     }
   }catch(e){
-    console.debug('[hermes] Live model fetch failed for',provider,e.message);
+    console.debug('[sidekick] Live model fetch failed for',provider,e.message);
   }finally{
     _liveModelFetchPending.delete(provider);
   }
@@ -3733,7 +3733,7 @@ function _loadContextInfo() {
   }
   
   // Try backend API
-  fetch(hermesApiUrl('api/session/context-info?session_id=' + encodeURIComponent(sid)).href, {
+  fetch(sidekickApiUrl('api/session/context-info?session_id=' + encodeURIComponent(sid)).href, {
     cache: 'no-store',
     credentials: 'include',
   })
@@ -4631,7 +4631,7 @@ function renderMd(raw){
       // Rewrite localhost/127.0.0.1 to the actual server base URL so remote
       // users (VPN, Docker, deployed) can load agent-generated images (#642).
       // Strip the trailing slash from document.baseURI so the URL's own path
-      // joins cleanly — this preserves any subpath mount (e.g. /hermes/).
+      // joins cleanly — this preserves any subpath mount (e.g. /sidekick/).
       let src=ref;
       if(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(src)){
         const base=(document.baseURI||'').replace(/\/$/,'');
@@ -5920,7 +5920,7 @@ function markInflight(sid, streamId) {
   try {
     localStorage.setItem(INFLIGHT_KEY, JSON.stringify({sid, streamId, ts: Date.now()}));
   } catch(e) {
-    // localStorage full (typically hermes-webui-inflight-state consumed quota).
+    // localStorage full (typically sidekick-webui-inflight-state consumed quota).
     // Purge stale states and try one more time; inflight tracking is non-critical.
     try {
       const all=_readInflightStateMap();

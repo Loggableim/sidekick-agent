@@ -56,17 +56,17 @@ _SENSITIVE_BODY_KEYS = frozenset({
 })
 
 # Snapshot at import time so runtime env mutations (e.g. LLM-generated
-# `export HERMES_REDACT_SECRETS=false`) cannot disable redaction
+# `export SIDEKICK_REDACT_SECRETS=false`) cannot disable redaction
 # mid-session.  ON by default — secure default per issue #17691. Users who
 # need raw credential values in tool output (e.g. working on the redactor
 # itself) can opt out via `security.redact_secrets: false` in config.yaml
-# (bridged to this env var in hermes_cli/main.py, gateway/run.py, and
-# cli.py) or `HERMES_REDACT_SECRETS=false` in ~/.sidekick/.env. An opt-out
+# (bridged to this env var in sidekick_cli/main.py, gateway/run.py, and
+# cli.py) or `SIDEKICK_REDACT_SECRETS=false` in ~/.sidekick/.env. An opt-out
 # warning is logged at gateway and CLI startup so operators see the
 # downgrade — see `_log_redaction_status()` in gateway/run.py and cli.py.
 _REDACT_ENABLED = (
     os.getenv("SIDEKICK_REDACT_SECRETS")
-    or os.getenv("HERMES_REDACT_SECRETS")
+    or os.getenv("SIDEKICK_REDACT_SECRETS")
     or "true"
 ).lower() in {"1", "true", "yes", "on"}
 

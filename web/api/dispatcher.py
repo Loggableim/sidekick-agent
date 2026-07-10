@@ -217,17 +217,17 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 
     logger.info("dispatch worker %s starting", worker_id)
 
-    # ── Resolve `hermes` binary ──────────────────────────────────────────
-    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
-    if not hermes_bin:
-        hermes_bin = sys.executable
-        hermes_args = ["-m", "sidekick_cli.main"]
+    # ── Resolve `sidekick` binary ──────────────────────────────────────────
+    sidekick_bin = shutil.which("sidekick") or shutil.which("sidekick")
+    if not sidekick_bin:
+        sidekick_bin = sys.executable
+        sidekick_args = ["-m", "sidekick_cli.main"]
     else:
-        hermes_args = []
+        sidekick_args = []
 
     # ── Build command ────────────────────────────────────────────────────
     cmd = (
-        [hermes_bin] + hermes_args +
+        [sidekick_bin] + sidekick_args +
         ["-p", agent_slug,
          "--skills", "kanban-worker",
          "chat",
@@ -237,14 +237,14 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
     # ── Environment ──────────────────────────────────────────────────────
     env = dict(os.environ)
     env["SIDEKICK_KANBAN_TASK"] = task_id
-    env["HERMES_KANBAN_TASK"] = task_id
+    env["SIDEKICK_KANBAN_TASK"] = task_id
     env["SIDEKICK_KANBAN_BOARD"] = board_slug
-    env["HERMES_KANBAN_BOARD"] = board_slug
+    env["SIDEKICK_KANBAN_BOARD"] = board_slug
     env["SIDEKICK_PROFILE"] = agent_slug
-    env["HERMES_PROFILE"] = agent_slug
+    env["SIDEKICK_PROFILE"] = agent_slug
     # Pin kanban home so the worker reads the right board
     env["SIDEKICK_KANBAN_HOME"] = str(space.root)
-    env["HERMES_KANBAN_HOME"] = str(space.root)
+    env["SIDEKICK_KANBAN_HOME"] = str(space.root)
 
     # ── Worker log (per-space/board/task) ──────────────────────────────
     log_dir = Path(space.root) / "kanban" / "boards" / board_slug / "logs"
@@ -300,9 +300,9 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 
     except FileNotFoundError:
         logger.error(
-            "dispatch worker %s: `hermes` executable not found on PATH "
+            "dispatch worker %s: `sidekick` executable not found on PATH "
             "(tried: %s); cannot spawn worker",
-            worker_id, hermes_bin,
+            worker_id, sidekick_bin,
         )
         with _kanban_home_override(str(space.root)):
             try:
@@ -331,19 +331,19 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 def _set_space_kanban_home(space_root: str) -> None:
     """Set kanban home for this thread (bypasses request-local)."""
     os.environ["SIDEKICK_KANBAN_HOME"] = space_root
-    os.environ["HERMES_KANBAN_HOME"] = space_root
+    os.environ["SIDEKICK_KANBAN_HOME"] = space_root
 
 
 def _clear_kanban_home() -> None:
     os.environ.pop("SIDEKICK_KANBAN_HOME", None)
-    os.environ.pop("HERMES_KANBAN_HOME", None)
+    os.environ.pop("SIDEKICK_KANBAN_HOME", None)
 
 
 @contextmanager
 def _kanban_home_override(space_root: str):
     """Temporarily pin both kanban home env vars and restore prior values."""
     old_home = os.environ.get("SIDEKICK_KANBAN_HOME")
-    old_hermes_home = os.environ.get("HERMES_KANBAN_HOME")
+    old_sidekick_home = os.environ.get("SIDEKICK_KANBAN_HOME")
     _set_space_kanban_home(space_root)
     try:
         yield
@@ -352,10 +352,10 @@ def _kanban_home_override(space_root: str):
             os.environ.pop("SIDEKICK_KANBAN_HOME", None)
         else:
             os.environ["SIDEKICK_KANBAN_HOME"] = old_home
-        if old_hermes_home is None:
-            os.environ.pop("HERMES_KANBAN_HOME", None)
+        if old_sidekick_home is None:
+            os.environ.pop("SIDEKICK_KANBAN_HOME", None)
         else:
-            os.environ["HERMES_KANBAN_HOME"] = old_hermes_home
+            os.environ["SIDEKICK_KANBAN_HOME"] = old_sidekick_home
 
 
 # ── Status / Monitoring ─────────────────────────────────────────────────────

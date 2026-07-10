@@ -16,13 +16,13 @@ python tests/smoke_webui.py
 
 ## 2. Branding Audit
 
-Ensure no stale user-facing references to legacy names (`Hermes`, `NousResearch`, `LastBrowser`) exist in installer scripts, docs, or smoke tests.
+Ensure no stale user-facing references to legacy names (`Sidekick`, `NousResearch`, `LastBrowser`) exist in installer scripts, docs, or smoke tests.
 
 ```bash
 # Quick scan (excludes env-var constants and legitimate legacy references)
-grep -in "Hermes\|NousResearch\|LastBrowser" \
+grep -in "Sidekick\|NousResearch\|LastBrowser" \
   --include="*.ps1" --include="*.md" --include="*.py" . \
-  | grep -iv "HERMES_\|SIDEKICK_\|legacy\|migration\|alias\|compat"
+  | grep -iv "SIDEKICK_\|SIDEKICK_\|legacy\|migration\|alias\|compat"
 ```
 
 **Expected:** No matches, or only lines that are explicitly intentional legacy references. The existing smoke test `tests/smoke_all.py` also runs a branding check against the user-facing docs and help output.

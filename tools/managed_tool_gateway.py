@@ -28,7 +28,7 @@ class ManagedToolGatewayConfig:
 
 
 def auth_json_path():
-    """Return the Sidekick auth store path, respecting HERMES_HOME overrides."""
+    """Return the Sidekick auth store path, respecting SIDEKICK_HOME overrides."""
     return get_sidekick_home() / "auth.json"
 
 

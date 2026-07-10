@@ -87,7 +87,7 @@ _MAX_CONCURRENT_ACCOUNT_USAGE_PROBES = 2
 # to call the provider API indefinitely.  Non-Linux platforms (macOS, Windows)
 # rely on OS-level process-tree cleanup instead; this variable is then unused.
 # prctl(PR_SET_DEATHSIG, SIGTERM) is available via ctypes without any C
-# extension — the same technique used throughout the Hermes codebase.
+# extension — the same technique used throughout the Sidekick codebase.
 _ACCOUNT_USAGE_PARENT_DEATHSIG_BOOTSTRAP = (
     # fmt: off
     # Lines are written as string literals so this block passes
@@ -385,7 +385,7 @@ _PROVIDER_ENV_VAR: dict[str, str] = {
     "opencode-zen": "OPENCODE_ZEN_API_KEY",
     "opencode-go": "OPENCODE_GO_API_KEY",
     # NOTE: bare "ollama" (local) deliberately omitted — local Ollama is keyless
-    # by default and the runtime in hermes_cli/runtime_provider.py only consumes
+    # by default and the runtime in sidekick_cli/runtime_provider.py only consumes
     # OLLAMA_API_KEY when the base URL hostname is ollama.com (Ollama Cloud).
     # If we mapped both providers to the same env var, configuring Ollama Cloud
     # would falsely flip the local Ollama card to "API key configured" (#1410).
@@ -394,7 +394,7 @@ _PROVIDER_ENV_VAR: dict[str, str] = {
     # by _provider_has_key().
     "ollama-cloud": "OLLAMA_API_KEY",
     # Bare "lmstudio" maps to LM_API_KEY — the canonical env var the agent CLI
-    # runtime reads (hermes_cli/auth.py:182, api_key_env_vars=("LM_API_KEY",)).
+    # runtime reads (sidekick_cli/auth.py:182, api_key_env_vars=("LM_API_KEY",)).
     # Pre-#1499/#1500 the WebUI used LMSTUDIO_API_KEY here, which made Settings
     # report keys correctly but the agent runtime ignored them — masked in
     # practice by the LMSTUDIO_NOAUTH_PLACEHOLDER for keyless local installs.
@@ -420,7 +420,7 @@ _PROVIDER_ENV_VAR_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 # Providers that use OAuth or token flows — their credentials are managed
-# through the Hermes CLI, not via API keys.  The WebUI cannot set these.
+# through the Sidekick CLI, not via API keys.  The WebUI cannot set these.
 _OAUTH_PROVIDERS = frozenset({
     "copilot",
     "copilot-acp",
@@ -432,11 +432,11 @@ _OAUTH_PROVIDERS = frozenset({
 # SECTION: Helper functions
 
 
-def _get_hermes_home() -> Path:
-    """Return the active Hermes home directory."""
+def _get_sidekick_home() -> Path:
+    """Return the active Sidekick home directory."""
     try:
-        from web.api.profiles import get_active_hermes_home
-        return get_active_hermes_home()
+        from web.api.profiles import get_active_profile_home
+        return get_active_profile_home()
     except ImportError:
         return get_webui_home()
 
@@ -529,7 +529,7 @@ def _write_env_file(env_path: Path, updates: dict[str, str | None]) -> None:
             content += "\n"
         # Atomic write via tempfile + os.replace so cross-process readers
         # (Telegram bot, CLI) never see a half-truncated file.  The shared
-        # ``~/.hermes/.env`` is also written by ``hermes_cli.config.save_env_value``
+        # ``~/.sidekick/.env`` is also written by ``sidekick_cli.config.save_env_value``
         # using the same atomic pattern; matching it here closes the
         # cross-process leg of #1164 (within-process is covered by _ENV_LOCK).
         _mode = _stat.S_IRUSR | _stat.S_IWUSR  # 0o600
@@ -560,7 +560,7 @@ def _provider_has_key(provider_id: str) -> bool:
     """Check whether a provider has a configured API key.
 
     Checks (in order):
-    1. ``~/.hermes/.env`` for the known env var
+    1. ``~/.sidekick/.env`` for the known env var
     2. ``os.environ`` for the known env var
     3. ``config.yaml → model.api_key`` (only if provider is the active one)
     4. ``config.yaml → providers.<id>.api_key``
@@ -568,7 +568,7 @@ def _provider_has_key(provider_id: str) -> bool:
     """
     env_var = _PROVIDER_ENV_VAR.get(provider_id)
     if env_var:
-        env_path = _get_hermes_home() / ".env"
+        env_path = _get_sidekick_home() / ".env"
         env_values = _load_env_file(env_path)
         if env_values.get(env_var):
             return True
@@ -614,7 +614,7 @@ def _get_provider_api_key(provider_id: str) -> str | None:
     provider_id = (provider_id or "").strip().lower()
     env_var = _PROVIDER_ENV_VAR.get(provider_id)
     if env_var:
-        env_path = _get_hermes_home() / ".env"
+        env_path = _get_sidekick_home() / ".env"
         env_values = _load_env_file(env_path)
         if env_values.get(env_var):
             return str(env_values[env_var]).strip() or None
@@ -748,7 +748,7 @@ def _agent_fetch_account_usage(provider: str, *, base_url: str | None = None, ap
 def _account_usage_subprocess_env(home: Path, provider: str, api_key: str | None) -> dict[str, str]:
     env = dict(os.environ)
     env["SIDEKICK_HOME"] = str(Path(home))
-    env["HERMES_HOME"] = str(Path(home))
+    env["SIDEKICK_HOME"] = str(Path(home))
 
     # Profile .env values should affect only the child quota probe, not the
     # WebUI process-global environment. This is especially important for
@@ -863,7 +863,7 @@ def _fetch_account_usage_with_profile_context(provider: str) -> Any:
     A warm worker-pool (reuse of persistent subprocess handles) is a natural
     follow-up if this first slice proves insufficient in production.
     """
-    home = _get_hermes_home()
+    home = _get_sidekick_home()
     api_key = _get_provider_api_key(provider)
     sem = _get_account_usage_probe_semaphore()
     try:
@@ -1221,10 +1221,10 @@ def get_providers() -> dict[str, Any]:
         auth_error = None
         if is_oauth:
             key_source = "oauth"
-            # Check if actually authenticated via hermes_cli.
+            # Check if actually authenticated via sidekick_cli.
             # IMPORTANT: do not unconditionally overwrite has_key from _provider_has_key().
             # A token in config.yaml is a valid credential even when get_auth_status()
-            # returns logged_in=False (e.g. token not in the hermes credential pool,
+            # returns logged_in=False (e.g. token not in the sidekick credential pool,
             # or refresh token consumed by native Codex CLI / VS Code extension).
             try:
                 from cli.auth import get_auth_status as _gas
@@ -1242,13 +1242,13 @@ def get_providers() -> dict[str, Any]:
                     auth_error = status.get("error") if isinstance(status, dict) else None
             except Exception:
                 # Import failed or auth check errored — don't override a known-good
-                # key just because the hermes_cli auth module is unavailable.
-                logger.debug("hermes_cli auth check failed for %s", pid, exc_info=True)
+                # key just because the sidekick_cli auth module is unavailable.
+                logger.debug("sidekick_cli auth check failed for %s", pid, exc_info=True)
                 # keep has_key from _provider_has_key()
         elif has_key:
             env_var = _PROVIDER_ENV_VAR.get(pid)
             if env_var:
-                env_path = _get_hermes_home() / ".env"
+                env_path = _get_sidekick_home() / ".env"
                 env_values = _load_env_file(env_path)
                 if env_values.get(env_var):
                     key_source = "env_file"
@@ -1302,7 +1302,7 @@ def get_providers() -> dict[str, Any]:
         models = list(_PROVIDER_MODELS.get(pid, []))
         models_total = len(models)
         # OpenAI Codex account catalogs drift independently from WebUI releases.
-        # The model picker already prefers hermes_cli + Codex local cache for
+        # The model picker already prefers sidekick_cli + Codex local cache for
         # this provider (the agent's `provider_model_ids("openai-codex")` filters
         # IDs with `supported_in_api: false`, but Codex CLI still surfaces some
         # of those — notably `gpt-5.3-codex-spark` from #1680 — in its picker).
@@ -1321,7 +1321,7 @@ def get_providers() -> dict[str, Any]:
                 models_total = len(models)
         # Nous Portal: prefer the live catalog so the providers card matches
         # the dropdown picker (#1538). Same fallback shape as the static-only
-        # case below — when hermes_cli is unavailable or its lookup raises,
+        # case below — when sidekick_cli is unavailable or its lookup raises,
         # we keep the four-entry curated list.
         #
         # On large-tier accounts (#1567 reporter Deor saw 396 entries), we
@@ -1347,7 +1347,7 @@ def get_providers() -> dict[str, Any]:
                     ]
                     models_total = len(live_ids)
             except Exception:
-                logger.debug("Failed to load Nous Portal models from hermes_cli")
+                logger.debug("Failed to load Nous Portal models from sidekick_cli")
         # LM Studio: fetch live locally-loaded models so the providers card
         # matches what's actually available on the user's server (#WebUI).
         if pid == "lmstudio":
@@ -1359,7 +1359,7 @@ def get_providers() -> dict[str, Any]:
                     models = [{"id": mid, "label": mid} for mid in lm_live]
                     models_total = len(models)
             except Exception:
-                logger.debug("Failed to load LM Studio models from hermes_cli")
+                logger.debug("Failed to load LM Studio models from sidekick_cli")
         # Also include models from config.yaml providers section
         if isinstance(providers_cfg, dict):
             provider_cfg = providers_cfg.get(pid, {})
@@ -1444,7 +1444,7 @@ def get_providers() -> dict[str, Any]:
 def set_provider_key(provider_id: str, api_key: str | None) -> dict[str, Any]:
     """Set or update the API key for a provider.
 
-    Writes the key to ``~/.hermes/.env`` using the standard env var name.
+    Writes the key to ``~/.sidekick/.env`` using the standard env var name.
     If ``api_key`` is None or empty, the key is removed.
 
     Returns a status dict with the operation result.
@@ -1477,7 +1477,7 @@ def set_provider_key(provider_id: str, api_key: str | None) -> dict[str, Any]:
         if len(api_key) < 8:
             return {"ok": False, "error": "API key appears too short."}
 
-    env_path = _get_hermes_home() / ".env"
+    env_path = _get_sidekick_home() / ".env"
     try:
         _write_env_file(env_path, {env_var: api_key})
     except ValueError as exc:
@@ -1502,7 +1502,7 @@ def set_provider_key(provider_id: str, api_key: str | None) -> dict[str, Any]:
 def remove_provider_key(provider_id: str) -> dict[str, Any]:
     """Remove the API key for a provider.
 
-    Removes the key from ``~/.hermes/.env`` (via ``set_provider_key``)
+    Removes the key from ``~/.sidekick/.env`` (via ``set_provider_key``)
     and also cleans up ``config.yaml`` if the key is stored there
     (``providers.<id>.api_key`` or top-level ``model.api_key`` when this
     provider is the active one).

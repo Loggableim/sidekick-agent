@@ -77,12 +77,12 @@ def _extract_inherited_flags(argv: Sequence[str]) -> list[str]:
     return flags
 
 
-def resolve_hermes_bin() -> Optional[str]:
+def resolve_sidekick_bin() -> Optional[str]:
     """Find the sidekick entry point.
 
     Priority:
       1. ``sys.argv[0]`` if it resolves to a real executable.
-      2. ``shutil.which("hermes")`` on PATH.
+      2. ``shutil.which("sidekick")`` on PATH.
       3. ``None`` → caller should fall back to ``python -m sidekick_cli.main``.
 
     Windows note: ``os.access(path, os.X_OK)`` returns True for ``.py`` and
@@ -92,7 +92,7 @@ def resolve_hermes_bin() -> Optional[str]:
     directly — CreateProcessW needs a real .exe, not a script associated
     with the Python launcher.  On Windows we therefore skip the argv[0]
     fast-path when it points at a .py file and fall through to either
-    ``hermes.exe`` on PATH or the ``sys.executable -m sidekick_cli.main``
+    ``sidekick.exe`` on PATH or the ``sys.executable -m sidekick_cli.main``
     fallback.
     """
     argv0 = sys.argv[0]
@@ -114,7 +114,7 @@ def resolve_hermes_bin() -> Optional[str]:
                 return abs_path
 
     # PATH lookup
-    path_bin = shutil.which("sidekick") or shutil.which("hermes")
+    path_bin = shutil.which("sidekick") or shutil.which("sidekick")
     if path_bin:
         return path_bin
 
@@ -136,7 +136,7 @@ def build_relaunch_argv(
         original_argv: The original argv to scan for flags (defaults to
             ``sys.argv[1:]``).
     """
-    bin_path = resolve_hermes_bin()
+    bin_path = resolve_sidekick_bin()
 
     if bin_path:
         argv = [bin_path]
@@ -162,13 +162,13 @@ def relaunch(
 
     On POSIX we use ``os.execvp`` which replaces the running process with
     the new one in place — same PID, no double-fork.  That's what the
-    relaunch contract wants: "run hermes again as if the user had typed
+    relaunch contract wants: "run sidekick again as if the user had typed
     the new argv".
 
     Windows has no native exec semantics — ``os.execvp`` on Windows
     *emulates* exec by spawning the child and exiting the parent, but
     only works when the target is a real Win32 executable.  Our target
-    is usually ``hermes.exe`` (a Python console-script shim that wraps
+    is usually ``sidekick.exe`` (a Python console-script shim that wraps
     ``python -m sidekick_cli.main``) or a ``.cmd`` batch file, and both
     raise ``OSError(8, "Exec format error")`` on Windows' execvp.
 
@@ -176,7 +176,7 @@ def relaunch(
     (which routes through ``cmd.exe`` via ``shell=False`` + PATHEXT resolution),
     wait for it to exit, then propagate its exit code via ``sys.exit``.
     That's functionally equivalent — the user sees "sidekick exited, then
-    new hermes started" — just with two PIDs in play instead of one.
+    new sidekick started" — just with two PIDs in play instead of one.
     """
     new_argv = build_relaunch_argv(
         extra_args, preserve_inherited=preserve_inherited, original_argv=original_argv
@@ -195,7 +195,7 @@ def relaunch(
             # cryptic.  Common causes: ``sidekick`` not on PATH yet (install
             # hasn't propagated User PATH into this shell) or a stale shim.
             print(
-                f"\nHermes relaunch failed: {exc}\n"
+                f"\nSidekick relaunch failed: {exc}\n"
                 f"Command: {' '.join(new_argv)}\n"
                 f"Fix: open a new terminal so PATH picks up, then re-run sidekick.",
                 file=sys.stderr,

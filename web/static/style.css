@@ -1007,12 +1007,14 @@
   .app-titlebar-sub[hidden]{display:none;}
   .app-titlebar-hamburger,.app-titlebar-spacer{display:none;width:32px;height:32px;flex-shrink:0;}
   .app-titlebar-spacer{display:block;flex:1 1 auto;width:auto;height:auto;}
+  .titlebar-utility-actions{display:flex;align-items:center;gap:2px;margin-left:8px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}
   .titlebar-actions{display:flex;align-items:center;gap:2px;margin-right:4px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}
   .titlebar-action-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border:none;background:transparent;color:var(--muted);border-radius:6px;cursor:pointer;padding:0;transition:background-color .15s,color .15s;}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
   .titlebar-action-btn:hover{background:var(--hover-bg);color:var(--text);}
   .titlebar-action-btn-danger:hover{color:#ef4444;}
   .titlebar-action-btn:disabled{opacity:0.4;cursor:not-allowed;}
-  .titlebar-actions #btnCastToggle,
+  .titlebar-utility-actions #btnCastToggle,
   .titlebar-actions #btnRebootSidekick,
   .titlebar-actions #btnShutdownSidekick{display:inline-flex!important;}
   .game-mode-toggle-btn{position:relative;}
@@ -1023,10 +1025,13 @@
   .cast-off{color:#555!important;filter:none;}
   .cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.88;}
   .cast-unavailable:hover{opacity:1;color:#f59e0b!important;}
+  .nova-yolo-toggle-btn.active{background:rgba(239,68,68,.18);color:#fb7185;box-shadow:0 0 0 1px rgba(251,113,133,.45) inset,0 0 12px rgba(239,68,68,.24);}
+  .nova-yolo-toggle-btn.active:hover{background:rgba(239,68,68,.28);color:#fecdd3;}
   /* -- Language Selector (titlebar) -- */
   .titlebar-lang-selector{position:relative;display:inline-flex;align-items:center;}
   .lang-selector-btn{font-size:16px;line-height:1;}
   .lang-dropdown{display:block;position:absolute;top:100%;right:0;min-width:36px;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.4);z-index:9999;padding:4px;}
+  .titlebar-utility-actions .lang-dropdown{left:0;right:auto;}
   .lang-dropdown[hidden]{display:none!important;}
   .lang-option{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:var(--muted);border-radius:6px;cursor:pointer;padding:0;font-size:18px;line-height:1;transition:background-color .15s;margin:1px 0;}
   .lang-option:hover{background:var(--hover-bg);color:var(--text);}
@@ -1094,8 +1099,8 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .window-btn:hover:not(:disabled){background:var(--hover-bg);color:var(--text);}
   .window-btn:disabled{opacity:.38;cursor:not-allowed;}
   .window-btn-close:hover:not(:disabled){background:rgba(255,80,80,.18);color:#ff5555;}
-  html.hermes-app-window .window-controls{border-left-color:color-mix(in srgb,var(--border) 72%,transparent);}
-  html.hermes-app-window .window-btn{width:38px;}
+  html.sidekick-app-window .window-controls{border-left-color:color-mix(in srgb,var(--border) 72%,transparent);}
+  html.sidekick-app-window .window-btn{width:38px;}
   html.window-controls-overlay .app-titlebar{padding-right:max(0px,env(safe-area-inset-right,0));}
   .sidebar{width:300px;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:visible;flex-shrink:0;transition:width .24s cubic-bezier(.22,1,.36,1),opacity .18s ease,transform .24s cubic-bezier(.22,1,.36,1),border-color .24s ease;}
   .sidebar-header{padding:16px 18px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
@@ -2621,6 +2626,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .app-titlebar-hamburger,.app-titlebar-spacer{display:flex;}
     .app-titlebar-inner{flex:1 1 auto;}
     .titlebar-actions{display:none;}
+    .titlebar-utility-actions{margin-left:4px;}
     .titlebar-actions #btnRebootSidekick,
     .titlebar-actions #btnShutdownSidekick{display:none!important;}
     .system-health-panel.insights-card{gap:10px;padding:12px;}
@@ -4054,7 +4060,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 }
 
 /* â”€â”€ Provider cards (Settings â†’ Providers) â”€â”€
-   Matches hermes-desktop LLM Providers panel. Card uses --sidebar (surface-1),
+   Matches sidekick-desktop LLM Providers panel. Card uses --sidebar (surface-1),
    hover rows use --surface (surface-2). Body divider uses a subtle tint. */
 #providersList{gap:12px;}
 .provider-quota-card{
@@ -5300,7 +5306,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
 .tool-card-preview { font-size: 11px; }
 
 /* â”€â”€ Streaming cursor at the end of the live assistant body â”€â”€ */
-@keyframes hermes-cursor-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+@keyframes sidekick-cursor-blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
 #toolRunningRow { margin-top: 10px; }
 [data-live-assistant="1"]:last-child .msg-body > :last-child::after,
 [data-live-assistant="1"]:last-child .msg-body:not(:has(> *))::after {
@@ -5312,7 +5318,7 @@ body.discord-mode .split-resize-handle{display:none !important;}
   border-radius: 1px;
   margin-left: 3px;
   vertical-align: -0.16em;
-  animation: hermes-cursor-blink 1.05s steps(2, start) infinite;
+  animation: sidekick-cursor-blink 1.05s steps(2, start) infinite;
 }
 
 /* â”€â”€ Error state: distinct red-accent card, not italic emphasis â”€â”€ */
@@ -6111,7 +6117,7 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .kanban-card-stale-amber{border-color:rgba(245,197,66,.55)}
 .kanban-card-stale-red{border-color:rgba(255,95,95,.65)}
 .kanban-column.drop-target{outline:2px solid var(--accent);outline-offset:-2px}
-.hermes-kanban-md p{margin:0 0 4px}.hermes-kanban-md code{font-family:var(--mono);font-size:.95em}
+.sidekick-kanban-md p{margin:0 0 4px}.sidekick-kanban-md code{font-family:var(--mono);font-size:.95em}
 
 /* â”€â”€ Rightpanel Kanban view â”€â”€ */
 .rightpanel-content--kanban {

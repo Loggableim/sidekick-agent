@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 
-def test_appstore_run_hermes_cli_uses_utf8_encoding(monkeypatch, tmp_path):
+def test_appstore_run_sidekick_cli_uses_utf8_encoding(monkeypatch, tmp_path):
     import web.api.appstore as appstore
 
     captured = {}
@@ -18,7 +18,7 @@ def test_appstore_run_hermes_cli_uses_utf8_encoding(monkeypatch, tmp_path):
 
     monkeypatch.setattr(appstore.subprocess, "run", fake_run)
 
-    rc, out = appstore._run_hermes_cli(["tools", "status"])
+    rc, out = appstore._run_sidekick_cli(["tools", "status"])
 
     assert rc == 0
     assert out == "done"

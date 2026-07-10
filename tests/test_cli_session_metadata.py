@@ -92,7 +92,7 @@ def test_get_cli_sessions_uses_index_title_without_loading_session_metadata(tmp_
             home.mkdir(parents=True)
             (home / "state.db").write_bytes(b"")
 
-            mp.setattr(profiles_mod, "get_active_hermes_home", lambda: str(home))
+            mp.setattr(profiles_mod, "get_active_profile_home", lambda: str(home))
             mp.setattr(profiles_mod, "get_active_profile_name", lambda: "default")
             mp.setattr(models_mod, "get_last_workspace", lambda: str(tmp_path / "workspace"))
             mp.setattr(models_mod, "get_claude_code_sessions", lambda: [])
@@ -158,7 +158,7 @@ def test_web_server_session_search_uses_compat_sessiondb(tmp_path, monkeypatch):
             client = TestClient(web_server.app)
             response = client.get(
                 "/api/sessions/search?q=hello",
-                headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+                headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
             )
 
             assert response.status_code == 200

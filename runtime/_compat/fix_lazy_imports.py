@@ -7,12 +7,12 @@ import os
 import re
 import glob
 
-DST_RUNTIME = r"C:\HermesPortable\sidekick\runtime"
+DST_RUNTIME = r"C:\SidekickPortable\sidekick\runtime"
 
 # Rewrite rules — applied globally with re.sub (matches anywhere in line)
 REWRITE_RULES = [
     (r'from sidekick_constants import', 'from runtime._compat.shim_constants import'),
-    (r'from hermes_constants import', 'from runtime._compat.shim_constants import'),
+    (r'from sidekick_constants import', 'from runtime._compat.shim_constants import'),
     (r'from utils import', 'from shared.utils import'),
 ]
 

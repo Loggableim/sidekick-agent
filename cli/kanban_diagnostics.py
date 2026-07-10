@@ -581,7 +581,7 @@ def _rule_stranded_in_ready(task, events, runs, now, cfg) -> list[Diagnostic]:
     * Profile was deleted, leaving its tasks stranded.
     * External worker pool (Codex CLI, Claude Code lane, custom daemon)
       is down, hung, or wasn't started.
-    * Dispatcher is misconfigured (wrong board, wrong HERMES_HOME).
+    * Dispatcher is misconfigured (wrong board, wrong SIDEKICK_HOME).
 
     Pre-rule, all of these silently rotted in ``skipped_nonspawnable`` —
     the dispatcher correctly skipped them (good — no respawn loop) but
@@ -592,7 +592,7 @@ def _rule_stranded_in_ready(task, events, runs, now, cfg) -> list[Diagnostic]:
     on the dispatcher and a different operator response).
 
     The signal is age-based on purpose: it's identity-agnostic, so it
-    works for Hermes profiles, registered lanes, external workers, and
+    works for Sidekick profiles, registered lanes, external workers, and
     typos uniformly. No registry to curate, no per-board allowlist.
     """
     threshold_seconds = float(

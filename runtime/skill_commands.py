@@ -34,8 +34,8 @@ def _resolve_skill_commands_platform() -> Optional[str]:
     :func:`get_skill_commands` can drop a stale cache that was populated
     for a different platform's ``skills.platform_disabled`` view (#14536).
 
-    Resolves from (in order) ``HERMES_PLATFORM`` env var and
-    ``HERMES_SESSION_PLATFORM`` from the gateway session context. Returns
+    Resolves from (in order) ``SIDEKICK_PLATFORM`` env var and
+    ``SIDEKICK_SESSION_PLATFORM`` from the gateway session context. Returns
     ``None`` when no platform scope is active (e.g. classic CLI, RL
     rollouts, standalone scripts).
     """
@@ -44,7 +44,7 @@ def _resolve_skill_commands_platform() -> Optional[str]:
 
         resolved_platform = (
             os.getenv("SIDEKICK_PLATFORM")
-            or get_session_env("HERMES_SESSION_PLATFORM")
+            or get_session_env("SIDEKICK_SESSION_PLATFORM")
         )
     except Exception:
         resolved_platform = os.getenv("SIDEKICK_PLATFORM")
@@ -99,7 +99,7 @@ def _load_skill_payload(skill_identifier: str, task_id: str | None = None) -> tu
 def _inject_skill_config(loaded_skill: dict[str, Any], parts: list[str]) -> None:
     """Resolve and inject skill-declared config values into the message parts.
 
-    If the loaded skill's frontmatter declares ``metadata.hermes.config``
+    If the loaded skill's frontmatter declares ``metadata.sidekick.config``
     entries, their current values (from config.yaml or defaults) are appended
     as a ``[Skill config: ...]`` block so the agent knows the configured values
     without needing to read config.yaml itself.

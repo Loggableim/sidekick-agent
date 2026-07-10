@@ -1,6 +1,6 @@
 """Safe server-side probe for the official Nova dashboard.
 
-The official `hermes dashboard` binds to 127.0.0.1:9119 by default and exposes
+The official `sidekick dashboard` binds to 127.0.0.1:9119 by default and exposes
 GET /api/status as a public, read-only identity/status endpoint.  Keep all
 probing server-side to avoid browser CORS/mixed-content failures, and only allow
 loopback targets so a user-controlled setting cannot become an SSRF primitive.
@@ -68,11 +68,11 @@ def _looks_like_official_dashboard(payload: object) -> bool:
     version = payload.get("version")
     if not isinstance(version, str) or not version.strip():
         return False
-    # Verified against current Nova `hermes_cli.web_server.get_status()`:
-    # /api/status returns version plus these Hermes-specific fields. Requiring at
+    # Verified against current Nova `sidekick_cli.web_server.get_status()`:
+    # /api/status returns version plus these Sidekick-specific fields. Requiring at
     # least one avoids treating any generic {version: ...} local service as the
     # official dashboard.
-    return any(key in payload for key in ("release_date", "hermes_home", "config_path", "gateway_running"))
+    return any(key in payload for key in ("release_date", "sidekick_home", "config_path", "gateway_running"))
 
 
 def probe_official_dashboard(

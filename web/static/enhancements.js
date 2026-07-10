@@ -1197,7 +1197,7 @@
   }
 
   // ─── WINDOW GLOBALS ──────────────────────────────────────────
-  window.__HERMES_ENHANCEMENTS = {
+  window.__SIDEKICK_ENHANCEMENTS = {
     state,
     toggleKeyboardShortcuts,
     toggleFavorite,

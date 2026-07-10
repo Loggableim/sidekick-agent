@@ -67,7 +67,6 @@ def test_game_mode_router_pool_prefers_deepseek_and_reports_effective_model(tmp_
     pool_path = home / "spaces" / "nova" / "provider_pool_config.json"
     _write_router_pool_config(pool_path)
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
-    monkeypatch.delenv("HERMES_HOME", raising=False)
 
     module = _load_provider_pool_module("nova_provider_pool_game_mode_on")
     pool = module.ProviderPool.load(pool_path)
@@ -89,7 +88,7 @@ def test_game_mode_router_pool_keeps_local_default_when_game_mode_is_off(tmp_pat
     pool_path = home / "spaces" / "nova" / "provider_pool_config.json"
     _write_router_pool_config(pool_path)
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
-    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
 
     module = _load_provider_pool_module("nova_provider_pool_game_mode_off")
     pool = module.ProviderPool.load(pool_path)

@@ -50,7 +50,7 @@ class SSHEnvironment(BaseEnvironment):
         self.port = port
         self.key_path = key_path
 
-        self.control_dir = Path(tempfile.gettempdir()) / "hermes-ssh"
+        self.control_dir = Path(tempfile.gettempdir()) / "sidekick-ssh"
         self.control_dir.mkdir(parents=True, exist_ok=True)
         # Keep the socket filename short and deterministic so the full path
         # stays under the 104-byte sun_path limit that macOS enforces on
@@ -70,7 +70,7 @@ class SSHEnvironment(BaseEnvironment):
 
         self._ensure_remote_dirs()
         self._sync_manager = FileSyncManager(
-            get_files_fn=lambda: iter_sync_files(f"{self._remote_home}/.hermes"),
+            get_files_fn=lambda: iter_sync_files(f"{self._remote_home}/.sidekick"),
             upload_fn=self._scp_upload,
             delete_fn=self._ssh_delete,
             bulk_upload_fn=self._ssh_bulk_upload,
@@ -130,7 +130,7 @@ class SSHEnvironment(BaseEnvironment):
 
     def _ensure_remote_dirs(self) -> None:
         """Create base ~/.sidekick directory tree on remote in one SSH call."""
-        base = f"{self._remote_home}/.hermes"
+        base = f"{self._remote_home}/.sidekick"
         dirs = [base, f"{base}/skills", f"{base}/credentials", f"{base}/cache"]
         cmd = self._build_ssh_command()
         cmd.append(quoted_mkdir_command(dirs))
@@ -178,7 +178,7 @@ class SSHEnvironment(BaseEnvironment):
                 raise RuntimeError(f"remote mkdir failed: {result.stderr.strip()}")
 
         # Symlink staging avoids fragile GNU tar --transform rules.
-        with tempfile.TemporaryDirectory(prefix="hermes-ssh-bulk-") as staging:
+        with tempfile.TemporaryDirectory(prefix="sidekick-ssh-bulk-") as staging:
             for host_path, remote_path in files:
                 staged = os.path.join(staging, remote_path.lstrip("/"))
                 os.makedirs(os.path.dirname(staged), exist_ok=True)
@@ -238,10 +238,10 @@ class SSHEnvironment(BaseEnvironment):
         logger.debug("SSH: bulk-uploaded %d file(s) via tar pipe", len(files))
 
     def _ssh_bulk_download(self, dest: Path) -> None:
-        """Download remote .hermes/ as a tar archive."""
+        """Download remote .sidekick/ as a tar archive."""
         # Tar from / with the full path so archive entries preserve absolute
-        # paths (e.g. home/user/.hermes/skills/f.py), matching _pushed_hashes keys.
-        rel_base = f"{self._remote_home}/.hermes".lstrip("/")
+        # paths (e.g. home/user/.sidekick/skills/f.py), matching _pushed_hashes keys.
+        rel_base = f"{self._remote_home}/.sidekick".lstrip("/")
         ssh_cmd = self._build_ssh_command()
         ssh_cmd.append(f"tar cf - -C / {shlex.quote(rel_base)}")
         with open(dest, "wb") as f:

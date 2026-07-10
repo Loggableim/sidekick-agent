@@ -287,46 +287,28 @@ cat ~/.sidekick/state/webui/sessions/<session-id>.json
 
 ---
 
-## Legacy `HERMES_*` Aliases
+## Local-state import
 
-Sidekick was previously named **Hermes**. The legacy `HERMES_*` environment variables are still supported but deprecated:
+Sidekick reads only the `SIDEKICK_*` environment variables. Its active state
+directory is selected with `SIDEKICK_HOME` and defaults to `~/.sidekick`.
 
-| Legacy Var | Current Var |
-|---|---|
-| `HERMES_HOME` | `SIDEKICK_HOME` |
-| `HERMES_WEBUI_HOST` | — (still `HERMES_WEBUI_HOST`) |
-| `HERMES_WEBUI_PORT` | — (still `HERMES_WEBUI_PORT`) |
-| `HERMES_WEBUI_PASSWORD` | — (still `HERMES_WEBUI_PASSWORD`) |
-| `HERMES_WEBUI_LOG_FILE` | — (still `HERMES_WEBUI_LOG_FILE`) |
-
-**Resolution order:**
-1. `SIDEKICK_HOME` (highest priority)
-2. `HERMES_HOME`
-
-> If both are set, `SIDEKICK_HOME` wins. The config file and state directory will use `SIDEKICK_HOME` if set.
-
-The CLI command `sidekick doctor` checks for usage of legacy env vars and suggests migration.
-
----
-
-## Migration from `~/.hermes` to `~/.sidekick`
-
-On first run, Sidekick automatically migrates data from `~/.hermes` to `~/.sidekick`:
-
-- **Config**: Migrated on first `list_sessions()` or config read.
-- **Sessions**: Migrated from `~/.hermes/state/webui/sessions/` to `~/.sidekick/state/webui/sessions/`.
-- **Environment**: Old `~/.hermes/.env` is copied to `~/.sidekick/.env` if the new file doesn't exist.
-
-The migration is **safe** — old files are never deleted, only copied. To force re-migration:
+If you have state from a previous installation, import it deliberately into the
+current Sidekick home. The source is never detected or copied automatically:
 
 ```bash
-# Delete the migration marker and re-run a session command
-rm ~/.sidekick/.migrated_from_hermes
-sidekick doctor           # triggers migration check
+# Inspect what would be imported.
+sidekick repair local-state --from <previous-home>
+
+# Copy only missing local state after reviewing the preview.
+sidekick repair local-state --from <previous-home> --apply
 ```
 
-To verify:
+The source data is retained. Sidekick does not delete or modify it.
+
+To verify the active state root:
+
 ```bash
+sidekick doctor
 ls ~/.sidekick/config.yaml
 ls ~/.sidekick/state/webui/sessions/
 ```
@@ -424,7 +406,7 @@ sidekick doctor
 - No `provider` or `api_key` in `~/.sidekick/config.yaml`
 - Environment variables not set in the current shell
 - `.env` file not loaded (check `~/.sidekick/.env`)
-- Stale `~/.hermes/` config not migrated (run `sidekick doctor --fix`)
+- Stale `~/.sidekick/` config not migrated (run `sidekick doctor --fix`)
 
 ### `sidekick doctor` says "config issue" but I configured everything
 
@@ -452,7 +434,7 @@ Re-run setup:
 sidekick setup
 ```
 
-Sessions and configuration are local — there is no cloud backup. If you had an old `~/.hermes/`, the auto-migration will recreate state from there.
+Sessions and configuration are local — there is no cloud backup. If you had an old `~/.sidekick/`, the auto-migration will recreate state from there.
 
 ### Gateway service won't start
 

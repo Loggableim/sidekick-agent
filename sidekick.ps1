@@ -123,7 +123,7 @@ function Start-WebUI {
     Write-Host "`n[WebUI] Dashboard (Port 9119)" -ForegroundColor Cyan
     $procId, $null = Get-ComponentStatus "webui"
     if ($procId) { Write-Status "WebUI" "bereits gestartet (PID $procId)" "Yellow"; return }
-    $proc = Start-ProcessLogged -Name "webui" -Command $PythonExe -Arguments "-m uvicorn web.server:app --host 127.0.0.1 --port 9119"
+    $proc = Start-ProcessLogged -Name "webui" -Command $PythonExe -Arguments "-m uvicorn cli.web_server:app --host 127.0.0.1 --port 9119"
     if ($proc) { Write-Status "WebUI" "startet (http://127.0.0.1:9119)" "Green" }
 }
 

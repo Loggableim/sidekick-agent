@@ -4,11 +4,11 @@ import builtins
 from types import SimpleNamespace
 
 
-def test_slack_manifest_write_falls_back_to_hermes_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
-    hermes_home = tmp_path / "hermes-home"
-    hermes_home.mkdir()
+def test_slack_manifest_write_falls_back_to_sidekick_home_when_sidekick_home_is_missing(monkeypatch, tmp_path):
+    sidekick_home = tmp_path / "sidekick-home"
+    sidekick_home.mkdir()
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     import cli.slack_cli as slack_cli
 
@@ -24,4 +24,4 @@ def test_slack_manifest_write_falls_back_to_hermes_home_when_sidekick_home_is_mi
     result = slack_cli.slack_manifest_command(SimpleNamespace(write=True))
 
     assert result == 0
-    assert (hermes_home / "slack-manifest.json").exists()
+    assert (sidekick_home / "slack-manifest.json").exists()

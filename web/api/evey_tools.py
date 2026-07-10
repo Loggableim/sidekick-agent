@@ -16,7 +16,7 @@ from pathlib import Path
 from web.api._home import get_active_webui_home, get_webui_home
 
 
-def get_hermes_home() -> Path:
+def get_sidekick_home() -> Path:
     return get_webui_home()
 
 
@@ -75,8 +75,8 @@ def _watchdog_file(home: Path | None = None) -> Path:
     return _data_dir(home) / "watchdog-state.json"
 
 
-HERMES_HOME = get_hermes_home()
-EVEY_DIR = HERMES_HOME / "workspace" / "evey"
+SIDEKICK_HOME = get_sidekick_home()
+EVEY_DIR = SIDEKICK_HOME / "workspace" / "evey"
 DATA_DIR = EVEY_DIR / "data"
 LOG_DIR = EVEY_DIR / "logs"
 CACHE_DIR = EVEY_DIR / "cache"

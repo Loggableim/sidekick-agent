@@ -47,6 +47,13 @@ datasets/
 tmp/
 temp/
 
+# Local runtime and browser QA artifacts
+state.db*
+.codex-run-logs/
+.playwright-cli/
+output/
+nova/nova_data/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

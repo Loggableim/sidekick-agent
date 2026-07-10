@@ -153,7 +153,7 @@ Folgende v0.1–v0.4-Errungenschaften müssen Tests/Fails verhindern:
    → Smoke-Test: shared session → web.api.session_ops delegation ✅
 2. **Gateway-Warnings:** Keine Import-Warnings
    → Smoke-Test: `gateway.run import (0 warnings)` ✅
-3. **Env-Alias:** `SIDEKICK_*` > `HERMES_*`
+3. **Env-Alias:** `SIDEKICK_*` > `SIDEKICK_*`
    → Smoke-Test: `shared.paths: env var priority` ✅
 4. **WebUI-Fehler:** Strukturierte Responses statt Tracebacks
    → Smoke-Test: `/health` returns 200 + JSON ✅
@@ -198,7 +198,7 @@ Folgende v0.1–v0.4-Errungenschaften müssen Tests/Fails verhindern:
 3. **CI:** macOS in der Test-Matrix (CLI + Imports + Session Layer)
 4. **Doctor:** Disk-Usage-Warnung + Session-Integritäts-Check
 5. **Smoke:** 19/19 oder besser (2 neue Tests: Streaming-Disconnect + macOS-Pfade)
-6. **Keine neuen Features · kein LastBrowser · keine user-facing Hermes**
+6. **Keine neuen Features · kein LastBrowser · keine user-facing Sidekick**
 
 ### Risiken
 

@@ -1,14 +1,14 @@
-// ── localStorage key migration: hermes-* → sidekick-* ──────────────────────
+// ── localStorage key migration: sidekick-* → sidekick-* ──────────────────────
 (function(){
   if(localStorage.getItem('sidekick-migrated-v1')) return;
   var keys=[], i;
   for(i=0;i<localStorage.length;i++){
     var k=localStorage.key(i);
-    if(k && k.startsWith('hermes-')) keys.push(k);
+    if(k && k.startsWith('sidekick-')) keys.push(k);
   }
   for(i=0;i<keys.length;i++){
     var v=localStorage.getItem(keys[i]);
-    if(v!==null) localStorage.setItem(keys[i].replace('hermes-','sidekick-'), v);
+    if(v!==null) localStorage.setItem(keys[i].replace('sidekick-','sidekick-'), v);
   }
   try{localStorage.setItem('sidekick-migrated-v1','1');}catch(_){}
 })();
@@ -336,7 +336,7 @@ function _syncMobileSidebarInlineOffset(sidebar,open){
 const windowControls={
   supported:false,
   _host(){
-    return window.hermesWindowControls || window.HermesWindowControls || null;
+    return window.sidekickWindowControls || window.SidekickWindowControls || null;
   },
   async _call(action){
     const host=this._host();
@@ -413,13 +413,13 @@ function initWindowControls(){
   if(!controls)return;
   const overlay=!!(navigator.windowControlsOverlay && navigator.windowControlsOverlay.visible);
   const host=windowControls._host();
-  const appMode=(()=>{try{return new URLSearchParams(location.search).get('hermes_app')==='1'||window.matchMedia('(display-mode: standalone)').matches||window.matchMedia('(display-mode: window-controls-overlay)').matches;}catch(_){return false;}})();
+  const appMode=(()=>{try{return new URLSearchParams(location.search).get('sidekick_app')==='1'||window.matchMedia('(display-mode: standalone)').matches||window.matchMedia('(display-mode: window-controls-overlay)').matches;}catch(_){return false;}})();
   const hasHost=!!host;
   windowControls.supported=overlay||hasHost||appMode;
   document.documentElement.classList.toggle('window-controls-overlay',overlay);
   document.documentElement.classList.toggle('has-custom-window-controls',windowControls.supported);
   document.documentElement.classList.toggle('has-native-window-bridge',hasHost);
-  document.documentElement.classList.toggle('hermes-app-window',appMode);
+  document.documentElement.classList.toggle('sidekick-app-window',appMode);
   if(!windowControls.supported){
     controls.hidden=true;
     return;
@@ -1528,7 +1528,7 @@ function _normalizeAppearance(theme,skin){
 //   1. Mobile Safari status bar (the prefers-color-scheme media variants in index.html
 //      cover the pre-load case; this updater handles user-toggled changes mid-session).
 //   2. iOS PWA / Add to Home Screen status bar.
-//   3. Native WKWebView wrappers (e.g. hermes-swift-mac) that read this attribute as
+//   3. Native WKWebView wrappers (e.g. sidekick-swift-mac) that read this attribute as
 //      the source of truth for AppKit chrome (tab bar, title bar, traffic-light area)
 //      instead of pixel-sampling — overlay-resistant and IPC-free.
 // Reading getComputedStyle(html).getPropertyValue('--bg') picks up the active skin
@@ -2147,7 +2147,7 @@ async function _syncGameModeStateFromServer() {
     });
   }
 })().catch(e=>{
-  console.error('[hermes] boot failed', e);
+  console.error('[sidekick] boot failed', e);
   try{S._bootReady=true;}catch(_){}
   try{syncTopbar();}catch(_){}
   try{syncWorkspacePanelState();}catch(_){}

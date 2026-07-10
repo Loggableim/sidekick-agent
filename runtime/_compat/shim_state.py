@@ -645,7 +645,7 @@ class SessionDB:
     def _derive_title_from_messages(self, session_id: str) -> str | None:
         """Best-effort fallback title from the first user message.
 
-        Legacy Hermes/Sidekick state.db rows often have NULL session titles.
+        Legacy Sidekick/Sidekick state.db rows often have NULL session titles.
         The WebUI should still show something meaningful instead of ``Untitled``
         when message history is present.
         """

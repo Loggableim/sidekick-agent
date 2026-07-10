@@ -52,7 +52,7 @@ def test_firecrawl_mcp_stdio_config_normalizes_to_hosted_http(monkeypatch):
             }
         },
     )
-    monkeypatch.setattr("cli.env_loader.load_hermes_dotenv", lambda: None)
+    monkeypatch.setattr("cli.env_loader.load_sidekick_dotenv", lambda: None)
 
     from tools.mcp_tool import _load_mcp_config
 
@@ -397,25 +397,7 @@ def test_voice_debug_handles_unset_env(monkeypatch):
     _debug("noop")
 
 
-def test_portable_home_bootstrap_sets_both_home_vars(monkeypatch):
-    import importlib
-    import sys
-    from pathlib import Path
-
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.delenv("HERMES_HOME", raising=False)
-    monkeypatch.delenv("SIDEKICK_DISABLE_PORTABLE_HOME", raising=False)
-
-    sys.modules.pop("cli.main", None)
-    main = importlib.import_module("cli.main")
-
-    portable_home = main.PROJECT_ROOT.parent / "home"
-
-    assert Path(main.os.environ["SIDEKICK_HOME"]) == portable_home
-    assert Path(main.os.environ["HERMES_HOME"]) == portable_home
-
-
-def test_profile_override_bootstrap_sets_both_home_vars(monkeypatch, tmp_path):
+def test_profile_override_bootstrap_sets_sidekick_home(monkeypatch, tmp_path):
     import importlib
     import sys
     from pathlib import Path
@@ -425,17 +407,15 @@ def test_profile_override_bootstrap_sets_both_home_vars(monkeypatch, tmp_path):
     profile_home.mkdir(parents=True)
 
     monkeypatch.setenv("SIDEKICK_HOME", str(base_home))
-    monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.setattr(sys, "argv", ["sidekick", "--profile", "coder"])
 
     sys.modules.pop("cli.main", None)
     main = importlib.import_module("cli.main")
 
     assert Path(main.os.environ["SIDEKICK_HOME"]) == profile_home
-    assert Path(main.os.environ["HERMES_HOME"]) == profile_home
 
 
-def test_profile_override_trusts_existing_profile_hermes_home(monkeypatch, tmp_path):
+def test_profile_override_trusts_existing_profile_sidekick_home(monkeypatch, tmp_path):
     import importlib
     import sys
     from pathlib import Path
@@ -448,12 +428,12 @@ def test_profile_override_trusts_existing_profile_hermes_home(monkeypatch, tmp_p
     (base_home / "active_profile").write_text("other", encoding="utf-8")
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(profile_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(profile_home))
     monkeypatch.setenv("SIDEKICK_DISABLE_PORTABLE_HOME", "1")
     monkeypatch.setattr(sys, "argv", ["sidekick"])
 
     sys.modules.pop("cli.main", None)
     main = importlib.import_module("cli.main")
 
-    assert Path(main.os.environ["HERMES_HOME"]) == profile_home
+    assert Path(main.os.environ["SIDEKICK_HOME"]) == profile_home
     assert main.os.environ.get("SIDEKICK_HOME") in {None, str(profile_home)}

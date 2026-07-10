@@ -1,14 +1,14 @@
 """Kanban tools — structured tool-call surface for worker + orchestrator agents.
 
 These tools are only registered into the model's schema when the agent is
-running under the dispatcher (env var ``HERMES_KANBAN_TASK`` set). A
+running under the dispatcher (env var ``SIDEKICK_KANBAN_TASK`` set). A
 normal ``sidekick chat`` session sees **zero** kanban tools in its schema.
 
 Why tools instead of just shelling out to ``sidekick kanban``?
 
 1. **Backend portability.** A worker whose terminal tool points at Docker
    / Modal / Singularity / SSH would run ``sidekick kanban complete …``
-   inside the container, where ``hermes`` isn't installed and the DB
+   inside the container, where ``sidekick`` isn't installed and the DB
    isn't mounted. Tools run in the agent's Python process, so they
    always reach ``~/.sidekick/kanban.db`` regardless of terminal backend.
 
@@ -59,7 +59,7 @@ def _profile_has_kanban_toolset() -> bool:
 def _check_kanban_mode() -> bool:
     """Task-lifecycle tools are available when:
 
-    1. ``HERMES_KANBAN_TASK`` is set (dispatcher-spawned worker), OR
+    1. ``SIDEKICK_KANBAN_TASK`` is set (dispatcher-spawned worker), OR
     2. The current profile has ``kanban`` in its toolsets config
        (orchestrator profiles like techlead that route work via Kanban).
 
@@ -115,14 +115,14 @@ def _worker_run_id(task_id: str) -> Optional[int]:
 def _enforce_worker_task_ownership(tid: str) -> Optional[str]:
     """Reject worker-driven destructive calls on foreign task IDs.
 
-    A process spawned by the dispatcher has ``HERMES_KANBAN_TASK`` set
+    A process spawned by the dispatcher has ``SIDEKICK_KANBAN_TASK`` set
     to its own task id. Tools like ``kanban_complete`` / ``kanban_block``
     / ``kanban_heartbeat`` mutate run-lifecycle state, so a buggy or
     prompt-injected worker that passed an explicit ``task_id`` for some
     other task could corrupt sibling or cross-tenant runs (see #19534).
 
     Orchestrator profiles (kanban toolset enabled but **no**
-    ``HERMES_KANBAN_TASK`` in env) aren't subject to this check — their
+    ``SIDEKICK_KANBAN_TASK`` in env) aren't subject to this check — their
     job is routing, and they sometimes legitimately close out child
     tasks or reopen blocked ones. Workers are narrowly scoped to their
     one task.
@@ -232,7 +232,7 @@ def _handle_show(args: dict, **kw) -> str:
     tid = _default_task_id(args.get("task_id"))
     if not tid:
         return tool_error(
-            "task_id is required (or set HERMES_KANBAN_TASK in the env)"
+            "task_id is required (or set SIDEKICK_KANBAN_TASK in the env)"
         )
     try:
         kb, conn = _connect()
@@ -362,7 +362,7 @@ def _handle_complete(args: dict, **kw) -> str:
     tid = _default_task_id(args.get("task_id"))
     if not tid:
         return tool_error(
-            "task_id is required (or set HERMES_KANBAN_TASK in the env)"
+            "task_id is required (or set SIDEKICK_KANBAN_TASK in the env)"
         )
     ownership_err = _enforce_worker_task_ownership(tid)
     if ownership_err:
@@ -440,7 +440,7 @@ def _handle_block(args: dict, **kw) -> str:
     tid = _default_task_id(args.get("task_id"))
     if not tid:
         return tool_error(
-            "task_id is required (or set HERMES_KANBAN_TASK in the env)"
+            "task_id is required (or set SIDEKICK_KANBAN_TASK in the env)"
         )
     ownership_err = _enforce_worker_task_ownership(tid)
     if ownership_err:
@@ -483,7 +483,7 @@ def _handle_heartbeat(args: dict, **kw) -> str:
     tid = _default_task_id(args.get("task_id"))
     if not tid:
         return tool_error(
-            "task_id is required (or set HERMES_KANBAN_TASK in the env)"
+            "task_id is required (or set SIDEKICK_KANBAN_TASK in the env)"
         )
     ownership_err = _enforce_worker_task_ownership(tid)
     if ownership_err:
@@ -493,7 +493,7 @@ def _handle_heartbeat(args: dict, **kw) -> str:
         kb, conn = _connect()
         try:
             # Extend the claim TTL first. The dispatcher pins
-            # HERMES_KANBAN_CLAIM_LOCK in the worker env at spawn time
+            # SIDEKICK_KANBAN_CLAIM_LOCK in the worker env at spawn time
             # (see _default_spawn in kanban_db.py); falling back to the
             # default _claimer_id() covers locally-driven workers that
             # never went through the dispatcher path.
@@ -534,7 +534,7 @@ def _handle_comment(args: dict, **kw) -> str:
     # into the next worker's system prompt by ``build_worker_context``
     # as ``**{author}** (timestamp): {body}`` — accepting an
     # ``args["author"]`` override let a worker forge a comment from
-    # an authoritative-looking name like ``hermes-system`` and poison
+    # an authoritative-looking name like ``sidekick-system`` and poison
     # the future-worker context with what reads as a system directive.
     # Cross-task commenting itself remains unrestricted (see #19713) —
     # comments are the deliberate handoff channel between tasks.
@@ -678,7 +678,7 @@ def _handle_link(args: dict, **kw) -> str:
 # ---------------------------------------------------------------------------
 
 _DESC_TASK_ID_DEFAULT = (
-    "Task id. If omitted, defaults to HERMES_KANBAN_TASK from the env "
+    "Task id. If omitted, defaults to SIDEKICK_KANBAN_TASK from the env "
     "(the task the dispatcher spawned you to work on)."
 )
 
@@ -948,7 +948,7 @@ KANBAN_CREATE_SCHEMA = {
                 "type": "string",
                 "description": (
                     "Optional namespace for multi-project isolation. "
-                    "Defaults to HERMES_TENANT env if set."
+                    "Defaults to SIDEKICK_TENANT env if set."
                 ),
             },
             "priority": {

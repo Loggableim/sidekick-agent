@@ -13,7 +13,7 @@ def test_save_job_output_does_not_overwrite_same_second_outputs(monkeypatch, tmp
     fixed_now = datetime(2026, 6, 22, 12, 34, 56, tzinfo=timezone.utc)
 
     monkeypatch.setattr(cron_jobs, "OUTPUT_DIR", tmp_path)
-    monkeypatch.setattr(cron_jobs, "_hermes_now", lambda: fixed_now)
+    monkeypatch.setattr(cron_jobs, "_sidekick_now", lambda: fixed_now)
 
     first = cron_jobs.save_job_output("job-1", "first output")
     second = cron_jobs.save_job_output("job-1", "second output")
@@ -76,7 +76,7 @@ def test_run_job_script_uses_utf8_text_mode(monkeypatch, tmp_path):
 def test_load_jobs_removes_stale_tmp_files(monkeypatch, tmp_path):
     import runtime.cron.jobs as cron_jobs
 
-    monkeypatch.setattr(cron_jobs, "HERMES_DIR", tmp_path)
+    monkeypatch.setattr(cron_jobs, "SIDEKICK_HOME_DIR", tmp_path)
     monkeypatch.setattr(cron_jobs, "CRON_DIR", tmp_path / "cron")
     monkeypatch.setattr(cron_jobs, "OUTPUT_DIR", tmp_path / "cron" / "output")
     monkeypatch.setattr(cron_jobs, "JOBS_FILE", tmp_path / "cron" / "jobs.json")

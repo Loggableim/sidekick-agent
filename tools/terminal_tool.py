@@ -267,7 +267,7 @@ def _get_sudo_password_cache_scope() -> str:
     try:
         from gateway.session_context import get_session_env
 
-        session_key = get_session_env("HERMES_SESSION_KEY", "")
+        session_key = get_session_env("SIDEKICK_SESSION_KEY", "")
     except Exception:
         session_key = os.getenv("SIDEKICK_SESSION_KEY")
     if session_key:
@@ -389,7 +389,7 @@ def _prompt_for_sudo_password(timeout_seconds: int = 45) -> str:
     - Timeout expires (45s default)
     - Any error occurs
     
-    Only works in interactive mode (HERMES_INTERACTIVE=1).
+    Only works in interactive mode (SIDEKICK_INTERACTIVE=1).
     If a _sudo_password_callback is registered (by the CLI), delegates to it
     so the prompt integrates with prompt_toolkit's UI.  Otherwise reads
     directly from /dev/tty with echo disabled.
@@ -840,7 +840,7 @@ def _transform_sudo_command(command: str | None) -> tuple[str | None, str | None
     themselves; see their execute() methods for how they handle the
     non-None sudo_stdin case.
 
-    If SUDO_PASSWORD is not set and in interactive mode (HERMES_INTERACTIVE=1):
+    If SUDO_PASSWORD is not set and in interactive mode (SIDEKICK_INTERACTIVE=1):
       Prompts user for password with 45s timeout, caches for session.
 
     If SUDO_PASSWORD is not set and NOT interactive:
@@ -1947,12 +1947,12 @@ def terminal_tool(
                 # routed back to the correct chat/thread.
                 if background and (notify_on_complete or watch_patterns):
                     from gateway.session_context import get_session_env as _gse
-                    _gw_platform = _gse("HERMES_SESSION_PLATFORM", "")
+                    _gw_platform = _gse("SIDEKICK_SESSION_PLATFORM", "")
                     if _gw_platform:
-                        _gw_chat_id = _gse("HERMES_SESSION_CHAT_ID", "")
-                        _gw_thread_id = _gse("HERMES_SESSION_THREAD_ID", "")
-                        _gw_user_id = _gse("HERMES_SESSION_USER_ID", "")
-                        _gw_user_name = _gse("HERMES_SESSION_USER_NAME", "")
+                        _gw_chat_id = _gse("SIDEKICK_SESSION_CHAT_ID", "")
+                        _gw_thread_id = _gse("SIDEKICK_SESSION_THREAD_ID", "")
+                        _gw_user_id = _gse("SIDEKICK_SESSION_USER_ID", "")
+                        _gw_user_name = _gse("SIDEKICK_SESSION_USER_NAME", "")
                         proc_session.watcher_platform = _gw_platform
                         proc_session.watcher_chat_id = _gw_chat_id
                         proc_session.watcher_user_id = _gw_user_id

@@ -23,7 +23,7 @@ def test_worktree_settings_endpoint_roundtrips(monkeypatch, tmp_path):
     cli_config.save_config(config_state)
 
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
 
     response = client.get("/api/worktree/settings", headers=headers)
     assert response.status_code == 200

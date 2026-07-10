@@ -104,7 +104,7 @@ def test_agent_workspace_uses_active_profile_home_after_import(monkeypatch, tmp_
     (active_home / "config.yaml").write_text("model:\n  default: gpt-4o\n", encoding="utf-8")
 
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(import_path_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(import_path_home))
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
     sys.modules.pop("web.api.agent_workspace", None)

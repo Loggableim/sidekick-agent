@@ -19,8 +19,8 @@ from web.api.config import load_settings
 
 logger = logging.getLogger(__name__)
 
-PASSWORD_ENV_VARS = ("SIDEKICK_WEBUI_PASSWORD", "HERMES_WEBUI_PASSWORD")
-SESSION_TTL_ENV_VARS = ("SIDEKICK_WEBUI_SESSION_TTL", "HERMES_WEBUI_SESSION_TTL")
+PASSWORD_ENV_VARS = ("SIDEKICK_WEBUI_PASSWORD",)
+SESSION_TTL_ENV_VARS = ("SIDEKICK_WEBUI_SESSION_TTL",)
 
 
 def _state_dir() -> Path:
@@ -47,7 +47,7 @@ def _resolve_session_ttl() -> int:
     """Resolve session TTL from env > settings > default.
 
     Priority mirrors get_password_hash(): SIDEKICK_WEBUI_SESSION_TTL /
-    legacy HERMES_WEBUI_SESSION_TTL env vars first, then settings.json,
+    legacy SIDEKICK_WEBUI_SESSION_TTL env vars first, then settings.json,
     falling back to ``SESSION_TTL`` (30 days).
     Clamped to [60s, 1 year] to prevent runaway cookies or self-lockout.
     """
@@ -76,7 +76,7 @@ PUBLIC_PATHS = frozenset({
     '/api/errors/db-path',
 })
 
-COOKIE_NAME = 'hermes_session'
+COOKIE_NAME = 'sidekick_session'
 
 _STATE_DIR = _state_dir()
 _SESSIONS_FILE = _STATE_DIR / '.sessions.json'

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def _resolve_git_executable() -> Optional[str]:
     """Resolve a git binary for subprocess use when ``PATH`` may be minimal.
 
-    Matches other Hermes subprocess resolution: :func:`shutil.which` first,
+    Matches other Sidekick subprocess resolution: :func:`shutil.which` first,
     then common Git for Windows install paths and POSIX defaults.
     """
     found = shutil.which("git")
@@ -477,7 +477,7 @@ def cmd_install(
     ).exists():
         console.print(
             f"[yellow]Warning:[/yellow] {installed_name} doesn't contain plugin.yaml "
-            f"or __init__.py. It may not be a valid Hermes plugin.",
+            f"or __init__.py. It may not be a valid Sidekick plugin.",
         )
 
     _prompt_plugin_env_vars(installed_manifest, console)
@@ -694,7 +694,7 @@ def _plugin_exists(name: str) -> bool:
             manifest = _read_manifest(child)
             if manifest.get("name") == name:
                 return True
-    # Bundled: <repo>/plugins/<name>/ (or HERMES_BUNDLED_PLUGINS on Nix).
+    # Bundled: <repo>/plugins/<name>/ (or SIDEKICK_BUNDLED_PLUGINS on Nix).
     from cli.plugins import get_bundled_plugins_dir
     repo_plugins = get_bundled_plugins_dir()
     if repo_plugins.is_dir():

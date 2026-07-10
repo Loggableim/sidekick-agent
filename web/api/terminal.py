@@ -287,7 +287,7 @@ def start_terminal(
                 "LINES": str(rows),
                 "PWD": cwd,
                 "SIDEKICK_WEBUI_TERMINAL": "1",
-                "HERMES_WEBUI_TERMINAL": "1",
+                "SIDEKICK_WEBUI_TERMINAL": "1",
             }
         )
 

@@ -238,7 +238,7 @@ def _is_continuation_session(parent: dict | None, child: dict | None) -> bool:
     """Return True when ``child`` is the next segment of the same conversation.
 
     Compression rotates session ids automatically. A manual CLI close followed
-    by ``hermes -c`` also records a new child session; for sidebar projection it
+    by ``sidekick -c`` also records a new child session; for sidebar projection it
     should continue the same visible conversation rather than becoming a
     separate child-session row. Plain parent/child links that started before the
     parent's ended boundary remain child sessions.

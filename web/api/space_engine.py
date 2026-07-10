@@ -6,7 +6,7 @@ Agents are roles INSIDE a space — no more global profiles.
 
 Directory layout::
 
-    HERMES_HOME/spaces/
+    SIDEKICK_HOME/spaces/
       nova/                     → fresh-install default Sidekick space
         space.yaml              → model, provider, color, project_dir
         agents/
@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
-_SPACES_ROOT_KEY = "HERMES_WEBUI_SPACES_DIR"
-_OLD_WORKSPACES_KEY = "HERMES_WEBUI_WORKSPACES_DIR"
+_SPACES_ROOT_KEY = "SIDEKICK_WEBUI_SPACES_DIR"
+_OLD_WORKSPACES_KEY = "SIDEKICK_WEBUI_WORKSPACES_DIR"
 
 _DEFAULT_SPACES_ROOT: Path = (get_webui_home() / "spaces").expanduser().resolve()
 SPACES_ROOT: Path = _DEFAULT_SPACES_ROOT

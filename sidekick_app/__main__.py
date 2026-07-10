@@ -12,7 +12,7 @@ import os
 def _ensure_self_first() -> None:
     """Insert the sidekick repo root at the front of sys.path so our own
     ``cli/`` (a package directory) shadows any stray ``cli.py`` file
-    from the old ``cids-hermes-agent`` repo that may also be on PATH."""
+    from the old ``cids-sidekick-agent`` repo that may also be on PATH."""
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
         sys.path.remove(repo_root)
@@ -32,10 +32,6 @@ def _bootstrap_aliases() -> None:
         "sidekick_logging": "runtime._compat.shim_logging",
         "sidekick_bootstrap": "runtime._compat.shim_bootstrap",
         "sidekick_time": "runtime._compat.shim_time",
-        "hermes_constants": "runtime._compat.shim_constants",
-        "hermes_state": "runtime._compat.shim_state",
-        "hermes_bootstrap": "runtime._compat.shim_bootstrap",
-        "hermes_time": "runtime._compat.shim_time",
     }
     for alias, target in aliases.items():
         if alias not in sys.modules:

@@ -1,4 +1,4 @@
-"""Default SOUL.md template seeded into HERMES_HOME on first run."""
+"""Default SOUL.md template seeded into SIDEKICK_HOME on first run."""
 
 DEFAULT_SOUL_MD = (
     "You are Sidekick Agent, an intelligent AI assistant. "

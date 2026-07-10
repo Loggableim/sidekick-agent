@@ -6,7 +6,7 @@ no stderr chatter.  Just the agent's final text to stdout.
 Toolsets = explicit --toolsets when provided, otherwise whatever the user has
 configured for "cli" in `sidekick tools`.
 Rules / memory / AGENTS.md / preloaded skills = same as a normal chat turn.
-Approvals = auto-bypassed (HERMES_YOLO_MODE=1 is set for the call).
+Approvals = auto-bypassed (SIDEKICK_YOLO_MODE=1 is set for the call).
 Working directory = the user's CWD (AGENTS.md etc. resolve from there as usual).
 
 Model / provider selection mirrors `sidekick chat`:
@@ -16,8 +16,8 @@ Model / provider selection mirrors `sidekick chat`:
     - If only --provider given, error out (ambiguous — caller must pick a model).
 
 Env var fallbacks (used when the corresponding arg is not passed):
-    - HERMES_INFERENCE_MODEL
-    - HERMES_INFERENCE_PROVIDER  (already read by resolve_runtime_provider)
+    - SIDEKICK_INFERENCE_MODEL
+    - SIDEKICK_INFERENCE_PROVIDER  (already read by resolve_runtime_provider)
 """
 
 from __future__ import annotations
@@ -204,10 +204,10 @@ def run_oneshot(
 
     Args:
         prompt: The user message to send.
-        model: Optional model override. Falls back to HERMES_INFERENCE_MODEL
+        model: Optional model override. Falls back to SIDEKICK_INFERENCE_MODEL
             env var, then config.yaml's model.default / model.model.
         provider: Optional provider override. Falls back to
-            HERMES_INFERENCE_PROVIDER env var, then config.yaml's model.provider,
+            SIDEKICK_INFERENCE_PROVIDER env var, then config.yaml's model.provider,
             then "auto".
         toolsets: Optional comma-separated string or iterable of toolsets.
 
@@ -228,7 +228,7 @@ def run_oneshot(
     env_model_early = (os.getenv("SIDEKICK_INFERENCE_MODEL") or "").strip()
     if provider and not ((model or "").strip() or env_model_early):
         sys.stderr.write(
-            "sidekick -z: --provider requires --model (or SIDEKICK_INFERENCE_MODEL / HERMES_INFERENCE_MODEL). "
+            "sidekick -z: --provider requires --model (or SIDEKICK_INFERENCE_MODEL). "
             "Pass both explicitly, or neither to use your configured defaults.\n"
         )
         return 2
@@ -346,10 +346,10 @@ def _run_agent(
         #                so the agent continues instead of stalling on
         #                the tool's built-in "not available" error
         #   - sudo password prompt → terminal_tool gates on
-        #                HERMES_INTERACTIVE which we never set
-        #   - shell-hook approval → auto-approved via HERMES_ACCEPT_HOOKS=1
+        #                SIDEKICK_INTERACTIVE which we never set
+        #   - shell-hook approval → auto-approved via SIDEKICK_ACCEPT_HOOKS=1
         #                (set above); also falls back to deny on non-tty
-        #   - dangerous-command approval → bypassed via HERMES_YOLO_MODE=1
+        #   - dangerous-command approval → bypassed via SIDEKICK_YOLO_MODE=1
         #   - skill secret capture → returns gracefully when no callback set
         clarify_callback=_oneshot_clarify_callback,
     )

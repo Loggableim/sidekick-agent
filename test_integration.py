@@ -21,35 +21,35 @@ _tmpdir = tempfile.mkdtemp(prefix="sidekick_inttest_")
 _HOME = os.path.join(_tmpdir, "sidekick_home")
 
 # Phase 1: Env-Var Priorität
-print("--- Phase 1: Env-Var Priority (SIDEKICK_ > HERMES_) ---")
+print("--- Phase 1: Env-Var Priority (SIDEKICK_ > SIDEKICK_) ---")
 
 # Nur Test-Vars setzen, keine realen überschreiben
 os.environ['SIDEKICK_HOME'] = os.path.join(_tmpdir, 'sidekick')
-os.environ['HERMES_HOME'] = os.path.join(_tmpdir, 'hermes')
+os.environ['SIDEKICK_HOME'] = os.path.join(_tmpdir, 'sidekick')
 
 from shared.paths import sidekick_home
 h = sidekick_home()
 check("SIDEKICK_ bevorzugt", 'sidekick' in str(h), f"got {h}")
 
-# Test: Fallback auf HERMES_
+# Test: Fallback auf SIDEKICK_
 del os.environ['SIDEKICK_HOME']
 h2 = sidekick_home()
-check("Fallback auf HERMES_", 'hermes' in str(h2), f"got {h2}")
+check("Fallback auf SIDEKICK_", 'sidekick' in str(h2), f"got {h2}")
 
-del os.environ['HERMES_HOME']
+del os.environ['SIDEKICK_HOME']
 
 # Test: os.getenv Dual-Read
 os.environ['SIDEKICK_API_TIMEOUT'] = '42.0'
-os.environ['HERMES_API_TIMEOUT'] = '99.0'
-v = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('HERMES_API_TIMEOUT', '1800.0'))
+os.environ['SIDEKICK_API_TIMEOUT'] = '99.0'
+v = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('SIDEKICK_API_TIMEOUT', '1800.0'))
 check("os.getenv primary", v == 42.0, f"got {v}")
 
 del os.environ['SIDEKICK_API_TIMEOUT']
-v2 = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('HERMES_API_TIMEOUT', '1800.0'))
+v2 = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('SIDEKICK_API_TIMEOUT', '1800.0'))
 check("os.getenv fallback", v2 == 99.0, f"got {v2}")
 
-del os.environ['HERMES_API_TIMEOUT']
-v3 = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('HERMES_API_TIMEOUT', '1800.0'))
+del os.environ['SIDEKICK_API_TIMEOUT']
+v3 = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('SIDEKICK_API_TIMEOUT', '1800.0'))
 check("os.getenv default", v3 == 1800.0, f"got {v3}")
 
 # Phase 2: Syntaxcheck

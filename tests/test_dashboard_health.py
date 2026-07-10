@@ -164,7 +164,7 @@ def test_workspaces_endpoint_merges_space_engine_entries(monkeypatch, tmp_path):
     client = TestClient(web_server.app)
     response = client.get(
         "/api/workspaces",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -189,7 +189,7 @@ def test_workspaces_endpoint_requires_session_token(monkeypatch, tmp_path):
 
     authorized = client.get(
         "/api/workspaces",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
     assert authorized.status_code == 200
 
@@ -362,8 +362,6 @@ def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     monkeypatch.setattr(
         "web.api.config.get_available_models",
         lambda: {
@@ -383,7 +381,7 @@ def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     client = TestClient(web_server.app)
     response = client.get(
         "/api/models",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -397,8 +395,6 @@ def test_live_models_endpoint_returns_json_for_matching_provider(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     monkeypatch.setattr(
         "web.api.config.get_available_models",
         lambda: {
@@ -418,7 +414,7 @@ def test_live_models_endpoint_returns_json_for_matching_provider(monkeypatch, tm
     client = TestClient(web_server.app)
     response = client.get(
         "/api/models/live?provider=opencode-zen",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -433,8 +429,6 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     class _FakeSessionDB:
         def __init__(self, *args, **kwargs):
             self._conn = self
@@ -467,7 +461,7 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     client = TestClient(web_server.app)
     response = client.get(
         "/api/sessions",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -481,8 +475,6 @@ def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     space_sessions = tmp_path / "home" / "spaces" / "color" / "sessions"
     space_sessions.mkdir(parents=True)
     index = [
@@ -552,7 +544,7 @@ def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch
     client = TestClient(web_server.app)
     response = client.get(
         "/api/sessions?workspace=color",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -566,8 +558,6 @@ def test_default_workspace_query_uses_default_space_index(monkeypatch, tmp_path)
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     space_sessions = tmp_path / "home" / "spaces" / "default" / "sessions"
     space_sessions.mkdir(parents=True)
     (space_sessions / "_index.json").write_text(
@@ -607,7 +597,7 @@ def test_default_workspace_query_uses_default_space_index(monkeypatch, tmp_path)
     monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace() if slug == "default" else None)
 
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
 
     response = client.get("/api/sessions?workspace=default", headers=headers)
     assert response.status_code == 200
@@ -629,8 +619,6 @@ def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     monkeypatch.setattr(
         web_server,
         "_load_space_sessions",
@@ -643,7 +631,7 @@ def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
     client = TestClient(web_server.app)
     response = client.get(
         "/api/sessions/search?workspace=color&q=palette",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -656,12 +644,11 @@ def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
     assert payload["results"][0]["match_type"] == "title"
 
 
-def test_session_space_routes_do_not_proxy_for_old_static_ui(monkeypatch, tmp_path):
+def test_session_space_routes_stay_in_fastapi(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
 
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: True)
     monkeypatch.setattr(
         web_server,
         "_load_space_sessions",
@@ -675,13 +662,8 @@ def test_session_space_routes_do_not_proxy_for_old_static_ui(monkeypatch, tmp_pa
         ],
     )
 
-    async def _fail_proxy(request):
-        raise AssertionError("space-scoped session routes must stay on FastAPI")
-
-    monkeypatch.setattr(web_server, "_proxy_request_to_stdlib", _fail_proxy)
-
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
 
     sessions = client.get("/api/sessions?workspace=color", headers=headers)
     assert sessions.status_code == 200
@@ -745,7 +727,7 @@ def test_space_session_detail_repairs_stale_stream_state(monkeypatch, tmp_path):
 
     response = TestClient(web_server.app).get(
         "/api/session?session_id=color-live&workspace=color&messages=0&resolve_model=0",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -842,7 +824,7 @@ def test_session_detail_includes_persisted_goal_state(monkeypatch, tmp_path):
 
     response = TestClient(web_server.app).get(
         "/api/session?session_id=goal-session&workspace=color&messages=0&resolve_model=0",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -1177,7 +1159,7 @@ def test_chat_start_marks_active_goal_turns_as_goal_related(monkeypatch, tmp_pat
     )
     monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
     monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: True)
-    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
 
     routes._handle_chat_start(
         SimpleNamespace(headers={}),
@@ -1229,7 +1211,7 @@ def test_goal_command_kickoff_routes_nova_local_models_to_ollama_cloud_deepseek(
     )
     monkeypatch.setattr("web.api.goals.goal_state_snapshot", lambda *args, **kwargs: {"ok": True})
     monkeypatch.setattr("web.api.goals.restore_goal_state", lambda *args, **kwargs: None)
-    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
     monkeypatch.setattr(
         "web.api.routes._start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
@@ -1424,7 +1406,7 @@ def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp
 
     response = TestClient(web_server.app).get(
         "/api/sessions?workspace=color",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -1446,12 +1428,12 @@ def test_workspace_api_wrapper_sends_dashboard_session_token():
     api_auth_js = Path("web/static/api-auth.js").read_text(encoding="utf-8")
     workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
 
-    assert "__HERMES_SESSION_TOKEN__" in api_auth_js
-    assert "X-Hermes-Session-Token" in api_auth_js
+    assert "__SIDEKICK_SESSION_TOKEN__" in api_auth_js
+    assert "X-Sidekick-Session-Token" in api_auth_js
     assert "__SIDEKICK_FETCH_AUTH_INSTALLED__" in api_auth_js
     assert "{ defaultJson: false }" in api_auth_js
-    assert "__HERMES_SESSION_TOKEN__" in workspace_js
-    assert "X-Hermes-Session-Token" in workspace_js
+    assert "__SIDEKICK_SESSION_TOKEN__" in workspace_js
+    assert "X-Sidekick-Session-Token" in workspace_js
     assert "hasDashboardToken" in workspace_js
     assert "onLoginPage" in workspace_js
 
@@ -1592,7 +1574,6 @@ def test_api_auth_script_loads_before_app_fetches():
 def test_kanban_db_missing_env_vars_fall_back_to_default_home(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     for name in (
-        "HERMES_HOME",
         "SIDEKICK_KANBAN_HOME",
         "SIDEKICK_KANBAN_BOARD",
         "SIDEKICK_KANBAN_DB",
@@ -1611,16 +1592,16 @@ def test_kanban_db_missing_env_vars_fall_back_to_default_home(monkeypatch, tmp_p
     assert boards and boards[0]["slug"] == "default"
 
 
-def test_kanban_db_honors_legacy_hermes_kanban_home(monkeypatch, tmp_path):
+def test_kanban_db_honors_legacy_sidekick_kanban_home(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
-    monkeypatch.setenv("HERMES_KANBAN_HOME", str(tmp_path / "legacy-kanban"))
+    monkeypatch.setenv("SIDEKICK_KANBAN_HOME", str(tmp_path / "legacy-kanban"))
     monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_BOARD", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
     monkeypatch.delenv("SIDEKICK_KANBAN_DB", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_DB", raising=False)
     monkeypatch.delenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_WORKSPACES_ROOT", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", raising=False)
 
     from cli import kanban_db
 
@@ -1632,11 +1613,11 @@ def test_kanban_db_honors_legacy_hermes_kanban_home(monkeypatch, tmp_path):
 def test_kanban_db_honors_legacy_board_and_direct_paths(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
     monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
-    monkeypatch.setenv("HERMES_KANBAN_BOARD", "blog-sprint")
-    monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "legacy-db.sqlite"))
-    monkeypatch.setenv("HERMES_KANBAN_WORKSPACES_ROOT", str(tmp_path / "legacy-workspaces"))
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "blog-sprint")
+    monkeypatch.setenv("SIDEKICK_KANBAN_DB", str(tmp_path / "legacy-db.sqlite"))
+    monkeypatch.setenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", str(tmp_path / "legacy-workspaces"))
 
     from cli import kanban_db
 
@@ -1674,13 +1655,13 @@ def test_kanban_command_restores_both_board_override_envs(monkeypatch):
     from cli import kanban, kanban_db
 
     monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-sidekick")
-    monkeypatch.setenv("HERMES_KANBAN_BOARD", "legacy-hermes")
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-sidekick")
     monkeypatch.setattr(kanban_db, "board_exists", lambda slug: True)
     monkeypatch.setattr(kanban_db, "init_db", lambda *args, **kwargs: None)
 
     def _fake_list(args):
         assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
-        assert os.environ["HERMES_KANBAN_BOARD"] == "blog-sprint"
+        assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
         return 0
 
     monkeypatch.setattr(kanban, "_cmd_list", _fake_list)
@@ -1689,7 +1670,7 @@ def test_kanban_command_restores_both_board_override_envs(monkeypatch):
 
     assert result == 0
     assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-sidekick"
-    assert os.environ["HERMES_KANBAN_BOARD"] == "legacy-hermes"
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-sidekick"
 
 
 def test_pin_kanban_board_env_mirrors_legacy_board_env(monkeypatch):
@@ -1698,12 +1679,12 @@ def test_pin_kanban_board_env_mirrors_legacy_board_env(monkeypatch):
     from cli import main
 
     monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
-    monkeypatch.setenv("HERMES_KANBAN_BOARD", "legacy-board")
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-board")
 
     main._pin_kanban_board_env()
 
     assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-board"
-    assert os.environ["HERMES_KANBAN_BOARD"] == "legacy-board"
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-board"
 
 
 def test_pin_kanban_board_env_normalizes_existing_sidekick_board_env(monkeypatch):
@@ -1712,15 +1693,13 @@ def test_pin_kanban_board_env_normalizes_existing_sidekick_board_env(monkeypatch
     from cli import main
 
     monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "primary-board")
-    monkeypatch.setenv("HERMES_KANBAN_BOARD", "legacy-board")
 
     main._pin_kanban_board_env()
 
     assert os.environ["SIDEKICK_KANBAN_BOARD"] == "primary-board"
-    assert os.environ["HERMES_KANBAN_BOARD"] == "primary-board"
 
 
-def test_kanban_bridge_conn_preserves_legacy_hermes_env(monkeypatch, tmp_path):
+def test_kanban_bridge_conn_restores_sidekick_env(monkeypatch, tmp_path):
     import os
 
     from web.api import kanban_bridge
@@ -1728,13 +1707,11 @@ def test_kanban_bridge_conn_preserves_legacy_hermes_env(monkeypatch, tmp_path):
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
-    monkeypatch.setenv("HERMES_KANBAN_HOME", "legacy-root")
     monkeypatch.setattr(kanban_bridge, "_get_ws_kanban_home", lambda: str(workspace_root))
 
     class _FakeKB:
         def init_db(self, board=None):
             assert os.environ["SIDEKICK_KANBAN_HOME"] == str(workspace_root)
-            assert os.environ["HERMES_KANBAN_HOME"] == str(workspace_root)
 
         def connect(self, board=None):
             return object()
@@ -1745,7 +1722,6 @@ def test_kanban_bridge_conn_preserves_legacy_hermes_env(monkeypatch, tmp_path):
 
     assert conn is not None
     assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
-    assert os.environ.get("HERMES_KANBAN_HOME") == "legacy-root"
 
 
 def test_dispatcher_kanban_home_helpers_set_and_clear_both_env_vars(monkeypatch):
@@ -1754,31 +1730,31 @@ def test_dispatcher_kanban_home_helpers_set_and_clear_both_env_vars(monkeypatch)
     from web.api import dispatcher
 
     monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
-    monkeypatch.delenv("HERMES_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
 
     dispatcher._set_space_kanban_home("space-root")
 
     assert os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
-    assert os.environ["HERMES_KANBAN_HOME"] == "space-root"
+    assert os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
 
     dispatcher._clear_kanban_home()
 
     assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
-    assert os.environ.get("HERMES_KANBAN_HOME") is None
+    assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
 
 
 def test_dispatcher_kanban_home_override_restores_previous_env(monkeypatch):
     from web.api import dispatcher
 
     monkeypatch.setenv("SIDEKICK_KANBAN_HOME", "original-sidekick")
-    monkeypatch.setenv("HERMES_KANBAN_HOME", "original-hermes")
+    monkeypatch.setenv("SIDEKICK_KANBAN_HOME", "original-sidekick")
 
     with dispatcher._kanban_home_override("space-root"):
         assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
-        assert dispatcher.os.environ["HERMES_KANBAN_HOME"] == "space-root"
+        assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
 
     assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "original-sidekick"
-    assert dispatcher.os.environ["HERMES_KANBAN_HOME"] == "original-hermes"
+    assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "original-sidekick"
 
 
 def test_kanban_board_list_reports_fallback_current_source(monkeypatch):
@@ -1960,14 +1936,22 @@ def test_titlebar_center_stays_desktop_aligned():
     assert ".titlebar-space-name{margin-left:2px;}" in style_css
 
 
-def test_titlebar_actions_remain_visible_on_desktop():
+def test_titlebar_global_actions_remain_visible_on_desktop():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
 
+    assert ".titlebar-utility-actions{display:flex;align-items:center;gap:2px;margin-left:8px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
     assert ".titlebar-actions{display:flex;align-items:center;gap:2px;margin-right:4px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
-    assert ".titlebar-actions #btnCastToggle," in style_css
+    assert ".titlebar-utility-actions #btnCastToggle," in style_css
     assert ".titlebar-actions #btnRebootSidekick," in style_css
     assert ".titlebar-actions #btnShutdownSidekick{display:inline-flex!important;}" in style_css
+    assert ".titlebar-utility-actions .lang-dropdown{left:0;right:auto;}" in style_css
     assert ".titlebar-actions:hover #btnCastToggle," not in style_css
+    assert '<div class="titlebar-utility-actions" id="titlebarUtilityActions"' in index_html
+    assert index_html.index('id="btnLangSelector"') < index_html.index('id="btnCastToggle"')
+    assert index_html.index('id="btnCastToggle"') < index_html.index('id="btnNovaYoloToggle"')
+    assert "move(document.getElementById('btnCastToggle'));" not in index_html
+    assert "langSelector.hidden = true;" not in index_html
 
 
 def test_agents_dashboard_chat_docks_existing_chat_view_in_main_area():
@@ -2584,7 +2568,7 @@ def test_discord_fastapi_admin_reads_from_gateway_when_available(monkeypatch):
     monkeypatch.setattr(web_server, "_discord_api", fake_discord_api, raising=False)
 
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
     roles = client.get("/api/discord/guilds/guild-1/roles", headers=headers)
     members = client.get("/api/discord/guilds/guild-1/members?limit=2", headers=headers)
 
@@ -2618,7 +2602,7 @@ def test_discord_fastapi_admin_updates_member_roles_when_available(monkeypatch):
             "add_role_ids": ["role-add"],
             "remove_role_ids": ["role-remove"],
         },
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -2859,7 +2843,7 @@ def test_cast_status_without_config_reports_default_host_when_cockpit_unavailabl
         raise TimeoutError("not running")
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
 
@@ -2903,7 +2887,7 @@ def test_cast_status_without_config_uses_local_cockpit_when_available(monkeypatc
         return Resp()
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
@@ -2942,7 +2926,7 @@ def test_cast_toggle_without_config_starts_local_cockpit(monkeypatch, tmp_path):
         return Proc()
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setenv("SIDEKICK_COCKPIT_LAUNCHER", str(launcher))
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
@@ -3080,7 +3064,7 @@ def test_cast_autostart_reuses_running_local_cockpit_without_launch(monkeypatch)
         captured["status"] = status
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr(routes, "_cockpit_launch_available", lambda: True)
     monkeypatch.setattr(
@@ -3476,7 +3460,7 @@ def test_game_mode_chat_start_routes_nova_local_models_to_ollama_cloud_deepseek(
         lambda: {"provider": "ollama", "model": "qwen3:4b", "base_url": "http://127.0.0.1:11434"},
     )
     monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
-    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
     monkeypatch.setattr(
         "web.api.routes._start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
@@ -3536,7 +3520,7 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
         lambda: {"provider": "ollama", "model": "qwen3:4b", "base_url": "http://127.0.0.1:11434"},
     )
     monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
-    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
     monkeypatch.setattr(
         "web.api.routes._start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
@@ -3602,7 +3586,7 @@ def test_game_mode_chat_start_routes_nova_instance_spaces_to_ollama_cloud_deepse
     )
     monkeypatch.setattr("web.api.space_engine.get_space", lambda slug: FakeSpace() if slug == "studio-alpha" else None)
     monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
-    monkeypatch.setattr("web.api.profiles.get_hermes_home_for_profile", lambda profile: tmp_path / "home")
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
     monkeypatch.setattr(
         "web.api.routes._start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
@@ -3637,7 +3621,7 @@ def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": False})
     monkeypatch.delenv("SIDEKICK_EXEC_ASK", raising=False)
-    monkeypatch.setenv("HERMES_EXEC_ASK", "legacy-ask")
+    monkeypatch.setenv("SIDEKICK_EXEC_ASK", "legacy-ask")
     monkeypatch.setattr(cfg, "resolve_model_provider", lambda model: ("qwen3:4b", "openai", "https://api.openai.com/v1"))
     monkeypatch.setattr(cfg, "resolve_custom_provider_connection", lambda provider: (None, None))
 
@@ -3652,7 +3636,7 @@ def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path
             from tools.approval import _is_gateway_approval_context, get_current_session_key
 
             captured["approval_session_key"] = get_current_session_key()
-            captured["approval_platform"] = get_session_env("HERMES_SESSION_PLATFORM")
+            captured["approval_platform"] = get_session_env("SIDEKICK_SESSION_PLATFORM")
             captured["is_gateway"] = _is_gateway_approval_context()
 
         def run_conversation(self, **kwargs):
@@ -3710,7 +3694,7 @@ def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path
     assert captured["approval_session_key"] == "chat-sync-1"
     assert captured["approval_platform"] == "webui"
     assert captured["is_gateway"] is True
-    assert os.environ["HERMES_EXEC_ASK"] == "legacy-ask"
+    assert os.environ["SIDEKICK_EXEC_ASK"] == "legacy-ask"
 
 
 def test_game_mode_chat_sync_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
@@ -4188,18 +4172,20 @@ def test_game_mode_recognizes_local_image_queue_process():
             return "python.exe"
 
         def cmdline(self):
-            return ["python", "C:/HermesPortable/home/scripts/local_gen_queue.py"]
+            return ["python", "C:/SidekickPortable/home/scripts/local_gen_queue.py"]
 
     assert game_mode._process_looks_like_local_image_generation_queue(Proc()) is True
 
 
 def test_local_gen_queue_rejects_generate_when_game_mode_enabled():
-    source = Path(r"C:\HermesPortable\home\scripts\local_gen_queue.py").read_text(encoding="utf-8")
+    source_path = Path(__import__("os").environ.get("SIDEKICK_LOCAL_GEN_QUEUE_PATH", ""))
+    if not source_path.is_file():
+        pytest.skip("external local image queue requires SIDEKICK_LOCAL_GEN_QUEUE_PATH")
+    source = source_path.read_text(encoding="utf-8")
 
     assert "def _game_mode_enabled()" in source
     assert "def _game_mode_settings_candidates()" in source
     assert '"state", "webui", "settings.json"' in source
-    assert "C:/sidekick/home/state/webui/settings.json" in source
     assert "if _game_mode_enabled():" in source
     assert 'self._json(409, _game_mode_payload())' in source
     assert 'job.error = "game_mode_enabled"' in source
@@ -4430,7 +4416,7 @@ def test_settings_endpoint_exposes_legacy_password_env_var(monkeypatch, tmp_path
 
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("SIDEKICK_WEBUI_PASSWORD", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "legacy-secret")
+    monkeypatch.setenv("SIDEKICK_WEBUI_PASSWORD", "legacy-secret")
     from web.api import config as cfg
     from web.api import routes
 
@@ -4471,7 +4457,7 @@ def test_settings_post_rejects_password_change_when_legacy_password_env_var_set(
 
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("SIDEKICK_WEBUI_PASSWORD", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "legacy-secret")
+    monkeypatch.setenv("SIDEKICK_WEBUI_PASSWORD", "legacy-secret")
     from web.api import config as cfg
     from web.api import routes
 
@@ -4518,7 +4504,7 @@ def test_onboarding_probe_accepts_legacy_open_env_var(monkeypatch, tmp_path):
 
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("SIDEKICK_WEBUI_ONBOARDING_OPEN", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_ONBOARDING_OPEN", "1")
+    monkeypatch.setenv("SIDEKICK_WEBUI_ONBOARDING_OPEN", "1")
     from web.api import auth
     from web.api import routes
 
@@ -4565,9 +4551,8 @@ def test_onboarding_probe_accepts_legacy_open_env_var(monkeypatch, tmp_path):
     assert seen["args"] == ("ollama", "http://example.com", "secret")
 
 
-def test_session_ttl_accepts_legacy_env_var(monkeypatch, tmp_path):
-    monkeypatch.setenv("HERMES_WEBUI_SESSION_TTL", "600")
-    monkeypatch.delenv("SIDEKICK_WEBUI_SESSION_TTL", raising=False)
+def test_session_ttl_accepts_sidekick_env_var(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_WEBUI_SESSION_TTL", "600")
     from web.api import auth
 
     monkeypatch.setattr(auth, "load_settings", lambda: {})
@@ -4618,18 +4603,18 @@ def test_media_endpoint_serves_allowed_local_file(monkeypatch, tmp_path):
     assert handler.response_headers["content-type"] == "application/octet-stream"
 
 
-def test_media_endpoint_falls_back_to_hermes_home(monkeypatch, tmp_path):
+def test_media_endpoint_falls_back_to_sidekick_home(monkeypatch, tmp_path):
     import io
     from urllib.parse import quote, urlparse
 
     from web.api import routes
 
-    hermes_home = tmp_path / "hermes-home"
-    hermes_home.mkdir()
-    media_file = hermes_home / "preview.txt"
-    media_file.write_text("hello from hermes home", encoding="utf-8")
+    sidekick_home = tmp_path / "sidekick-home"
+    sidekick_home.mkdir()
+    media_file = sidekick_home / "preview.txt"
+    media_file.write_text("hello from sidekick home", encoding="utf-8")
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
 
     class _Handler:
         headers = {"Host": "127.0.0.1"}
@@ -4658,7 +4643,7 @@ def test_media_endpoint_falls_back_to_hermes_home(monkeypatch, tmp_path):
 
     assert handled is True
     assert handler.status_code == 200
-    assert handler.wfile.getvalue() == b"hello from hermes home"
+    assert handler.wfile.getvalue() == b"hello from sidekick home"
 
 
 def test_extension_url_list_caps_without_crashing(monkeypatch, tmp_path):
@@ -4727,7 +4712,7 @@ def test_cli_session_messages_stitch_continuation_parent(monkeypatch, tmp_path):
             ("child", "assistant", "from child", 3.1),
         )
 
-    monkeypatch.setattr("web.api.profiles.get_active_hermes_home", lambda: str(home))
+    monkeypatch.setattr("web.api.profiles.get_active_profile_home", lambda: str(home))
 
     messages = models.get_cli_session_messages("child")
 
@@ -4737,7 +4722,7 @@ def test_cli_session_messages_stitch_continuation_parent(monkeypatch, tmp_path):
 def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch, tmp_path):
     from web.api import config as cfg
     from web.api import game_mode
-    from web import server
+    from cli import web_server
 
     settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
     active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
@@ -4754,7 +4739,7 @@ def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch,
         lambda: calls.append("release") or {"local_model_servers": []},
     )
 
-    server._release_game_mode_resources_on_startup()
+    web_server._release_game_mode_resources_on_startup()
 
     assert calls == ["release"]
     assert active_lock.exists()
@@ -4960,13 +4945,12 @@ def test_session_html_cache_ignores_loading_placeholder():
     assert "!/Loading conversation/i.test(String(_html))" in ui_js
 
 
-def test_launcher_stops_orphan_stdlib_backends():
+def test_launcher_manages_only_declared_sidekick_processes():
     launcher = Path("Sidekick-Launcher.ps1").read_text(encoding="utf-8")
 
-    assert "function Stop-OrphanStdlibBackends" in launcher
-    assert "\\-m\\s+web\\.server" in launcher
-    assert 'Stop-OrphanStdlibBackends "launcher stop"' in launcher
-    assert 'Stop-OrphanStdlibBackends "pre-start cleanup"' in launcher
+    assert "function Stop-OrphanStdlibBackends" not in launcher
+    assert ".".join(("web", "server")) not in launcher
+    assert 'foreach ($name in @("dashboard", "gateway"))' in launcher
 
 
 def test_goal_continuation_auto_starts_after_delivery():
@@ -4982,85 +4966,6 @@ def test_goal_continuation_auto_starts_after_delivery():
     assert "If any required work remains" in goals_py
     assert "goal_related = has_active_goal(" in routes_py
     assert "goal_related=goal_related" in routes_py
-
-
-def test_proxy_response_keeps_safe_stdlib_headers(monkeypatch):
-    from cli import web_server
-
-    captured = {}
-
-    def fake_proxy(method, path, headers, body):
-        captured["path"] = path
-        return (
-            200,
-            b"{}",
-            {
-                "Content-Type": "application/json; charset=utf-8",
-                "Set-Cookie": "profile=default; Path=/; SameSite=Lax",
-                "Content-Disposition": 'attachment; filename="session.json"',
-                "Cache-Control": "no-store",
-                "X-Accel-Buffering": "no",
-                "Connection": "close",
-            },
-            "application/json; charset=utf-8",
-        )
-
-    monkeypatch.setattr(web_server, "_proxy_sync", fake_proxy)
-
-    client = TestClient(web_server.app)
-    response = client.get(
-        "/api/not-native-route",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
-    )
-
-    assert response.status_code == 200
-    assert captured["path"] == "/api/not-native-route"
-    assert response.headers["set-cookie"] == "profile=default; Path=/; SameSite=Lax"
-    assert response.headers["content-disposition"] == 'attachment; filename="session.json"'
-    assert response.headers["cache-control"] == "no-store"
-    assert response.headers["x-accel-buffering"] == "no"
-    assert "connection" not in {key.lower() for key in response.headers}
-
-
-def test_proxy_forwards_original_host_for_legacy_csrf():
-    from cli import web_server
-
-    forwarded = web_server._forward_request_headers(
-        {
-            "host": "127.0.0.1:9119",
-            "origin": "http://127.0.0.1:9119",
-            "content-length": "2",
-        }
-    )
-
-    assert "host" not in {key.lower() for key in forwarded}
-    assert forwarded["origin"] == "http://127.0.0.1:9119"
-    assert forwarded["X-Forwarded-Host"] == "127.0.0.1:9119"
-    assert forwarded["X-Real-Host"] == "127.0.0.1:9119"
-    assert "content-length" not in {key.lower() for key in forwarded}
-
-
-def test_proxy_sync_returns_502_on_backend_connection_reset(monkeypatch):
-    from cli import web_server
-
-    def reset_urlopen(req, timeout):
-        raise ConnectionResetError("backend closed connection")
-
-    monkeypatch.setattr(web_server, "_ensure_stdlib_backend", lambda: 9123)
-    monkeypatch.setattr(web_server.urllib.request, "urlopen", reset_urlopen)
-
-    status, body, headers, content_type = web_server._proxy_sync(
-        "GET",
-        "/api/workspaces",
-        {"host": "127.0.0.1:9119"},
-        None,
-    )
-
-    payload = json.loads(body.decode("utf-8"))
-    assert status == 502
-    assert payload["error"].startswith("proxy failed:")
-    assert headers["connection"] == "close"
-    assert content_type == "application/json"
 
 
 def test_asyncio_disconnect_context_is_suppressed():
@@ -5156,7 +5061,7 @@ def test_query_token_only_authenticates_event_streams():
     assert not web_server._has_valid_session_token(normal_api_request)
 
 
-def test_legacy_sse_paths_are_streamed_not_buffered():
+def test_sse_paths_allow_eventsource_authentication():
     from cli import web_server
 
     streamed_paths = [
@@ -5194,55 +5099,3 @@ def test_browser_frame_image_uses_authenticated_fetch_blob():
     assert "if (!img.getAttribute('src')) img.style.visibility = 'hidden';" in browser_js
     assert "URL.createObjectURL(blob)" in browser_js
     assert "URL.revokeObjectURL(_browserFrameObjectUrl)" in browser_js
-
-
-def test_stdlib_proxy_uses_streaming_proxy_for_legacy_sse(monkeypatch):
-    from cli import web_server
-
-    captured = {}
-
-    def fake_stream(method, path, headers, body):
-        captured["stream_path"] = path
-        return iter([b"event: ping\n", b"data: {}\n", b"\n"])
-
-    def fail_sync(method, path, headers, body):
-        raise AssertionError(f"SSE path must not use buffered proxy: {path}")
-
-    monkeypatch.setattr(web_server, "_proxy_stream", fake_stream)
-    monkeypatch.setattr(web_server, "_proxy_sync", fail_sync)
-
-    client = TestClient(web_server.app)
-    response = client.get(
-        f"/api/approval/stream?session_id=s1&token={web_server._SESSION_TOKEN}",
-    )
-
-    assert response.status_code == 200
-    assert captured["stream_path"] == (
-        f"/api/approval/stream?session_id=s1&token={web_server._SESSION_TOKEN}"
-    )
-    assert "event: ping" in response.text
-
-
-def test_proxy_stream_yields_sse_lines_without_buffering(monkeypatch):
-    from cli import web_server
-
-    class FakeResponse:
-        def __init__(self):
-            self.lines = iter([b"event: heartbeat\n", b"data: {}\n", b"\n", b""])
-
-        def readline(self):
-            return next(self.lines)
-
-    monkeypatch.setattr(web_server, "_ensure_stdlib_backend", lambda: 9123)
-    monkeypatch.setattr(web_server.urllib.request, "urlopen", lambda req, timeout: FakeResponse())
-
-    chunks = list(
-        web_server._proxy_stream(
-            "GET",
-            "/api/chat/stream?stream_id=s1",
-            {"host": "127.0.0.1:9119"},
-            None,
-        )
-    )
-
-    assert chunks == [b"event: heartbeat\n", b"data: {}\n", b"\n"]

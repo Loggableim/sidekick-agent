@@ -572,7 +572,7 @@ def _resolve_web_extract_auxiliary(model: Optional[str] = None) -> tuple[Optiona
     extra_body: Dict[str, Any] = {}
     if client is not None and _is_nous_auxiliary_client(client):
         from runtime.auxiliary_client import get_auxiliary_extra_body
-        extra_body = get_auxiliary_extra_body() or {"tags": ["product=hermes-agent"]}
+        extra_body = get_auxiliary_extra_body() or {"tags": ["product=sidekick-agent"]}
 
     return client, effective_model, extra_body
 

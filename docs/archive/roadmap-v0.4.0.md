@@ -149,8 +149,8 @@ Diagnose-Infrastruktur.
 - **DoD:** `sidekick --help` und `sidekick doctor` funktionieren offline
 
 **D3. Branding-Audit als automatisierter Test** (Priorität: 🟢 Niedrig)
-- Grep-basierter Test in `tests/` der verbleibende Hermes/Nous-Stellen prüft
-- **DoD:** CI failt, wenn neue user-facing Hermes-Referenzen eingefügt werden
+- Grep-basierter Test in `tests/` der verbleibende Sidekick/Nous-Stellen prüft
+- **DoD:** CI failt, wenn neue user-facing Sidekick-Referenzen eingefügt werden
 
 ---
 
@@ -167,14 +167,14 @@ Diagnose-Infrastruktur.
 | `docs/releases/v0.1.0.md` | ✅ Historisch | — |
 | `docs/releases/v0.2.0.md` | ✅ Historisch | — |
 | `docs/releases/v0.3.0.md` | ✅ Historisch | — |
-| `docs/audits/hermes-links-v0.1.0.md` | ✅ Historisch | — |
-| `docs/audits/hermes-links-v0.2.0.md` | ✅ Historisch | — |
+| `docs/audits/sidekick-links-v0.1.0.md` | ✅ Historisch | — |
+| `docs/audits/sidekick-links-v0.2.0.md` | ✅ Historisch | — |
 | `docs/design/session-contract-analysis.md` | ✅ Technisch | Entwickler |
 | **Quickstart (neben README)** | ❌ Fehlt | **Hoch** |
 | **Architektur-Überblick** | ❌ Fehlt | **Hoch** |
 | **Config-Referenz** | ❌ Fehlt | Mittel |
 | **Troubleshooting** | ❌ Fehlt | **Hoch** |
-| **Migration von Hermes** | ❌ Fehlt | Mittel |
+| **Migration von Sidekick** | ❌ Fehlt | Mittel |
 
 ### Vorschlag für v0.4.0
 

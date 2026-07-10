@@ -254,7 +254,7 @@ def resolve_space_slug(kw: dict[str, Any] | None = None, *, default: str = "defa
     Resolution order:
     1. ``kw['user_task']`` from the tool framework
     2. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE``
-    3. ``HERMES_WEBUI_ACTIVE_WORKSPACE`` for legacy compatibility
+    3. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` for legacy compatibility
     4. ``default`` (usually ``"default"``)
     """
     kw = kw or {}
@@ -264,7 +264,7 @@ def resolve_space_slug(kw: dict[str, Any] | None = None, *, default: str = "defa
     slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
     if slug:
         return slug
-    slug = os.getenv("HERMES_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
     if slug:
         return slug
     return default

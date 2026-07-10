@@ -1,7 +1,7 @@
 """
 Profile management for multiple isolated Sidekick instances.
 
-Each profile is a fully independent HERMES_HOME directory with its own
+Each profile is a fully independent SIDEKICK_HOME directory with its own
 config.yaml, .env, memory, sessions, skills, gateway, cron, and logs.
 Profiles live under ``~/.sidekick/profiles/<name>/`` by default.
 
@@ -45,7 +45,7 @@ _PROFILE_DIRS = [
     # Per-profile HOME for subprocesses: isolates system tool configs (git,
     # ssh, gh, npm …) so credentials don't bleed between profiles.  In Docker
     # this also ensures tool configs land inside the persistent volume.
-    # See hermes_constants.get_subprocess_home() and issue #4426.
+    # See sidekick_constants.get_subprocess_home() and issue #4426.
     "home",
 ]
 
@@ -79,7 +79,7 @@ _CLONE_ALL_STRIP: list[str] = [
 # user data from a named-profile source.
 #
 # Rationale per item:
-#   hermes-agent  — git repo checkout (~84 MB source + ~3 GB venv)
+#   sidekick-agent  — git repo checkout (~84 MB source + ~3 GB venv)
 #   .worktrees    — git worktrees
 #   profiles      — sibling named profiles (recursive copy never intended)
 #   bin           — installed binaries (tirith etc., ~10 MB) shared per-host
@@ -90,7 +90,7 @@ _CLONE_ALL_STRIP: list[str] = [
 # archive is a portable snapshot; clone-all keeps those because the cloned
 # profile is meant to keep working immediately).
 _CLONE_ALL_DEFAULT_EXCLUDE_ROOT: frozenset[str] = frozenset({
-    "hermes-agent",
+    "sidekick-agent",
     ".worktrees",
     "profiles",
     "bin",
@@ -98,7 +98,7 @@ _CLONE_ALL_DEFAULT_EXCLUDE_ROOT: frozenset[str] = frozenset({
 })
 
 # Marker file written by `sidekick profile create --no-skills`.  When present in
-# a profile's root, callers of seed_profile_skills() (fresh-create, `hermes
+# a profile's root, callers of seed_profile_skills() (fresh-create, `sidekick
 # update`'s all-profile sync, the web dashboard) skip bundled-skill seeding
 # for that profile.  The user can still install skills manually via
 # `sidekick skills install` or drop SKILL.md files into the profile's skills/.
@@ -119,7 +119,7 @@ def _clone_all_copytree_ignore(source_dir: Path):
 
     Two categories:
       1. Root-level entries in ``_CLONE_ALL_DEFAULT_EXCLUDE_ROOT`` — known
-         Hermes infrastructure directories that only the default profile
+         Sidekick infrastructure directories that only the default profile
          (``~/.sidekick``) ever contains.  Gated on ``source_dir`` actually
          being the default profile so a named-profile source never has its
          own data silently dropped.
@@ -167,21 +167,21 @@ def _clone_all_copytree_ignore(source_dir: Path):
 # export is a portable, reasonable-size archive of actual profile data.
 _DEFAULT_EXPORT_EXCLUDE_ROOT = frozenset({
     # Infrastructure
-    "hermes-agent",         # repo checkout (multi-GB)
+    "sidekick-agent",         # repo checkout (multi-GB)
     ".worktrees",           # git worktrees
     "profiles",             # other profiles — never recursive-export
     "bin",                  # installed binaries (tirith, etc.)
     "node_modules",         # npm packages
     # Databases & runtime state
     "state.db", "state.db-shm", "state.db-wal",
-    "hermes_state.db",
+    "sidekick_state.db",
     "response_store.db", "response_store.db-shm", "response_store.db-wal",
     "gateway.pid", "gateway_state.json", "processes.json",
     "auth.json",            # API keys, OAuth tokens, credential pools
     ".env",                 # API keys (dotenv)
     "auth.lock", "active_profile", ".update_check",
     "errors.log",
-    ".hermes_history",
+    ".sidekick_history",
     # Caches (regenerated on use)
     "image_cache", "audio_cache", "document_cache",
     "browser_screenshots", "checkpoints",
@@ -194,8 +194,8 @@ _RESERVED_NAMES = frozenset({
     "sidekick", "default", "test", "tmp", "root", "sudo",
 })
 
-# Hermes subcommands that cannot be used as profile names/aliases
-_HERMES_SUBCOMMANDS = frozenset({
+# Sidekick subcommands that cannot be used as profile names/aliases
+_SIDEKICK_SUBCOMMANDS = frozenset({
     "chat", "model", "gateway", "setup", "whatsapp", "login", "logout",
     "status", "cron", "doctor", "dump", "config", "pairing", "skills", "tools",
     "mcp", "sessions", "insights", "version", "update", "uninstall",
@@ -210,26 +210,26 @@ _HERMES_SUBCOMMANDS = frozenset({
 def _get_profiles_root() -> Path:
     """Return the directory where named profiles are stored.
 
-    Anchored to the sidekick root, NOT to the current HERMES_HOME
+    Anchored to the sidekick root, NOT to the current SIDEKICK_HOME
     (which may itself be a profile).  This ensures ``coder profile list``
     can see all profiles.
 
-    In Docker/custom deployments where HERMES_HOME points outside
-    ``~/.sidekick``, profiles live under ``HERMES_HOME/profiles/`` so
+    In Docker/custom deployments where SIDEKICK_HOME points outside
+    ``~/.sidekick``, profiles live under ``SIDEKICK_HOME/profiles/`` so
     they persist on the mounted volume.
     """
     return _get_default_sidekick_home() / "profiles"
 
 
 def _get_default_sidekick_home() -> Path:
-    """Return the default (pre-profile) HERMES_HOME path.
+    """Return the default (pre-profile) SIDEKICK_HOME path.
 
     In standard deployments this is ``~/.sidekick``.
-    In Docker/custom deployments where HERMES_HOME is outside ``~/.sidekick``
-    (e.g. ``/opt/data``), returns HERMES_HOME directly.
+    In Docker/custom deployments where SIDEKICK_HOME is outside ``~/.sidekick``
+    (e.g. ``/opt/data``), returns SIDEKICK_HOME directly.
     """
-    from runtime._compat.shim_constants import get_default_hermes_root
-    return get_default_hermes_root()
+    from runtime._compat.shim_constants import get_default_sidekick_root
+    return get_default_sidekick_root()
 
 
 def _get_active_profile_path() -> Path:
@@ -289,13 +289,13 @@ def validate_profile_name(name: str) -> None:
     if name in _RESERVED_NAMES:
         raise ValueError(
             f"Profile name {name!r} is reserved — it collides with either "
-            f"the Hermes installation itself or a common system binary.  "
+            f"the Sidekick installation itself or a common system binary.  "
             f"Pick a different name."
         )
 
 
 def get_profile_dir(name: str) -> Path:
-    """Resolve a profile name to its HERMES_HOME directory."""
+    """Resolve a profile name to its SIDEKICK_HOME directory."""
     canon = normalize_profile_name(name)
     if canon == "default":
         return _get_default_sidekick_home()
@@ -322,7 +322,7 @@ def check_alias_collision(name: str) -> Optional[str]:
     canon = normalize_profile_name(name)
     if canon in _RESERVED_NAMES:
         return f"'{canon}' is a reserved name"
-    if canon in _HERMES_SUBCOMMANDS:
+    if canon in _SIDEKICK_SUBCOMMANDS:
         return f"'{canon}' conflicts with a sidekick subcommand"
 
     # Check existing commands in PATH
@@ -678,7 +678,7 @@ def create_profile(
 def seed_profile_skills(profile_dir: Path, quiet: bool = False) -> Optional[dict]:
     """Seed bundled skills into a profile via subprocess.
 
-    Uses subprocess because sync_skills() caches HERMES_HOME at module level.
+    Uses subprocess because sync_skills() caches SIDEKICK_HOME at module level.
     Returns the sync result dict, or None on failure.
 
     Profiles that opted out of bundled skills (via ``sidekick profile create
@@ -699,7 +699,7 @@ def seed_profile_skills(profile_dir: Path, quiet: bool = False) -> Optional[dict
             [sys.executable, "-c",
              "import json; from tools.skills_sync import sync_skills; "
              "r = sync_skills(quiet=True); print(json.dumps(r))"],
-            env={**os.environ, "HERMES_HOME": str(profile_dir)},
+            env={**os.environ, "SIDEKICK_HOME": str(profile_dir)},
             cwd=str(project_root),
             capture_output=True,
             text=True,
@@ -827,7 +827,7 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
     import platform as _platform
 
     # Derive service name for this profile
-    # Temporarily set HERMES_HOME so _profile_suffix resolves correctly
+    # Temporarily set SIDEKICK_HOME so _profile_suffix resolves correctly
     old_home = os.environ.get("SIDEKICK_HOME")
     try:
         os.environ["SIDEKICK_HOME"] = str(profile_dir)
@@ -866,7 +866,7 @@ def _cleanup_gateway_service(name: str, profile_dir: Path) -> None:
     finally:
         if old_home is not None:
             os.environ["SIDEKICK_HOME"] = old_home
-        elif "HERMES_HOME" in os.environ or "SIDEKICK_HOME" in os.environ:
+        elif "SIDEKICK_HOME" in os.environ:
             os.environ.pop("SIDEKICK_HOME", None)
 
 
@@ -954,15 +954,15 @@ def set_active_profile(name: str) -> None:
 
 
 def get_active_profile_name() -> str:
-    """Infer the current profile name from HERMES_HOME.
+    """Infer the current profile name from SIDEKICK_HOME.
 
-    Returns ``"default"`` if HERMES_HOME is not set or points to ``~/.sidekick``.
-    Returns the profile name if HERMES_HOME points into ``~/.sidekick/profiles/<name>``.
-    Returns ``"custom"`` if HERMES_HOME is set to an unrecognized path.
+    Returns ``"default"`` if SIDEKICK_HOME is not set or points to ``~/.sidekick``.
+    Returns the profile name if SIDEKICK_HOME points into ``~/.sidekick/profiles/<name>``.
+    Returns ``"custom"`` if SIDEKICK_HOME is set to an unrecognized path.
     """
     from runtime._compat.shim_constants import get_sidekick_home
-    hermes_home = get_sidekick_home()
-    resolved = hermes_home.resolve()
+    sidekick_home = get_sidekick_home()
+    resolved = sidekick_home.resolve()
 
     default_resolved = _get_default_sidekick_home().resolve()
     if resolved == default_resolved:
@@ -1027,7 +1027,7 @@ def export_profile(name: str, output_path: str) -> Path:
 
     if canon == "default":
         # The default profile IS ~/.sidekick itself — its parent is ~/ and its
-        # directory name is ".hermes", not "default".  We stage a clean copy
+        # directory name is ".sidekick", not "default".  We stage a clean copy
         # under a temp dir so the archive contains ``default/...``.
         with tempfile.TemporaryDirectory() as tmpdir:
             staged = Path(tmpdir) / "default"
@@ -1172,7 +1172,7 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
     profiles_root = _get_profiles_root()
     profiles_root.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.TemporaryDirectory(prefix="hermes_profile_import_") as tmpdir:
+    with tempfile.TemporaryDirectory(prefix="sidekick_profile_import_") as tmpdir:
         staging_root = Path(tmpdir)
         _safe_extract_profile_archive(archive, staging_root)
 
@@ -1198,8 +1198,8 @@ def import_profile(archive_path: str, name: Optional[str] = None) -> Path:
 
 def _migrate_honcho_profile_host(old_name: str, new_name: str, new_dir: Path) -> None:
     """Rename Honcho host blocks for a renamed profile without changing peers."""
-    old_host = f"hermes.{old_name}"
-    new_host = f"hermes.{new_name}"
+    old_host = f"sidekick.{old_name}"
+    new_host = f"sidekick.{new_name}"
 
     candidates = [
         new_dir / "honcho.json",
@@ -1311,10 +1311,10 @@ def rename_profile(old_name: str, new_name: str) -> Path:
 def generate_bash_completion() -> str:
     """Generate a bash completion script for sidekick profile names."""
     return '''# Sidekick Agent profile completion
-# Add to ~/.bashrc: eval "$(hermes completion bash)"
+# Add to ~/.bashrc: eval "$(sidekick completion bash)"
 
-_hermes_profiles() {
-    local profiles_dir="$HOME/.hermes/profiles"
+_sidekick_profiles() {
+    local profiles_dir="$HOME/.sidekick/profiles"
     local profiles="default"
     if [ -d "$profiles_dir" ]; then
         profiles="$profiles $(ls "$profiles_dir" 2>/dev/null)"
@@ -1322,14 +1322,14 @@ _hermes_profiles() {
     echo "$profiles"
 }
 
-_hermes_completion() {
+_sidekick_completion() {
     local cur prev
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # Complete profile names after -p / --profile
     if [[ "$prev" == "-p" || "$prev" == "--profile" ]]; then
-        COMPREPLY=($(compgen -W "$(_hermes_profiles)" -- "$cur"))
+        COMPREPLY=($(compgen -W "$(_sidekick_profiles)" -- "$cur"))
         return
     fi
 
@@ -1341,7 +1341,7 @@ _hermes_completion() {
                 return
                 ;;
             use|delete|show|alias|rename|export)
-                COMPREPLY=($(compgen -W "$(_hermes_profiles)" -- "$cur"))
+                COMPREPLY=($(compgen -W "$(_sidekick_profiles)" -- "$cur"))
                 return
                 ;;
         esac
@@ -1354,21 +1354,21 @@ _hermes_completion() {
     fi
 }
 
-complete -F _hermes_completion hermes
+complete -F _sidekick_completion sidekick
 '''
 
 
 def generate_zsh_completion() -> str:
     """Generate a zsh completion script for sidekick profile names."""
-    return '''#compdef hermes
+    return '''#compdef sidekick
 # Sidekick Agent profile completion
-# Add to ~/.zshrc: eval "$(hermes completion zsh)"
+# Add to ~/.zshrc: eval "$(sidekick completion zsh)"
 
-_hermes() {
+_sidekick() {
     local -a profiles
     profiles=(default)
-    if [[ -d "$HOME/.hermes/profiles" ]]; then
-        profiles+=("${(@f)$(ls $HOME/.hermes/profiles 2>/dev/null)}")
+    if [[ -d "$HOME/.sidekick/profiles" ]]; then
+        profiles+=("${(@f)$(ls $HOME/.sidekick/profiles 2>/dev/null)}")
     fi
 
     _arguments \\
@@ -1385,7 +1385,7 @@ _hermes() {
     esac
 }
 
-_hermes "$@"
+_sidekick "$@"
 '''
 
 
@@ -1394,10 +1394,10 @@ _hermes "$@"
 # ---------------------------------------------------------------------------
 
 def resolve_profile_env(profile_name: str) -> str:
-    """Resolve a profile name to a HERMES_HOME path string.
+    """Resolve a profile name to a SIDEKICK_HOME path string.
 
-    Called early in the CLI entry point, before any hermes modules
-    are imported, to set the HERMES_HOME environment variable.
+    Called early in the CLI entry point, before any sidekick modules
+    are imported, to set the SIDEKICK_HOME environment variable.
     """
     canon = normalize_profile_name(profile_name)
     validate_profile_name(canon)

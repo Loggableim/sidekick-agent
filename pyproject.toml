@@ -34,6 +34,8 @@ telegram = [
     "python-telegram-bot>=21,<23",
 ]
 all = [
+    "fastapi>=0.104,<1",
+    "uvicorn[standard]>=0.24,<1",
     "httpx>=0.27",
     "python-dotenv>=1.0",
     "cryptography>=41.0",
@@ -48,6 +50,12 @@ all = [
     "numpy>=2.0",
     "chromadb>=1.0",
     "sentence-transformers>=5.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+    "build>=1.2",
+    "coverage>=7.0",
 ]
 
 [project.scripts]
@@ -64,11 +72,17 @@ include-package-data = true
 # test-driven imports do not depend on the current working directory.
 py-modules = ["run_agent", "sidekick_constants", "bootstrap", "model_tools", "toolsets"]
 
+[tool.setuptools.package-data]
+web = ["static/*", "static/**/*"]
+providers = ["bundled/*", "bundled/**/*"]
+nova = ["*.json"]
+
 [tool.setuptools.packages.find]
 include = [
     "cli", "cli.*",
     "cron", "cron.*",
     "gateway", "gateway.*",
+    "nova", "nova.*",
     "providers", "providers.*",
     "runtime", "runtime.*", "runtime._compat", "runtime.cron", "runtime.cron.*",
     "runtime.gateway", "runtime.gateway.*",

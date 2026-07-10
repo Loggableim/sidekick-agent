@@ -1,8 +1,17 @@
 from pathlib import Path
 
+import os
+import pytest
 
-APP_JS = Path(r"C:\HermesPortable\home\cockpit\dashboard\app.js")
-APP_HTML = Path(r"C:\HermesPortable\home\cockpit\dashboard\index.html")
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
+
+
+APP_JS = Path(r"C:\SidekickPortable\home\cockpit\dashboard\app.js")
+APP_HTML = Path(r"C:\SidekickPortable\home\cockpit\dashboard\index.html")
 
 
 def test_frontend_persists_selected_microphone_device():

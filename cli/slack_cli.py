@@ -44,7 +44,7 @@ def _build_full_manifest(bot_name: str, bot_description: str) -> dict:
         },
         "display_information": {
             "name": bot_name[:35],
-            "description": (bot_description or "Your Hermes agent on Slack")[:140],
+            "description": (bot_description or "Your Sidekick agent on Slack")[:140],
             "background_color": "#1a1a2e",
         },
         "features": {
@@ -59,7 +59,7 @@ def _build_full_manifest(bot_name: str, bot_description: str) -> dict:
             },
             "slash_commands": slashes,
             "assistant_view": {
-                "assistant_description": "Chat with Hermes in threads and DMs.",
+                "assistant_description": "Chat with Sidekick in threads and DMs.",
             },
         },
         "oauth_config": {
@@ -108,7 +108,7 @@ def slack_manifest_command(args) -> int:
 
     Flags (all parsed in ``sidekick_cli/main.py``):
       --write [PATH]  Write to file instead of stdout (default path:
-                      ``$HERMES_HOME/slack-manifest.json``)
+                      ``$SIDEKICK_HOME/slack-manifest.json``)
       --name NAME     Override the bot display name (default: "Sidekick")
       --description DESC  Override the bot description
       --slashes-only  Emit only the ``features.slash_commands`` array (for
@@ -137,8 +137,8 @@ def slack_manifest_command(args) -> int:
             except Exception:
                 target = Path(
                     os.environ.get("SIDEKICK_HOME")
-                    or os.environ.get("HERMES_HOME")
-                    or str(Path.home() / ".hermes")
+                    or os.environ.get("SIDEKICK_HOME")
+                    or str(Path.home() / ".sidekick")
                 ) / "slack-manifest.json"
         else:
             target = Path(write_target).expanduser()
@@ -147,7 +147,7 @@ def slack_manifest_command(args) -> int:
         print(f"Slack manifest written to: {target}", file=sys.stderr)
         print(
             "\nNext steps:\n"
-            "  1. Open https://api.slack.com/apps and pick your Hermes app\n"
+            "  1. Open https://api.slack.com/apps and pick your Sidekick app\n"
             "     (or create a new one: Create New App → From an app manifest).\n"
             f"  2. Features → App Manifest → paste the contents of\n"
             f"     {target}\n"

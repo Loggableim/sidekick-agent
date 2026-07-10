@@ -1,8 +1,8 @@
 """
-Session-scoped context variables for the Hermes gateway.
+Session-scoped context variables for the Sidekick gateway.
 
 Replaces the previous ``os.environ``-based session state
-(``HERMES_SESSION_PLATFORM``, ``HERMES_SESSION_CHAT_ID``, etc.) with
+(``SIDEKICK_SESSION_PLATFORM``, ``SIDEKICK_SESSION_CHAT_ID``, etc.) with
 Python's ``contextvars.ContextVar``.
 
 **Why this matters**
@@ -24,9 +24,9 @@ so concurrent messages never interfere.
 
 **Backward compatibility**
 
-The public helper ``get_session_env(name, default="")`` mirrors the old
-``os.getenv("SIDEKICK_SESSION_*") or os.getenv("SIDEKICK_SESSION_*", ...)`` calls.  Existing tool code only
-needs to replace the import + call site::
+The public helper ``get_session_env(name, default="")`` provides the
+session-scoped replacement for direct ``os.getenv("SIDEKICK_SESSION_*")`` calls.
+Existing tool code only needs to replace the import + call site::
 
     # before
     import os
@@ -34,7 +34,7 @@ needs to replace the import + call site::
 
     # after
     from gateway.session_context import get_session_env
-    platform = get_session_env("HERMES_SESSION_PLATFORM", "")
+    platform = get_session_env("SIDEKICK_SESSION_PLATFORM", "")
 """
 
 from contextvars import ContextVar
@@ -49,33 +49,33 @@ _UNSET: Any = object()
 # Per-task session variables
 # ---------------------------------------------------------------------------
 
-_SESSION_PLATFORM: ContextVar = ContextVar("HERMES_SESSION_PLATFORM", default=_UNSET)
-_SESSION_CHAT_ID: ContextVar = ContextVar("HERMES_SESSION_CHAT_ID", default=_UNSET)
-_SESSION_CHAT_NAME: ContextVar = ContextVar("HERMES_SESSION_CHAT_NAME", default=_UNSET)
-_SESSION_THREAD_ID: ContextVar = ContextVar("HERMES_SESSION_THREAD_ID", default=_UNSET)
-_SESSION_USER_ID: ContextVar = ContextVar("HERMES_SESSION_USER_ID", default=_UNSET)
-_SESSION_USER_NAME: ContextVar = ContextVar("HERMES_SESSION_USER_NAME", default=_UNSET)
-_SESSION_KEY: ContextVar = ContextVar("HERMES_SESSION_KEY", default=_UNSET)
-_SESSION_ID: ContextVar = ContextVar("HERMES_SESSION_ID", default=_UNSET)
+_SESSION_PLATFORM: ContextVar = ContextVar("SIDEKICK_SESSION_PLATFORM", default=_UNSET)
+_SESSION_CHAT_ID: ContextVar = ContextVar("SIDEKICK_SESSION_CHAT_ID", default=_UNSET)
+_SESSION_CHAT_NAME: ContextVar = ContextVar("SIDEKICK_SESSION_CHAT_NAME", default=_UNSET)
+_SESSION_THREAD_ID: ContextVar = ContextVar("SIDEKICK_SESSION_THREAD_ID", default=_UNSET)
+_SESSION_USER_ID: ContextVar = ContextVar("SIDEKICK_SESSION_USER_ID", default=_UNSET)
+_SESSION_USER_NAME: ContextVar = ContextVar("SIDEKICK_SESSION_USER_NAME", default=_UNSET)
+_SESSION_KEY: ContextVar = ContextVar("SIDEKICK_SESSION_KEY", default=_UNSET)
+_SESSION_ID: ContextVar = ContextVar("SIDEKICK_SESSION_ID", default=_UNSET)
 
 # Cron auto-delivery vars — set per-job in run_job() so concurrent jobs
 # don't clobber each other's delivery targets.
-_CRON_AUTO_DELIVER_PLATFORM: ContextVar = ContextVar("HERMES_CRON_AUTO_DELIVER_PLATFORM", default=_UNSET)
-_CRON_AUTO_DELIVER_CHAT_ID: ContextVar = ContextVar("HERMES_CRON_AUTO_DELIVER_CHAT_ID", default=_UNSET)
-_CRON_AUTO_DELIVER_THREAD_ID: ContextVar = ContextVar("HERMES_CRON_AUTO_DELIVER_THREAD_ID", default=_UNSET)
+_CRON_AUTO_DELIVER_PLATFORM: ContextVar = ContextVar("SIDEKICK_CRON_AUTO_DELIVER_PLATFORM", default=_UNSET)
+_CRON_AUTO_DELIVER_CHAT_ID: ContextVar = ContextVar("SIDEKICK_CRON_AUTO_DELIVER_CHAT_ID", default=_UNSET)
+_CRON_AUTO_DELIVER_THREAD_ID: ContextVar = ContextVar("SIDEKICK_CRON_AUTO_DELIVER_THREAD_ID", default=_UNSET)
 
 _VAR_MAP = {
-    "HERMES_SESSION_PLATFORM": _SESSION_PLATFORM,
-    "HERMES_SESSION_CHAT_ID": _SESSION_CHAT_ID,
-    "HERMES_SESSION_CHAT_NAME": _SESSION_CHAT_NAME,
-    "HERMES_SESSION_THREAD_ID": _SESSION_THREAD_ID,
-    "HERMES_SESSION_USER_ID": _SESSION_USER_ID,
-    "HERMES_SESSION_USER_NAME": _SESSION_USER_NAME,
-    "HERMES_SESSION_KEY": _SESSION_KEY,
-    "HERMES_SESSION_ID": _SESSION_ID,
-    "HERMES_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
-    "HERMES_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
-    "HERMES_CRON_AUTO_DELIVER_THREAD_ID": _CRON_AUTO_DELIVER_THREAD_ID,
+    "SIDEKICK_SESSION_PLATFORM": _SESSION_PLATFORM,
+    "SIDEKICK_SESSION_CHAT_ID": _SESSION_CHAT_ID,
+    "SIDEKICK_SESSION_CHAT_NAME": _SESSION_CHAT_NAME,
+    "SIDEKICK_SESSION_THREAD_ID": _SESSION_THREAD_ID,
+    "SIDEKICK_SESSION_USER_ID": _SESSION_USER_ID,
+    "SIDEKICK_SESSION_USER_NAME": _SESSION_USER_NAME,
+    "SIDEKICK_SESSION_KEY": _SESSION_KEY,
+    "SIDEKICK_SESSION_ID": _SESSION_ID,
+    "SIDEKICK_CRON_AUTO_DELIVER_PLATFORM": _CRON_AUTO_DELIVER_PLATFORM,
+    "SIDEKICK_CRON_AUTO_DELIVER_CHAT_ID": _CRON_AUTO_DELIVER_CHAT_ID,
+    "SIDEKICK_CRON_AUTO_DELIVER_THREAD_ID": _CRON_AUTO_DELIVER_THREAD_ID,
 }
 
 
@@ -132,9 +132,9 @@ def clear_session_vars(tokens: list) -> None:
 
 
 def get_session_env(name: str, default: str = "") -> str:
-    """Read a session context variable by its legacy ``HERMES_SESSION_*`` / ``SIDEKICK_SESSION_*`` name.
+    """Read a Sidekick session context variable.
 
-    Drop-in replacement for ``os.getenv("SIDEKICK_SESSION_*") or os.getenv("SIDEKICK_SESSION_*", default)``.
+    Drop-in replacement for ``os.getenv("SIDEKICK_SESSION_*", default)``.
 
     Resolution order:
     1. Context variable (set by the gateway for concurrency-safe access).

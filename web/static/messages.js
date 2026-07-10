@@ -2393,6 +2393,51 @@ document.addEventListener('keydown',function(e){
 //     fetches the new session's state.
 let _yoloEnabled = false;
 
+// Nova YOLO is deliberately independent from the current chat session's YOLO
+// flag. It is a persisted autonomy override consumed by Nova's Entity Kernel.
+let _novaYoloEnabled = false;
+
+function _updateNovaYoloButton() {
+  const button = $('btnNovaYoloToggle');
+  if (!button) return;
+  button.classList.toggle('active', _novaYoloEnabled);
+  button.setAttribute('aria-pressed', _novaYoloEnabled ? 'true' : 'false');
+  button.setAttribute('aria-label', _novaYoloEnabled ? 'Nova YOLO autonomy active' : 'Enable Nova YOLO autonomy');
+  button.title = _novaYoloEnabled ? 'Nova YOLO active: policy and boundaries are bypassed' : 'Enable Nova YOLO autonomy';
+}
+
+async function fetchNovaYoloMode() {
+  try {
+    const data = await api('/api/nova/yolo');
+    _novaYoloEnabled = !!data.enabled;
+    _updateNovaYoloButton();
+    return _novaYoloEnabled;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function toggleNovaYoloMode() {
+  const enabled = !_novaYoloEnabled;
+  try {
+    const data = await api('/api/nova/yolo', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+    _novaYoloEnabled = !!data.enabled;
+    _updateNovaYoloButton();
+    showToast(_novaYoloEnabled ? 'Nova YOLO autonomy enabled' : 'Nova YOLO autonomy disabled');
+  } catch (error) {
+    showToast('Nova YOLO: ' + (error && error.message ? error.message : 'update failed'));
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { void fetchNovaYoloMode(); }, { once: true });
+} else {
+  void fetchNovaYoloMode();
+}
+
 async function _fetchYoloState(sid) {
   try {
     const data = await api('/api/session/yolo?session_id=' + encodeURIComponent(sid));

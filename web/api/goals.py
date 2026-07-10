@@ -1,4 +1,4 @@
-"""WebUI bridge for Hermes persistent session goals."""
+"""WebUI bridge for Sidekick persistent session goals."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ try:  # Exposed as a module attribute so tests can monkeypatch it directly.
         judge_goal,
         normalize_goal_turn_budget,
     )
-except Exception:  # pragma: no cover - depends on installed hermes-agent
+except Exception:  # pragma: no cover - depends on installed sidekick-agent
     CONTINUATION_PROMPT_TEMPLATE = ""  # type: ignore
     DEFAULT_MAX_CONSECUTIVE_PARSE_FAILURES = 3  # type: ignore
     DEFAULT_MAX_TURNS = 20  # type: ignore
@@ -53,7 +53,7 @@ _DB_CACHE: dict[str, Any] = {}
 
 
 def _default_max_turns() -> int:
-    """Return the configured /goal turn budget, defaulting to Hermes' 20 turns."""
+    """Return the configured /goal turn budget, defaulting to Sidekick' 20 turns."""
     try:
         from web.api import config as _config
 
@@ -71,10 +71,10 @@ def _meta_key(session_id: str) -> str:
 
 
 def _profile_db(profile_home: str | Path, *, space_slug: str | None = None):
-    """Return a SessionDB pinned to *profile_home*, without reading HERMES_HOME.
+    """Return a SessionDB pinned to *profile_home*, without reading SIDEKICK_HOME.
 
-    The upstream Hermes GoalManager persists through hermes_cli.goals.load_goal(),
-    which resolves SessionDB from process-global HERMES_HOME. WebUI sessions are
+    The upstream Sidekick GoalManager persists through sidekick_cli.goals.load_goal(),
+    which resolves SessionDB from process-global SIDEKICK_HOME. WebUI sessions are
     profile-scoped and can run concurrently, so the WebUI bridge uses an explicit
     state.db path whenever the caller provides the session's profile home.
     When in a space context, returns a space-scoped goals.db instead.

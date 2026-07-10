@@ -14,8 +14,8 @@
 
 **Files:**
 - Modify: `tests/test_nova_hub_metrics.py`
-- Inspect: `C:\HermesPortable\home\cockpit\dashboard\index.html`
-- Inspect: `C:\HermesPortable\home\cockpit\dashboard\app.js`
+- Inspect: `C:\SidekickPortable\home\cockpit\dashboard\index.html`
+- Inspect: `C:\SidekickPortable\home\cockpit\dashboard\app.js`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -53,8 +53,8 @@ Expected: FAIL because the card still contains `sGpuL` and no six-second rotatio
 ### Task 2: Implement the single-value six-second rotation
 
 **Files:**
-- Modify: `C:\HermesPortable\home\cockpit\dashboard\index.html:197`
-- Modify: `C:\HermesPortable\home\cockpit\dashboard\app.js:604-631`
+- Modify: `C:\SidekickPortable\home\cockpit\dashboard\index.html:197`
+- Modify: `C:\SidekickPortable\home\cockpit\dashboard\app.js:604-631`
 - Test: `tests/test_nova_hub_metrics.py`
 
 - [ ] **Step 1: Replace the stacked GPU card markup**
@@ -122,7 +122,7 @@ Run:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests\test_nova_hub_metrics.py -q
-node --check C:\HermesPortable\home\cockpit\dashboard\app.js
+node --check C:\SidekickPortable\home\cockpit\dashboard\app.js
 ```
 
 Expected: all GPU metric tests PASS and `node --check` exits 0.
@@ -141,8 +141,8 @@ Expected: the commit contains only `tests/test_nova_hub_metrics.py`; existing un
 ### Task 3: Verify the live rotation and regression suite
 
 **Files:**
-- Verify: `C:\HermesPortable\home\cockpit\dashboard\index.html`
-- Verify: `C:\HermesPortable\home\cockpit\dashboard\app.js`
+- Verify: `C:\SidekickPortable\home\cockpit\dashboard\index.html`
+- Verify: `C:\SidekickPortable\home\cockpit\dashboard\app.js`
 
 - [ ] **Step 1: Run automated verification**
 

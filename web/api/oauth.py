@@ -91,11 +91,11 @@ def _normalize_onboarding_oauth_provider(provider: str) -> str:
     return provider or "openai-codex"
 
 
-def _get_active_hermes_home() -> Path:
+def _get_active_profile_home() -> Path:
     try:
-        from web.api.profiles import get_active_hermes_home
+        from web.api.profiles import get_active_profile_home
 
-        return Path(get_active_hermes_home())
+        return Path(get_active_profile_home())
     except Exception as exc:
         # Per Opus advisor on stage-296: log the silent fallback so a corrupt
         # profile state ending up writing tokens to the fallback WebUI home is
@@ -169,14 +169,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _persist_codex_credentials(hermes_home: Path, token_data: dict[str, Any]) -> Path:
+def _persist_codex_credentials(sidekick_home: Path, token_data: dict[str, Any]) -> Path:
     """Persist Codex OAuth credentials to active-profile auth.json."""
     access_token = str(token_data.get("access_token") or "").strip()
     refresh_token = str(token_data.get("refresh_token") or "").strip()
     if not access_token:
         raise RuntimeError("Codex token exchange did not return an access_token")
 
-    auth_path = Path(hermes_home) / "auth.json"
+    auth_path = Path(sidekick_home) / "auth.json"
     auth = _read_auth_json(auth_path)
     auth.setdefault("version", 1)
     pool = auth.setdefault("credential_pool", {})
@@ -240,7 +240,7 @@ def _persist_codex_credentials(hermes_home: Path, token_data: dict[str, Any]) ->
 
 # Backward-compatible wrapper used by older code/tests.
 def _save_codex_credentials(token_data):
-    return _persist_codex_credentials(_get_active_hermes_home(), token_data)
+    return _persist_codex_credentials(_get_active_profile_home(), token_data)
 
 
 # ── Anthropic / Claude Code credential linking ─────────────────────────────
@@ -267,7 +267,7 @@ def _read_claude_code_credentials() -> dict[str, Any] | None:
     return None
 
 
-def _clear_anthropic_env_values(hermes_home: Path) -> None:
+def _clear_anthropic_env_values(sidekick_home: Path) -> None:
     """Clear Anthropic API/setup-token env values in the active profile only.
 
     The .env write path already clears os.environ while holding the streaming
@@ -278,7 +278,7 @@ def _clear_anthropic_env_values(hermes_home: Path) -> None:
         from web.api.providers import _write_env_file
 
         _write_env_file(
-            Path(hermes_home) / ".env",
+            Path(sidekick_home) / ".env",
             {key: None for key in _ANTHROPIC_ENV_KEYS},
         )
     except Exception as exc:
@@ -286,10 +286,10 @@ def _clear_anthropic_env_values(hermes_home: Path) -> None:
     _clear_process_anthropic_env_values()
 
 
-def _link_anthropic_credentials(hermes_home: Path) -> None:
-    """Link Hermes to use Claude Code's credential store.
+def _link_anthropic_credentials(sidekick_home: Path) -> None:
+    """Link Sidekick to use Claude Code's credential store.
 
-    Clears ANTHROPIC_TOKEN and ANTHROPIC_API_KEY from the Hermes .env so
+    Clears ANTHROPIC_TOKEN and ANTHROPIC_API_KEY from the Sidekick .env so
     that resolve_anthropic_token() falls through to reading Claude Code's
     ~/.claude/.credentials.json directly — the same thing the CLI's
     ``use_anthropic_claude_code_credentials()`` does.
@@ -298,10 +298,10 @@ def _link_anthropic_credentials(hermes_home: Path) -> None:
     ``_provider_oauth_authenticated("anthropic", ...)`` can detect the
     linked state without touching the actual credential files.
     """
-    _clear_anthropic_env_values(hermes_home)
+    _clear_anthropic_env_values(sidekick_home)
 
     # Write a pool marker (no secrets) so onboarding status can detect linkage.
-    auth_path = Path(hermes_home) / "auth.json"
+    auth_path = Path(sidekick_home) / "auth.json"
     auth = _read_auth_json(auth_path)
     auth.setdefault("version", 1)
     pool = auth.setdefault("credential_pool", {})
@@ -417,8 +417,8 @@ def _run_anthropic_credential_worker(flow_id: str) -> None:
                 if not current or current.get("status") != "pending":
                     return
 
-            hermes_home = Path(flow["hermes_home"])
-            _link_anthropic_credentials(hermes_home)
+            sidekick_home = Path(flow["sidekick_home"])
+            _link_anthropic_credentials(sidekick_home)
             with _OAUTH_FLOWS_LOCK:
                 current = _OAUTH_FLOWS.get(flow_id)
                 if not current or current.get("status") != "pending":
@@ -429,7 +429,7 @@ def _run_anthropic_credential_worker(flow_id: str) -> None:
                     _drop_sensitive_flow_fields(current)
                     cancelled = False
             if cancelled:
-                _remove_anthropic_link_marker(hermes_home)
+                _remove_anthropic_link_marker(sidekick_home)
             return
         except Exception as exc:
             logger.warning("Anthropic credential polling failed: %s", exc)
@@ -443,9 +443,9 @@ def _run_anthropic_credential_worker(flow_id: str) -> None:
             return
 
 
-def _remove_anthropic_link_marker(hermes_home: Path) -> None:
+def _remove_anthropic_link_marker(sidekick_home: Path) -> None:
     """Remove the secret-free Claude Code linked marker after a cancelled race."""
-    auth_path = Path(hermes_home) / "auth.json"
+    auth_path = Path(sidekick_home) / "auth.json"
     auth = _read_auth_json(auth_path)
     pool = auth.get("credential_pool")
     if not isinstance(pool, dict):
@@ -637,7 +637,7 @@ def _run_codex_oauth_worker(flow_id: str) -> None:
                 current = _OAUTH_FLOWS.get(flow_id)
                 if not current or current.get("status") != "pending":
                     return
-            _persist_codex_credentials(Path(live["hermes_home"]), tokens)
+            _persist_codex_credentials(Path(live["sidekick_home"]), tokens)
             _set_flow_status(flow_id, "success")
             return
         except Exception as exc:
@@ -646,18 +646,18 @@ def _run_codex_oauth_worker(flow_id: str) -> None:
             return
 
 
-def _start_anthropic_flow(hermes_home: Path) -> dict[str, Any]:
+def _start_anthropic_flow(sidekick_home: Path) -> dict[str, Any]:
     """Start or immediately complete the Anthropic credential-linking flow."""
     creds = _read_claude_code_credentials()
     flow_id = uuid.uuid4().hex
 
     if creds:
         # Credentials already exist — link and return success immediately.
-        _link_anthropic_credentials(hermes_home)
+        _link_anthropic_credentials(sidekick_home)
         flow = {
             "provider": "anthropic",
             "status": "success",
-            "hermes_home": str(hermes_home),
+            "sidekick_home": str(sidekick_home),
             "created_at": time.time(),
             "updated_at": time.time(),
         }
@@ -672,7 +672,7 @@ def _start_anthropic_flow(hermes_home: Path) -> dict[str, Any]:
         "status": "pending",
         "expires_at": expires_at,
         "poll_interval_seconds": ANTHROPIC_CREDENTIAL_POLL_SECONDS,
-        "hermes_home": str(hermes_home),
+        "sidekick_home": str(sidekick_home),
         "created_at": time.time(),
         "updated_at": time.time(),
     }
@@ -700,10 +700,10 @@ def start_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
 
     # Normalize Claude aliases to canonical "anthropic"
     if provider in _ANTHROPIC_PROVIDER_ALIASES:
-        return _start_anthropic_flow(_get_active_hermes_home())
+        return _start_anthropic_flow(_get_active_profile_home())
 
     # Codex flow
-    hermes_home = _get_active_hermes_home()
+    sidekick_home = _get_active_profile_home()
     try:
         device = _request_codex_user_code()
     except Exception as exc:
@@ -725,7 +725,7 @@ def start_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
         "user_code": user_code,
         "expires_at": expires_at,
         "poll_interval_seconds": interval,
-        "hermes_home": str(hermes_home),
+        "sidekick_home": str(sidekick_home),
         "created_at": time.time(),
         "updated_at": time.time(),
     }

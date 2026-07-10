@@ -6,8 +6,17 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import os
+import pytest
 
-MODULE_PATH = Path("C:/HermesPortable/home/cockpit/dashboard_server.py")
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
+
+
+MODULE_PATH = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py")
 COCKPIT_DIR = MODULE_PATH.parent
 
 
@@ -198,7 +207,7 @@ def test_voice_llm_reads_ollama_from_alternate_auth_path(tmp_path, monkeypatch):
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     dashboard.SIDEKICK_HOME = tmp_path / "home"
     dashboard.SIDEKICK_AUTH_PATH = tmp_path / "missing-sidekick-auth.json"
-    dashboard.AUTH_PATH = tmp_path / "hermes-auth.json"
+    dashboard.AUTH_PATH = tmp_path / "sidekick-auth.json"
     dashboard.AUTH_PATH.write_text(
         json.dumps({"providers": {"ollama-cloud": {"access_token": "test-alt-auth-token"}}}),
         encoding="utf-8",

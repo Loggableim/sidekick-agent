@@ -29,14 +29,14 @@ def _profile_state_dir() -> Path:
     """Return the webui_state directory for the active profile.
 
     For the default profile, returns the global STATE_DIR (respects
-    HERMES_WEBUI_STATE_DIR env var for test isolation).
+    SIDEKICK_WEBUI_STATE_DIR env var for test isolation).
     For named profiles, returns {profile_home}/webui_state/.
     """
     try:
-        from web.api.profiles import get_active_profile_name, get_active_hermes_home
+        from web.api.profiles import get_active_profile_name, get_active_profile_home
         name = get_active_profile_name()
         if name and name != 'default':
-            d = get_active_hermes_home() / 'webui_state'
+            d = get_active_profile_home() / 'webui_state'
             d.mkdir(parents=True, exist_ok=True)
             return d
     except ImportError:
@@ -52,9 +52,9 @@ def _profiles_root_dir() -> Path:
         return Path(profiles_root()).expanduser().resolve()
     except Exception:
         try:
-            from web.api.profiles import get_active_hermes_home
+            from web.api.profiles import get_active_profile_home
 
-            return Path(get_active_hermes_home()).expanduser().resolve() / "profiles"
+            return Path(get_active_profile_home()).expanduser().resolve() / "profiles"
         except Exception:
             return Path(get_webui_home()).expanduser().resolve() / "profiles"
 
@@ -86,7 +86,7 @@ def _profile_default_workspace() -> str:
     Checks keys in priority order:
       1. 'workspace'         — explicit webui workspace key
       2. 'default_workspace' — alternate explicit key
-      3. 'terminal.cwd'      — hermes-agent terminal working dir (most common)
+      3. 'terminal.cwd'      — sidekick-agent terminal working dir (most common)
 
     Falls back to the current default workspace resolver.
     """
@@ -120,12 +120,12 @@ def _clean_workspace_list(workspaces: list) -> list:
     - Preserve saved paths even when they are currently missing or inaccessible;
       picker state must not be destroyed by a transient stat/permission failure.
     - Remove entries whose paths live inside another profile's directory
-      (e.g. ~/.hermes/profiles/X/... should not appear on a different profile).
+      (e.g. ~/.sidekick/profiles/X/... should not appear on a different profile).
     - Rename any entry whose name is literally 'default' to 'Home' (avoids
       confusion with the 'default' profile name).
     Returns the cleaned list (may be empty).
     """
-    hermes_profiles = _profiles_root_dir()
+    sidekick_profiles = _profiles_root_dir()
     result = []
     for w in workspaces:
         path = w.get('path', '')
@@ -135,13 +135,13 @@ def _clean_workspace_list(workspaces: list) -> list:
         p = _safe_resolve(Path(path).expanduser())
         # Skip paths inside a DIFFERENT profile's directory (cross-profile leak).
         # Allow paths inside the CURRENT profile's own directory (e.g. test workspaces
-        # created under ~/.hermes/profiles/webui/webui-mvp-test/).
+        # created under ~/.sidekick/profiles/webui/webui-mvp-test/).
         try:
-            p.relative_to(hermes_profiles)
-            # p is under ~/.hermes/profiles/ — only skip if it's under a DIFFERENT profile
+            p.relative_to(sidekick_profiles)
+            # p is under ~/.sidekick/profiles/ — only skip if it's under a DIFFERENT profile
             try:
-                from web.api.profiles import get_active_hermes_home
-                own_profile_dir = get_active_hermes_home().resolve()
+                from web.api.profiles import get_active_profile_home
+                own_profile_dir = get_active_profile_home().resolve()
                 p.relative_to(own_profile_dir)
                 # p is under our own profile dir — keep it
             except (ValueError, Exception):
@@ -626,7 +626,7 @@ def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
         pass
 
     # (C) Trusted if it is equal to or under the current default workspace.
-    #     In Docker deployments HERMES_WEBUI_DEFAULT_WORKSPACE is often set to a
+    #     In Docker deployments SIDEKICK_WEBUI_DEFAULT_WORKSPACE is often set to a
     #     volume mount outside the user's home (e.g. /data/workspace).  That path
     #     is validated by the workspace resolver, so any sub-path of it is safe
     #     without requiring the user to add it to the workspace list manually.

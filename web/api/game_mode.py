@@ -489,7 +489,7 @@ def _classify_gpu_process(proc: Any | None) -> tuple[str, bool]:
         return ("ollama", True)
     if any(marker in text for marker in _LOCAL_IMAGE_BACKEND_PROCESS_MARKERS):
         return ("image_generation_backend", True)
-    if "sidekick" in text or "web.server" in text or "run_agent.py" in text:
+    if "sidekick" in text or "run_agent.py" in text:
         return ("sidekick", True)
     return ("other", False)
 

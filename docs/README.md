@@ -40,8 +40,8 @@
 
 | Dokument | Beschreibung |
 |----------|--------------|
-| [`audits/hermes-links-v0.1.0.md`](audits/hermes-links-v0.1.0.md) | Erster Hermes-Link-Audit (v0.1.0) |
-| [`audits/hermes-links-v0.2.0.md`](audits/hermes-links-v0.2.0.md) | Finaler Hermes-Link-Audit (v0.2.0) |
+| [`audits/sidekick-links-v0.1.0.md`](audits/sidekick-links-v0.1.0.md) | Erster Sidekick-Link-Audit (v0.1.0) |
+| [`audits/sidekick-links-v0.2.0.md`](audits/sidekick-links-v0.2.0.md) | Finaler Sidekick-Link-Audit (v0.2.0) |
 
 ## Screenshots
 

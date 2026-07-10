@@ -116,8 +116,8 @@ def _workspace_slug_from_request(handler, parsed=None) -> str | None:
 
     Resolution order:
       1. ``?workspace=<slug>`` query parameter
-      2. ``X-Hermes-Workspace`` HTTP header
-      3. ``HERMES_WEBUI_ACTIVE_WORKSPACE`` env var
+      2. ``X-Sidekick-Workspace`` HTTP header
+      3. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` env var
       4. Falls back to ``None`` (caller chooses default)
     """
     if parsed:
@@ -127,7 +127,7 @@ def _workspace_slug_from_request(handler, parsed=None) -> str | None:
         if raw and raw[0].strip():
             return raw[0].strip().lower()
     if handler:
-        slug = handler.headers.get("X-Hermes-Workspace", "").strip().lower()
+        slug = handler.headers.get("X-Sidekick-Workspace", "").strip().lower()
         if slug:
             return slug
     slug = os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
@@ -200,13 +200,13 @@ def _active_skills_dir() -> Path:
     WebUI profile switches are cookie/thread-local scoped, so the agent
     module-level ``tools.skills_tool.SKILLS_DIR`` can still point at the server
     startup profile. Skills UI endpoints must derive the directory from
-    ``get_active_hermes_home()`` for every request instead of reading that
+    ``get_active_profile_home()`` for every request instead of reading that
     process-global constant.
     """
     try:
-        from web.api.profiles import get_active_hermes_home
+        from web.api.profiles import get_active_profile_home
 
-        return Path(get_active_hermes_home()) / "skills"
+        return Path(get_active_profile_home()) / "skills"
     except Exception:
         return get_webui_home() / "skills"
 
@@ -593,11 +593,11 @@ def _safe_first(*values):
 
 def _gateway_session_metadata_path():
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
-    return hermes_home / "sessions" / "sessions.json"
+        sidekick_home = get_webui_home()
+    return sidekick_home / "sessions" / "sessions.json"
 
 
 def _load_gateway_session_identity_map() -> dict[str, dict]:
@@ -755,18 +755,18 @@ def _profile_home_for_cron_job(job: dict):
     points at a profile that was deleted after save, fall back to the active
     server profile and log a warning instead of crashing the Run Now path.
     """
-    from web.api.profiles import get_active_hermes_home, get_hermes_home_for_profile
+    from web.api.profiles import get_active_profile_home, get_profile_home
 
     raw = str((job or {}).get("profile") or "").strip()
     if not raw:
-        return get_active_hermes_home()
+        return get_active_profile_home()
     if raw not in _available_cron_profile_names():
         logger.warning(
             "Cron job %s references missing profile %r; falling back to server default",
             (job or {}).get("id", "?"), raw,
         )
-        return get_active_hermes_home()
-    return get_hermes_home_for_profile(raw)
+        return get_active_profile_home()
+    return get_profile_home(raw)
 
 
 def _cron_job_subprocess_main(job, execution_profile_home, result_queue):
@@ -812,7 +812,7 @@ def _cron_subprocess_result_timeout_seconds(job):
 def _run_cron_job_in_profile_subprocess(job, execution_profile_home):
     """Execute cron.scheduler.run_job without holding the parent cron env lock.
 
-    cron.scheduler/cron.jobs still rely on process-global HERMES_HOME and module
+    cron.scheduler/cron.jobs still rely on process-global SIDEKICK_HOME and module
     constants, so running the job body in a child process gives each long cron
     execution its own globals. The parent process only uses cron_profile_context
     for short metadata reads/writes and remains responsive to unrelated cron UI
@@ -937,7 +937,7 @@ _PROVIDER_ALIASES = {
 }
 
 # OpenAI-compatible /v1/models endpoints for live model discovery.
-# Used as fallback when hermes_cli.provider_model_ids() is unavailable or
+# Used as fallback when sidekick_cli.provider_model_ids() is unavailable or
 # returns [] for a provider (#871).  Kept at module level so the dict is
 # built once, not reconstructed per request.
 _OPENAI_COMPAT_ENDPOINTS = {
@@ -952,7 +952,7 @@ _OPENAI_COMPAT_ENDPOINTS = {
 # NOTE: "openai-codex" is excluded because it maps to the same endpoint as
 # the base "openai" provider (api.openai.com/v1).  When both are configured
 # the openai provider is already wired through provider_model_ids(); codex-
-# specific model filtering happens downstream in hermes_cli.
+# specific model filtering happens downstream in sidekick_cli.
 #
 _LIVE_MODELS_CACHE_TTL = 60.0
 _LIVE_MODELS_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
@@ -1027,7 +1027,7 @@ from web.api.config import (
     is_game_mode_enabled,
     game_mode_blocks_local_model_request,
     game_mode_blocked_payload,
-    set_hermes_default_model,
+    set_sidekick_default_model,
     model_with_provider_context,
     get_reasoning_status,
     set_reasoning_display,
@@ -1236,12 +1236,12 @@ def _ports_match(origin_scheme: str, origin_port: str | None, allowed_port: str 
 
 
 def _allowed_public_origins() -> set[str]:
-    """Parse HERMES_WEBUI_ALLOWED_ORIGINS env var (comma-separated) into a set.
+    """Parse SIDEKICK_WEBUI_ALLOWED_ORIGINS env var (comma-separated) into a set.
 
     Each entry must include the scheme, e.g. https://myapp.example.com:8000.
     Entries without a scheme are silently skipped and a warning is printed.
     """
-    raw = os.getenv('SIDEKICK_WEBUI_ALLOWED_ORIGINS') or os.getenv('HERMES_WEBUI_ALLOWED_ORIGINS', '')
+    raw = os.getenv('SIDEKICK_WEBUI_ALLOWED_ORIGINS', '')
     result = set()
     for value in raw.split(','):
         value = value.strip().rstrip('/').lower()
@@ -1250,7 +1250,7 @@ def _allowed_public_origins() -> set[str]:
         if not (value.startswith('http://') or value.startswith('https://')):
             import sys
             print(
-                f"[webui] WARNING: HERMES_WEBUI_ALLOWED_ORIGINS entry {value!r} is missing "
+                f"[webui] WARNING: SIDEKICK_WEBUI_ALLOWED_ORIGINS entry {value!r} is missing "
                 f"the scheme (expected https://hostname or http://hostname). Entry ignored.",
                 flush=True, file=sys.stderr,
             )
@@ -1838,7 +1838,7 @@ def _should_hide_stale_messaging_session(
 ) -> bool:
     """Hide stale Gateway-owned internal rows after an external chat moved on.
 
-    Hermes Gateway keeps the external conversation identity in sessions.json.
+    Sidekick Gateway keeps the external conversation identity in sessions.json.
     Compression/session-reset can leave old Agent state.db rows behind; those
     rows are implementation segments, not distinct conversations users chose.
     Only apply this aggressive hiding when Gateway is currently advertising an
@@ -2492,7 +2492,7 @@ def _normalize_logs_tail(raw_tail) -> int:
 
 
 def _handle_logs(handler, parsed) -> bool:
-    """Return a bounded tail window for an active-profile Hermes log file."""
+    """Return a bounded tail window for an active-profile Sidekick log file."""
     query = parse_qs(parsed.query)
     file_key = (query.get("file", ["agent"])[0] or "agent").strip().lower()
     filename = _LOG_FILE_WHITELIST.get(file_key)
@@ -2501,13 +2501,13 @@ def _handle_logs(handler, parsed) -> bool:
 
     tail = _normalize_logs_tail(query.get("tail", [None])[0])
     try:
-        from web.api.profiles import get_active_hermes_home
+        from web.api.profiles import get_active_profile_home
 
-        hermes_home = Path(get_active_hermes_home()).expanduser()
+        sidekick_home = Path(get_active_profile_home()).expanduser()
     except Exception:
-        hermes_home = get_webui_home()
+        sidekick_home = get_webui_home()
 
-    log_dir = hermes_home / "logs"
+    log_dir = sidekick_home / "logs"
     log_path = log_dir / filename
     try:
         # Defense in depth: the filename is hardcoded above, but keep the final
@@ -2552,16 +2552,16 @@ _LLM_WIKI_DOCS_URL = "https://sidekick-agent.sh/docs/user-guide/skills/bundled/r
 _LLM_WIKI_PAGE_DIRS = ("entities", "concepts", "comparisons", "queries")
 
 
-def _llm_wiki_active_hermes_home() -> Path:
+def _llm_wiki_active_sidekick_home() -> Path:
     try:
-        from web.api.profiles import get_active_hermes_home
-        return Path(get_active_hermes_home()).expanduser()
+        from web.api.profiles import get_active_profile_home
+        return Path(get_active_profile_home()).expanduser()
     except Exception:
         return get_webui_home()
 
 
-def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
-    env_path = hermes_home / ".env"
+def _llm_wiki_env_file_path(sidekick_home: Path) -> str | None:
+    env_path = sidekick_home / ".env"
     if not env_path.exists() or not env_path.is_file():
         return None
     try:
@@ -2614,8 +2614,8 @@ _LLM_WIKI_FORBIDDEN_ROOTS = frozenset(
 
 
 def _llm_wiki_resolve_path() -> tuple[Path, str, bool]:
-    hermes_home = _llm_wiki_active_hermes_home()
-    raw = os.getenv("WIKI_PATH") or _llm_wiki_env_file_path(hermes_home)
+    sidekick_home = _llm_wiki_active_sidekick_home()
+    raw = os.getenv("WIKI_PATH") or _llm_wiki_env_file_path(sidekick_home)
     source = "WIKI_PATH" if raw else "default"
     configured = bool(raw)
     if not raw:
@@ -3284,7 +3284,7 @@ def _deep_health_checks(stream_check: dict | None = None) -> tuple[dict, bool]:
 
     Plain /health intentionally stays tiny. /health?deep=1 is for supervisors
     and watchdogs that need to know whether the process can still touch the
-    shared stream map, sidebar/session path, project state, and Hermes state.db
+    shared stream map, sidebar/session path, project state, and Sidekick state.db
     without hitting the RST-before-write failure mode from #1458.
 
     `stream_check` is the result from a prior `_streams_lock_health()` call;
@@ -4122,6 +4122,11 @@ def handle_get(handler, parsed) -> bool:
 
         return j(handler, get_nova_status())
 
+    if parsed.path == "/api/nova/yolo":
+        from web.api.nova_lifecycle import load_nova_yolo_state
+
+        return j(handler, load_nova_yolo_state())
+
     if parsed.path == "/api/nova/personality":
         from web.api.nova_lifecycle import personality_snapshot
 
@@ -4197,7 +4202,7 @@ def handle_get(handler, parsed) -> bool:
         # had no way to know — see issue #1139 / #1560.
         settings["password_env_var"] = bool(
             os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
-            or os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
+            or os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
         )
         # Inject the running version so the UI badge stays in sync with git tags
         # without any manual release step.
@@ -4436,16 +4441,16 @@ def handle_get(handler, parsed) -> bool:
                                 custom_providers=_cfg_custom_providers_load,
                             ) or 0
                         except TypeError:
-                            # Older hermes-agent builds: legacy 2-arg form.
+                            # Older sidekick-agent builds: legacy 2-arg form.
                             _fb_cl = _get_cl(_model_for_lookup, "") or 0
                         if _fb_cl:
                             _persisted_cl = _fb_cl
                     except Exception:
                         pass
             try:
-                from web.api.profiles import get_hermes_home_for_profile
+                from web.api.profiles import get_profile_home
 
-                profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+                profile_home = get_profile_home(getattr(s, "profile", None))
             except Exception:
                 profile_home = None
             try:
@@ -4896,7 +4901,7 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/api/personalities":
         # Read personalities from config.yaml agent.personalities section
-        # (matches hermes-agent CLI behavior, not filesystem SOUL.md approach)
+        # (matches sidekick-agent CLI behavior, not filesystem SOUL.md approach)
         from web.api.config import reload_config as _reload_cfg
 
         _reload_cfg()  # pick up config.yaml changes without server restart
@@ -5056,7 +5061,7 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, str(e), 404)
 
     # ── Cron API (GET) ──
-    # All cron handlers touch cron.jobs which resolves HERMES_HOME from
+    # All cron handlers touch cron.jobs which resolves SIDEKICK_HOME from
     # os.environ (process-global) at call time. Wrap in cron_profile_context
     # so the TLS-active profile's jobs.json is read, not the process default.
     if parsed.path == "/api/crons":
@@ -5159,11 +5164,11 @@ def handle_get(handler, parsed) -> bool:
         )
 
     if parsed.path == "/api/profile/active":
-        from web.api.profiles import get_active_profile_name, get_active_hermes_home
+        from web.api.profiles import get_active_profile_name, get_active_profile_home
 
         return j(
             handler,
-            {"name": get_active_profile_name(), "path": str(get_active_hermes_home())},
+            {"name": get_active_profile_name(), "path": str(get_active_profile_home())},
         )
 
     # ── Gateway Status (GET) ──
@@ -5606,7 +5611,7 @@ def _handle_apply_code(handler, body) -> bool:
 
 # ── System shutdown/reboot helper ──────────────────────────────────────────
 def _run_bat(name: str) -> None:
-    """Run a .bat file from the HermesPortable root directory."""
+    """Run a .bat file from the SidekickPortable root directory."""
     try:
         root = Path(__file__).resolve().parent.parent.parent
         bat_path = root / name
@@ -5673,7 +5678,7 @@ def _default_cockpit_cast_host() -> str:
 
 def _cockpit_launcher_path() -> Path:
     raw = os.getenv("SIDEKICK_COCKPIT_LAUNCHER", "").strip()
-    return Path(raw) if raw else Path("C:/HermesPortable/home/cockpit/launch_cockpit.py")
+    return Path(raw) if raw else Path("C:/SidekickPortable/home/cockpit/launch_cockpit.py")
 
 
 def _cockpit_autostart_enabled() -> bool:
@@ -6297,7 +6302,7 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/default-model":
         try:
-            return j(handler, set_hermes_default_model(body.get("model")))
+            return j(handler, set_sidekick_default_model(body.get("model")))
         except ValueError as e:
             return bad(handler, str(e))
         except RuntimeError as e:
@@ -6437,7 +6442,7 @@ def handle_post(handler, parsed) -> bool:
         except KeyError:
             return bad(handler, "Session not found", 404)
         # Resolve personality from config.yaml agent.personalities section
-        # (matches hermes-agent CLI behavior)
+        # (matches sidekick-agent CLI behavior)
         prompt = ""
         if name:
             from web.api.config import reload_config as _reload_cfg2
@@ -6453,7 +6458,7 @@ def handle_post(handler, parsed) -> bool:
                     handler, f'Personality "{name}" not found in config.yaml', 404
                 )
             value = raw_personalities[name]
-            # Resolve prompt using the same logic as hermes-agent cli.py
+            # Resolve prompt using the same logic as sidekick-agent cli.py
             if isinstance(value, dict):
                 parts = [value.get("system_prompt", "") or value.get("prompt", "")]
                 if value.get("tone"):
@@ -6819,6 +6824,11 @@ def handle_post(handler, parsed) -> bool:
         else:
             disable_session_yolo(sid)
         return j(handler, {"ok": True, "yolo_enabled": enabled})
+
+    if parsed.path == "/api/nova/yolo":
+        from web.api.nova_lifecycle import set_nova_yolo_enabled
+
+        return j(handler, set_nova_yolo_enabled(bool(body.get("enabled", False))))
 
     if parsed.path == "/api/subagents":
         subagent_id = str(body.get("subagent_id", "") or "").strip()
@@ -7204,7 +7214,7 @@ def handle_post(handler, parsed) -> bool:
         )
         requested_clear_password = bool(body.get("_clear_password"))
 
-        # #1560: SIDEKICK_WEBUI_PASSWORD / legacy HERMES_WEBUI_PASSWORD take precedence in
+        # #1560: SIDEKICK_WEBUI_PASSWORD takes precedence in
         # api.auth.get_password_hash(), so writing password_hash to settings.json
         # has no effect on auth. Refuse loudly with 409 instead of silently
         # succeeding — the previous behaviour returned 200 + a green save toast
@@ -7212,11 +7222,11 @@ def handle_post(handler, parsed) -> bool:
         if requested_password or requested_clear_password:
             if (
                 os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
-                or os.getenv("HERMES_WEBUI_PASSWORD", "").strip()
+                or os.getenv("SIDEKICK_WEBUI_PASSWORD", "").strip()
             ):
                 return bad(
                     handler,
-                    "SIDEKICK_WEBUI_PASSWORD / HERMES_WEBUI_PASSWORD env var is set — it overrides the settings password. "
+                    "SIDEKICK_WEBUI_PASSWORD is set — it overrides the settings password. "
                     "Unset the env var and restart the server before changing the password here.",
                     409,
                 )
@@ -7283,7 +7293,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -7320,7 +7330,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -7355,7 +7365,7 @@ def handle_post(handler, parsed) -> bool:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
-            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN") or _os.getenv("HERMES_WEBUI_ONBOARDING_OPEN")
+            _os.getenv("SIDEKICK_WEBUI_ONBOARDING_OPEN")
         ):
             import ipaddress
             try:
@@ -8117,7 +8127,7 @@ def _handle_agents_post(handler, parsed, body):
             import subprocess as _sp
             profile_name = body.get("profile_name", slug)
             result = _sp.run(
-                ["hermes", "profile", "create", profile_name, "--clone-from", "default", "--no-alias"],
+                ["sidekick", "profile", "create", profile_name, "--clone-from", "default", "--no-alias"],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -8352,7 +8362,7 @@ def _handle_session_export(handler, parsed):
     handler.send_response(200)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header(
-        "Content-Disposition", f'attachment; filename="hermes-{sid}.json"'
+        "Content-Disposition", f'attachment; filename="sidekick-{sid}.json"'
     )
     handler.send_header("Content-Length", str(len(payload.encode("utf-8"))))
     handler.send_header("Cache-Control", "no-store")
@@ -8869,7 +8879,7 @@ def _handle_media(handler, parsed):
     """Serve a local file by absolute path for inline display in the chat.
 
     Security:
-    - Path must resolve to an allowed root (hermes home, /tmp, common dirs)
+    - Path must resolve to an allowed root (sidekick home, /tmp, common dirs)
     - Auth-gated when auth is enabled
     - Only image MIME types are served inline; all others force download
     - SVG always served as attachment (XSS risk)
@@ -8881,7 +8891,7 @@ def _handle_media(handler, parsed):
     import os as _os
 
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = _routes_active_home()
+    _SIDEKICK_HOME = _routes_active_home()
 
     # Auth check
     if is_auth_enabled():
@@ -8903,9 +8913,9 @@ def _handle_media(handler, parsed):
         return bad(handler, "Invalid path", 400)
     target = resolved
 
-    # Allowed roots: hermes home, /tmp, user home, and active workspace.
+    # Allowed roots: sidekick home, /tmp, user home, and active workspace.
     allowed_roots = [
-        _HERMES_HOME.resolve(),
+        _SIDEKICK_HOME.resolve(),
         Path("/tmp").resolve(),
         (_HOME / ".sidekick").resolve(),
         _HOME.resolve(),  # user home — needed for Windows absolute paths on other drives
@@ -9466,7 +9476,7 @@ def _handle_live_models(handler, parsed):
         # The browser sends whatever active_provider the static endpoint returned;
         # without normalization, provider_model_ids() misses the alias and returns [].
         # Uses the WebUI-owned table (api/config._resolve_provider_alias) which
-        # works even when hermes_cli is not on sys.path.
+        # works even when sidekick_cli is not on sys.path.
         from web.api.config import _resolve_provider_alias
         provider = _resolve_provider_alias(provider)
 
@@ -9498,7 +9508,7 @@ def _handle_live_models(handler, parsed):
 
         if not ids:
             # For 'custom' and 'custom:*' providers, provider_model_ids()
-            # returns [] because they aren't real hermes_cli endpoints.
+            # returns [] because they aren't real sidekick_cli endpoints.
             # Fall back to the custom_providers entries from config.yaml so
             # the live-model enrichment step can add any models that weren't
             # already in the static list (issue #1619).
@@ -9834,9 +9844,9 @@ def _handle_memory_read(handler):
         mem_dir = space.memory_dir
     except Exception:
         try:
-            from web.api.profiles import get_active_hermes_home
+            from web.api.profiles import get_active_profile_home
 
-            mem_dir = get_active_hermes_home() / "memories"
+            mem_dir = get_active_profile_home() / "memories"
         except Exception:
             mem_dir = get_webui_home() / "memories"
     mem_file = mem_dir / "MEMORY.md"
@@ -9900,8 +9910,8 @@ def _handle_supermemory_status(handler):
     configured = False
     config_path = None
     try:
-        from web.api.profiles import get_active_hermes_home
-        sm_path = get_active_hermes_home() / "supermemory.json"
+        from web.api.profiles import get_active_profile_home
+        sm_path = get_active_profile_home() / "supermemory.json"
         if not sm_path.exists():
             alt = Path(os.environ.get("LOCALAPPDATA", "")) / "sidekick" / "supermemory.json"
             if alt.exists():
@@ -10005,8 +10015,8 @@ def _handle_hybrid_search(handler, body):
         memory_file = resolve_active_space().memory_dir / "MEMORY.md"
     except Exception:
         try:
-            from web.api.profiles import get_active_hermes_home
-            home = get_active_hermes_home()
+            from web.api.profiles import get_active_profile_home
+            home = get_active_profile_home()
         except Exception:
             home = get_webui_home()
         memory_file = home / "MEMORY.md"
@@ -10404,9 +10414,9 @@ def _start_chat_stream_for_session(
             from web.api.goals import has_active_goal
 
             try:
-                from web.api.profiles import get_hermes_home_for_profile
+                from web.api.profiles import get_profile_home
 
-                profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+                profile_home = get_profile_home(getattr(s, "profile", None))
             except Exception:
                 profile_home = None
             goal_space_slug = str(
@@ -10616,9 +10626,9 @@ def _handle_goal_command(handler, body):
             _clear_stale_stream_state(s)
 
     try:
-        from web.api.profiles import get_hermes_home_for_profile
+        from web.api.profiles import get_profile_home
 
-        profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+        profile_home = get_profile_home(getattr(s, "profile", None))
     except Exception:
         profile_home = None
     space_slug = str(
@@ -10807,9 +10817,9 @@ def _handle_chat_start(handler, body, diag=None):
             from web.api.goals import has_active_goal
 
             try:
-                from web.api.profiles import get_hermes_home_for_profile
+                from web.api.profiles import get_profile_home
 
-                profile_home = get_hermes_home_for_profile(getattr(s, "profile", None))
+                profile_home = get_profile_home(getattr(s, "profile", None))
             except Exception:
                 profile_home = None
             goal_related = has_active_goal(
@@ -11029,7 +11039,7 @@ def _normalize_chat_attachments(raw_attachments):
 
     Older clients send a list of filenames. Newer clients send upload result
     objects containing name/path/mime/size so image attachments can be supplied
-    to Hermes as native multimodal inputs for the current turn.
+    to Sidekick as native multimodal inputs for the current turn.
     """
     normalized = []
     if not isinstance(raw_attachments, list):
@@ -11079,17 +11089,17 @@ def _handle_chat_sync(handler, body):
         os.environ["TERMINAL_CWD"] = str(workspace)
         old_platform = os.environ.get("SIDEKICK_PLATFORM")
         old_session_platform = os.environ.get("SIDEKICK_SESSION_PLATFORM")
-        old_hermes_session_platform = os.environ.get("HERMES_SESSION_PLATFORM")
+        old_sidekick_session_platform = os.environ.get("SIDEKICK_SESSION_PLATFORM")
         old_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK")
-        old_hermes_exec_ask = os.environ.get("HERMES_EXEC_ASK")
-        old_hermes_session_key = os.environ.get("HERMES_SESSION_KEY")
+        old_sidekick_exec_ask = os.environ.get("SIDEKICK_EXEC_ASK")
+        old_sidekick_session_key = os.environ.get("SIDEKICK_SESSION_KEY")
         old_session_key = os.environ.get("SIDEKICK_SESSION_KEY")
         os.environ["SIDEKICK_PLATFORM"] = "webui"
         os.environ["SIDEKICK_SESSION_PLATFORM"] = "webui"
-        os.environ["HERMES_SESSION_PLATFORM"] = "webui"
+        os.environ["SIDEKICK_SESSION_PLATFORM"] = "webui"
         os.environ["SIDEKICK_EXEC_ASK"] = "1"
-        os.environ["HERMES_EXEC_ASK"] = "1"
-        os.environ["HERMES_SESSION_KEY"] = s.session_id
+        os.environ["SIDEKICK_EXEC_ASK"] = "1"
+        os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
         os.environ["SIDEKICK_SESSION_KEY"] = s.session_id
     try:
         from run_agent import AIAgent
@@ -11124,7 +11134,7 @@ def _handle_chat_sync(handler, body):
                 # later reloads reflect the effective remote Nova model.
                 s.model = _model
                 s.model_provider = _provider
-            # Resolve API key via Hermes runtime provider (matches gateway behaviour)
+            # Resolve API key via Sidekick runtime provider (matches gateway behaviour)
             _api_key = None
             try:
                 from web.api.oauth import resolve_runtime_provider_with_anthropic_env_lock
@@ -11214,22 +11224,22 @@ def _handle_chat_sync(handler, body):
                 os.environ.pop("SIDEKICK_SESSION_PLATFORM", None)
             else:
                 os.environ["SIDEKICK_SESSION_PLATFORM"] = old_session_platform
-            if old_hermes_session_platform is None:
-                os.environ.pop("HERMES_SESSION_PLATFORM", None)
+            if old_sidekick_session_platform is None:
+                os.environ.pop("SIDEKICK_SESSION_PLATFORM", None)
             else:
-                os.environ["HERMES_SESSION_PLATFORM"] = old_hermes_session_platform
+                os.environ["SIDEKICK_SESSION_PLATFORM"] = old_sidekick_session_platform
             if old_exec_ask is None:
                 os.environ.pop("SIDEKICK_EXEC_ASK", None)
             else:
                 os.environ["SIDEKICK_EXEC_ASK"] = old_exec_ask
-            if old_hermes_exec_ask is None:
-                os.environ.pop("HERMES_EXEC_ASK", None)
+            if old_sidekick_exec_ask is None:
+                os.environ.pop("SIDEKICK_EXEC_ASK", None)
             else:
-                os.environ["HERMES_EXEC_ASK"] = old_hermes_exec_ask
-            if old_hermes_session_key is None:
-                os.environ.pop("HERMES_SESSION_KEY", None)
+                os.environ["SIDEKICK_EXEC_ASK"] = old_sidekick_exec_ask
+            if old_sidekick_session_key is None:
+                os.environ.pop("SIDEKICK_SESSION_KEY", None)
             else:
-                os.environ["HERMES_SESSION_KEY"] = old_hermes_session_key
+                os.environ["SIDEKICK_SESSION_KEY"] = old_sidekick_session_key
             if old_session_key is None:
                 os.environ.pop("SIDEKICK_SESSION_KEY", None)
             else:
@@ -11450,8 +11460,8 @@ def _async_extract_facts(sid: str) -> None:
             mem_dir = _get_or_create_space(target_space_slug).memory_dir
         except Exception:
             try:
-                from web.api.profiles import get_active_hermes_home
-                mem_dir = get_active_hermes_home() / "memories"
+                from web.api.profiles import get_active_profile_home
+                mem_dir = get_active_profile_home() / "memories"
             except Exception:
                 mem_dir = get_webui_home() / "memories"
 
@@ -11555,18 +11565,18 @@ def _handle_cron_run(handler, body):
     # Capture the TLS-active profile home now — the thread runs after the
     # request finishes, so TLS is gone by then.
     #
-    # Resolve directly without a try/except: get_active_hermes_home() does
+    # Resolve directly without a try/except: get_active_profile_home() does
     # in-memory dict reads + a single Path.is_dir() stat, so the only way
     # it could raise from inside a request handler is if api.profiles
     # itself partially failed to import (in which case we'd already be
     # 500-ing the whole request). A silent fallback to None here would
     # re-introduce the exact bug #1573 fixes — the worker thread would
-    # run unpinned against the process-global HERMES_HOME — so we'd
+    # run unpinned against the process-global SIDEKICK_HOME — so we'd
     # rather let any unexpected exception 500 the request than corrupt
     # cross-profile state.
-    from web.api.profiles import get_active_hermes_home
+    from web.api.profiles import get_active_profile_home
 
-    _profile_home = get_active_hermes_home()
+    _profile_home = get_active_profile_home()
     _execution_profile_home = _profile_home_for_cron_job(job)
     threading.Thread(target=_run_cron_tracked, args=(job, _profile_home, _execution_profile_home), daemon=True).start()
     return j(handler, {"ok": True, "job_id": job_id, "status": "running"})
@@ -12542,13 +12552,13 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
         return False
 
     try:
-        from web.api.profiles import get_active_hermes_home
+        from web.api.profiles import get_active_profile_home
 
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
+        sidekick_home = get_webui_home()
 
-    db_path = hermes_home / "state.db"
+    db_path = sidekick_home / "state.db"
     if not db_path.exists():
         return False
 
@@ -13127,9 +13137,9 @@ def _handle_memory_write(handler, body):
         mem_dir = space.memory_dir
     except Exception:
         try:
-            from web.api.profiles import get_active_hermes_home
+            from web.api.profiles import get_active_profile_home
 
-            mem_dir = get_active_hermes_home() / "memories"
+            mem_dir = get_active_profile_home() / "memories"
         except Exception:
             mem_dir = get_webui_home() / "memories"
     mem_dir.mkdir(parents=True, exist_ok=True)
@@ -13443,7 +13453,7 @@ def _mask_secrets(obj):
 
 
 def _parse_mcp_enabled(value) -> bool:
-    """Parse Hermes MCP ``enabled`` values without raising on bad config."""
+    """Parse Sidekick MCP ``enabled`` values without raising on bad config."""
     if value is None:
         return True
     if isinstance(value, bool):
@@ -14005,8 +14015,8 @@ def _handle_hybrid_search(handler, body):
         memory_file = resolve_active_space().memory_dir / "MEMORY.md"
     except Exception:
         try:
-            from web.api.profiles import get_active_hermes_home
-            home = get_active_hermes_home()
+            from web.api.profiles import get_active_profile_home
+            home = get_active_profile_home()
         except Exception:
             home = get_webui_home()
         memory_file = home / "MEMORY.md"

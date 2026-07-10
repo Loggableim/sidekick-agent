@@ -33,15 +33,15 @@ from shared.utils import atomic_replace
 logger = logging.getLogger(__name__)
 
 
-HERMES_HOME = get_sidekick_home()
-SKILLS_DIR = HERMES_HOME / "skills"
+SIDEKICK_HOME = get_sidekick_home()
+SKILLS_DIR = SIDEKICK_HOME / "skills"
 MANIFEST_FILE = SKILLS_DIR / ".bundled_manifest"
 
 
 def _get_bundled_dir() -> Path:
     """Locate the bundled skills/ directory.
 
-    Checks HERMES_BUNDLED_SKILLS env var first (set by Nix wrapper),
+    Checks SIDEKICK_BUNDLED_SKILLS env var first (set by Nix wrapper),
     then falls back to the relative path from this source file.
     """
     env_override = os.getenv("SIDEKICK_BUNDLED_SKILLS")

@@ -1220,7 +1220,7 @@ function gmailStreamSummaryForEmail() {
   const url = _gmailAccount(`api/gmail/ai/summary/stream?id=${encodeURIComponent(_gmailCurrentEmailId)}&model=${encodeURIComponent(model)}`);
   _gmailSummaryAborted = false;
 
-  fetch(hermesApiUrl(url).href)
+  fetch(sidekickApiUrl(url).href)
     .then(response => {
       if (!response.ok) throw new Error('Stream error');
       const reader = response.body.getReader();
@@ -1279,7 +1279,7 @@ function toolsSummarizeChat() {
   summaryBody.innerHTML = '<div class="gmail-ai-placeholder"><span class="gmail-ai-robot-big">🤖</span><span>Fasse Chat zusammen...</span></div>';
   _gmailSummaryAborted = false;
 
-  fetch(hermesApiUrl('api/gmail/ai/summary/stream?model=' + encodeURIComponent(_gmailAIModel) + '&id=chat').href, {
+  fetch(sidekickApiUrl('api/gmail/ai/summary/stream?model=' + encodeURIComponent(_gmailAIModel) + '&id=chat').href, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt: 'Fasse die folgende Unterhaltung auf Deutsch kurz zusammen:\n\n' + chatText.slice(0, 5000) }),
@@ -1456,7 +1456,7 @@ function gmailCreateTask() {
   const email = GMAIL.emails.find(e => e.id === _gmailCurrentEmailId);
   if (!email) { gmailToast('⚠️ E-Mail nicht in aktueller Liste', 'info'); return; }
   gmailToast('📋 Erstelle Task...', 'info');
-  fetch(hermesApiUrl('api/gmail/ai/task').href, {
+  fetch(sidekickApiUrl('api/gmail/ai/task').href, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(_gmailWithWorkspace({ id: _gmailCurrentEmailId, title: (email.subject || 'Email Task').slice(0, 120), account: GMAIL.currentAccount, priority: 1 })),

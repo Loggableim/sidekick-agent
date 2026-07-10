@@ -108,40 +108,6 @@ def sessions_dir() -> Path:
     return path
 
 
-def migrate_legacy_sessions() -> int:
-    """Copy legacy ``~/.hermes/webui/sessions/`` JSON files to the canonical
-    ``~/.sidekick/state/webui/sessions/`` directory, if they exist and are
-    not already present in the target.
-
-    Returns the number of migrated session files.
-    Skips files that already exist in the target (path conflict).
-    """
-    target = sessions_dir()
-    # Legacy paths — checked in priority order
-    legacy_candidates = [
-        Path.home() / ".hermes" / "webui" / "sessions",
-        Path.home() / ".hermes" / "sessions",
-    ]
-    count = 0
-    for legacy_dir in legacy_candidates:
-        if not legacy_dir.is_dir():
-            continue
-        for src in sorted(legacy_dir.glob("*.json")):
-            dst = target / src.name
-            if dst.exists():
-                continue
-            try:
-                import shutil
-                shutil.copy2(str(src), str(dst))
-                count += 1
-            except OSError:
-                logger.warning("Failed to migrate legacy session %s", src.name)
-                continue
-    if count > 0:
-        logger.info("Migrated %d legacy session(s) to %s", count, target)
-    return count
-
-
 def _session_path(session_id: str) -> Path:
     return sessions_dir() / f"{session_id}.json"
 
@@ -228,13 +194,6 @@ def append_message(
 
 
 def list_sessions() -> list[dict[str, Any]]:
-    # One-shot legacy migration: copy ~/.hermes sessions on first list
-    if not getattr(list_sessions, "_migrated", False):
-        list_sessions._migrated = True  # type: ignore[attr-defined]
-        try:
-            migrate_legacy_sessions()
-        except Exception:
-            pass
     rows: list[dict[str, Any]] = []
     for path in sorted(sessions_dir().glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:

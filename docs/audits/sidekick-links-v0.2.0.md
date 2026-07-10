@@ -1,4 +1,4 @@
-# Finaler Hermes-Link-Audit — v0.2.0
+# Finaler Sidekick-Link-Audit — v0.2.0
 
 **Stand:** Commit `5f9edfe` (Tag `v0.2.0`)
 **Datum:** 2026-06-07
@@ -20,11 +20,11 @@
 
 | Fundort | Referenz | Einordnung | Begründung |
 |---------|----------|------------|------------|
-| `sidekick --help` Z.74 | `HERMES_INFERENCE_MODEL` | ✅ env var doc | Nutzerhilfe: Legacy-Env-Var wird noch akzeptiert |
-| `sidekick --help` Z.78 | `HERMES_INFERENCE_PROVIDER` | ✅ env var doc | s.o. |
-| `sidekick --help` Z.91 | `HERMES_ACCEPT_HOOKS` | ✅ env var doc | s.o. |
+| `sidekick --help` Z.74 | `SIDEKICK_INFERENCE_MODEL` | ✅ env var doc | Nutzerhilfe: Legacy-Env-Var wird noch akzeptiert |
+| `sidekick --help` Z.78 | `SIDEKICK_INFERENCE_PROVIDER` | ✅ env var doc | s.o. |
+| `sidekick --help` Z.91 | `SIDEKICK_ACCEPT_HOOKS` | ✅ env var doc | s.o. |
 
-**Fazit:** 0 user-facing "Hermes"-Produktnamen mehr. Nur dokumentierte Legacy-Env-Var-Aliase.
+**Fazit:** 0 user-facing "Sidekick"-Produktnamen mehr. Nur dokumentierte Legacy-Env-Var-Aliase.
 
 ---
 
@@ -32,13 +32,13 @@
 
 | Fundort | Referenz | Einordnung | Begründung |
 |---------|----------|------------|------------|
-| `README.md` Z.28 | `hermes --help` | ✅ allowed legacy compat | Legacy-CLI-Alias-Dokumentation |
-| `README.md` Z.89 | `cids-hermes-agent` / `cids-hermes-webui` | ✅ provenance/legal | Source-Attribution der Migration |
-| `README.md` Z.95 | `hermes_cli.*` | ✅ provenance/legal | Erwähnung im Migrations-Kontext |
-| `README.md` Z.97 | `hermes` command alias | ✅ allowed legacy compat | CLI-Alias-Dokumentation |
-| `docs/releases/v0.1.0-monorepo.md` | `cids-hermes-*` | ✅ provenance/legal | Historische Release-Dokumentation |
+| `README.md` Z.28 | `sidekick --help` | ✅ allowed legacy compat | Legacy-CLI-Alias-Dokumentation |
+| `README.md` Z.89 | `cids-sidekick-agent` / `cids-sidekick-webui` | ✅ provenance/legal | Source-Attribution der Migration |
+| `README.md` Z.95 | `sidekick_cli.*` | ✅ provenance/legal | Erwähnung im Migrations-Kontext |
+| `README.md` Z.97 | `sidekick` command alias | ✅ allowed legacy compat | CLI-Alias-Dokumentation |
+| `docs/releases/v0.1.0-monorepo.md` | `cids-sidekick-*` | ✅ provenance/legal | Historische Release-Dokumentation |
 | `docs/releases/v0.2.0.md` | `v0.1.0-monorepo` | ✅ provenance/legal | Versions-Dokumentation |
-| `docs/audits/hermes-links-v0.1.0.md` | alle | ✅ provenance/legal | Historisches Audit-Dokument |
+| `docs/audits/sidekick-links-v0.1.0.md` | alle | ✅ provenance/legal | Historisches Audit-Dokument |
 
 ---
 
@@ -46,7 +46,7 @@
 
 | Fundort | Referenz | Einordnung | Begründung |
 |---------|----------|------------|------------|
-| `cron/__init__.py` | "cids-hermes-agent/cron/" im Kommentar | ✅ migration shim | Forwarder-Paket, Kommentar erklärt Herkunft |
+| `cron/__init__.py` | "cids-sidekick-agent/cron/" im Kommentar | ✅ migration shim | Forwarder-Paket, Kommentar erklärt Herkunft |
 | `gateway/__init__.py` | "gateway" → `runtime.gateway` | ✅ migration shim | Forwarder-Paket |
 | `gateway/restart.py` | `from runtime.gateway.restart import *` | ✅ migration shim | Forwarder |
 | `gateway/status.py` | `from runtime.gateway.status import *` | ✅ migration shim | Forwarder |
@@ -60,10 +60,10 @@
 
 | Fundort | Referenz | Einordnung | Begründung |
 |---------|----------|------------|------------|
-| `cli/auth.py:836` | `".hermes/auth.json"` | ⚠️ should rename | Fallback-Pfad, low risk |
-| `cli/backup.py:286,301` | `.hermes/config.yaml`, `.hermes` prefix | ⚠️ should rename | Backup-Kompatibilität, low risk |
-| `cli/cli.py:2594` | `.hermes_history` | ⚠️ should rename | History-Filename, cosmetic |
-| `cli/config.py:217` | "hermes-agent.settings" | ⚠️ should rename | NixOS-Konfig-Referenz, cosmetic |
+| `cli/auth.py:836` | `".sidekick/auth.json"` | ⚠️ should rename | Fallback-Pfad, low risk |
+| `cli/backup.py:286,301` | `.sidekick/config.yaml`, `.sidekick` prefix | ⚠️ should rename | Backup-Kompatibilität, low risk |
+| `cli/cli.py:2594` | `.sidekick_history` | ⚠️ should rename | History-Filename, cosmetic |
+| `cli/config.py:217` | "sidekick-agent.settings" | ⚠️ should rename | NixOS-Konfig-Referenz, cosmetic |
 
 ---
 
@@ -93,9 +93,9 @@ Die echte Implementierung liegt in `runtime/gateway/`.
 | ❌ blocking functional | 0 | — |
 
 **Gesamturteil:**
-- **Keine user-facing Hermes-Namen mehr** außer dokumentierten Legacy-Env-Var-Aliase im `--help`
-- **0 blockierende Hermes-Abhängigkeiten**
-- **4 kosmetische ⚠️-Funde** (Filename `.hermes_history`, Backup-Prefix `.hermes`, NixOS-Konfig-Referenz) für v0.4.0 oder später
+- **Keine user-facing Sidekick-Namen mehr** außer dokumentierten Legacy-Env-Var-Aliase im `--help`
+- **0 blockierende Sidekick-Abhängigkeiten**
+- **4 kosmetische ⚠️-Funde** (Filename `.sidekick_history`, Backup-Prefix `.sidekick`, NixOS-Konfig-Referenz) für v0.4.0 oder später
 - **Alle produktiven Imports** zeigen auf `runtime.*`, `cli.*`, `shared.*`, `tools.*`, `web.*`
 
 Das Repo ist funktional vollständig auf Sidekick umgestellt.

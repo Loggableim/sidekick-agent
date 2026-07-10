@@ -35,7 +35,7 @@ def _load_env():
     for candidate in [
         os.path.join(os.path.dirname(__file__), "..", ".env"),
         os.path.join(os.path.dirname(__file__), "..", "..", "home", ".env"),
-        os.path.expanduser("~/.hermes/.env"),
+        os.path.expanduser("~/.sidekick/.env"),
     ]:
         env_path = os.path.abspath(candidate)
         try:

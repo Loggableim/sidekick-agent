@@ -58,7 +58,7 @@ def _config_file(home: Path | None = None) -> Path:
 def _spaces_root(home: Path | None = None) -> Path:
     override = (
         os.environ.get("SIDEKICK_WEBUI_SPACES_DIR")
-        or os.environ.get("HERMES_WEBUI_SPACES_DIR")
+        or os.environ.get("SIDEKICK_WEBUI_SPACES_DIR")
         or ""
     ).strip()
     if override:
@@ -136,7 +136,7 @@ _CONFIG_FILE = _SIDEKICK_HOME / "config.yaml"
 # Space-specific app activation: each space can enable apps via space.yaml
 _SPACES_ROOT = Path(
     os.environ.get("SIDEKICK_WEBUI_SPACES_DIR")
-    or os.environ.get("HERMES_WEBUI_SPACES_DIR")
+    or os.environ.get("SIDEKICK_WEBUI_SPACES_DIR")
     or str(_HOME_DIR / "spaces")
 )
 
@@ -151,7 +151,7 @@ _AGENT_DIR = _REPO_ROOT  # run_agent.py is in-repo now
 # ---------------------------------------------------------------------------
 
 def _read_env() -> dict[str, str]:
-    """Return all key-value pairs from ``~/.hermes/.env``."""
+    """Return all key-value pairs from ``~/.sidekick/.env``."""
     env_file = _env_file()
     if not env_file.exists():
         return {}
@@ -336,12 +336,12 @@ def _unpatch_config(path_parts: list[str]) -> bool:
 # Sidekick CLI subprocess helper
 # ---------------------------------------------------------------------------
 
-def _run_hermes_cli(args: list[str]) -> tuple[int, str]:
+def _run_sidekick_cli(args: list[str]) -> tuple[int, str]:
     """Run the Sidekick CLI via the venv Python and return ``(returncode, stdout)``."""
     cmd = [str(_VENV_PYTHON), "-m", "sidekick_cli.main"] + args
     env = os.environ.copy()
 
-    # Ensure PYTHONPATH includes the agent directory so hermes_cli resolves
+    # Ensure PYTHONPATH includes the agent directory so sidekick_cli resolves
     agent_dir = str(_AGENT_DIR)
     pythonpath = env.get("PYTHONPATH", "")
     paths = [p for p in pythonpath.split(os.pathsep) if p]
@@ -646,7 +646,7 @@ def install_app(manifest_key: str, values: dict) -> dict:
     tools_to_enable: list[str] = manifest.get("tools_enable", [])
     for tool_name in tools_to_enable:
         try:
-            rc, out = _run_hermes_cli(["tools", "enable", tool_name])
+            rc, out = _run_sidekick_cli(["tools", "enable", tool_name])
             if rc != 0:
                 errors.append(f"Failed to enable tool '{tool_name}': {out}")
         except Exception as exc:
@@ -656,7 +656,7 @@ def install_app(manifest_key: str, values: dict) -> dict:
     gateway_restarted = False
     if manifest.get("gateway_restart", False):
         try:
-            rc, out = _run_hermes_cli(["gateway", "restart"])
+            rc, out = _run_sidekick_cli(["gateway", "restart"])
             if rc == 0:
                 gateway_restarted = True
                 changed_files.append("gateway (restarted)")
@@ -744,7 +744,7 @@ def uninstall_app(manifest_key: str) -> dict:
         tools_to_disable: list[str] = manifest.get("tools_enable", [])
         for tool_name in tools_to_disable:
             try:
-                rc, out = _run_hermes_cli(["tools", "disable", tool_name])
+                rc, out = _run_sidekick_cli(["tools", "disable", tool_name])
                 if rc != 0:
                     errors.append(f"Failed to disable tool '{tool_name}': {out}")
             except Exception as exc:

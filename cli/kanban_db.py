@@ -1,7 +1,7 @@
 """SQLite-backed Kanban board for multi-profile, multi-project collaboration.
 
 In a fresh install the board lives at ``<root>/kanban.db`` where
-``<root>`` is the **shared Hermes root** (the parent of any active
+``<root>`` is the **shared Sidekick root** (the parent of any active
 profile). Profiles intentionally collapse onto a shared board: it IS
 the cross-profile coordination primitive. A worker spawned with
 ``sidekick -p <profile>`` joins the same board as the dispatcher that
@@ -12,7 +12,7 @@ claimed the task. The same applies to ``<root>/kanban/workspaces/`` and
 separate unrelated streams of work (e.g. one per project / repo / domain).
 Each board is a directory under ``<root>/kanban/boards/<slug>/`` with
 its own ``kanban.db``, ``workspaces/``, and ``logs/``. All boards share
-the profile's Hermes home but are otherwise isolated: a worker spawned
+the profile's Sidekick home but are otherwise isolated: a worker spawned
 for a task on board ``atm10-server`` sees only that board's tasks,
 cannot enumerate other boards, and its dispatcher ticks don't touch
 other boards' DBs.
@@ -27,9 +27,9 @@ Board resolution order (highest precedence first, all optional):
 * ``board=`` argument passed directly to :func:`connect` / :func:`init_db`
   (explicit — used by the CLI ``--board`` flag and the dashboard
   ``?board=...`` query param).
-* ``HERMES_KANBAN_BOARD`` env var (used by the dispatcher to pin workers
+* ``SIDEKICK_KANBAN_BOARD`` env var (used by the dispatcher to pin workers
   to the board their task lives on — workers cannot see other boards).
-* ``HERMES_KANBAN_DB`` env var (pins the DB file path directly — legacy
+* ``SIDEKICK_KANBAN_DB`` env var (pins the DB file path directly — legacy
   override still honoured; highest precedence when the file path itself
   is what the caller wants to force).
 * ``<root>/kanban/current`` — a one-line text file holding the slug of
@@ -37,17 +37,17 @@ Board resolution order (highest precedence first, all optional):
   switch <slug>``. When absent, the active board is ``default``.
 
 In standard installs ``<root>`` is ``~/.sidekick``. In Docker / custom
-deployments where ``HERMES_HOME`` points outside ``~/.sidekick`` (e.g.
-``/opt/hermes`` — legacy), ``<root>`` is ``HERMES_HOME``. Legacy env-var
+deployments where ``SIDEKICK_HOME`` points outside ``~/.sidekick`` (e.g.
+``/opt/sidekick`` — legacy), ``<root>`` is ``SIDEKICK_HOME``. Legacy env-var
 overrides still work:
 
-* ``HERMES_KANBAN_DB`` — pin the database file path directly.
-* ``HERMES_KANBAN_WORKSPACES_ROOT`` — pin the workspaces root directly.
-* ``HERMES_KANBAN_HOME`` — pin the umbrella root that anchors kanban
+* ``SIDEKICK_KANBAN_DB`` — pin the database file path directly.
+* ``SIDEKICK_KANBAN_WORKSPACES_ROOT`` — pin the workspaces root directly.
+* ``SIDEKICK_KANBAN_HOME`` — pin the umbrella root that anchors kanban
   paths. Useful for tests and unusual deployments.
 
-The dispatcher injects ``HERMES_KANBAN_DB``,
-``HERMES_KANBAN_WORKSPACES_ROOT``, and ``HERMES_KANBAN_BOARD`` into
+The dispatcher injects ``SIDEKICK_KANBAN_DB``,
+``SIDEKICK_KANBAN_WORKSPACES_ROOT``, and ``SIDEKICK_KANBAN_BOARD`` into
 worker subprocess env so workers converge on the exact DB the
 dispatcher used to claim their task — even under unusual symlink or
 Docker layouts.
@@ -55,7 +55,7 @@ Docker layouts.
 Schema is intentionally small: tasks, task_links, task_comments,
 task_events.  The ``workspace_kind`` field decouples coordination from git
 worktrees so that research / ops / digital-twin workloads work alongside
-coding workloads.  See ``docs/hermes-kanban-v1-spec.pdf`` for the full
+coding workloads.  See ``docs/sidekick-kanban-v1-spec.pdf`` for the full
 design specification.
 
 Concurrency strategy: WAL mode + ``BEGIN IMMEDIATE`` for write
@@ -125,7 +125,7 @@ DEFAULT_BOARD = "default"
 
 # Slug validator: lowercase alphanumerics, digits, hyphens; 1–64 chars.
 # Strict enough to stop traversal (`..`) and embedded path separators, loose
-# enough that kebab-case names like ``atm10-server`` or ``hermes-agent``
+# enough that kebab-case names like ``atm10-server`` or ``sidekick-agent``
 # pass without fuss. Board names with display formatting (spaces, emoji)
 # live in ``board.json``; the slug is just the directory name.
 _BOARD_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]{0,63}$")
@@ -156,26 +156,26 @@ def _normalize_board_slug(slug: Optional[str]) -> Optional[str]:
 
 
 def kanban_home() -> Path:
-    """Return the shared Hermes root that anchors the kanban board.
+    """Return the shared Sidekick root that anchors the kanban board.
 
     Resolution order:
 
     1. ``SIDEKICK_KANBAN_HOME`` env var when set and non-empty.
-    2. ``HERMES_KANBAN_HOME`` env var as a legacy fallback.
-    3. ``get_default_hermes_root()``, which already returns ``<root>``
-       when ``HERMES_HOME`` is ``<root>/profiles/<name>``, and returns
-       ``HERMES_HOME`` directly for Docker / custom deployments.
+    2. ``SIDEKICK_KANBAN_HOME`` env var as a legacy fallback.
+    3. ``get_default_sidekick_root()``, which already returns ``<root>``
+       when ``SIDEKICK_HOME`` is ``<root>/profiles/<name>``, and returns
+       ``SIDEKICK_HOME`` directly for Docker / custom deployments.
 
     The kanban board is shared across profiles **by design** (see the
     module docstring). Resolving the kanban paths through the active
-    profile's ``HERMES_HOME`` would silently fork the board per profile,
+    profile's ``SIDEKICK_HOME`` would silently fork the board per profile,
     which breaks the dispatcher / worker handoff.
     """
-    override = _env_override("SIDEKICK_KANBAN_HOME", "HERMES_KANBAN_HOME")
+    override = _env_override("SIDEKICK_KANBAN_HOME")
     if override:
         return Path(override).expanduser()
-    from runtime._compat.shim_constants import get_default_hermes_root
-    return get_default_hermes_root()
+    from runtime._compat.shim_constants import get_default_sidekick_root
+    return get_default_sidekick_root()
 
 
 def boards_root() -> Path:
@@ -204,7 +204,7 @@ def get_current_board() -> str:
 
     Order (highest precedence first):
 
-    1. ``HERMES_KANBAN_BOARD`` env var (set by the dispatcher on worker
+    1. ``SIDEKICK_KANBAN_BOARD`` env var (set by the dispatcher on worker
        spawn, or manually for ad-hoc overrides).
     2. ``<root>/kanban/current`` on disk (set by ``sidekick kanban boards
        switch``), but only when that board still exists.
@@ -214,7 +214,7 @@ def get_current_board() -> str:
     with a best-effort warning — the dispatcher must never crash because a
     user hand-edited a file or removed a board directory.
     """
-    env = _env_override("SIDEKICK_KANBAN_BOARD", "HERMES_KANBAN_BOARD")
+    env = _env_override("SIDEKICK_KANBAN_BOARD")
     if env:
         try:
             normed = _normalize_board_slug(env)
@@ -296,7 +296,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
 
     Resolution (highest precedence first):
 
-    1. ``HERMES_KANBAN_DB`` env var — pins the path directly. Honoured for
+    1. ``SIDEKICK_KANBAN_DB`` env var — pins the path directly. Honoured for
        back-compat and for the dispatcher→worker handoff (defense in
        depth: dispatcher injects this into worker env so workers are
        immune to any path-resolution disagreement).
@@ -305,7 +305,7 @@ def kanban_db_path(board: Optional[str] = None) -> Path:
     3. Board ``default`` → ``<root>/kanban.db`` (back-compat path).
        Other boards → ``<root>/kanban/boards/<slug>/kanban.db``.
     """
-    override = _env_override("SIDEKICK_KANBAN_DB", "HERMES_KANBAN_DB")
+    override = _env_override("SIDEKICK_KANBAN_DB")
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -320,14 +320,14 @@ def workspaces_root(board: Optional[str] = None) -> Path:
     """Return the directory under which ``scratch`` workspaces are created.
 
     Anchored per-board so workspaces don't leak between projects.
-    ``HERMES_KANBAN_WORKSPACES_ROOT`` pins the path directly (highest
+    ``SIDEKICK_KANBAN_WORKSPACES_ROOT`` pins the path directly (highest
     precedence) — the dispatcher injects this into worker env.
 
     ``default`` keeps the legacy path ``<root>/kanban/workspaces/`` so
     that existing scratch workspaces from before the boards feature are
     preserved. Other boards use ``<root>/kanban/boards/<slug>/workspaces/``.
     """
-    override = _env_override("SIDEKICK_KANBAN_WORKSPACES_ROOT", "HERMES_KANBAN_WORKSPACES_ROOT")
+    override = _env_override("SIDEKICK_KANBAN_WORKSPACES_ROOT")
     if override:
         return Path(override).expanduser()
     slug = _normalize_board_slug(board)
@@ -922,7 +922,7 @@ def connect(
     * ``db_path`` explicit → used as-is (legacy callers, tests).
     * ``board`` explicit → resolves to that board's DB.
     * Neither → :func:`kanban_db_path` resolves via
-      ``HERMES_KANBAN_DB`` env → ``HERMES_KANBAN_BOARD`` env →
+      ``SIDEKICK_KANBAN_DB`` env → ``SIDEKICK_KANBAN_BOARD`` env →
       ``<root>/kanban/current`` → ``default``.
     """
     if db_path is not None:
@@ -936,7 +936,7 @@ def connect(
     conn.row_factory = sqlite3.Row
     # WAL doesn't work on network filesystems (NFS/SMB/FUSE).  Shared helper
     # falls back to DELETE with one WARNING so kanban stays usable there.
-    # See hermes_state._WAL_INCOMPAT_MARKERS for detection logic.
+    # See sidekick_state._WAL_INCOMPAT_MARKERS for detection logic.
     from runtime._compat.shim_state import apply_wal_with_fallback
     apply_wal_with_fallback(conn, db_label=f"kanban.db ({path.name})")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -2927,7 +2927,7 @@ class DispatchResult:
     Operator-actionable — usually a misfiled task waiting for routing."""
     skipped_nonspawnable: list[str] = field(default_factory=list)
     """Ready task ids skipped because their assignee names a control-plane
-    lane (a Claude Code terminal like ``orion-cc``) rather than a Hermes
+    lane (a Claude Code terminal like ``orion-cc``) rather than a Sidekick
     profile. Expected steady-state on multi-lane setups; NOT an
     operator-actionable failure. Tracked separately so health telemetry
     can distinguish "real stuck" (nothing spawned but spawnable work
@@ -3653,7 +3653,7 @@ _clear_spawn_failures = _clear_failure_counter
 
 def has_spawnable_ready(conn: sqlite3.Connection) -> bool:
     """Return True iff there is at least one ready+assigned+unclaimed task
-    whose assignee maps to a real Hermes profile.
+    whose assignee maps to a real Sidekick profile.
 
     Used by the gateway- and CLI-embedded dispatchers' health telemetry to
     decide whether ``0 spawned`` is a "stuck" condition (real spawnable
@@ -3794,11 +3794,11 @@ def dispatch_once(
         if not row["assignee"]:
             result.skipped_unassigned.append(row["id"])
             continue
-        # Skip ready tasks whose assignee is not a real Hermes profile.
+        # Skip ready tasks whose assignee is not a real Sidekick profile.
         # `_default_spawn` invokes ``sidekick -p <assignee>`` which fails
         # with "Profile 'X' does not exist" when the assignee names a
         # control-plane lane (e.g. an interactive Claude Code terminal
-        # like ``orion-cc`` / ``orion-research``) rather than a Hermes
+        # like ``orion-cc`` / ``orion-research``) rather than a Sidekick
         # profile. Those task lanes are pulled by terminals via
         # ``claim_task`` directly and should NEVER auto-spawn — the
         # subprocess would crash on startup, get reaped as a zombie,
@@ -3902,20 +3902,20 @@ def _resolve_sidekick_argv() -> list[str]:
        that shows up in ``ps`` output and existing logs. Preferred so live
        systems' diagnostics stay familiar.
     2. ``sys.executable -m sidekick_cli.main`` — fallback for setups where
-       Hermes is launched from a venv and the ``sidekick`` shim is not on
+       Sidekick is launched from a venv and the ``sidekick`` shim is not on
        the dispatcher's ``$PATH`` (cron, systemd ``User=`` services,
        launchd jobs, detached processes, etc.). Goes through the running
        interpreter so the result is independent of ``$PATH``.
 
-    Mirrors ``gateway.run._resolve_hermes_bin`` for the same reason. Kept
+    Mirrors ``gateway.run._resolve_sidekick_bin`` for the same reason. Kept
     local (not imported from gateway) because ``sidekick_cli`` sits below
     ``gateway`` in the dependency order.
     """
     import shutil
 
-    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
-    if hermes_bin:
-        return [hermes_bin]
+    sidekick_bin = shutil.which("sidekick") or shutil.which("sidekick")
+    if sidekick_bin:
+        return [sidekick_bin]
     # Fallback to the module form. ``sidekick_cli.main`` is the actual
     # console-script target declared in pyproject.toml, NOT a top-level
     # ``sidekick`` package — there is no ``sidekick`` package to import.
@@ -3923,7 +3923,7 @@ def _resolve_sidekick_argv() -> list[str]:
 
 
 # Legacy alias for backward compatibility
-_resolve_hermes_argv = _resolve_sidekick_argv
+_resolve_sidekick_argv = _resolve_sidekick_argv
 
 
 def _default_spawn(
@@ -3940,7 +3940,7 @@ def _default_spawn(
     the PID check is a safety net for crashes, OOM kills, and Ctrl+C.
 
     ``board`` pins the child's kanban context to that board: the child's
-    ``HERMES_KANBAN_DB`` / ``HERMES_KANBAN_BOARD`` / workspaces_root env
+    ``SIDEKICK_KANBAN_DB`` / ``SIDEKICK_KANBAN_BOARD`` / workspaces_root env
     vars all resolve to the same board the dispatcher claimed the task
     from. Workers cannot accidentally see other boards.
     """
@@ -3955,50 +3955,50 @@ def _default_spawn(
     prompt = f"work kanban task {task.id}"
     env = dict(os.environ)
 
-    # Inject HERMES_HOME so the worker reads the profile-scoped config.yaml
+    # Inject SIDEKICK_HOME so the worker reads the profile-scoped config.yaml
     # (fallback_providers, toolsets, agent settings, etc.) instead of the root
     # config.  Without this, `env = dict(os.environ)` copies only the parent's
     # env, and when the child process starts `sidekick -p <name>` the
-    # _apply_profile_override() runs *before* hermes_constants is imported.
-    # If HERMES_HOME is absent from the child's env, get_sidekick_home() falls
-    # back to Path.home() / ".hermes" (the DEFAULT profile root), ignoring the
+    # _apply_profile_override() runs *before* sidekick_constants is imported.
+    # If SIDEKICK_HOME is absent from the child's env, get_sidekick_home() falls
+    # back to Path.home() / ".sidekick" (the DEFAULT profile root), ignoring the
     # profile-specific config entirely.  Fixes profile-scoped fallback_providers
     # being invisible to kanban workers.
     from cli.profiles import resolve_profile_env
     try:
-        env["HERMES_HOME"] = resolve_profile_env(profile_arg)
+        env["SIDEKICK_HOME"] = resolve_profile_env(profile_arg)
     except FileNotFoundError:
         # Profile dir doesn't exist — defer resolution to the CLI's
-        # _apply_profile_override() via HERMES_PROFILE (set below).
+        # _apply_profile_override() via SIDEKICK_PROFILE (set below).
         # This only happens in test fixtures where the isolated
-        # HERMES_HOME never had profiles created.
+        # SIDEKICK_HOME never had profiles created.
         pass
     if task.tenant:
-        env["HERMES_TENANT"] = task.tenant
-    env["HERMES_KANBAN_TASK"] = task.id
-    env["HERMES_KANBAN_WORKSPACE"] = workspace
+        env["SIDEKICK_TENANT"] = task.tenant
+    env["SIDEKICK_KANBAN_TASK"] = task.id
+    env["SIDEKICK_KANBAN_WORKSPACE"] = workspace
     if task.current_run_id is not None:
-        env["HERMES_KANBAN_RUN_ID"] = str(task.current_run_id)
+        env["SIDEKICK_KANBAN_RUN_ID"] = str(task.current_run_id)
     if task.claim_lock:
-        env["HERMES_KANBAN_CLAIM_LOCK"] = task.claim_lock
+        env["SIDEKICK_KANBAN_CLAIM_LOCK"] = task.claim_lock
     # Pin the shared board + workspaces root the dispatcher resolved, so
     # that even when the worker activates a profile (`sidekick -p <name>`
-    # rewrites HERMES_HOME), its kanban paths still match the
-    # dispatcher's. Belt-and-braces with the `get_default_hermes_root()`
+    # rewrites SIDEKICK_HOME), its kanban paths still match the
+    # dispatcher's. Belt-and-braces with the `get_default_sidekick_root()`
     # resolution in `kanban_home()` — symmetric resolution is the norm,
     # but unusual symlink / Docker layouts are caught here too.
-    env["HERMES_KANBAN_DB"] = str(kanban_db_path(board=board))
-    env["HERMES_KANBAN_WORKSPACES_ROOT"] = str(workspaces_root(board=board))
+    env["SIDEKICK_KANBAN_DB"] = str(kanban_db_path(board=board))
+    env["SIDEKICK_KANBAN_WORKSPACES_ROOT"] = str(workspaces_root(board=board))
     # Board slug — the final defense-in-depth pin. If the worker ever
     # resolves kanban paths without the DB / workspaces env vars, the
     # board slug still forces it to the right directory.
     resolved_board = _normalize_board_slug(board) or get_current_board()
-    env["HERMES_KANBAN_BOARD"] = resolved_board
-    # HERMES_PROFILE is the author the kanban_comment tool defaults to.
+    env["SIDEKICK_KANBAN_BOARD"] = resolved_board
+    # SIDEKICK_PROFILE is the author the kanban_comment tool defaults to.
     # `sidekick -p <assignee>` activates the profile, but the env var is
     # what the tool reads — set it explicitly here so comments are
     # attributed correctly regardless of how the child loads config.
-    env["HERMES_PROFILE"] = profile_arg
+    env["SIDEKICK_PROFILE"] = profile_arg
 
     cmd = [
         *_resolve_sidekick_argv(),
@@ -4304,7 +4304,7 @@ def build_worker_context(conn: sqlite3.Connection, task_id: str) -> str:
         for c in shown_c:
             ts = time.strftime("%Y-%m-%d %H:%M", time.localtime(c.created_at))
             # Render author with explicit "comment from worker" framing so
-            # operator-controlled HERMES_PROFILE values like "hermes-system"
+            # operator-controlled SIDEKICK_PROFILE values like "sidekick-system"
             # or "operator" can't be misread by the next worker as a system
             # directive above the (attacker-influenceable) comment body.
             # Defense-in-depth — the LLM-controlled author-forgery surface
@@ -4690,15 +4690,15 @@ def list_profiles_on_disk() -> list[str]:
 
     Includes:
     - named profiles under ``<default-root>/profiles/<name>/config.yaml``
-    - the implicit ``default`` profile when the default Hermes root exists
+    - the implicit ``default`` profile when the default Sidekick root exists
 
     Reads profile paths directly so this module has no import dependency on
     ``sidekick_cli.profiles`` (which pulls in a large chunk of the CLI startup
     path).
     """
     try:
-        from runtime._compat.shim_constants import get_default_hermes_root
-        default_root = get_default_hermes_root()
+        from runtime._compat.shim_constants import get_default_sidekick_root
+        default_root = get_default_sidekick_root()
         profiles_dir = default_root / "profiles"
     except Exception:
         return []

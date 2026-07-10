@@ -3,7 +3,7 @@ Sidekick -- Filesystem checkpoint (rollback) API.
 
 Provides endpoints to list, diff, and restore filesystem checkpoints
 created by the Nova agent's CheckpointManager.  Checkpoints live at
-``{hermes_home}/checkpoints/<hash>/`` as shadow git repositories.
+``{sidekick_home}/checkpoints/<hash>/`` as shadow git repositories.
 """
 
 import hashlib
@@ -40,11 +40,11 @@ def _validate_checkpoint_id(checkpoint: str) -> str:
     return cid
 
 
-def _hermes_home() -> Path:
-    """Return the active Hermes home directory."""
+def _sidekick_home() -> Path:
+    """Return the active Sidekick home directory."""
     try:
-        from web.api.profiles import get_active_hermes_home
-        return Path(get_active_hermes_home())
+        from web.api.profiles import get_active_profile_home
+        return Path(get_active_profile_home())
     except Exception:
         return get_webui_home()
 
@@ -63,7 +63,7 @@ def _workspace_hash(workspace: str) -> str:
 
 
 def _checkpoint_root() -> Path:
-    return _hermes_home() / "checkpoints"
+    return _sidekick_home() / "checkpoints"
 
 
 def _resolve_workspace(workspace: str) -> str:

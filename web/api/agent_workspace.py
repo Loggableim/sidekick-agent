@@ -25,8 +25,8 @@ from web.api._home import get_active_webui_home, get_webui_home
 logger = logging.getLogger(__name__)
 
 # ── Pfade ──────────────────────────────────────────────────────────────
-HERMES_HOME = get_webui_home()
-WORKSPACES_ROOT = HERMES_HOME / "workspaces"
+SIDEKICK_HOME = get_webui_home()
+WORKSPACES_ROOT = SIDEKICK_HOME / "workspaces"
 
 _LLM_CACHE = {}  # Cache für Config
 

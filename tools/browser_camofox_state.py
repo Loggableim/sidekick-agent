@@ -1,7 +1,7 @@
 """Sidekick-managed Camofox state helpers.
 
 Provides profile-scoped identity and state directory paths for Camofox
-persistent browser profiles.  When managed persistence is enabled, Hermes
+persistent browser profiles.  When managed persistence is enabled, Sidekick
 sends a deterministic userId derived from the active profile so that
 Camofox can map it to the same persistent browser profile directory
 across restarts.
@@ -42,6 +42,6 @@ def get_camofox_identity(task_id: Optional[str] = None) -> Dict[str, str]:
         f"camofox-session:{scope_root}:{logical_scope}",
     ).hex[:16]
     return {
-        "user_id": f"hermes_{user_digest}",
+        "user_id": f"sidekick_{user_digest}",
         "session_key": f"task_{session_digest}",
     }

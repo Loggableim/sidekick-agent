@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
-import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from sidekick_constants import (
     display_sidekick_home,
@@ -30,32 +30,37 @@ from shared.sessions import (
     session_status,
     update_session,
 )
-from web.server import create_server
+
+TestClient = pytest.importorskip("fastapi.testclient").TestClient
+
+
+def _webui_client():
+    from cli import web_server
+
+    return TestClient(web_server.app), {
+        web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN,
+    }
 
 
 def test_sidekick_home_defaults_to_user_profile(monkeypatch):
     monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.delenv("HERMES_HOME", raising=False)
     assert sidekick_home() == (Path.home() / ".sidekick").resolve()
 
 
-def test_sidekick_home_prefers_sidekick_env(monkeypatch, tmp_path):
+def test_sidekick_home_uses_sidekick_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "sidekick-home"))
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "legacy-home"))
     assert sidekick_home() == (tmp_path / "sidekick-home").resolve()
 
 
-def test_state_dir_uses_legacy_alias_when_canonical_missing(monkeypatch, tmp_path):
-    monkeypatch.delenv("SIDEKICK_STATE_DIR", raising=False)
-    monkeypatch.setenv("HERMES_STATE_DIR", str(tmp_path / "legacy-state"))
-    assert state_dir() == (tmp_path / "legacy-state").resolve()
+def test_state_dir_uses_sidekick_state_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_STATE_DIR", str(tmp_path / "state"))
+    assert state_dir() == (tmp_path / "state").resolve()
 
 
-def test_runtime_snapshot_reports_legacy_usage(monkeypatch, tmp_path):
-    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "legacy-home"))
+def test_runtime_snapshot_reports_sidekick_paths(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     snapshot = build_runtime_snapshot()
-    assert snapshot["legacy_env_detected"] is True
+    assert snapshot["sidekick_home"] == str((tmp_path / "home").resolve())
 
 
 def test_runtime_warnings_flag_repo_local_home(monkeypatch, tmp_path):
@@ -68,9 +73,7 @@ def test_runtime_warnings_flag_repo_local_home(monkeypatch, tmp_path):
 
 def test_web_state_dir_defaults_under_shared_state(monkeypatch, tmp_path):
     monkeypatch.delenv("SIDEKICK_STATE_DIR", raising=False)
-    monkeypatch.delenv("HERMES_STATE_DIR", raising=False)
     monkeypatch.delenv("SIDEKICK_WEBUI_STATE_DIR", raising=False)
-    monkeypatch.delenv("HERMES_WEBUI_STATE_DIR", raising=False)
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     assert web_state_dir() == (tmp_path / "home" / "state" / "webui").resolve()
 
@@ -96,29 +99,19 @@ def test_build_web_runtime_picks_explicit_host_port(monkeypatch, tmp_path):
     assert runtime.port == 9999
 
 
-def test_discover_python_accepts_legacy_env_var(monkeypatch):
-    monkeypatch.delenv("SIDEKICK_WEBUI_PYTHON", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_PYTHON", r"C:\legacy\python.exe")
+def test_discover_python_uses_sidekick_env_var(monkeypatch):
+    monkeypatch.setenv("SIDEKICK_WEBUI_PYTHON", r"C:\sidekick\python.exe")
     from web.api import config as web_config
 
-    assert web_config._discover_python(None) == r"C:\legacy\python.exe"
+    assert web_config._discover_python(None) == r"C:\sidekick\python.exe"
 
 
-def test_test_network_block_accepts_legacy_env_var(monkeypatch):
-    monkeypatch.delenv("SIDEKICK_WEBUI_TEST_NETWORK_BLOCK", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_TEST_NETWORK_BLOCK", "1")
-    import web.server as web_server
-
-    assert web_server._test_network_block_enabled() is True
-
-
-def test_aiagent_import_error_detail_accepts_legacy_agent_dir(monkeypatch):
-    monkeypatch.delenv("SIDEKICK_WEBUI_AGENT_DIR", raising=False)
-    monkeypatch.setenv("HERMES_WEBUI_AGENT_DIR", r"C:\legacy\sidekick-agent")
+def test_aiagent_import_error_detail_uses_sidekick_agent_dir(monkeypatch):
+    monkeypatch.setenv("SIDEKICK_WEBUI_AGENT_DIR", r"C:\sidekick\sidekick-agent")
     import web.api.streaming as streaming
 
     detail = streaming._aiagent_import_error_detail()
-    assert "C:\\legacy\\sidekick-agent" in detail
+    assert "C:\\sidekick\\sidekick-agent" in detail
     assert "SIDEKICK_WEBUI_AGENT_DIR" in detail
 
 
@@ -325,56 +318,36 @@ def test_run_assistant_once_returns_fallback_for_empty_stdout(monkeypatch):
     assert result.error == "empty response"
 
 
-def test_create_server_uses_runtime_host_and_port(monkeypatch, tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
+def test_webui_exports_fastapi_application(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
-    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    server = create_server()
-    try:
-        assert server.server_address[0] == "127.0.0.1"
-    finally:
-        server.server_close()
+    from cli import web_server
+
+    assert web_server.app.title == "Sidekick Agent"
+    assert callable(web_server.app)
 
 
 def test_web_server_health_endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
-    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    server = create_server()
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[:2]
-        with urllib.request.urlopen(f"http://{host}:{port}/health", timeout=5) as response:
-            payload = response.read().decode("utf-8")
-        data = json.loads(payload)
-        assert data["status"] == "ok"
-        assert "sessions" in data
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    client, _headers = _webui_client()
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["service"] == "sidekick-dashboard"
 
 
 def test_web_server_agents_list_endpoint_initializes_cleanly(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
-    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    server = create_server()
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[:2]
-        with urllib.request.urlopen(f"http://{host}:{port}/api/agents/list", timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        assert isinstance(payload, dict)
-        assert payload.get("agents") is not None
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    client, headers = _webui_client()
+
+    response = client.get("/api/agents/list", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, dict)
+    assert payload.get("agents") is not None
 
 
 def test_web_helpers_ignore_client_disconnects():
@@ -489,116 +462,72 @@ def test_shared_sessions_preserve_webui_only_metadata(monkeypatch, tmp_path):
 
 def test_web_server_session_endpoints(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
-    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    server = create_server()
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[:2]
-        req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/new",
-            data=json.dumps({"title": "API Session"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5) as response:
-            created = json.loads(response.read().decode("utf-8"))
-        assert "session" in created
-        session_id = created["session"]["session_id"]
+    client, headers = _webui_client()
 
-        with urllib.request.urlopen(f"http://{host}:{port}/api/sessions", timeout=5) as response:
-            listed = json.loads(response.read().decode("utf-8"))
-        assert isinstance(listed, dict)
-        assert "sessions" in listed
+    created_response = client.post("/api/session/new", json={"title": "API Session"}, headers=headers)
+    assert created_response.status_code == 200
+    created = created_response.json()
+    assert "session" in created
+    session_id = created["session"]["session_id"]
 
-        with urllib.request.urlopen(f"http://{host}:{port}/api/session?session_id={session_id}", timeout=5) as response:
-            fetched = json.loads(response.read().decode("utf-8"))
-        assert "session" in fetched
-        assert fetched["session"]["session_id"] == session_id
+    listed_response = client.get("/api/sessions", headers=headers)
+    assert listed_response.status_code == 200
+    listed = listed_response.json()
+    assert isinstance(listed, dict)
+    assert "sessions" in listed
 
-        patch_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/rename",
-            data=json.dumps({"session_id": session_id, "title": "Renamed Session"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(patch_req, timeout=5) as response:
-            patched = json.loads(response.read().decode("utf-8"))
-        assert patched["session"]["title"] == "Renamed Session"
+    fetched_response = client.get(f"/api/session?session_id={session_id}", headers=headers)
+    assert fetched_response.status_code == 200
+    fetched = fetched_response.json()
+    assert "session" in fetched
+    assert fetched["session"]["session_id"] == session_id
 
-        delete_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/delete",
-            data=json.dumps({"session_id": session_id}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(delete_req, timeout=5) as response:
-            deleted = json.loads(response.read().decode("utf-8"))
-        assert deleted["ok"] is True
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    patched_response = client.post(
+        "/api/session/rename",
+        json={"session_id": session_id, "title": "Renamed Session"},
+        headers=headers,
+    )
+    assert patched_response.status_code == 200
+    assert patched_response.json()["session"]["title"] == "Renamed Session"
+
+    deleted_response = client.post(
+        "/api/session/delete", json={"session_id": session_id}, headers=headers
+    )
+    assert deleted_response.status_code == 200
+    assert deleted_response.json()["ok"] is True
 
 
 def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
-    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    server = create_server()
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[:2]
-        workspace_dir = tmp_path / "workspace"
-        workspace_dir.mkdir(parents=True, exist_ok=True)
-        create_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/new",
-            data=json.dumps({"title": "Chat Session"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(create_req, timeout=5) as response:
-            created = json.loads(response.read().decode("utf-8"))
-        session_id = created["session"]["session_id"]
+    client, headers = _webui_client()
+    workspace_dir = tmp_path / "workspace"
+    workspace_dir.mkdir(parents=True, exist_ok=True)
 
-        update_req = urllib.request.Request(
-            f"http://{host}:{port}/api/session/update",
-            data=json.dumps(
-                {
-                    "session_id": session_id,
-                    "workspace": str(workspace_dir),
-                    "model": "gpt-test",
-                    "model_provider": "test-provider",
-                }
-            ).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(update_req, timeout=5) as response:
-            updated = json.loads(response.read().decode("utf-8"))
-        assert updated["session"]["model"] == "gpt-test"
-        assert updated["session"]["model_provider"] == "test-provider"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    created_response = client.post("/api/session/new", json={"title": "Chat Session"}, headers=headers)
+    assert created_response.status_code == 200
+    session_id = created_response.json()["session"]["session_id"]
+
+    updated_response = client.post(
+        "/api/session/update",
+        json={
+            "session_id": session_id,
+            "workspace": str(workspace_dir),
+            "model": "gpt-test",
+            "model_provider": "test-provider",
+        },
+        headers=headers,
+    )
+    assert updated_response.status_code == 200
+    updated = updated_response.json()
+    assert updated["session"]["model"] == "gpt-test"
+    assert updated["session"]["model_provider"] == "test-provider"
 
 
 def test_web_server_root_serves_html(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SIDEKICK_WEBUI_HOST", "127.0.0.1")
-    monkeypatch.setenv("SIDEKICK_WEBUI_PORT", "0")
-    server = create_server()
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        host, port = server.server_address[:2]
-        with urllib.request.urlopen(f"http://{host}:{port}/", timeout=5) as response:
-            html = response.read().decode("utf-8")
-        assert "<title>Sidekick</title>" in html
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
+    client, _headers = _webui_client()
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "<title>Sidekick</title>" in response.text

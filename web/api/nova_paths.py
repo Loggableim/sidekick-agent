@@ -27,5 +27,10 @@ def get_nova_session_start_path() -> Path:
     return get_nova_space_root() / "session_start.py"
 
 
+def get_nova_source_root() -> Path:
+    """Return the immutable Nova package bundled with Sidekick."""
+    return Path(__file__).resolve().parents[2] / "nova"
+
+
 def get_nova_state_snapshot_path() -> Path:
-    return get_nova_space_root() / "state_snapshot.py"
+    return get_nova_source_root() / "state_snapshot.py"

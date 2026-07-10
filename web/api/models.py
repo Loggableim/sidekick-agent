@@ -831,14 +831,14 @@ class Session:
         }
 
 def _get_profile_home(profile) -> Path:
-    """Resolve the hermes agent home directory for the given profile.
+    """Resolve the sidekick agent home directory for the given profile.
 
     Prefers the profile-specific helper from api.profiles; falls back to the
-    HERMES_HOME environment variable or ~/.hermes, expanding ~ correctly.
+    SIDEKICK_HOME environment variable or ~/.sidekick, expanding ~ correctly.
     """
     try:
-        from web.api.profiles import get_hermes_home_for_profile
-        return Path(get_hermes_home_for_profile(profile))
+        from web.api.profiles import get_profile_home
+        return Path(get_profile_home(profile))
     except Exception:
         return get_webui_home()
 
@@ -1217,13 +1217,13 @@ def _hide_from_default_sidebar(session: dict) -> bool:
 
 
 def _active_state_db_path() -> Path:
-    """Return state.db for the active Nova profile, degrading to HERMES_HOME."""
+    """Return state.db for the active Nova profile, degrading to SIDEKICK_HOME."""
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
-    return hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    return sidekick_home / 'state.db'
 
 
 def _enrich_sidebar_lineage_metadata(sessions: list[dict]) -> None:
@@ -2059,14 +2059,14 @@ def get_cli_session_metadata(session_id: str) -> dict:
         return {}
 
     try:
-        from web.api.profiles import get_active_hermes_home, get_active_profile_name
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home, get_active_profile_name
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
         cli_profile = get_active_profile_name()
     except Exception:
-        hermes_home = get_webui_home()
+        sidekick_home = get_webui_home()
         cli_profile = None
 
-    db_path = hermes_home / 'state.db'
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return {}
 
@@ -2163,7 +2163,7 @@ def get_cli_session_metadata(session_id: str) -> dict:
                 if len(parts) >= 3:
                     job_id = parts[1]
                     try:
-                        jobs_path = hermes_home / 'cron' / 'jobs.json'
+                        jobs_path = sidekick_home / 'cron' / 'jobs.json'
                         if jobs_path.exists():
                             import json as _json
                             jobs_data = _json.loads(jobs_path.read_text())
@@ -2241,21 +2241,21 @@ def get_cli_sessions() -> list:
     except Exception:
         logger.debug("Claude Code session scan failed", exc_info=True)
 
-    # Use the active WebUI profile's HERMES_HOME to find state.db.
+    # Use the active WebUI profile's SIDEKICK_HOME to find state.db.
     # The active profile is determined by what the user has selected in the UI
     # (stored in the server's runtime config). This means:
-    #   - default profile  -> ~/.hermes/state.db
-    #   - named profile X  -> ~/.hermes/profiles/X/state.db
+    #   - default profile  -> ~/.sidekick/state.db
+    #   - named profile X  -> ~/.sidekick/profiles/X/state.db
     # We resolve the active profile's home directory rather than just using
-    # HERMES_HOME (which is the server's launch profile, not necessarily the
+    # SIDEKICK_HOME (which is the server's launch profile, not necessarily the
     # active one after a profile switch).
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
+        sidekick_home = get_webui_home()
 
-    db_path = hermes_home / 'state.db'
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return cli_sessions
 
@@ -2298,7 +2298,7 @@ def get_cli_sessions() -> list:
                 if len(parts) >= 3:
                     _job_id = parts[1]
                     try:
-                        _jobs_path = hermes_home / 'cron' / 'jobs.json'
+                        _jobs_path = sidekick_home / 'cron' / 'jobs.json'
                         if _jobs_path.exists():
                             import json as _json
                             _jobs_data = _json.loads(_jobs_path.read_text())
@@ -2400,11 +2400,11 @@ def get_cli_session_messages(sid) -> list:
         return []
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
-    db_path = hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return []
 
@@ -2522,11 +2522,11 @@ def count_conversation_rounds(sid: str, since: float | None = None) -> int:
     import sqlite3, datetime
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
-    db_path = hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return 0
 
@@ -2598,11 +2598,11 @@ def delete_cli_session(sid) -> bool:
         return False
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = get_webui_home()
-    db_path = hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return False
 

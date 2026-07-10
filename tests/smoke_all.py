@@ -111,10 +111,10 @@ print(f'tools={len(registry._snapshot_entries())}')""",
 )
 
 test_code(
-    "web.server import",
+    "FastAPI WebUI import",
     """from sidekick_app.__main__ import _ensure_self_first, _bootstrap_aliases
 _ensure_self_first(); _bootstrap_aliases()
-import web.server
+import cli.web_server
 print('OK')""",
     grep="OK"
 )
@@ -150,14 +150,14 @@ print(f'home={h}')""",
 )
 
 test_code(
-    "shared.paths: env var priority (SIDEKICK > HERMES)",
+    "shared.paths: env var priority (SIDEKICK > SIDEKICK)",
     """import os
 os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-test'
-os.environ['HERMES_HOME'] = '/tmp/hermes-prio-test'
+os.environ['SIDEKICK_HOME'] = '/tmp/sidekick-prio-test'
 from shared.paths import sidekick_home
 h = sidekick_home()
 os.environ.pop('SIDEKICK_HOME', None)
-os.environ.pop('HERMES_HOME', None)
+os.environ.pop('SIDEKICK_HOME', None)
 # SIDEKICK_HOME should win
 assert 'sk-prio-test' in str(h), f'Expected sk-prio-test, got {h}'
 print('OK')""",
@@ -325,11 +325,11 @@ def capture_help(*args: str) -> str:
     )
     return proc.stdout + proc.stderr
 
-blocked_tokens = ("Hermes", "NousResearch", "LastBrowser")
+blocked_tokens = ("Sidekick", "NousResearch", "LastBrowser")
 allowed_markers = (
-    "HERMES_",
     "SIDEKICK_",
-    "~/.hermes",
+    "SIDEKICK_",
+    "~/.sidekick",
     "legacy",
     "Legacy",
     "migration",

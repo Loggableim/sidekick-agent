@@ -1,6 +1,6 @@
 """Shared utility functions for Sidekick Runtime.
 
-Ported from cids-hermes-agent/utils.py. Dependency-free module —
+Ported from cids-sidekick-agent/utils.py. Dependency-free module —
 safe to import from anywhere without risk of circular imports.
 """
 

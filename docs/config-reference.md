@@ -6,7 +6,7 @@ full user-facing tree in `cli.config`.
 
 ## How Resolution Works
 
-- `SIDEKICK_HOME` wins over `HERMES_HOME`.
+- `SIDEKICK_HOME` selects the active state root.
 - `config.yaml` holds the merged settings tree.
 - `.env` holds secrets and provider tokens.
 - `runtime.config` is a thin compatibility wrapper over `shared.config`.
@@ -21,7 +21,7 @@ app:
   name: Sidekick
   assistant_name: Nova
 runtime:
-  default_surface: cli
+  default_surface: webui
 paths:
   workspace: null
 webui:
@@ -33,7 +33,7 @@ logging:
   backup_count: 3
 ```
 
-## Full Default Tree
+## Canonical Default Tree
 
 These are the defaults owned by `cli.config`. They are the canonical source for
 the live `config.yaml` shape.
@@ -444,12 +444,10 @@ Category counts:
 - setting: 11
 - skill: 4
 
-Important resolution and alias patterns:
+Important resolution patterns:
 
-- `SIDEKICK_HOME` overrides `HERMES_HOME`.
 - `GOOGLE_API_KEY` and `GEMINI_API_KEY` are aliases for the same provider.
 - `GLM_API_KEY`, `ZAI_API_KEY`, and `Z_AI_API_KEY` are the same family.
-- Many `SIDEKICK_*` keys mirror `HERMES_*` names for migration.
 - `ENV_VARS_BY_VERSION` tracks which env vars were introduced in which
   migration step.
 

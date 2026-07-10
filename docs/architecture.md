@@ -22,11 +22,6 @@ flowchart TB
     Gateway["Gateway platforms"]
   end
 
-  subgraph Bootstrap["Bootstrapping"]
-    App["sidekick_app"]
-    Compat["sidekick_cli compatibility"]
-  end
-
   subgraph Core["Shared core"]
     Shared["shared.*"]
     Runtime["runtime.*"]
@@ -34,7 +29,7 @@ flowchart TB
   end
 
   subgraph Web["Web stack"]
-    Server["cli.web_server / web.server"]
+    Server["cli.web_server (FastAPI)"]
     API["web.api.*"]
   end
 
@@ -49,12 +44,9 @@ flowchart TB
   User --> WebUI
   User --> Gateway
 
-  CLI --> App
   WebUI --> Server
   Gateway --> Runtime
 
-  App --> Shared
-  App --> Compat
   Server --> API
   API --> Runtime
   Runtime --> Tools
@@ -87,7 +79,10 @@ The important boundary is simple:
 
 - `shared.*` owns basic config, paths, sessions, logging, and helper logic.
 - `cli.*` owns the human entrypoints, commands, and setup flows.
-- `web.api.*` owns the HTTP API and WebUI-specific state handling.
+- `cli.web_server` owns the single FastAPI/ASGI server and native WebUI routes.
+- `web.api.*` owns the remaining HTTP route logic and WebUI-specific state
+  handling; it is dispatched in-process by FastAPI while routes are converted
+  incrementally.
 - `runtime.*` owns the agent transport, providers, gateway, and background
   execution.
 - `tools.*` owns concrete tool implementations that the agent can call.
@@ -96,9 +91,8 @@ The important boundary is simple:
 
 Sidekick keeps user state under the active home directory:
 
-- `SIDEKICK_HOME` wins if it is set.
-- `HERMES_HOME` is the legacy fallback.
-- If neither is set, Sidekick falls back to the default home path.
+- `SIDEKICK_HOME` selects an explicit home.
+- Otherwise Sidekick falls back to `~/.sidekick`.
 
 The active home is profile-aware in the WebUI. That means a request can be
 routed to a profile-specific home directory even when the process has a shared
@@ -135,8 +129,7 @@ If you need to change:
   `runtime/*`
 - Shared defaults, paths, or simple config helpers -> `shared/*`
 - Tool behavior -> `tools/*`
-- Compatibility shims for legacy imports -> `sidekick_cli/*` and
-  `sidekick_app/*`
+- Application bootstrap -> `sidekick_app/*`
 
 ## Related Docs
 

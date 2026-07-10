@@ -52,9 +52,9 @@ logger = logging.getLogger(__name__)
 # Path Configuration
 # ============================================================================
 
-# Path to tinker-atropos submodule (relative to hermes-agent root)
-HERMES_ROOT = Path(__file__).parent.parent
-TINKER_ATROPOS_ROOT = HERMES_ROOT / "tinker-atropos"
+# Path to tinker-atropos submodule (relative to sidekick-agent root)
+SIDEKICK_ROOT = Path(__file__).parent.parent
+TINKER_ATROPOS_ROOT = SIDEKICK_ROOT / "tinker-atropos"
 ENVIRONMENTS_DIR = TINKER_ATROPOS_ROOT / "tinker_atropos" / "environments"
 CONFIGS_DIR = TINKER_ATROPOS_ROOT / "configs"
 LOGS_DIR = get_sidekick_home() / "logs" / "rl_training"

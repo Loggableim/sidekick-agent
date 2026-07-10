@@ -21,10 +21,10 @@ _DHH = display_sidekick_home()  # user-facing display path (e.g. ~/.sidekick or 
 
 # Load environment variables from ~/.sidekick/.env so API key checks work
 _env_path = get_env_path()
-load_sidekick_dotenv(hermes_home=_env_path.parent, project_env=PROJECT_ROOT / ".env")
+load_sidekick_dotenv(sidekick_home=_env_path.parent, project_env=PROJECT_ROOT / ".env")
 
 from cli.colors import Colors, color
-from cli.models import _HERMES_USER_AGENT
+from cli.models import _SIDEKICK_USER_AGENT
 
 # Exit code tracking: module-level counters set by check_warn / check_fail.
 # run_doctor() resets them at the start and uses the counts to choose an exit code.
@@ -450,7 +450,7 @@ def run_doctor(args):
 
     # Doctor runs from the interactive CLI, so CLI-gated tool availability
     # checks (like cronjob management) should see the same context as `sidekick`.
-    os.environ.setdefault("HERMES_INTERACTIVE", "1")
+    os.environ.setdefault("SIDEKICK_INTERACTIVE", "1")
     
     issues = []
     manual_issues = []  # issues that can't be auto-fixed
@@ -1050,7 +1050,7 @@ def run_doctor(args):
                         check_ok(f"Fixed symlink: {_cmd_link_display}/sidekick → {_venv_bin}")
                         fixed_count += 1
                     else:
-                        issues.append(f"Broken symlink at {_cmd_link_display}/hermes — run 'sidekick doctor --fix'")
+                        issues.append(f"Broken symlink at {_cmd_link_display}/sidekick — run 'sidekick doctor --fix'")
             elif _cmd_link.exists():
                 # It's a regular file, not a symlink — possibly a wrapper script
                 check_ok(f"{_cmd_link_display}/sidekick exists (non-symlink)")
@@ -1074,7 +1074,7 @@ def run_doctor(args):
                         )
                         manual_issues.append(f"Add {_cmd_link_display} to your PATH")
                 else:
-                    issues.append(f"Missing {_cmd_link_display}/hermes symlink — run 'sidekick doctor --fix'")
+                    issues.append(f"Missing {_cmd_link_display}/sidekick symlink — run 'sidekick doctor --fix'")
 
     # =========================================================================
     # Check: External tools
@@ -1520,7 +1520,7 @@ def run_doctor(args):
             url = (base.rstrip("/") + "/models") if base else default_url
             headers = {
                 "Authorization": f"Bearer {key}",
-                "User-Agent": _HERMES_USER_AGENT,
+                "User-Agent": _SIDEKICK_USER_AGENT,
             }
             if base_url_host_matches(base, "api.kimi.com"):
                 headers["User-Agent"] = "claude-code/0.1.0"
