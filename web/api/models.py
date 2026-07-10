@@ -1524,24 +1524,27 @@ def _extract_facts_via_llamacpp(messages, session_id: str, title: str = "") -> s
         from web.api import config as cfg
 
         if cfg.is_game_mode_enabled():
-            from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
+            try:
+                from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
 
-            response = call_llm(
-                provider="ollama-cloud",
-                model="deepseek-v4-flash",
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": conversation},
-                ],
-                temperature=0.2,
-                max_tokens=512,
-                timeout=30,
-            )
-            facts = extract_content_or_reasoning(response).strip()
-            if not facts or facts == "[NO FACTS]":
+                response = call_llm(
+                    provider="ollama-cloud",
+                    model="deepseek-v4-flash",
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": conversation},
+                    ],
+                    temperature=0.2,
+                    max_tokens=512,
+                    timeout=30,
+                )
+                facts = extract_content_or_reasoning(response).strip()
+                if not facts or facts == "[NO FACTS]":
+                    return None
+                title_line = f" ({title})" if title else ""
+                return f"§\n[SESSION: {session_id}]{title_line}\n{facts}\n"
+            except Exception:
                 return None
-            title_line = f" ({title})" if title else ""
-            return f"§\n[SESSION: {session_id}]{title_line}\n{facts}\n"
     except Exception:
         pass
 

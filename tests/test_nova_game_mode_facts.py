@@ -56,6 +56,7 @@ def test_async_extract_facts_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_
 def test_extract_facts_via_llamacpp_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_path):
     from web.api import config as cfg
     from web.api import models
+    from types import SimpleNamespace
 
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": True})
@@ -93,3 +94,32 @@ def test_extract_facts_via_llamacpp_uses_remote_deepseek_in_game_mode(monkeypatc
     assert calls, "Game Mode should route fact extraction through Ollama Cloud"
     assert calls[0]["kwargs"]["provider"] == "ollama-cloud"
     assert calls[0]["kwargs"]["model"] == "deepseek-v4-flash"
+
+
+def test_extract_facts_via_llamacpp_does_not_fall_back_to_local_in_game_mode(monkeypatch, tmp_path):
+    from web.api import config as cfg
+    from web.api import models
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    monkeypatch.setattr(
+        "runtime.auxiliary_client.call_llm",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("remote deepseek down")),
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("llama.cpp must not be called in Game Mode")),
+    )
+
+    assert (
+        models._extract_facts_via_llamacpp(
+            [
+                {"role": "user", "content": "Ich mag kurze, klare Titel."},
+                {"role": "assistant", "content": "Verstanden."},
+            ],
+            "sess_1",
+            "Archived Nova chat",
+        )
+        is None
+    )
