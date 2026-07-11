@@ -34,6 +34,10 @@ import urllib.request
 import urllib.error
 import sys
 from pathlib import Path
+HERE = Path(__file__).parent.resolve()
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+from nova_runtime import REMOTE_GAME_MODE_MODEL, extract_chat_text as _extract_chat_text, game_mode_enabled as _game_mode_enabled, load_env as _load_env, ollama_cloud_endpoint as _ollama_cloud_endpoint
 from typing import Any, Optional
 
 # ── Modell-Konfiguration ──────────────────────────────────────
@@ -56,73 +60,6 @@ MODELS = {
 }
 # Chat-basierte Models nutzen /v1/chat/completions
 CHAT_PORTS = {8081, 8082}
-REMOTE_GAME_MODE_MODEL = "deepseek-v4-flash"
-REMOTE_GAME_MODE_ENDPOINT = "https://ollama.com/v1/chat/completions"
-
-
-def _load_env() -> dict[str, str]:
-    env_path = Path(os.environ.get("SIDEKICK_HOME") or "C:/sidekick/home") / ".env"
-    if not env_path.exists():
-        env_path = Path("C:/sidekick/home/.env")
-    if not env_path.exists():
-        return {}
-
-    env: dict[str, str] = {}
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            env[key.strip()] = val.strip()
-    except Exception:
-        return {}
-    return env
-
-
-def _game_mode_enabled() -> bool:
-    try:
-        root = Path(os.environ.get("SIDEKICK_HOME") or "C:/sidekick/home")
-        settings = root / "state" / "webui" / "settings.json"
-        if settings.exists():
-            data = json.loads(settings.read_text(encoding="utf-8"))
-            if bool(data.get("game_mode_enabled")):
-                return True
-        settings_dir = settings.parent
-        for lock_file in (settings_dir / "game_mode.lock", settings_dir.parent / "game_mode.lock"):
-            if lock_file.exists():
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def _ollama_cloud_endpoint() -> str:
-    env = _load_env()
-    base = (
-        os.environ.get("OLLAMA_BASE_URL")
-        or env.get("OLLAMA_BASE_URL")
-        or "https://ollama.com/v1"
-    ).strip().rstrip("/")
-    if base.endswith("/chat/completions"):
-        return base
-    if base.endswith("/v1"):
-        return f"{base}/chat/completions"
-    return f"{base}/v1/chat/completions"
-
-
-def _extract_chat_text(payload: dict) -> Optional[str]:
-    choices = payload.get("choices") or []
-    if not choices:
-        return None
-    message = choices[0].get("message") or {}
-    for key in ("content", "reasoning_content", "reasoning"):
-        text = str(message.get(key) or "").strip()
-        if text:
-            return text
-    return None
-
-
 def health() -> dict:
     """Prüft alle lokalen Modelle und gibt ihren Status zurück."""
     results = {}

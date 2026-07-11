@@ -13,68 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from aces_types import ACESConfig, Goal, Tool
-
-REMOTE_GAME_MODE_MODEL = "deepseek-v4-flash"
-REMOTE_GAME_MODE_ENDPOINT = "https://ollama.com/v1/chat/completions"
-
-
-def _sidekick_home() -> Path:
-    raw = os.environ.get("SIDEKICK_HOME", "").strip()
-    if raw:
-        return Path(raw)
-    return Path(__file__).resolve().parent.parent.parent
-
-
-def _load_env() -> dict[str, str]:
-    env_path = _sidekick_home() / ".env"
-    if not env_path.exists():
-        env_path = Path("C:/sidekick/home/.env")
-    if not env_path.exists():
-        return {}
-
-    env: dict[str, str] = {}
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            env[key.strip()] = val.strip()
-    except Exception:
-        return {}
-    return env
-
-
-def _game_mode_enabled() -> bool:
-    try:
-        settings_file = _sidekick_home() / "state" / "webui" / "settings.json"
-        if settings_file.exists():
-            data = json.loads(settings_file.read_text(encoding="utf-8"))
-            if bool(data.get("game_mode_enabled")):
-                return True
-        settings_dir = settings_file.parent
-        for lock_file in (settings_dir / "game_mode.lock", settings_dir.parent / "game_mode.lock"):
-            if lock_file.exists():
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def _ollama_cloud_endpoint() -> str:
-    env = _load_env()
-    raw_base = (
-        os.environ.get("OLLAMA_BASE_URL")
-        or env.get("OLLAMA_BASE_URL")
-        or REMOTE_GAME_MODE_ENDPOINT
-    ).strip().rstrip("/")
-    if not raw_base:
-        raw_base = REMOTE_GAME_MODE_ENDPOINT
-    if raw_base.endswith("/chat/completions"):
-        return raw_base
-    if raw_base.endswith("/v1"):
-        return f"{raw_base}/chat/completions"
-    return f"{raw_base}/v1/chat/completions"
+from model_registry import model_for_role
+from nova_runtime import REMOTE_GAME_MODE_MODEL, game_mode_enabled as _game_mode_enabled, load_env as _load_env, ollama_cloud_endpoint as _ollama_cloud_endpoint
 
 
 @dataclass
@@ -92,6 +32,18 @@ class ACESLLMClient:
     def __init__(self, config: ACESConfig):
         self.config = config
         self.tokens_used = 0
+
+    def _local_backend(self) -> tuple[str, str, int]:
+        """Use the model starter's registry instead of a copied ACES port map."""
+        try:
+            model = model_for_role("aces")
+            return (
+                str(model["endpoint"]),
+                str(model.get("model") or model.get("label") or "nova-local"),
+                self.config.local_timeout_seconds,
+            )
+        except (KeyError, RuntimeError):
+            return self.config.local_endpoint, self.config.local_model, self.config.local_timeout_seconds
 
     def generate_code(self, goal: Goal, existing_tools: list[Tool]) -> LLMResult:
         """Generate one safe Python module for a goal."""
@@ -159,12 +111,14 @@ class ACESLLMClient:
                 ))
         else:
             if not prefer_cloud and self.config.local_enabled:
-                backends.append(("local", self.config.local_endpoint, self.config.local_model, None, self.config.local_timeout_seconds))
+                endpoint, model, timeout = self._local_backend()
+                backends.append(("local", endpoint, model, None, timeout))
             if self.config.cloud_enabled and self.config.cloud_endpoint:
                 api_key = os.environ.get(self.config.cloud_api_key_env, "")
                 backends.append(("cloud", self.config.cloud_endpoint, self.config.cloud_model, api_key, self.config.cloud_timeout_seconds))
             if prefer_cloud and self.config.local_enabled:
-                backends.append(("local", self.config.local_endpoint, self.config.local_model, None, self.config.local_timeout_seconds))
+                endpoint, model, timeout = self._local_backend()
+                backends.append(("local", endpoint, model, None, timeout))
 
         last_error = ""
         for backend, endpoint, model, api_key, timeout in backends:

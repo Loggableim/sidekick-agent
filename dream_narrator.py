@@ -21,8 +21,11 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 from pathlib import Path
-
 HERE = Path(__file__).parent.resolve()
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+from nova_runtime import extract_chat_text, game_mode_enabled as _game_mode_enabled, load_env as _load_env, ollama_cloud_endpoint
+
 REMOTE_DREAM_MODEL = "deepseek-v4-flash"
 REMOTE_DREAM_BASE_URL = "https://ollama.com/v1"
 
@@ -62,85 +65,12 @@ i shape:""",
 }
 
 
-def _load_env() -> dict[str, str]:
-    """Load a local .env file for runtime scripts that are not process-managed."""
-    env_path = HERE.parent.parent / ".env"
-    if not env_path.exists():
-        env_path = Path("C:/sidekick/home/.env")
-    if not env_path.exists():
-        return {}
-
-    env: dict[str, str] = {}
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            env[key.strip()] = val.strip()
-    except Exception:
-        return {}
-    return env
-
-
-def _sidekick_home() -> Path:
-    raw = os.environ.get("SIDEKICK_HOME", "").strip()
-    if raw:
-        return Path(raw)
-    return HERE.parent.parent
-
-
-def _game_mode_settings_file() -> Path:
-    return _sidekick_home() / "state" / "webui" / "settings.json"
-
-
-def _game_mode_lock_paths() -> tuple[Path, ...]:
-    settings_dir = _game_mode_settings_file().parent
-    legacy_lock = settings_dir.parent / "game_mode.lock"
-    return tuple(dict.fromkeys((settings_dir / "game_mode.lock", legacy_lock)))
-
-
-def _game_mode_enabled() -> bool:
-    try:
-        for lock_file in _game_mode_lock_paths():
-            if lock_file.exists():
-                return True
-        settings_file = _game_mode_settings_file()
-        if settings_file.exists():
-            data = json.loads(settings_file.read_text(encoding="utf-8"))
-            if bool(data.get("game_mode_enabled")):
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def _ollama_cloud_chat_endpoint() -> str:
-    env = _load_env()
-    raw_base = (
-        os.environ.get("OLLAMA_BASE_URL")
-        or env.get("OLLAMA_BASE_URL")
-        or REMOTE_DREAM_BASE_URL
-    ).strip().rstrip("/")
-    if not raw_base:
-        raw_base = REMOTE_DREAM_BASE_URL
-    if raw_base.endswith("/chat/completions"):
-        return raw_base
-    if raw_base.endswith("/v1"):
-        return f"{raw_base}/chat/completions"
-    return f"{raw_base}/v1/chat/completions"
+    return ollama_cloud_endpoint(HERE)
 
 
 def _extract_message_text(payload: dict) -> str:
-    choices = payload.get("choices") or []
-    if not choices:
-        return ""
-    message = choices[0].get("message") or {}
-    for key in ("content", "reasoning_content", "reasoning"):
-        text = str(message.get(key) or "").strip()
-        if text:
-            return text
-    return ""
+    return extract_chat_text(payload) or ""
 
 
 def _call_llm(prompt: str, port: int = 8082, temperature: float = 0.95,
@@ -179,7 +109,7 @@ def _call_llm(prompt: str, port: int = 8082, temperature: float = 0.95,
 def _call_remote_llm(prompt: str, model: str = REMOTE_DREAM_MODEL, temperature: float = 0.95,
                      max_tokens: int = 512) -> str:
     """Rufe Ollama Cloud für Game-Mode-Träume auf."""
-    env = _load_env()
+    env = _load_env(HERE)
     api_key = (os.environ.get("OLLAMA_API_KEY") or env.get("OLLAMA_API_KEY") or "").strip()
     if not api_key:
         return "[TRAUMFEHLER: OLLAMA_API_KEY fehlt]"

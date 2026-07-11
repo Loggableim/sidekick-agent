@@ -48,6 +48,16 @@ class AutobiographyStore:
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS intent_rewards (
+                event_id TEXT PRIMARY KEY,
+                intent_id TEXT,
+                evaluated_at TEXT NOT NULL,
+                score REAL NOT NULL,
+                outcome TEXT NOT NULL,
+                details_json TEXT NOT NULL
+            )
+            """)
             conn.commit()
         finally:
             conn.close()
@@ -106,6 +116,42 @@ class AutobiographyStore:
         finally:
             conn.close()
         return [self._row(row) for row in rows]
+
+    def actions_due_for_evaluation(self, cutoff: datetime, limit: int = 50) -> list[dict[str, Any]]:
+        """Return completed action events that have not received post-hoc feedback."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT events.* FROM events
+                LEFT JOIN intent_rewards ON intent_rewards.event_id = events.id
+                WHERE events.type = 'action'
+                  AND events.intent_id IS NOT NULL
+                  AND events.timestamp <= ?
+                  AND intent_rewards.event_id IS NULL
+                ORDER BY events.timestamp ASC LIMIT ?
+                """,
+                (cutoff.isoformat(), int(limit)),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._row(row) for row in rows]
+
+    def record_reward(self, event_id: str, intent_id: str | None, score: float, outcome: str,
+                      details: dict[str, Any]) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO intent_rewards VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    event_id, intent_id, datetime.now().isoformat(),
+                    max(0.0, min(1.0, float(score))), outcome,
+                    json.dumps(details, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
 
 def main() -> int:

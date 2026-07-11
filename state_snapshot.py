@@ -382,15 +382,26 @@ def format_hormone_state(state: dict[str, Any], compact: bool = False) -> str:
             parts.append(f"{dim[:4]} {sign}{val:.3f}")
         lines.append(f"  Modulation: {' · '.join(parts)}")
 
+    def deviation_of(entry: Any) -> float:
+        if isinstance(entry, dict):
+            try:
+                return float(entry.get("deviation", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+        try:
+            return float(entry) - 0.5
+        except (TypeError, ValueError):
+            return 0.0
+
     if hormones:
         ordered = sorted(
             hormones.items(),
-            key=lambda item: abs(float(item[1].get("deviation", 0.0) or 0.0)),
+            key=lambda item: abs(deviation_of(item[1])),
             reverse=True,
         )[:3]
         top_parts = []
         for name, entry in ordered:
-            deviation = float(entry.get("deviation", 0.0) or 0.0)
+            deviation = deviation_of(entry)
             arrow = "↑" if deviation > 0 else "↓" if deviation < 0 else "·"
             top_parts.append(f"{name}{arrow}{abs(deviation):.2f}")
         if top_parts:
@@ -472,6 +483,8 @@ def _continuity_status(state: dict[str, Any], archive: list[dict[str, Any]]) -> 
         "session_count": state.get("session_count", 0),
         "open_threads": open_threads[:8],
         "recent_threads": threads,
+        "prioritized_thread": state.get("prioritized_thread"),
+        "prioritized_history": list(state.get("prioritized_history", []) or []),
         "is_stale": is_stale,
     }
 

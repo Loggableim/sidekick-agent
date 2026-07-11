@@ -23,15 +23,22 @@ import urllib.error
 from datetime import datetime
 from pathlib import Path
 from notification_gate import NotificationGate
+from nova_runtime import load_env as _load_env
 
 HERE = Path(__file__).parent.resolve()
 PYTHON = sys.executable
+SIDEKICK_SRC = HERE.parents[2] / "sidekick"
+if (SIDEKICK_SRC / "nova" / "__init__.py").exists() and str(SIDEKICK_SRC) not in sys.path:
+    sys.path.insert(0, str(SIDEKICK_SRC))
 
 
 def run_entity_kernel_tick(dry_run: bool = False) -> dict | None:
     """Run Entity Kernel v1 before legacy autonomous logic."""
     try:
-        from entity_kernel import EntityKernel
+        try:
+            from nova.entity_kernel import EntityKernel
+        except ImportError:
+            from entity_kernel import EntityKernel
         kernel = EntityKernel()
         return kernel.tick(dry_run=dry_run)
     except Exception as exc:
@@ -39,25 +46,6 @@ def run_entity_kernel_tick(dry_run: bool = False) -> dict | None:
 
 
 # ── Telegram ─────────────────────────────────────────────────────
-
-def _load_env() -> dict:
-    """Lädt .env und gibt Dict zurück."""
-    env_path = HERE.parent.parent / ".env"
-    if not env_path.exists():
-        env_path = Path("/c/sidekick/home/.env")
-    if not env_path.exists():
-        return {}
-    
-    env = {}
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, val = line.partition("=")
-            env[key.strip()] = val.strip()
-    return env
-
 
 def _get_chat_id() -> str | None:
     """Holt die Chat-ID aus config.yaml oder fragt Telegram API."""

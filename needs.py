@@ -3,15 +3,30 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 
 NEED_NAMES = ("continuity", "connection", "curiosity", "competence", "rest", "expression", "autonomy")
+FEEDBACK_FILE = Path(__file__).parent / "nova_data" / "entity_kernel" / "need_feedback.json"
 
 
 def _clip(value: float) -> float:
     return max(0.0, min(1.0, round(float(value), 4)))
+
+
+def _feedback_biases() -> dict[str, float]:
+    try:
+        raw = json.loads(FEEDBACK_FILE.read_text(encoding="utf-8"))
+        source = raw.get("biases", {}) if isinstance(raw, dict) else {}
+        return {
+            name: max(-0.2, min(0.2, float((source.get(name) or {}).get("value", 0.0))))
+            for name in NEED_NAMES
+        }
+    except (OSError, ValueError, TypeError):
+        return {}
 
 
 def _emotion(state: dict[str, Any]) -> dict[str, float]:
@@ -113,4 +128,10 @@ def compute_needs(state: dict[str, Any]) -> dict[str, dict[str, Any]]:
             {"title": "Create an autonomous intention", "action": "agenda_update", "tier": "silent", "priority": autonomy_level}
         ]),
     ]
+    biases = _feedback_biases()
+    for need in needs:
+        bias = biases.get(need.name, 0.0)
+        if bias:
+            need.level = _clip(need.level + bias)
+            need.evidence.append(f"reward_feedback={bias:+.3f}")
     return {need.name: need.to_dict() for need in needs}
