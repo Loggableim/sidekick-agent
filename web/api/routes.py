@@ -4122,6 +4122,11 @@ def handle_get(handler, parsed) -> bool:
 
         return j(handler, get_nova_status())
 
+    if parsed.path == "/api/nova/presence":
+        from nova.presence import PresenceCoordinator
+
+        return j(handler, PresenceCoordinator().status())
+
     if parsed.path == "/api/nova/yolo":
         from web.api.nova_lifecycle import load_nova_yolo_state
 
@@ -6829,6 +6834,33 @@ def handle_post(handler, parsed) -> bool:
         from web.api.nova_lifecycle import set_nova_yolo_enabled
 
         return j(handler, set_nova_yolo_enabled(bool(body.get("enabled", False))))
+
+    if parsed.path == "/api/nova/voice-event":
+        from nova.presence import PresenceCoordinator
+
+        coordinator = PresenceCoordinator()
+        phase = str(body.get("phase") or "").strip().lower()
+        if phase == "transcript":
+            result = coordinator.accept_transcript(
+                str(body.get("text") or ""), source=str(body.get("source") or "push_to_talk"),
+                confidence=float(body.get("confidence", 1.0)), cycle_id=body.get("cycle_id"),
+            )
+        elif phase == "speaking":
+            result = coordinator.begin_speaking(
+                str(body.get("text") or ""), cycle_id=str(body.get("cycle_id") or ""),
+                response_id=body.get("response_id"), source=str(body.get("source") or "hub"),
+            )
+        elif phase == "complete":
+            result = coordinator.complete(
+                cycle_id=str(body.get("cycle_id") or ""),
+                continue_listening=bool(body.get("continue_listening", False)),
+                source=str(body.get("source") or "hub"),
+            )
+        elif phase == "interrupt":
+            result = coordinator.interrupt(cycle_id=str(body.get("cycle_id") or ""), source=str(body.get("source") or "user"))
+        else:
+            result = coordinator.transition(phase, source=str(body.get("source") or "runtime"), cycle_id=body.get("cycle_id"))
+        return j(handler, result)
 
     if parsed.path == "/api/subagents":
         subagent_id = str(body.get("subagent_id", "") or "").strip()

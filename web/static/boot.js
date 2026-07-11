@@ -814,6 +814,7 @@ window._micPendingSend=window._micPendingSend||false;
   window._applyVoiceModePref = _applyVoiceModePref;
 
   let _voiceModeState='idle'; // idle | listening | thinking | speaking
+  let _voiceEntityCycleId=null;
   let _recognition=null;
   let _silenceTimer=null;
   // Capture the session id at thinking-time so the TTS callback won't read
@@ -821,6 +822,15 @@ window._micPendingSend=window._micPendingSend||false;
   // between send and stream completion. (Opus pre-release advisor.)
   let _voiceModeThinkingSid=null;
   const SILENCE_MS=1800; // auto-send after 1.8s silence
+
+  async function _novaVoiceEvent(payload){
+    try{
+      const response=await fetch('/api/nova/voice-event',{
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload||{})
+      });
+      return await response.json();
+    }catch(_){ return {ok:false,reason:'presence_api_unavailable'}; }
+  }
 
   function _setState(state){
     _voiceModeState=state;
@@ -835,6 +845,7 @@ window._micPendingSend=window._micPendingSend||false;
   function _startListening(){
     if(!_voiceModeActive) return;
     _setState('listening');
+    _novaVoiceEvent({phase:'listening',source:'push_to_talk',cycle_id:_voiceEntityCycleId});
 
     _recognition=new SpeechRecognition();
     _recognition.continuous=false;
@@ -903,7 +914,7 @@ window._micPendingSend=window._micPendingSend||false;
     }
   }
 
-  function _voiceModeSend(){
+  async function _voiceModeSend(){
     if(!_voiceModeActive) return;
     const text=(ta.value||'').trim();
     if(!text){
@@ -917,11 +928,15 @@ window._micPendingSend=window._micPendingSend||false;
     _voiceModeThinkingSid=(typeof S!=='undefined'&&S.session)?S.session.session_id:null;
     try{ if(_recognition) _recognition.abort(); }catch(_){}
     _recognition=null;
+    const perceived=await _novaVoiceEvent({
+      phase:'transcript', text, confidence:1.0, source:'push_to_talk', cycle_id:_voiceEntityCycleId
+    });
+    if(perceived&&perceived.ok&&perceived.cycle_id) _voiceEntityCycleId=perceived.cycle_id;
     // send() is global from boot.js
     if(typeof send==='function') send();
   }
 
-  function _speakResponse(){
+  async function _speakResponse(){
     if(!_voiceModeActive) return;
     // Bail out if the user navigated to a different session between send and
     // stream completion. The patched autoReadLastAssistant fires globally;
@@ -960,6 +975,15 @@ window._micPendingSend=window._micPendingSend||false;
     }
     if(!clean){ _startListening(); return; }
 
+    const responseId=last.dataset.messageId||last.dataset.id||null;
+    const gate=await _novaVoiceEvent({
+      phase:'speaking', text:clean, source:'web_tts', cycle_id:_voiceEntityCycleId, response_id:responseId
+    });
+    if(gate&&gate.ok===false){
+      if(gate.reason==='already_spoken') _startListening();
+      return;
+    }
+
     const utter=new SpeechSynthesisUtterance(clean);
 
     // Apply saved voice preferences
@@ -976,9 +1000,13 @@ window._micPendingSend=window._micPendingSend||false;
 
     utter.onend=()=>{
       // After speaking, go back to listening
+      _novaVoiceEvent({phase:'complete',source:'web_tts',cycle_id:_voiceEntityCycleId,continue_listening:true});
+      _voiceEntityCycleId=null;
       if(_voiceModeActive) setTimeout(()=>_startListening(),500);
     };
     utter.onerror=()=>{
+      _novaVoiceEvent({phase:'interrupt',source:'web_tts',cycle_id:_voiceEntityCycleId});
+      _voiceEntityCycleId=null;
       if(_voiceModeActive) setTimeout(()=>_startListening(),1000);
     };
 
@@ -1036,9 +1064,12 @@ window._micPendingSend=window._micPendingSend||false;
   }
 
   function _deactivate(){
+    if(_voiceEntityCycleId) _novaVoiceEvent({phase:'interrupt',source:'user',cycle_id:_voiceEntityCycleId});
+    else _novaVoiceEvent({phase:'available',source:'user'});
     _voiceModeActive=false;
     _voiceModeState='idle';
     _voiceModeThinkingSid=null;
+    _voiceEntityCycleId=null;
     modeBtn.classList.remove('active');
     _setButtonTooltip(modeBtn, t('voice_mode_toggle'));
     bar.style.display='none';

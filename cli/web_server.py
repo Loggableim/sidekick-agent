@@ -3531,6 +3531,16 @@ class NovaYoloToggle(BaseModel):
     enabled: bool
 
 
+class NovaVoiceEvent(BaseModel):
+    phase: str
+    text: str = ""
+    confidence: float = 1.0
+    source: str = "push_to_talk"
+    cycle_id: str | None = None
+    response_id: str | None = None
+    continue_listening: bool = False
+
+
 @app.get("/api/nova/yolo")
 async def nova_yolo_status_endpoint():
     from web.api.nova_lifecycle import load_nova_yolo_state
@@ -3543,6 +3553,38 @@ async def nova_yolo_toggle_endpoint(body: NovaYoloToggle):
     from web.api.nova_lifecycle import set_nova_yolo_enabled
 
     return set_nova_yolo_enabled(body.enabled)
+
+
+@app.get("/api/nova/presence")
+async def nova_presence_endpoint():
+    from nova.presence import PresenceCoordinator
+
+    return PresenceCoordinator().status()
+
+
+@app.post("/api/nova/voice-event")
+async def nova_voice_event_endpoint(body: NovaVoiceEvent):
+    from nova.presence import PresenceCoordinator
+
+    coordinator = PresenceCoordinator()
+    phase = body.phase.strip().lower()
+    if phase == "transcript":
+        return coordinator.accept_transcript(
+            body.text, source=body.source, confidence=body.confidence, cycle_id=body.cycle_id,
+        )
+    if phase == "speaking":
+        return coordinator.begin_speaking(
+            body.text, cycle_id=str(body.cycle_id or ""), response_id=body.response_id, source=body.source,
+        )
+    if phase == "complete":
+        return coordinator.complete(
+            cycle_id=str(body.cycle_id or ""), continue_listening=body.continue_listening, source=body.source,
+        )
+    if phase == "interrupt":
+        return coordinator.interrupt(cycle_id=str(body.cycle_id or ""), source=body.source)
+    if phase in {"sleeping", "available", "listening", "thinking", "do_not_disturb"}:
+        return coordinator.transition(phase, source=body.source, cycle_id=body.cycle_id)
+    return {"ok": False, "reason": "unsupported_voice_phase", "phase": phase}
 
 
 @app.get("/api/nova/personality")

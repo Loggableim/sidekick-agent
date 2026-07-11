@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from nova.paths import get_nova_data_dir
+from nova.entity_types import Intent
 
 DEFAULT_PATH = get_nova_data_dir() / "agenda.json"
 
@@ -42,15 +43,26 @@ class AgendaStore:
     def _save(self) -> None:
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def _find_duplicate(self, need: str, action: str) -> dict[str, Any] | None:
+    def _find_duplicate(self, need: str, action: str, target: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        target = target or {}
         for item in self.data["open"]:
-            if item.get("need") == need and item.get("action") == action and item.get("status") in {"open", "active", "blocked"}:
+            if (
+                item.get("need") == need
+                and item.get("action") == action
+                and (item.get("target") or {}) == target
+                and item.get("status") in {"open", "active", "blocked"}
+            ):
                 return item
         return None
 
     def upsert_intent(self, need: str, title: str, why: str, action: str, priority: float,
-                      tier: str = "silent", due_at: str | None = None, source: str = "entity_kernel") -> dict[str, Any]:
-        existing = self._find_duplicate(need, action)
+                      tier: str = "silent", due_at: str | None = None, source: str = "entity_kernel",
+                      target: dict[str, Any] | None = None, payload: dict[str, Any] | None = None,
+                      expected_outcome: dict[str, Any] | None = None,
+                      evidence_refs: list[str] | None = None,
+                      correlation_id: str | None = None, intent_id: str | None = None) -> dict[str, Any]:
+        target = target or {}
+        existing = self._find_duplicate(need, action, target)
         now = _now()
         priority = round(max(0.0, min(1.0, float(priority))), 4)
         if existing:
@@ -59,10 +71,15 @@ class AgendaStore:
             existing["why"] = why
             existing["priority"] = max(float(existing.get("priority", 0.0)), priority)
             existing["tier"] = tier
+            existing["payload"] = payload or existing.get("payload") or {}
+            existing["expected_outcome"] = expected_outcome or existing.get("expected_outcome") or {}
+            existing["evidence_refs"] = list(dict.fromkeys([*(existing.get("evidence_refs") or []), *(evidence_refs or [])]))
+            if existing.get("status") == "blocked" and (existing.get("last_result") or {}).get("status") == "failed":
+                existing["status"] = "open"
             self._save()
             return dict(existing)
         item = {
-            "id": _intent_id(need, action),
+            "id": intent_id or _intent_id(need, action),
             "created_at": now,
             "updated_at": now,
             "status": "open",
@@ -77,10 +94,34 @@ class AgendaStore:
             "attempts": 0,
             "last_result": None,
             "source": source,
+            "target": target,
+            "payload": payload or {},
+            "expected_outcome": expected_outcome or {},
+            "evidence_refs": evidence_refs or [],
+            "correlation_id": correlation_id,
         }
         self.data["open"].append(item)
         self._save()
         return dict(item)
+
+    def upsert(self, intent: Intent | dict[str, Any]) -> dict[str, Any]:
+        data = intent.to_dict() if isinstance(intent, Intent) else dict(intent)
+        return self.upsert_intent(
+            need=str(data.get("need") or "autonomy"),
+            title=str(data.get("title") or data.get("action") or "Nova intent"),
+            why=str(data.get("why") or "Nova proposed this intent."),
+            action=str(data.get("action") or ""),
+            priority=float(data.get("priority", 0.5)),
+            tier=str(data.get("policy_tier") or data.get("tier") or "silent"),
+            due_at=data.get("due_at"),
+            source=str(data.get("source") or "entity_kernel"),
+            target=data.get("target") or {},
+            payload=data.get("payload") or {},
+            expected_outcome=data.get("expected_outcome") or {},
+            evidence_refs=data.get("evidence_refs") or [],
+            correlation_id=data.get("correlation_id"),
+            intent_id=data.get("intent_id") or data.get("id"),
+        )
 
     def list_open(self) -> list[dict[str, Any]]:
         return [dict(item) for item in self.data.get("open", []) if item.get("status") in {"open", "active"}]

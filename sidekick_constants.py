@@ -19,10 +19,10 @@ from runtime._compat.shim_constants import (  # noqa: F401
     apply_ipv4_preference,
     display_sidekick_home,
     get_config_path,
-    get_default_sidekick_root,
+    get_default_sidekick_root as _get_default_sidekick_root,
     get_env_path,
     get_optional_skills_dir,
-    get_sidekick_dir,
+    get_sidekick_dir as _get_sidekick_dir,
     get_sidekick_home,
     get_skills_dir,
     get_subprocess_home,
@@ -36,12 +36,12 @@ from runtime._compat.shim_constants import (  # noqa: F401
 
 def get_sidekick_dir(new_subpath: str, old_name: str) -> Path:
     """Legacy alias — delegates to get_sidekick_dir."""
-    return get_sidekick_dir(new_subpath, old_name)
+    return _get_sidekick_dir(new_subpath, old_name)
 
 
 def get_default_sidekick_root() -> Path:
     """Legacy alias — delegates to get_default_sidekick_root."""
-    return get_default_sidekick_root()
+    return _get_default_sidekick_root()
 
 
 def get_subprocess_home() -> str | None:

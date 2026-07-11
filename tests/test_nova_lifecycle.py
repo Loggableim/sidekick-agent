@@ -112,6 +112,60 @@ def test_post_turn_creates_versioned_event_and_queues_reflection(monkeypatch, tm
     assert personality["last_event_id"] == result["event_id"]
 
 
+def test_post_turn_filters_goal_loop_from_vector_memory_and_personality_queue(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    import web.api.nova_lifecycle as lifecycle
+
+    calls = []
+    monkeypatch.setattr(lifecycle, "_run_local_script", lambda *args, **kwargs: calls.append(args) or {"ok": True, "stdout": ""})
+    result = lifecycle.post_turn(
+        session_id="goal-loop",
+        user_text="[Continuing toward your standing goal] Goal: Lebe dein Leben. Continue working toward this goal.",
+        assistant_text="Acknowledged",
+        workspace_slug="nova",
+        blocking=True,
+    )
+    events = lifecycle.load_events(limit=1, include_private=True)
+    queue = json.loads(lifecycle.get_nova_state_paths().reflection_queue.read_text(encoding="utf-8")) if lifecycle.get_nova_state_paths().reflection_queue.exists() else []
+
+    assert result["ok"] is True
+    assert "memory_filtered" in events[0]["steps"]
+    assert "personality_filtered" in events[0]["steps"]
+    assert not any(args and args[0] == "vector_memory.py" for args in calls)
+    assert queue == []
+
+
+def test_entity_prompt_context_doses_internal_state_without_raw_metrics(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    import web.api.nova_lifecycle as lifecycle
+    from nova.entity_state import EntityStateStore
+
+    space = lifecycle.get_nova_state_paths().space
+    store = EntityStateStore(space / "nova_data" / "entity" / "entity_state.json", space)
+    state = store.load()
+    state["dynamic"]["mood"] = 0.8
+    state["dynamic"]["energy"] = 0.2
+    state["dynamic"]["focus"] = 0.9
+    state["traits"] = {
+        "curiosity": {"current": 0.8, "visibility": "public"},
+        "risk_tolerance": {"current": 0.3, "visibility": "private"},
+    }
+    state["preferences"]["learned"] = {"concise": "Ich bevorzuge kurze Statusmeldungen."}
+    state["opinions"] = {"trust": {"position": "Ich denke, Vertrauen braucht nachvollziehbare Gründe.", "confidence": 0.8}}
+    store.save(state)
+
+    normal = lifecycle.entity_prompt_context("Hilf mir mit Code")
+    asked = lifecycle.entity_prompt_context("Wie geht es dir und wie fühlst du dich?")
+    public = lifecycle.personality_snapshot("public")
+
+    assert "Current felt state:" not in normal
+    assert "Current felt state: warm, quiet, clear" in asked
+    assert "Learned preferences: Ich bevorzuge kurze Statusmeldungen." in normal
+    assert "Vertrauen braucht nachvollziehbare Gründe" in lifecycle.entity_prompt_context("Was bedeutet Vertrauen?")
+    assert "0.8" not in asked and "0.2" not in asked and "0.9" not in asked
+    assert "risk_tolerance" not in public["traits"]
+
+
 def test_pre_turn_repairs_incomplete_events(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -220,7 +274,7 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     jobs_file = tmp_path / "home" / "cron" / "jobs.json"
 
     assert result["ok"] is True
-    assert len(result["active"]) == 3
+    assert len(result["active"]) == 5
     assert (scripts / "nova_substrate_heartbeat.py").exists()
     assert (scripts / "nova_dream_reflection_tick.py").exists()
     assert jobs_file.exists()
@@ -231,6 +285,8 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
         "Nova substrate heartbeat",
         "Nova background tick",
         "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
     }
     jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
     assert all(job.get("game_mode_pause") is False for job in jobs)
@@ -282,14 +338,16 @@ def test_background_cron_jobs_prune_legacy_nova_jobs(monkeypatch, tmp_path):
     names = {job["name"] for job in jobs}
 
     assert result["ok"] is True
-    assert len(result["active"]) == 3
-    assert len(jobs) == 3
+    assert len(result["active"]) == 5
+    assert len(jobs) == 5
     assert "Nova Substrate Heartbeat" not in names
     assert "Nova Entity Kernel Tick" not in names
     assert names == {
         "Nova substrate heartbeat",
         "Nova background tick",
         "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
     }
 
 
@@ -336,14 +394,16 @@ def test_background_cron_jobs_prune_legacy_nova_jobs_even_if_metadata_drifted(mo
     names = {job["name"] for job in jobs}
 
     assert result["ok"] is True
-    assert len(result["active"]) == 3
-    assert len(jobs) == 3
+    assert len(result["active"]) == 5
+    assert len(jobs) == 5
     assert "Nova Substrate Heartbeat" not in names
     assert "Nova Entity Kernel Tick" not in names
     assert names == {
         "Nova substrate heartbeat",
         "Nova background tick",
         "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
     }
 
 
@@ -392,14 +452,16 @@ def test_background_cron_jobs_prune_legacy_nova_jobs_with_display_suffix(monkeyp
     names = {job["name"] for job in jobs}
 
     assert result["ok"] is True
-    assert len(result["active"]) == 3
-    assert len(jobs) == 3
+    assert len(result["active"]) == 5
+    assert len(jobs) == 5
     assert "Nova Substrate Heartbeat (5m)" not in names
     assert "Nova Entity Kernel Tick (15m)" not in names
     assert names == {
         "Nova substrate heartbeat",
         "Nova background tick",
         "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
     }
 
 
@@ -467,10 +529,10 @@ def test_background_cron_jobs_clear_stale_error_state_on_current_nova_jobs(monke
     jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
 
     assert result["ok"] is True
-    assert [job["state"] for job in jobs] == ["scheduled", "scheduled", "scheduled"]
-    assert [job["last_status"] for job in jobs] == [None, None, None]
-    assert [job["last_error"] for job in jobs] == [None, None, None]
-    assert [job["last_delivery_error"] for job in jobs] == [None, None, None]
+    assert [job["state"] for job in jobs] == ["scheduled"] * 5
+    assert [job["last_status"] for job in jobs] == [None] * 5
+    assert [job["last_error"] for job in jobs] == [None] * 5
+    assert [job["last_delivery_error"] for job in jobs] == [None] * 5
     assert all(job["enabled"] is True for job in jobs)
 
 

@@ -35,6 +35,10 @@ class EntityKernelTests(unittest.TestCase):
 }
 """, encoding="utf-8")
         (self.root / "self_model.json").write_text('{"version": 1, "identity": {"name": "Nova"}}', encoding="utf-8")
+        (self.root / "innere_stimme.py").write_text(
+            "import json, sys\nprint(json.dumps({'stored': True, 'title': sys.argv[2]}))\n",
+            encoding="utf-8",
+        )
 
     def tearDown(self):
         self.tmp.cleanup()

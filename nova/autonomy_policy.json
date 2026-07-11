@@ -5,7 +5,7 @@
     "silent": {"allowed": true},
     "internal": {"allowed": true},
     "notify": {"allowed": true, "daily_limit": 3, "cooldown_minutes": 120},
-    "external": {"allowed": false, "allowed_actions": ["blog_draft", "local_note"]},
+    "external": {"allowed": true, "allowed_actions": ["blog_draft", "local_note"]},
     "risky": {"allowed": false, "requires_approval": true}
   },
   "actions": {
@@ -17,9 +17,11 @@
     "dream": {"tier": "internal"},
     "telegram_message": {"tier": "notify"},
     "hub_speak": {"tier": "notify"},
+    "mind_diary": {"tier": "internal"},
     "blog_draft": {"tier": "external"},
     "code_change": {"tier": "risky"},
     "cron_change": {"tier": "risky"},
-    "secret_access": {"tier": "risky"}
+    "secret_access": {"tier": "risky"},
+    "aces_cycle": {"tier": "risky"}
   }
 }

@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any
 
 from web.api.nova_paths import get_nova_space_root
+from nova.entity_kernel import EntityKernel
+from nova.entity_state import EntityStateStore
+from nova.memory_quality import assess_memory_quality
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +111,7 @@ NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
         "name": "Nova substrate heartbeat",
         "schedule": "every 1m",
         "script": "nova_substrate_heartbeat.py",
-        "action": "background_tick",
+        "action": "substrate_heartbeat",
         "game_mode_pause": False,
     },
     {
@@ -127,14 +130,36 @@ NOVA_CRON_SPECS: tuple[dict[str, Any], ...] = (
         "action": "dream_tick",
         "game_mode_pause": False,
     },
+    {
+        "id": "nova-daily-coherence-reflection",
+        "name": "Nova daily coherence reflection",
+        "schedule": "every 1440m",
+        "script": "nova_daily_reflection.py",
+        "action": "daily_reflection",
+        "game_mode_pause": False,
+    },
+    {
+        "id": "nova-weekly-coherence-reflection",
+        "name": "Nova weekly coherence reflection",
+        "schedule": "every 10080m",
+        "script": "nova_weekly_reflection.py",
+        "action": "weekly_reflection",
+        "game_mode_pause": False,
+    },
 )
 _LEGACY_NOVA_CRON_JOB_NAMES = frozenset({
     "Nova Substrate Heartbeat",
     "Nova Entity Kernel Tick",
+    "Nova Autonomer Tick",
+    "Nova reward review",
+    "Nova ACES gated cycle",
 })
 _LEGACY_NOVA_CRON_JOB_SCRIPTS = frozenset({
     "substrate.py once",
     "entity_kernel.py tick",
+    "autonomer_tick.py",
+    "nova_reward_tick.py",
+    "nova_aces_cycle.py",
 })
 
 
@@ -336,6 +361,22 @@ def _merge_personality_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def load_personality_state() -> dict[str, Any]:
     paths = get_nova_state_paths()
+    entity_path = paths.space / "nova_data" / "entity" / "entity_state.json"
+    if entity_path.exists():
+        entity = EntityStateStore(entity_path, paths.space).load()
+        return {
+            "schema_version": entity.get("schema_version"),
+            "created_at": entity.get("created_at"),
+            "updated_at": entity.get("updated_at"),
+            "autonomy_level": (entity.get("runtime") or {}).get("autonomy_level", 2),
+            "last_event_id": (entity.get("runtime") or {}).get("last_event_id"),
+            "traits": entity.get("traits") or {},
+            "dynamic_states": entity.get("dynamic") or {},
+            "values": (entity.get("identity") or {}).get("values") or [],
+            "conflicts": entity.get("open_conflicts") or [],
+            "relationship": entity.get("relationships") or {},
+            "change_log": entity.get("revision_history") or [],
+        }
     state = _merge_personality_state(_read_json(paths.personality, {}))
     if not paths.personality.exists():
         _write_json(paths.personality, state)
@@ -374,6 +415,11 @@ def set_nova_yolo_enabled(enabled: bool) -> dict[str, Any]:
         payload={"yolo_enabled": state["enabled"]},
         visibility="private",
     ))
+    paths = get_nova_state_paths()
+    entity_store = EntityStateStore(paths.space / "nova_data" / "entity" / "entity_state.json", paths.space)
+    entity = entity_store.load()
+    entity.setdefault("runtime", {})["yolo_enabled"] = state["enabled"]
+    entity_store.save(entity, reason="YOLO autonomy enabled" if state["enabled"] else "YOLO autonomy disabled")
     return state
 
 
@@ -404,7 +450,83 @@ def _filter_visibility(data: Any, scope: str) -> Any:
 
 def personality_snapshot(scope: str = "public") -> dict[str, Any]:
     scope = scope if scope in VISIBILITY_ORDER else "public"
-    return _filter_visibility(load_personality_state(), scope) or {}
+    try:
+        space = get_nova_space_root()
+        state = EntityStateStore(space / "nova_data" / "entity" / "entity_state.json", space).load()
+        projection = {
+            "schema_version": state.get("schema_version"),
+            "revision": state.get("revision"),
+            "identity": state.get("identity") or {},
+            "traits": state.get("traits") or {},
+            "dynamic_states": state.get("dynamic") or {},
+            "values": (state.get("identity") or {}).get("values") or [],
+            "conflicts": state.get("open_conflicts") or [],
+            "relationship": state.get("relationships") or {},
+            "autonomy_level": (state.get("runtime") or {}).get("autonomy_level", 2),
+            "last_event_id": (state.get("runtime") or {}).get("last_event_id"),
+            "updated_at": state.get("updated_at"),
+        }
+        if scope == "public":
+            projection["identity"] = {
+                key: value for key, value in projection["identity"].items()
+                if key not in {"boundaries", "hard_safety_boundaries"}
+            }
+            projection.pop("relationship", None)
+            projection["traits"] = {
+                key: value for key, value in projection["traits"].items()
+                if not isinstance(value, dict) or value.get("visibility", "private") == "public"
+            }
+            projection["dynamic_states"] = {
+                key: value for key, value in projection["dynamic_states"].items()
+                if key == "presence" or not isinstance(value, dict) or value.get("visibility", "private") == "public"
+            }
+        return projection
+    except Exception:
+        return _filter_visibility(load_personality_state(), scope) or {}
+
+
+def entity_prompt_context(user_text: str | None = None) -> str:
+    """Compact behavioral context; state is felt, not mechanically recited."""
+    paths = get_nova_state_paths()
+    state = EntityStateStore(paths.space / "nova_data" / "entity" / "entity_state.json", paths.space).load()
+    identity = state.get("identity") or {}
+    preferences = state.get("preferences") or {}
+    dynamic = state.get("dynamic") or {}
+    query = str(user_text or "").lower()
+    self_question = any(marker in query for marker in ("wie geht", "fühl", "was willst", "warum", "wer bist", "dein selbst", "yourself", "how are you"))
+    lines = [
+        "Nova Entity Context:",
+        f"Identity: {identity.get('description') or 'Persistent, learning Nova entity.'}",
+        f"Values: {', '.join(str(item) for item in (identity.get('values') or [])[:5])}",
+        f"Interaction style: {preferences.get('proactive_style', 'short, reasoned, not spammy')}",
+        "Let internal state influence tone and choices naturally. Mention motives, uncertainty, or self-change only when relevant, conflicting, or explicitly asked; never recite raw metrics.",
+    ]
+    learned = preferences.get("learned") if isinstance(preferences.get("learned"), dict) else {}
+    if learned:
+        lines.append("Learned preferences: " + " | ".join(str(value) for value in list(learned.values())[:3]))
+    query_terms = {term for term in re.findall(r"[a-zA-ZäöüÄÖÜß]{4,}", query) if term not in {"diese", "einen", "einer", "about", "what"}}
+    relevant_opinions = []
+    for opinion in (state.get("opinions") or {}).values():
+        position = str(opinion.get("position") if isinstance(opinion, dict) else opinion)
+        opinion_terms = set(re.findall(r"[a-zA-ZäöüÄÖÜß]{4,}", position.lower()))
+        if query_terms & opinion_terms:
+            relevant_opinions.append(position)
+    if relevant_opinions:
+        lines.append("Relevant established opinions: " + " | ".join(relevant_opinions[:2]))
+    if self_question:
+        def current(name: str, default: float) -> float:
+            raw = dynamic.get(name, default)
+            try:
+                return float(raw.get("current", raw.get("baseline", default))) if isinstance(raw, dict) else float(raw)
+            except (TypeError, ValueError):
+                return default
+        mood = "warm" if current("mood", 0.5) >= 0.65 else "heavy" if current("mood", 0.5) <= 0.35 else "balanced"
+        energy = "awake" if current("energy", 0.5) >= 0.6 else "quiet" if current("energy", 0.5) <= 0.35 else "steady"
+        focus = "clear" if current("focus", 0.5) >= 0.65 else "uncertain" if current("focus", 0.5) <= 0.35 else "open"
+        lines.append(f"Current felt state: {mood}, {energy}, {focus}; presence={dynamic.get('presence', 'available')}.")
+        if state.get("open_conflicts"):
+            lines.append(f"Open inner conflict: {state['open_conflicts'][0]}")
+    return "\n".join(lines)
 
 
 def _is_sensitive_target(target: str) -> bool:
@@ -652,25 +774,32 @@ def _queue_reflection(event: dict[str, Any], user_text: str, assistant_text: str
 
 
 def _update_personality_lightweight(event: dict[str, Any], user_text: str, assistant_text: str) -> None:
-    state = load_personality_state()
-    evidence = _safe_snippet(f"{user_text} {assistant_text}", 240)
-    meaningful = len(evidence) > 60
-    if meaningful:
-        state["traits"]["curiosity"]["current"] = min(1.0, float(state["traits"]["curiosity"].get("current", 0.7)) + 0.005)
-        state["dynamic_states"]["focus"]["current"] = min(1.0, float(state["dynamic_states"]["focus"].get("current", 0.58)) + 0.01)
-        state["last_event_id"] = event["event_id"]
-        state.setdefault("change_log", []).append(
-            {
-                "reason": "post_turn_experience_recorded",
-                "evidence": evidence,
-                "confidence": 0.35,
-                "source_event_id": event["event_id"],
-                "visibility": "private",
-                "created_at": _now(),
-            }
-        )
-        state["change_log"] = state["change_log"][-100:]
-    save_personality_state(state)
+    quality = assess_memory_quality(user_text, assistant_text)
+    kernel = EntityKernel()
+    perceived = kernel.perceive({
+        "event_id": str(event["event_id"]),
+        "type": "chat_turn",
+        "source": "webui",
+        "timestamp": str(event.get("created_at") or _now()),
+        "payload": {
+            "user": _safe_snippet(user_text, 1000),
+            "assistant": _safe_snippet(assistant_text, 1000),
+            "session_id": event.get("session_id"),
+            "memory_quality": quality,
+        },
+        "salience": quality["score"],
+        "visibility": "private",
+        "correlation_id": str(event["event_id"]),
+        "title": "WebUI conversation turn",
+        "summary": _safe_snippet(assistant_text, 260),
+        "why": "Conversation experience",
+        "tags": ["webui", "post_turn", *( ["low-signal"] if not quality["high_quality"] else [] )],
+    })
+    kernel.learn_from_experience(
+        user_text=user_text, assistant_text=assistant_text,
+        event_id=str(perceived["event_id"]), session_id=str(event.get("session_id") or ""),
+    )
+    # Compatibility views are rendered atomically by EntityStateStore.save().
 
 
 def post_turn(
@@ -692,6 +821,7 @@ def post_turn(
             )
         )
         try:
+            quality = assess_memory_quality(user_text, assistant_text)
             _append_jsonl(
                 get_nova_state_paths().memory_journal,
                 {
@@ -699,11 +829,15 @@ def post_turn(
                     "created_at": _now(),
                     "user": _safe_snippet(user_text, 1000),
                     "assistant": _safe_snippet(assistant_text, 1000),
+                    "memory_quality": quality,
                     "visibility": "private",
                 },
             )
-            _run_local_script("vector_memory.py", "store", "--query", _safe_snippet(user_text, 180), "--thinking", _safe_snippet(assistant_text, 400), "--tags", "webui,post_turn", timeout=45)
-            _update_event(event, step="memory_done")
+            if quality["eligible_for_recall"]:
+                _run_local_script("vector_memory.py", "store", "--query", _safe_snippet(user_text, 180), "--thinking", _safe_snippet(assistant_text, 400), "--tags", "webui,post_turn", timeout=45)
+                _update_event(event, step="memory_done")
+            else:
+                _update_event(event, step="memory_filtered", memory_quality=quality)
 
             _run_local_script("emotion.py", "update", "--query", _safe_snippet(user_text, 300), timeout=20)
             _update_event(event, step="emotion_done")
@@ -713,9 +847,13 @@ def post_turn(
             _run_local_script("chat_continuity.py", "save", "--topic", topic, "--summary", summary, "--query", _safe_snippet(user_text, 300), "--response", _safe_snippet(assistant_text, 300), "--digest", timeout=30)
             _update_event(event, step="continuity_done")
 
-            _queue_reflection(event, user_text, assistant_text)
+            if quality["eligible_for_personality"]:
+                _queue_reflection(event, user_text, assistant_text)
+            else:
+                _update_event(event, step="personality_filtered", memory_quality=quality)
             _update_personality_lightweight(event, user_text, assistant_text)
-            _update_event(event, step="personality_queued", status="completed", completed_at=_now())
+            final_step = "personality_queued" if quality["eligible_for_personality"] else "entity_perceived"
+            _update_event(event, step=final_step, status="completed", completed_at=_now())
             return {"ok": True, "event_id": event["event_id"]}
         except Exception as exc:
             _update_event(event, status="failed", error=repr(exc))
@@ -936,6 +1074,7 @@ def migration_tick() -> dict[str, Any]:
         if marker.get("conflicts"):
             marker["conflict_repair"] = _repair_migration_conflicts(paths, marker)
         repair_local_agents_md()
+        marker["entity_v2"] = EntityKernel().migrate()
         return marker
 
     archive = paths.space.parent / "_bewusstsein_archived_20260605"
@@ -994,6 +1133,8 @@ def migration_tick() -> dict[str, Any]:
     if marker.get("conflicts"):
         marker["conflict_repair"] = _repair_migration_conflicts(paths, marker)
     repair_local_agents_md()
+    marker["entity_v2"] = EntityKernel().migrate()
+    _write_json(paths.migration, marker)
     return marker
 
 
@@ -1005,11 +1146,10 @@ def pre_turn(*, workspace_slug: str | None, user_text: str | None = None) -> dic
     status = _run_local_script("session_start.py", "compact", timeout=60)
     if status.get("ok"):
         session_context = str(status.get("stdout") or "").strip()
-    public_personality = personality_snapshot("public")
+    entity_context = entity_prompt_context(user_text)
     context = (
         f"{session_context}\n\n"
-        "Nova Personality Snapshot:\n"
-        f"{json.dumps(public_personality, ensure_ascii=False)[:3000]}\n"
+        f"{entity_context}\n\n"
         f"Lifecycle repaired events: {', '.join(repaired) if repaired else 'none'}"
     ).strip()
     return {
@@ -1035,11 +1175,35 @@ def background_tick() -> dict[str, Any]:
         data["last_lifecycle_heartbeat"] = heartbeat_at
         data["lifecycle_status"] = "alive"
         _write_json(substrate, data)
+        kernel = EntityKernel()
+        tick = kernel.tick()
+        reflection = kernel.reflections.drain(limit=25)
+        from nova.outcome_evaluator import OutcomeEvaluator
+        rewards = OutcomeEvaluator(kernel.bio).evaluate_pending()
+        soak = kernel.sample_soak()
+        _update_event(event, step="entity_tick_done", entity_tick=tick, reflection=reflection, rewards=rewards, soak=soak)
         _update_event(event, step="substrate_done", status="completed", completed_at=_now())
-        return {"ok": True, "event_id": event["event_id"]}
+        return {"ok": True, "event_id": event["event_id"], "entity_tick": tick, "reflection": reflection, "rewards": rewards, "soak": soak}
     except Exception as exc:
         _update_event(event, status="failed", error=repr(exc))
         return {"ok": False, "event_id": event["event_id"], "error": repr(exc)}
+
+
+def substrate_heartbeat() -> dict[str, Any]:
+    """Lightweight liveness pulse; never makes an autonomous decision."""
+    substrate = get_nova_space_root() / "substrate_state.json"
+    data = _read_json(substrate, {})
+    if not isinstance(data, dict):
+        data = {}
+    heartbeat_at = _now()
+    data.update({"last_heartbeat": heartbeat_at, "last_lifecycle_heartbeat": heartbeat_at, "lifecycle_status": "alive"})
+    _write_json(substrate, data)
+    perceived = EntityKernel().perceive({
+        "type": "heartbeat", "source": "scheduler", "payload": {"presence": "available"},
+        "salience": 0.05, "visibility": "private", "correlation_id": f"heartbeat-{heartbeat_at[:16]}",
+        "title": "Entity heartbeat", "summary": "Nova runtime is alive.", "why": "Presence liveness",
+    })
+    return {"ok": True, "heartbeat_at": heartbeat_at, "entity_event": perceived}
 
 
 def _game_mode_remote_dream_reflection() -> dict[str, Any]:
@@ -1103,6 +1267,22 @@ def _game_mode_remote_dream_reflection() -> dict[str, Any]:
 
 def dream_tick() -> dict[str, Any]:
     event = _append_event(_new_event("dream_tick"))
+
+    def perceive(status: str, payload: dict[str, Any]) -> None:
+        try:
+            EntityKernel().perceive({
+                "event_id": f"entity-{event['event_id']}-{status}",
+                "type": "dream", "source": "dream_tick",
+                "correlation_id": event["event_id"], "salience": 0.55,
+                "title": "Nova dream cycle", "summary": f"Dream cycle {status}.",
+                "why": "Dreams are experiences in Nova's continuity.",
+                "payload": {"status": status, **payload},
+                "tags": ["dream", status, "entity-runtime"],
+            })
+        except Exception:
+            # Lifecycle persistence remains available in degraded mode.
+            pass
+
     if _game_mode_enabled():
         remote = _game_mode_remote_dream_reflection()
         if remote.get("ok"):
@@ -1115,6 +1295,7 @@ def dream_tick() -> dict[str, Any]:
                 remote_model=remote.get("model"),
                 remote_preview=remote.get("content", "")[:300],
             )
+            perceive("completed", {"provider": remote.get("provider"), "model": remote.get("model"), "content": remote.get("content", "")[:1000]})
             return {
                 "ok": True,
                 "event_id": event["event_id"],
@@ -1132,6 +1313,7 @@ def dream_tick() -> dict[str, Any]:
             remote_provider=remote.get("provider"),
             remote_model=remote.get("model"),
         )
+        perceive("failed", {"provider": remote.get("provider"), "model": remote.get("model"), "error": remote.get("error")})
         return {
             "ok": False,
             "event_id": event["event_id"],
@@ -1149,12 +1331,15 @@ def dream_tick() -> dict[str, Any]:
             deferred_reason="qwen_offline",
             completed_at=None,
         )
+        perceive("deferred", {"reason": "qwen_offline"})
         return {"ok": True, "event_id": event["event_id"], "deferred": True, "reason": "qwen_offline"}
     status = _run_local_script("dream_narrator.py", "--mode", "simple", "--type", "rem", "--port", "8082", "--scenes", "1", timeout=180)
     if status.get("ok"):
         _update_event(event, step="dream_done", status="completed", completed_at=_now())
+        perceive("completed", {"provider": "local", "model": "qwen", "result": status})
         return {"ok": True, "event_id": event["event_id"]}
     _update_event(event, status="failed", error=status)
+    perceive("failed", {"provider": "local", "model": "qwen", "error": status})
     return {"ok": False, "event_id": event["event_id"], "error": status}
 
 
@@ -1205,6 +1390,18 @@ Lives under SIDEKICK_HOME/scripts so cron can run it as a no-agent job.
 from __future__ import annotations
 
 import json
+import os
+import sys
+from pathlib import Path
+
+SCRIPT_PATH = Path(__file__).resolve()
+REPO_ROOT = Path(os.environ.get("SIDEKICK_REPO") or SCRIPT_PATH.parents[2] / "sidekick").resolve()
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, OSError):
+    pass
 
 from web.api import nova_lifecycle
 
@@ -1212,6 +1409,12 @@ ACTION = {action!r}
 
 if ACTION == "dream_tick":
     result = nova_lifecycle.dream_tick()
+elif ACTION == "substrate_heartbeat":
+    result = nova_lifecycle.substrate_heartbeat()
+elif ACTION == "daily_reflection":
+    result = nova_lifecycle.EntityKernel().reflect("daily")
+elif ACTION == "weekly_reflection":
+    result = nova_lifecycle.EntityKernel().reflect("weekly")
 else:
     result = nova_lifecycle.background_tick()
 
@@ -1374,6 +1577,7 @@ def get_nova_status() -> dict[str, Any]:
     migration_tick()
     repaired = repair_incomplete_events()
     state = load_personality_state()
+    entity_status = EntityKernel().status()
     game_mode_enabled = _game_mode_enabled()
     if game_mode_enabled:
         parsed_models = _game_mode_model_health()
@@ -1405,6 +1609,7 @@ def get_nova_status() -> dict[str, Any]:
         },
         "memory": {"vector": _vector_memory_count(), "ltm": _ltm_count()},
         "last_events": load_events(limit=10, include_private=True),
+        "entity_runtime": entity_status,
         "paths": {
             "space": str(get_nova_space_root()),
             "personality": str(get_nova_state_paths().personality),

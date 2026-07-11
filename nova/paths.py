@@ -16,7 +16,16 @@ def get_nova_space_root() -> Path:
 
 
 def get_nova_data_dir() -> Path:
-    """Return the persistent data directory, creating it on demand."""
-    path = get_nova_space_root() / "entity_kernel"
+    """Return Nova v2's canonical private entity-state directory."""
+    path = get_nova_space_root() / "nova_data" / "entity"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_legacy_nova_data_dirs() -> tuple[Path, ...]:
+    """Locations used by v1 implementations, in migration priority order."""
+    root = get_nova_space_root()
+    return (
+        root / "nova_data" / "entity_kernel",
+        root / "entity_kernel",
+    )
