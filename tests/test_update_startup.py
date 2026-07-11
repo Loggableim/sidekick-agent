@@ -53,6 +53,48 @@ def test_resolve_remote_default_branch_prefers_origin_head_master(tmp_path):
     assert main._resolve_remote_default_branch(["git"], install, "origin") == "master"
 
 
+def test_fetch_origin_retries_remote_ref_compare_and_swap_race(monkeypatch, tmp_path):
+    import cli.main as main
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            return SimpleNamespace(
+                returncode=1, stdout="",
+                stderr="error: cannot lock ref 'refs/remotes/origin/master': is at aaa but expected bbb",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    result = main._fetch_origin_with_ref_race_retry(["git"], tmp_path)
+
+    assert result.returncode == 0
+    assert calls == [
+        ["git", "fetch", "origin"],
+        ["git", "fetch", "--prune", "origin"],
+    ]
+
+
+def test_fetch_origin_does_not_retry_unrelated_failure(monkeypatch, tmp_path):
+    import cli.main as main
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=1, stdout="", stderr="fatal: authentication failed")
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    result = main._fetch_origin_with_ref_race_retry(["git"], tmp_path)
+
+    assert result.returncode == 1
+    assert calls == [["git", "fetch", "origin"]]
+
+
 def test_update_check_uses_origin_default_branch_master(monkeypatch, tmp_path, capsys):
     import cli.main as main
 

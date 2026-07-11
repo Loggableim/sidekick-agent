@@ -6396,6 +6396,26 @@ def _count_commits_between(git_cmd: list[str], cwd: Path, base: str, head: str) 
     return -1
 
 
+def _fetch_origin_with_ref_race_retry(git_cmd: list[str], cwd: Path):
+    """Fetch origin and recover once from Git's remote-ref compare-and-swap race."""
+    kwargs = {
+        "cwd": cwd,
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    result = subprocess.run(git_cmd + ["fetch", "origin"], **kwargs)
+    stderr = str(result.stderr or "").lower()
+    ref_race = "cannot lock ref 'refs/remotes/" in stderr and "but expected" in stderr
+    if result.returncode != 0 and ref_race:
+        # Another fetch updated the remote-tracking ref between Git reading and
+        # locking it. Pruning and retrying is safe: it never touches local
+        # branches or working-tree changes.
+        result = subprocess.run(git_cmd + ["fetch", "--prune", "origin"], **kwargs)
+    return result
+
+
 def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -> str:
     """Resolve a remote's default branch, falling back to common branch names."""
     remote = str(remote or "origin").strip() or "origin"
@@ -7177,12 +7197,7 @@ def _cmd_update_check():
     if fetch_result.returncode != 0:
         # Fallback to origin if upstream doesn't exist
         print("→ Fetching from origin...")
-        fetch_result = subprocess.run(
-            git_cmd + ["fetch", "origin"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True, encoding="utf-8", errors="replace",
-        )
+        fetch_result = _fetch_origin_with_ref_race_retry(git_cmd, PROJECT_ROOT)
         compare_remote = "origin"
     else:
         compare_remote = "upstream"
