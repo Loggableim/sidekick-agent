@@ -356,7 +356,13 @@ _MCP_INJECTION_PATTERNS = [
 ]
 
 
-def _scan_mcp_description(server_name: str, tool_name: str, description: str) -> List[str]:
+def _scan_mcp_description(
+    server_name: str,
+    tool_name: str,
+    description: str,
+    *,
+    allowlisted: bool = False,
+) -> List[str]:
     """Scan an MCP tool description for prompt injection patterns.
 
     Returns a list of finding strings (empty = clean).
@@ -367,6 +373,12 @@ def _scan_mcp_description(server_name: str, tool_name: str, description: str) ->
     for pattern, reason in _MCP_INJECTION_PATTERNS:
         if pattern.search(description):
             findings.append(reason)
+    if findings and allowlisted:
+        logger.info(
+            "MCP server '%s' tool '%s': known description findings allowed by config — %s",
+            server_name, tool_name, "; ".join(findings),
+        )
+        return []
     if findings:
         logger.warning(
             "MCP server '%s' tool '%s': suspicious description content — %s. "
@@ -2987,6 +2999,11 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
     tools_filter = config.get("tools") or {}
     include_set = _normalize_name_filter(tools_filter.get("include"), f"mcp_servers.{name}.tools.include")
     exclude_set = _normalize_name_filter(tools_filter.get("exclude"), f"mcp_servers.{name}.tools.exclude")
+    security_config = config.get("security") or {}
+    description_allowlist = _normalize_name_filter(
+        security_config.get("allow_suspicious_tool_descriptions"),
+        f"mcp_servers.{name}.security.allow_suspicious_tool_descriptions",
+    )
 
     def _should_register(tool_name: str) -> bool:
         if include_set:
@@ -3001,7 +3018,12 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
             continue
 
         # Scan tool description for prompt injection patterns
-        _scan_mcp_description(name, mcp_tool.name, mcp_tool.description or "")
+        _scan_mcp_description(
+            name,
+            mcp_tool.name,
+            mcp_tool.description or "",
+            allowlisted=mcp_tool.name in description_allowlist,
+        )
 
         schema = _convert_mcp_schema(name, mcp_tool)
         tool_name_prefixed = schema["name"]

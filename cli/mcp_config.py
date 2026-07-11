@@ -575,7 +575,10 @@ def cmd_mcp_test(args):
 
     # Show transport info
     if "url" in cfg:
-        _info(f"Transport: HTTP → {cfg['url']}")
+        from runtime.redact import redact_sensitive_text
+
+        safe_url = redact_sensitive_text(str(cfg["url"]), force=True)
+        _info(f"Transport: HTTP → {safe_url}")
     else:
         cmd = cfg.get("command", "?")
         _info(f"Transport: stdio → {cmd}")
