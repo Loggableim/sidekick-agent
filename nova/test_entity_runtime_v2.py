@@ -196,6 +196,16 @@ def test_default_autobiography_path_follows_runtime_home(monkeypatch, tmp_path: 
     assert second_store.db_path == second / "spaces" / "nova" / "nova_data" / "entity" / "autobiography.db"
 
 
+def test_legacy_self_model_projection_ignores_runtime_revision_churn(tmp_path: Path) -> None:
+    store = EntityStateStore(tmp_path / "nova_data" / "entity" / "entity_state.json", tmp_path)
+    state = store.save(store.load(), reason="initial")
+    first = (tmp_path / "self_model.json").read_text(encoding="utf-8")
+    state["runtime"]["last_event_id"] = "heartbeat-1"
+    store.save(state, reason="Perceived heartbeat")
+    second = (tmp_path / "self_model.json").read_text(encoding="utf-8")
+    assert second == first
+
+
 def test_soak_monitor_requires_elapsed_window_and_no_violations(tmp_path: Path) -> None:
     from nova.soak_monitor import SoakMonitor
 

@@ -167,8 +167,9 @@ class EntityStateStore:
             "opinions": state.get("opinions") or {},
             "long_running_themes": themes,
             "open_conflicts": state.get("open_conflicts") or [],
-            "self_model_candidates": state.get("self_revision_candidates") or [],
-            "revision_history": state.get("revision_history") or [],
+            # Deliberately omit transient candidates and the rolling revision
+            # log. Legacy self-model readers need stable identity projection,
+            # not a tracked file mutation on every heartbeat.
         }
         _atomic_json(self.space_dir / "self_model.json", self_model)
 
