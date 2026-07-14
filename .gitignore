@@ -51,6 +51,7 @@ temp/
 state.db*
 .codex-run-logs/
 .playwright-cli/
+.worktrees/
 output/
 nova/nova_data/
 
