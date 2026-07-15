@@ -7264,6 +7264,126 @@ class SidekickCLI:
             print(f"    2. Or configure settings in {display_sidekick_home()}/config.yaml")
             print()
     
+    def _queue_workflow_turn(self, state: dict, message: str) -> None:
+        """Queue one CLI/TUI workflow turn with its server-owned metadata."""
+        self._next_workflow_turn = {
+            "mode": state.get("mode", "plan"),
+            "plan_id": state["plan_id"],
+            "version": state["version"],
+            "session_id": self.session_id,
+        }
+        self._pending_input.put(message)
+
+    def _finalize_workflow_turn(self, workflow_turn: dict, *, result: dict | None, error: Exception | None = None):
+        """Persist the terminal state of a CLI/TUI workflow turn exactly once."""
+        from runtime.workflows import WorkflowStore
+
+        store = WorkflowStore()
+        plan_id = str(workflow_turn.get("plan_id") or "")
+        if error is not None:
+            return store.fail(self.session_id, plan_id, reason=str(error))
+
+        result = result or {}
+        if workflow_turn.get("mode") == "plan":
+            plan_text = str(result.get("final_response") or "").strip()
+            if not plan_text:
+                return store.fail(self.session_id, plan_id, reason="planner returned no plan text")
+            state = store.record_plan(
+                self.session_id,
+                plan_id,
+                workflow_turn["version"],
+                plan_text,
+            )
+            _cprint(
+                f"  Plan {state['plan_id'][:8]} version {state['version']} is ready for review. "
+                f"Run /execute {state['plan_id']} to proceed."
+            )
+            return state
+
+        if result.get("failed") or result.get("error"):
+            return store.fail(
+                self.session_id,
+                plan_id,
+                reason=str(result.get("error") or "execution failed"),
+            )
+        return store.finish_execution(self.session_id, plan_id)
+
+    def _handle_workflow_command(self, command: str, canonical: str) -> None:
+        """Handle /plan and /execute against the shared profile workflow store."""
+        from runtime.workflows import WorkflowError, WorkflowStore
+
+        parts = command.split(None, 2)
+        store = WorkflowStore()
+        try:
+            if canonical == "plan":
+                action = parts[1].strip().lower() if len(parts) > 1 else ""
+                if action == "revise":
+                    feedback = parts[2].strip() if len(parts) > 2 else ""
+                    if not feedback:
+                        _cprint("  Usage: /plan revise <feedback>")
+                        return
+                    current = store.get_session(self.session_id)
+                    if not current:
+                        _cprint("  No plan is available for this session.")
+                        return
+                    state = store.revise(self.session_id, current["plan_id"], current["version"], feedback)
+                    request = state["request"]
+                elif action == "reject":
+                    current = store.get_session(self.session_id)
+                    if not current:
+                        _cprint("  No plan is available for this session.")
+                        return
+                    state = store.reject(self.session_id, current["plan_id"], current["version"])
+                    _cprint(f"  Plan {state['plan_id'][:8]} rejected.")
+                    return
+                else:
+                    request = command.partition(" ")[2].strip()
+                    if not request:
+                        _cprint("  Usage: /plan <request>")
+                        return
+                    state = store.create_plan(self.session_id, request)
+
+                message = (
+                    "[Workflow Plan Mode] Inspect only. Do not write files, run commands, delegate, "
+                    "or mutate any system. Produce a detailed Markdown implementation plan for:\n\n"
+                    + request
+                )
+                self._queue_workflow_turn(state, message)
+                _cprint(f"  Planning {state['plan_id'][:8]} (version {state['version']})...")
+                return
+
+            current = store.get_session(self.session_id)
+            requested_plan_id = parts[1].strip() if len(parts) > 1 else ""
+            if not current:
+                _cprint("  No plan is available for this session.")
+                return
+            if requested_plan_id and requested_plan_id != current["plan_id"]:
+                _cprint("  That plan does not belong to the current session.")
+                return
+            approved = store.approve(
+                self.session_id,
+                current["plan_id"],
+                current["version"],
+                approver="cli",
+            )
+            state = store.begin_execution(
+                self.session_id,
+                approved["plan_id"],
+                approved["version"],
+                stream_id=f"cli-{uuid.uuid4().hex}",
+            )
+            message = (
+                "[Workflow Execute Mode] The following plan was explicitly approved. Execute it using "
+                "normal Sidekick safety approvals and report verified results.\n\n"
+                + state["plan_markdown"]
+            )
+            self._queue_workflow_turn(state, message)
+            _cprint(f"  Executing approved plan {state['plan_id'][:8]}...")
+        except WorkflowError as exc:
+            _cprint(f"  Workflow blocked: {exc}")
+        except ValueError as exc:
+            _cprint(f"  Workflow input invalid: {exc}")
+
     def process_command(self, command: str) -> bool:
         """
         Process a slash command.
@@ -7590,6 +7710,8 @@ class SidekickCLI:
                 # No active run — treat as a normal next-turn message.
                 self._pending_input.put(payload)
                 _cprint(f"  No agent running; queued as next turn: {payload[:80]}{'...' if len(payload) > 80 else ''}")
+        elif canonical in {"plan", "execute"}:
+            self._handle_workflow_command(cmd_original, canonical)
         elif canonical == "goal":
             self._handle_goal_command(cmd_original)
         elif canonical == "skin":
@@ -10428,6 +10550,12 @@ class SidekickCLI:
                     "2-3 sentences max. No code blocks or markdown.] "
                 )
 
+            _workflow_turn = getattr(self, "_next_workflow_turn", None)
+            if _workflow_turn and _workflow_turn.get("session_id") == self.session_id:
+                self._next_workflow_turn = None
+            else:
+                _workflow_turn = None
+
             def run_agent():
                 nonlocal result
                 # Set callbacks inside the agent thread so thread-local storage
@@ -10455,14 +10583,28 @@ class SidekickCLI:
                     agent_message = _srn + "\n\n" + agent_message
                     self._pending_skills_reload_note = None
                 try:
-                    result = self.agent.run_conversation(
-                        user_message=agent_message,
-                        conversation_history=self.conversation_history[:-1],  # Exclude the message we just added
-                        stream_callback=stream_callback,
-                        task_id=self.session_id,
-                        persist_user_message=message if _voice_prefix else None,
-                    )
+                    from runtime.workflows import workflow_context
+
+                    with workflow_context(
+                        mode=_workflow_turn.get("mode", "action") if _workflow_turn else "action",
+                        session_id=self.session_id,
+                        plan_id=_workflow_turn.get("plan_id", "") if _workflow_turn else "",
+                    ):
+                        result = self.agent.run_conversation(
+                            user_message=agent_message,
+                            conversation_history=self.conversation_history[:-1],  # Exclude the message we just added
+                            stream_callback=stream_callback,
+                            task_id=self.session_id,
+                            persist_user_message=message if _voice_prefix else None,
+                        )
+                    if _workflow_turn:
+                        self._finalize_workflow_turn(_workflow_turn, result=result)
                 except Exception as exc:
+                    if _workflow_turn:
+                        try:
+                            self._finalize_workflow_turn(_workflow_turn, result=None, error=exc)
+                        except Exception:
+                            logging.error("Workflow failure state could not be persisted", exc_info=True)
                     logging.error("run_conversation raised: %s", exc, exc_info=True)
                     _summary = getattr(self.agent, '_summarize_api_error', lambda e: str(e)[:300])(exc)
                     result = {

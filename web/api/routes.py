@@ -3921,6 +3921,24 @@ def _handle_analytics_usage(handler, parsed):
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
 
+    if parsed.path.startswith("/api/workflows/session/"):
+        from urllib.parse import unquote
+
+        session_id = unquote(parsed.path[len("/api/workflows/session/"):]).strip()
+        if not session_id or "/" in session_id or "\\" in session_id:
+            return bad(handler, "invalid session_id", 400)
+        try:
+            session = get_session(session_id)
+        except KeyError:
+            return bad(handler, "Session not found", 404)
+        requested_profile = parse_qs(parsed.query or "").get("profile", [""])[0].strip()
+        if requested_profile and not _profiles_match(getattr(session, "profile", None), requested_profile):
+            return bad(handler, "Session does not belong to the requested profile", 403)
+        try:
+            return j(handler, {"workflow": _workflow_store_for_session(session).get_session(session_id)})
+        except Exception as exc:
+            return _workflow_error(handler, exc)
+
     if parsed.path.startswith("/session/static/"):
         # Strip the leading "/session" so _serve_static() sees a path that
         # starts with "/static/" (its required prefix). _serve_static enforces
@@ -6902,6 +6920,27 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/goal":
         return _handle_goal_command(handler, body)
+
+    if parsed.path == "/api/workflows/plan":
+        return _handle_workflow_plan(handler, body)
+
+    if parsed.path.startswith("/api/workflows/") and parsed.path.endswith("/revise"):
+        plan_id = parsed.path[len("/api/workflows/"):-len("/revise")].strip("/")
+        if plan_id and not body.get("plan_id"):
+            body["plan_id"] = plan_id
+        return _handle_workflow_revise(handler, body)
+
+    if parsed.path.startswith("/api/workflows/") and parsed.path.endswith("/approve"):
+        plan_id = parsed.path[len("/api/workflows/"):-len("/approve")].strip("/")
+        if plan_id and not body.get("plan_id"):
+            body["plan_id"] = plan_id
+        return _handle_workflow_approve(handler, body)
+
+    if parsed.path.startswith("/api/workflows/") and parsed.path.endswith("/reject"):
+        plan_id = parsed.path[len("/api/workflows/"):-len("/reject")].strip("/")
+        if plan_id and not body.get("plan_id"):
+            body["plan_id"] = plan_id
+        return _handle_workflow_reject(handler, body)
 
     if parsed.path == "/api/chat/start":
         return _handle_chat_start(handler, body, diag=diag)
@@ -10412,9 +10451,28 @@ def _start_chat_stream_for_session(
     goal_related: bool = False,
     mode: str = "",
     sandbox_disabled: bool = False,
+    workflow_plan_id: str = "",
+    workflow_version: int | None = None,
+    stream_id: str | None = None,
 ):
     """Persist pending state, register an SSE channel, and start an agent turn."""
     attachments = attachments or []
+    requested_stream_id = str(stream_id or "").strip()
+    if str(mode or "").strip().lower() == "execute":
+        # Execute turns are never generic chat turns.  The durable transition
+        # must already bind this exact server-issued stream to the approved plan
+        # before a worker can be registered or started.
+        try:
+            from runtime.workflows import WorkflowError
+
+            _workflow_store_for_session(s).assert_execution_authorized(
+                s.session_id,
+                str(workflow_plan_id or ""),
+                workflow_version,
+                stream_id=requested_stream_id,
+            )
+        except WorkflowError as exc:
+            return {"error": str(exc), "code": "workflow_conflict", "_status": 409}
     # Prevent duplicate runs in the same session while a stream is still active.
     # This commonly happens after page refresh/reconnect races and can produce
     # duplicated clarify cards for what appears to be a single user request.
@@ -10465,7 +10523,7 @@ def _start_chat_stream_for_session(
         except Exception:
             pass
 
-    stream_id = uuid.uuid4().hex
+    stream_id = requested_stream_id or uuid.uuid4().hex
     session_lock = _get_session_agent_lock(s.session_id)
     diag.stage("session_lock_wait") if diag else None
     with session_lock:
@@ -10512,7 +10570,14 @@ def _start_chat_stream_for_session(
     thr = threading.Thread(
         target=_run_agent_streaming,
         args=(s.session_id, msg, model, workspace, stream_id, attachments),
-        kwargs={"model_provider": model_provider, "goal_related": goal_related, "mode": mode, "sandbox_disabled": sandbox_disabled},
+        kwargs={
+            "model_provider": model_provider,
+            "goal_related": goal_related,
+            "mode": mode,
+            "sandbox_disabled": sandbox_disabled,
+            "workflow_plan_id": workflow_plan_id,
+            "workflow_version": workflow_version,
+        },
         daemon=True,
     )
     thr.start()
@@ -10824,6 +10889,10 @@ def _handle_chat_start(handler, body, diag=None):
                 # currently-selected profile instead of the stale one stamped at
                 # creation time.
                 s.profile = requested_profile
+        if str(body.get("mode", "") or "").strip().lower() == "plan":
+            # Plan Mode is always a durable workflow; clients cannot enter it
+            # through the generic chat endpoint and rely on a prompt alone.
+            return _handle_workflow_plan(handler, body)
         diag.stage("normalize_message") if diag else None
         msg = str(body.get("message", "")).strip()
         if not msg:
@@ -10945,6 +11014,212 @@ def _handle_chat_start(handler, body, diag=None):
     finally:
         if diag:
             diag.finish()
+
+
+def _workflow_store_for_session(session):
+    """Return the durable workflow store belonging to this session's profile."""
+    from runtime.workflows import WorkflowStore
+    from web.api.profiles import get_profile_home
+
+    return WorkflowStore(profile_home=get_profile_home(getattr(session, "profile", None)))
+
+
+def _workflow_session_for_request(handler, body):
+    try:
+        require(body, "session_id")
+    except ValueError as exc:
+        return None, bad(handler, str(exc))
+    try:
+        session = get_session(str(body["session_id"]))
+    except KeyError:
+        return None, bad(handler, "Session not found", 404)
+    requested_profile = str(body.get("profile") or "").strip()
+    if requested_profile and not _profiles_match(getattr(session, "profile", None), requested_profile):
+        return None, bad(handler, "Session does not belong to the requested profile", 403)
+    return session, None
+
+
+def _workflow_error(handler, exc):
+    from runtime.workflows import WorkflowApprovalError, WorkflowConflictError, WorkflowNotFoundError
+
+    if isinstance(exc, WorkflowNotFoundError):
+        return bad(handler, str(exc), 404)
+    if isinstance(exc, (WorkflowConflictError, WorkflowApprovalError)):
+        return j(handler, {"error": str(exc), "code": "workflow_conflict"}, status=409)
+    if isinstance(exc, ValueError):
+        return bad(handler, str(exc), 400)
+    logger.exception("Workflow request failed", exc_info=exc)
+    return j(handler, {"error": "Workflow request failed safely", "code": "workflow_failed"}, status=500)
+
+
+def _emit_workflow_stream_event(stream_id: str, state: dict) -> None:
+    """Best-effort lifecycle event for a newly-created or changed workflow."""
+    if not stream_id:
+        return
+    try:
+        with STREAMS_LOCK:
+            stream = STREAMS.get(stream_id)
+        if stream is not None:
+            stream.put_nowait(("workflow", state))
+    except Exception:
+        logger.debug("Could not emit workflow event for stream %s", stream_id, exc_info=True)
+
+
+def _start_workflow_stream(session, *, message: str, state: dict, body: dict, mode: str, stream_id: str | None = None):
+    """Start one trusted workflow stream after its state transition is durable."""
+    workspace = str(resolve_trusted_workspace(body.get("workspace") or getattr(session, "workspace", "")))
+    model, model_provider, normalized_model = _resolve_compatible_session_model_state(
+        body.get("model") or getattr(session, "model", ""),
+        body.get("model_provider") if "model_provider" in body else getattr(session, "model_provider", None),
+    )
+    game_mode_nova_override = _game_mode_nova_remote_model_state(
+        model,
+        model_provider,
+        space_slug=str(
+            getattr(session, "workspace_slug", None)
+            or getattr(session, "space_slug", None)
+            or getattr(session, "space", None)
+            or ""
+        ).strip().lower() or None,
+        workspace=workspace,
+    )
+    if game_mode_nova_override:
+        model, model_provider, normalized_model = game_mode_nova_override
+    response = _start_chat_stream_for_session(
+        session,
+        msg=message,
+        attachments=[],
+        workspace=workspace,
+        model=model,
+        model_provider=model_provider,
+        normalized_model=bool(normalized_model),
+        mode=mode,
+        sandbox_disabled=bool(body.get("sandbox_disabled", False)),
+        workflow_plan_id=state["plan_id"],
+        workflow_version=state["version"],
+        stream_id=stream_id,
+    )
+    status = int(response.pop("_status", 200) or 200)
+    return response, status
+
+
+def _handle_workflow_plan(handler, body):
+    session, error = _workflow_session_for_request(handler, body)
+    if error is not None:
+        return error
+    request = str(body.get("request") or body.get("message") or "").strip()
+    if not request:
+        return bad(handler, "request is required")
+    try:
+        store = _workflow_store_for_session(session)
+        state = store.create_plan(session.session_id, request)
+        response, status = _start_workflow_stream(session, message=request, state=state, body=body, mode="plan")
+        if status >= 400:
+            state = store.fail(session.session_id, state["plan_id"], reason=str(response.get("error") or "could not start planner"))
+        else:
+            _emit_workflow_stream_event(response.get("stream_id", ""), state)
+        response["workflow"] = state
+        return j(handler, response, status=status)
+    except Exception as exc:
+        return _workflow_error(handler, exc)
+
+
+def _handle_workflow_revise(handler, body):
+    session, error = _workflow_session_for_request(handler, body)
+    if error is not None:
+        return error
+    try:
+        store = _workflow_store_for_session(session)
+        state = store.revise(
+            session.session_id,
+            str(body.get("plan_id") or ""),
+            body.get("version"),
+            str(body.get("feedback") or ""),
+        )
+        response, status = _start_workflow_stream(session, message=state["request"], state=state, body=body, mode="plan")
+        if status >= 400:
+            state = store.fail(session.session_id, state["plan_id"], reason=str(response.get("error") or "could not start planner"))
+        else:
+            _emit_workflow_stream_event(response.get("stream_id", ""), state)
+        response["workflow"] = state
+        return j(handler, response, status=status)
+    except Exception as exc:
+        return _workflow_error(handler, exc)
+
+
+def _handle_workflow_approve(handler, body):
+    session, error = _workflow_session_for_request(handler, body)
+    if error is not None:
+        return error
+    try:
+        store = _workflow_store_for_session(session)
+        approved = store.approve(
+            session.session_id,
+            str(body.get("plan_id") or ""),
+            body.get("version"),
+            approver=str(body.get("approver") or "webui"),
+        )
+        execution_message = (
+            "The following plan was explicitly approved. Execute it now using normal Sidekick "
+            "safety approvals, and report verified results.\n\n"
+            + approved["plan_markdown"]
+        )
+        executing = store.begin_execution(
+            session.session_id,
+            approved["plan_id"],
+            approved["version"],
+            stream_id=uuid.uuid4().hex,
+        )
+        try:
+            response, status = _start_workflow_stream(
+                session,
+                message=execution_message,
+                state=executing,
+                body=body,
+                mode="execute",
+                stream_id=executing["execution_stream_id"],
+            )
+        except Exception as exc:
+            store.fail(session.session_id, executing["plan_id"], reason=f"could not start execution: {exc}")
+            raise
+        if status >= 400:
+            failed = store.fail(
+                session.session_id,
+                executing["plan_id"],
+                reason=str(response.get("error") or "could not start execution"),
+            )
+            response["workflow"] = failed
+            return j(handler, response, status=status)
+        if response.get("stream_id") != executing["execution_stream_id"]:
+            failed = store.fail(
+                session.session_id,
+                executing["plan_id"],
+                reason="execution stream did not preserve the server-issued workflow stream id",
+            )
+            response["workflow"] = failed
+            response["error"] = "Workflow execution failed safely"
+            return j(handler, response, status=500)
+        _emit_workflow_stream_event(response["stream_id"], executing)
+        response["workflow"] = executing
+        return j(handler, response)
+    except Exception as exc:
+        return _workflow_error(handler, exc)
+
+
+def _handle_workflow_reject(handler, body):
+    session, error = _workflow_session_for_request(handler, body)
+    if error is not None:
+        return error
+    try:
+        state = _workflow_store_for_session(session).reject(
+            session.session_id,
+            str(body.get("plan_id") or ""),
+            body.get("version"),
+            reason=str(body.get("reason") or ""),
+        )
+        return j(handler, {"ok": True, "workflow": state})
+    except Exception as exc:
+        return _workflow_error(handler, exc)
 
 
 def _handle_plan_accept(handler, body):

@@ -10315,6 +10315,12 @@ class AIAgent:
         tools. Used by the concurrent execution path; the sequential path retains
         its own inline invocation for backward-compatible display handling.
         """
+        from runtime.workflows import plan_tool_block_reason
+
+        workflow_block = plan_tool_block_reason(function_name)
+        if workflow_block is not None:
+            return json.dumps({"error": workflow_block}, ensure_ascii=False)
+
         # Check plugin hooks for a block directive before executing anything.
         block_message: Optional[str] = None
         if not pre_tool_block_checked:
@@ -10481,13 +10487,17 @@ class AIAgent:
 
             block_result = None
             blocked_by_guardrail = False
-            try:
-                from cli.plugins import get_pre_tool_call_block_message
-                block_message = get_pre_tool_call_block_message(
-                    function_name, function_args, task_id=effective_task_id or "",
-                )
-            except Exception:
-                block_message = None
+            from runtime.workflows import plan_tool_block_reason
+
+            block_message = plan_tool_block_reason(function_name)
+            if block_message is None:
+                try:
+                    from cli.plugins import get_pre_tool_call_block_message
+                    block_message = get_pre_tool_call_block_message(
+                        function_name, function_args, task_id=effective_task_id or "",
+                    )
+                except Exception:
+                    block_message = None
 
             if block_message is not None:
                 block_result = json.dumps({"error": block_message}, ensure_ascii=False)
@@ -10851,14 +10861,17 @@ class AIAgent:
                 function_args = {}
 
             # Check plugin hooks for a block directive before executing.
-            _block_msg: Optional[str] = None
-            try:
-                from cli.plugins import get_pre_tool_call_block_message
-                _block_msg = get_pre_tool_call_block_message(
-                    function_name, function_args, task_id=effective_task_id or "",
-                )
-            except Exception:
-                pass
+            from runtime.workflows import plan_tool_block_reason
+
+            _block_msg: Optional[str] = plan_tool_block_reason(function_name)
+            if _block_msg is None:
+                try:
+                    from cli.plugins import get_pre_tool_call_block_message
+                    _block_msg = get_pre_tool_call_block_message(
+                        function_name, function_args, task_id=effective_task_id or "",
+                    )
+                except Exception:
+                    pass
 
             _guardrail_block_decision: ToolGuardrailDecision | None = None
             if _block_msg is None:

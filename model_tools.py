@@ -721,6 +721,15 @@ def handle_function_call(
         Function result as a JSON string.
     """
     # Coerce string arguments to their schema-declared types (e.g. "42"→42)
+    # Plan Mode is an execution policy, not merely a system-prompt request.
+    # Keep this guard ahead of coercion, hooks, and registry dispatch so a
+    # blocked call cannot trigger side effects through this generic path.
+    from runtime.workflows import plan_tool_block_reason
+
+    workflow_block = plan_tool_block_reason(function_name)
+    if workflow_block is not None:
+        return json.dumps({"error": workflow_block}, ensure_ascii=False)
+
     function_args = coerce_tool_args(function_name, function_args)
 
     try:

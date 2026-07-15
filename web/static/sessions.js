@@ -807,6 +807,18 @@ async function loadSession(sid, options){
     return;
   }
   S.session=data.session;
+  // Workflow state is deliberately stored outside the transcript/session
+  // sidecars. Reload it separately so a plan card and its server version
+  // survive reconnects without trusting stale browser state.
+  api('/api/workflows/session/'+encodeURIComponent(sid)+'?profile='+encodeURIComponent(S.activeProfile||data.session.profile||'default'))
+    .then(workflowData=>{
+      if(_loadingSessionId!==sid||!S.session||S.session.session_id!==sid) return;
+      if(workflowData&&workflowData.workflow&&typeof _applyWorkflowState==='function'){
+        _applyWorkflowState(workflowData.workflow);
+      }else if(typeof _clearPlanState==='function'){
+        _clearPlanState();
+      }
+    }).catch(()=>{});
   // Rehydrate the goal banner immediately so any live-stream reattach or
   // SSE goal event sees the current goal state instead of a stale banner from
   // the previously viewed session.
@@ -971,6 +983,9 @@ async function loadSession(sid, options){
     // Attach pending user message if one is queued.
     const pendingMsg=typeof getPendingSessionMessage==='function'?getPendingSessionMessage(S.session):null;
     if(pendingMsg) S.messages.push(pendingMsg);
+    if(window._activePlan&&window._activePlan.sessionId===sid&&window._activePlan.text&&typeof _markCurrentAssistantAsPlan==='function'){
+      _markCurrentAssistantAsPlan(window._activePlan.text);
+    }
 
     if(activeStreamId){
       S.busy=true;

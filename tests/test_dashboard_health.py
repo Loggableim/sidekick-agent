@@ -4754,16 +4754,19 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
+    utility_start = index_html.index('<div class="titlebar-utility-actions" id="titlebarUtilityActions"')
+    utility_end = index_html.index('<div class="app-titlebar-center"', utility_start)
+    utility_actions = index_html[utility_start:utility_end]
     titlebar_start = index_html.index('<div class="titlebar-actions" id="titlebarActions">')
-    lang_start = index_html.index("titlebarLangSelector", titlebar_start)
-    cast_start = index_html.index("btnCastToggle", lang_start)
-    titlebar_actions = index_html[titlebar_start:cast_start]
+    titlebar_end = index_html.index('<div class="window-controls"', titlebar_start)
+    titlebar_actions = index_html[titlebar_start:titlebar_end]
 
     assert re.search(
         r'id="btnLangSelector"[^>]+aria-label="Language"[^>]+aria-haspopup="menu"[^>]+aria-expanded="false"[^>]+aria-controls="langDropdown"[^>]+onclick="toggleLangDropdown\(event\)"',
-        titlebar_actions,
+        utility_actions,
         re.S,
     )
+    assert 'id="btnCastToggle"' in utility_actions
     assert 'id="btnGameModeToggle"' in titlebar_actions
     assert "toggleGameMode()" in titlebar_actions
     assert "game_mode_toggle" in titlebar_actions

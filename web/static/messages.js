@@ -106,17 +106,15 @@ async function send(){
   _isSendingChat=true;
   try{
   let text=$('msg').value.trim();
-  // Plan/Action mode: `/plan` automatisch voranstellen
+  // Plan/Action mode is a server-owned workflow. Never encode it as a
+  // slash prompt: the server must create the plan ID and enforce tool policy.
   const composerMode = (() => {
     const rawMode = typeof window._composerMode === 'string'
       ? window._composerMode
       : (typeof localStorage !== 'undefined' ? localStorage.getItem('sidekick-webui-composer-mode') : '');
     return rawMode === 'plan' ? 'plan' : 'action';
   })();
-  if (composerMode === 'plan' && text && !text.startsWith('/')) {
-    text='/plan '+text;
-    $('msg').value=text;
-  }
+  if(composerMode!=='plan') window._workflowStatusSticky=null;
   if(!text&&!S.pendingFiles.length)return;
   // Don't send while an inline message edit is active
   if(document.querySelector('.msg-edit-area'))return;
@@ -343,7 +341,7 @@ async function send(){
   // Start the agent via POST, get a stream_id back
   let streamId;
   try{
-    const startData=await api('/api/chat/start',{method:'POST',body:JSON.stringify({
+    const startPayload={
       session_id:activeSid,message:msgText,
       model:selectedModelState.model,workspace:S.session.workspace,
       workspace_slug:selectedWorkspaceSlug,
@@ -354,7 +352,15 @@ async function send(){
       chat_mode: S.mode||'chat',
       attachments:uploaded.length?uploaded:undefined,
       sandbox_disabled: window._sandboxDisabled || false
-    })});
+    };
+    const startEndpoint=composerMode==='plan'?'/api/workflows/plan':'/api/chat/start';
+    if(composerMode==='plan'){
+      startPayload.request=msgText;
+      delete startPayload.message;
+      delete startPayload.attachments;
+    }
+    const startData=await api(startEndpoint,{method:'POST',body:JSON.stringify(startPayload)});
+    if(startData.workflow) _applyWorkflowState(startData.workflow);
 
     if(startData.effective_model && S.session){
       S.session.model=startData.effective_model;
@@ -859,7 +865,10 @@ let _latestGoalStatus=null;
   function _setActivePaneIdleIfOwner(){
     if(_isActiveSession()||!S.session||!INFLIGHT[S.session.session_id]){
       setBusy(false);
-      setComposerStatus('');
+      const workflowStatus=window._workflowStatusSticky;
+      const isCurrentTerminalWorkflow=workflowStatus&&workflowStatus.sessionId===activeSid&&
+        (workflowStatus.phase==='completed'||workflowStatus.phase==='rejected'||workflowStatus.phase==='failed');
+      setComposerStatus(isCurrentTerminalWorkflow?_workflowStatusText(workflowStatus.phase):'');
       if(typeof setStatus==='function') setStatus('');
     }
   }
@@ -1661,18 +1670,16 @@ let _latestGoalStatus=null;
       try{
         const d=JSON.parse(e.data||'{}');
         if((d.session_id||activeSid)!==activeSid) return;
-        const planText=String(d.text||d.plan||'').trim();
-        const planId=String(d.plan_id||d.id||'').trim() || `plan_${Date.now()}`;
-        if(!planText) return;
-        window._activePlan = {
-          id: planId,
-          text: planText,
-          sessionId: activeSid,
-          status: 'pending',
-          decisionMsg: null,
-        };
-        _markCurrentAssistantAsPlan(planText);
-        showToast('📋 Plan received — review and accept/revise', 3000);
+        _applyWorkflowState(d);
+        if(d.phase==='awaiting_approval') showToast('Plan ready - review and choose an action',3000);
+      }catch(_){}
+    });
+
+    source.addEventListener('workflow', e => {
+      try{
+        const d=JSON.parse(e.data||'{}');
+        if((d.session_id||activeSid)!==activeSid) return;
+        _applyWorkflowState(d);
       }catch(_){}
     });
 
@@ -1814,6 +1821,9 @@ source.addEventListener('done',e=>{
         const _prevOut=(S.session&&S.session.output_tokens)||0;
         const _prevCost=(S.session&&S.session.estimated_cost)||0;
         S.session=d.session;S.messages=d.session.messages||[];if(typeof _messagesTruncated!=='undefined')_messagesTruncated=!!d.session._messages_truncated;
+        if(window._activePlan&&window._activePlan.sessionId===activeSid&&window._activePlan.text){
+          _markCurrentAssistantAsPlan(window._activePlan.text);
+        }
         if(S.session&&S.session.session_id){
           localStorage.setItem('sidekick-webui-session',S.session.session_id);
           if(typeof _setActiveSessionUrl==='function') _setActiveSessionUrl(S.session.session_id);
@@ -4484,8 +4494,58 @@ function _ofbSvgIcon(ext) {
 // ── Panel navigation (Chat / Tasks / Skills / Memory) ──
 
 // ── Plan-Then-Code helpers ──
-// Global plan state (also read by ui.js renderMessages)
-window._activePlan = null;  // {id, text, sessionId, status, decisionMsg, msgIdx}
+// Global workflow state (also read by ui.js renderMessages). The server owns
+// identity/version/approval; this object is only a rendered cache.
+window._activePlan = null;  // {id, version, text, sessionId, status, phase}
+
+function _workflowCardStatus(phase){
+  if(phase==='rejected') return 'rejected';
+  if(phase==='executing'||phase==='completed') return 'accepted';
+  if(phase==='failed') return 'failed';
+  if(phase==='drafting'||phase==='revising') return 'revising';
+  return 'pending';
+}
+
+function _workflowStatusText(phase){
+  if(phase==='drafting') return '🧠 Planning…';
+  if(phase==='revising') return '✎ Revising plan…';
+  if(phase==='awaiting_approval') return '📋 Plan ready — review and choose an action';
+  if(phase==='executing') return '⚙ Executing approved plan…';
+  if(phase==='completed') return '✅ Execution completed';
+  if(phase==='rejected') return '✕ Plan rejected';
+  if(phase==='failed') return '❌ Workflow failed';
+  return '';
+}
+
+function _applyWorkflowState(workflow){
+  if(!workflow||typeof workflow!=='object') return;
+  const id=String(workflow.plan_id||workflow.id||'').trim();
+  const sessionId=String(workflow.session_id||(S.session&&S.session.session_id)||'').trim();
+  if(!id||!sessionId) return;
+  const text=String(workflow.plan_markdown||workflow.text||workflow.plan||'').trim();
+  const phase=String(workflow.phase||'');
+  window._activePlan={
+    id,
+    version:Number(workflow.version)||0,
+    text,
+    sessionId,
+    phase,
+    status:_workflowCardStatus(phase),
+  };
+  if(phase==='completed'||phase==='rejected'||phase==='failed'){
+    window._workflowStatusSticky={sessionId,phase};
+  }else if(window._workflowStatusSticky&&window._workflowStatusSticky.sessionId===sessionId){
+    window._workflowStatusSticky=null;
+  }
+  if(text&&S&&S.session&&S.session.session_id===sessionId){
+    _markCurrentAssistantAsPlan(text);
+    if(typeof renderMessages==='function') renderMessages({preserveScroll:true});
+  }
+  const statusText=_workflowStatusText(phase);
+  if(statusText&&typeof setComposerStatus==='function'&&S&&S.session&&S.session.session_id===sessionId){
+    setComposerStatus(statusText);
+  }
+}
 
 function _markCurrentAssistantAsPlan(planText){
   // Mark the last assistant message in S.messages as a plan
@@ -4495,8 +4555,10 @@ function _markCurrentAssistantAsPlan(planText){
     if(m && m.role==='assistant'){
       m._isPlan=true;
       m._planText=planText;
-      m._planStatus='pending';
+      m._planStatus=window._activePlan ? window._activePlan.status : 'pending';
       m._planId=window._activePlan ? window._activePlan.id : 'plan_'+Date.now();
+      m._planVersion=window._activePlan ? window._activePlan.version : 0;
+      m._planPhase=window._activePlan ? window._activePlan.phase : '';
       return;
     }
   }
@@ -4504,4 +4566,5 @@ function _markCurrentAssistantAsPlan(planText){
 
 function _clearPlanState(){
   window._activePlan=null;
+  window._workflowStatusSticky=null;
 }

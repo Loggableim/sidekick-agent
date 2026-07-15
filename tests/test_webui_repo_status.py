@@ -114,8 +114,12 @@ def test_titlebar_status_controls_are_relocated_into_the_composer_strip() -> Non
     assert "cluster.id = 'composerStatusStripCluster';" in index_html
     assert "move(document.getElementById('btnBrowserDrawerToggle'));" in index_html
     assert "move(document.querySelector('.titlebar-workflow-group'));" in index_html
-    assert "langSelector.hidden = true;" in index_html
     assert "topbarCluster.hidden = true;" in index_html
+    utility_start = index_html.index('<div class="titlebar-utility-actions" id="titlebarUtilityActions"')
+    utility_end = index_html.index('<div class="app-titlebar-center"', utility_start)
+    utility_actions = index_html[utility_start:utility_end]
+    assert 'id="titlebarLangSelector"' in utility_actions
+    assert "langSelector.hidden = true;" not in index_html
     assert "Language</div>" in index_html
     assert "switchLang('en')" in index_html
 
@@ -292,8 +296,8 @@ def test_titlebar_actions_stay_out_of_the_status_cluster() -> None:
 def test_titlebar_actions_do_not_expand_hidden_admin_buttons_on_focus() -> None:
     style_css = STYLE_CSS.read_text(encoding="utf-8")
 
-    assert ".titlebar-actions #btnCastToggle," in style_css
-    assert ".titlebar-actions:focus-within #btnCastToggle" not in style_css
+    assert ".titlebar-utility-actions #btnCastToggle," in style_css
+    assert ".titlebar-utility-actions:focus-within #btnCastToggle" not in style_css
     assert ".titlebar-actions:focus-within #btnRebootSidekick" not in style_css
     assert ".titlebar-actions:focus-within #btnShutdownSidekick" not in style_css
 
@@ -351,12 +355,12 @@ def test_titlebar_workspace_switch_is_stable_and_always_visible() -> None:
 def test_titlebar_destructive_actions_do_not_depend_on_hover() -> None:
     style_css = STYLE_CSS.read_text(encoding="utf-8")
 
-    assert ".titlebar-actions #btnCastToggle," in style_css
+    assert ".titlebar-utility-actions #btnCastToggle," in style_css
     assert ".titlebar-actions #btnRebootSidekick," in style_css
     assert ".titlebar-actions #btnShutdownSidekick{display:none!important;}" in style_css
-    assert ".titlebar-actions:hover #btnCastToggle," not in style_css
+    assert ".titlebar-utility-actions:hover #btnCastToggle," not in style_css
     assert ".titlebar-actions:hover #btnRebootSidekick," not in style_css
-    assert ".titlebar-actions:focus-within #btnCastToggle" not in style_css
+    assert ".titlebar-utility-actions:focus-within #btnCastToggle" not in style_css
     assert ".titlebar-actions:focus-within #btnRebootSidekick" not in style_css
     assert ".titlebar-actions:focus-within #btnShutdownSidekick" not in style_css
 

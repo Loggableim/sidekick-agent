@@ -609,6 +609,14 @@ DEFAULT_CONFIG = {
         "cleanup_on_exit": True,
     },
 
+    # Durable plan/execute workflow. Runtime enforcement stays enabled by
+    # default; turning off the UI affordance never turns an unapproved plan
+    # into permission to mutate files or external systems.
+    "workflows": {
+        "enabled": True,
+        "require_explicit_approval": True,
+    },
+
     "web": {
         "backend": "",           # shared fallback — applies to both search and extract
         "search_backend": "",    # per-capability override for web_search (e.g. "searxng")
@@ -3084,7 +3092,7 @@ def check_config_version() -> Tuple[int, int]:
 _KNOWN_ROOT_KEYS = {
     "_config_version", "model", "providers", "fallback_model",
     "fallback_providers", "credential_pool_strategies", "toolsets",
-    "agent", "terminal", "display", "compression", "delegation",
+    "agent", "terminal", "display", "compression", "delegation", "workflows",
     "auxiliary", "custom_providers", "context", "memory", "gateway",
     "sessions",
 }

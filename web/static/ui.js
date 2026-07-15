@@ -5153,7 +5153,14 @@ function setBusy(v){
     stopCtxPolling();
     if(typeof _clearActivityElapsedTimer==='function') _clearActivityElapsedTimer();
     setStatus('');
-    setComposerStatus('');
+    const workflowStatus=window._workflowStatusSticky;
+    const activeSid=S.session&&S.session.session_id;
+    const isCurrentTerminalWorkflow=workflowStatus&&workflowStatus.sessionId===activeSid&&
+      (workflowStatus.phase==='completed'||workflowStatus.phase==='rejected'||workflowStatus.phase==='failed');
+    const workflowText=isCurrentTerminalWorkflow&&typeof _workflowStatusText==='function'
+      ? _workflowStatusText(workflowStatus.phase)
+      : '';
+    setComposerStatus(workflowText);
     const sid=_queueDrainSid||(S.session&&S.session.session_id);
     _queueDrainSid=null;
     updateQueueBadge(sid);
@@ -7545,23 +7552,26 @@ function renderMessages(options){
       seg.dataset.planStatus=m._planStatus||'pending';
       const planContent=String(m._planText||displayContent||content||'').trim();
       const planStatus=m._planStatus||'pending';
-      const isResolved=planStatus==='accepted'||planStatus==='rejected';
+      const planPhase=m._planPhase||'';
+      const isResolved=planStatus==='accepted'||planStatus==='rejected'||planStatus==='failed';
+      const isActionable=planStatus==='pending';
       const isCollapsed=!!_isPlanCollapsed(rawIdx);
+      const planLabel=planStatus==='accepted'
+        ? (planPhase==='executing'?'⚙ Executing approved plan':planPhase==='completed'?'✅ Execution completed':'✅ Plan accepted')
+        : (planStatus==='rejected'?'❌ Plan rejected':planStatus==='failed'?'❌ Workflow failed':'Plan');
       seg.insertAdjacentHTML('beforeend',
         '<div class="plan-card'+(isResolved?' plan-card--resolved':' plan-card--pending')+(isCollapsed?' plan-card-collapsed':'')+'">'+
           '<div class="plan-card-header">'+
             '<span class="plan-card-icon">📋</span>'+
-            '<span class="plan-card-label">'+(isResolved
-              ? (planStatus==='accepted'?'✅ Plan accepted':'❌ Plan rejected')
-              : 'Plan')+'</span>'+
+            '<span class="plan-card-label">'+planLabel+'</span>'+
             (isResolved ? '' : '<span class="plan-card-minimize-btn" onclick="_togglePlanCollapse(this)" title="Minimize">'+(isCollapsed?'+':'−')+'</span>')+
           '</div>'+
           '<div class="plan-card-body">'+
             renderMd(planContent)+
           '</div>'+
-          (isResolved ? '' :
+          (isActionable ?
             '<div class="plan-card-actions">'+
-              '<button class="plan-btn plan-btn--accept" onclick="_acceptPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">✓ Accept</button>'+
+              '<button class="plan-btn plan-btn--accept" onclick="_acceptPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">✓ Accept &amp; Execute</button>'+
               '<button class="plan-btn plan-btn--revise" onclick="_showPlanReviseForm('+rawIdx+')">✎ Revise</button>'+
               '<button class="plan-btn plan-btn--reject" onclick="_rejectPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">✕ Reject</button>'+
             '</div>'+
@@ -7572,6 +7582,7 @@ function renderMessages(options){
                 '<button class="plan-btn plan-btn--cancel" onclick="_cancelPlanRevision('+rawIdx+')">Cancel</button>'+
               '</div>'+
             '</div>'
+            : ''
           )+
         '</div>'
       );
@@ -10467,6 +10478,8 @@ function escAttr(str){
     .replace(/>/g,'&gt;');
 }
 
+const _PLAN_COLLAPSED = new Set();
+
 function _isPlanCollapsed(rawIdx){
   return _PLAN_COLLAPSED.has(rawIdx);
 }
@@ -10491,6 +10504,11 @@ async function _acceptPlan(planId, rawIdx){
   if(!S.session) return;
   const sid=S.session.session_id;
   if(!sid) return;
+  const plan=window._activePlan&&window._activePlan.id===planId?window._activePlan:null;
+  if(!plan||!plan.version){
+    if(typeof showToast==='function') showToast('Plan is stale - reload the session before executing',3500,'warning');
+    return;
+  }
   // Immediately update UI state to show acceptance
   const msg=S.messages[rawIdx];
   if(msg){ msg._planStatus='accepted'; }
@@ -10499,14 +10517,18 @@ async function _acceptPlan(planId, rawIdx){
   if(typeof setComposerStatus==='function') setComposerStatus('✅ Plan accepted — starting implementation…');
   // Fire the API call — the server streams code via SSE
   try{
-    await api('/api/chat/plan/accept',{
+    const response=await api('/api/workflows/'+encodeURIComponent(planId)+'/approve',{
       method:'POST',
       body:JSON.stringify({
         session_id:sid,
+        version:plan.version,
+        profile:S.activeProfile||S.session.profile||'default',
         workspace:S.session.workspace||'',
         model:S.session.model||''
       })
     });
+    if(response.workflow&&typeof _applyWorkflowState==='function') _applyWorkflowState(response.workflow);
+    if(response.stream_id&&typeof attachLiveStream==='function') attachLiveStream(sid,response.stream_id,[]);
   }catch(err){
     // On error, revert plan status
     if(msg){ msg._planStatus='pending'; }
@@ -10516,15 +10538,21 @@ async function _acceptPlan(planId, rawIdx){
   }
 }
 
-function _rejectPlan(planId, rawIdx){
+async function _rejectPlan(planId, rawIdx){
   if(!S.session) return;
-  const msg=S.messages[rawIdx];
-  if(msg){
-    msg._planStatus='rejected';
-    msg._isPlan=false;  // Remove plan card, show the original raw content
+  const sid=S.session.session_id;
+  const plan=window._activePlan&&window._activePlan.id===planId?window._activePlan:null;
+  if(!sid||!plan||!plan.version) return;
+  try{
+    const response=await api('/api/workflows/'+encodeURIComponent(planId)+'/reject',{
+      method:'POST',
+      body:JSON.stringify({session_id:sid,version:plan.version,profile:S.activeProfile||S.session.profile||'default'})
+    });
+    if(response.workflow&&typeof _applyWorkflowState==='function') _applyWorkflowState(response.workflow);
+    if(typeof showToast==='function') showToast('Plan rejected',2000);
+  }catch(err){
+    if(typeof showToast==='function') showToast('Plan rejection failed: '+err.message,3500,'error');
   }
-  renderMessages({preserveScroll:true});
-  if(typeof showToast==='function') showToast('✕ Plan rejected',2000);
 }
 
 function _showPlanReviseForm(rawIdx){
@@ -10547,6 +10575,13 @@ async function _submitPlanRevision(rawIdx){
   if(!S.session) return;
   const sid=S.session.session_id;
   if(!sid) return;
+  const cardMessage=S.messages[rawIdx];
+  const planId=cardMessage&&cardMessage._planId;
+  const plan=window._activePlan&&window._activePlan.id===planId?window._activePlan:null;
+  if(!plan||!plan.version){
+    if(typeof showToast==='function') showToast('Plan is stale - reload the session before revising',3500,'warning');
+    return;
+  }
   const form=document.getElementById('planReviseForm_'+rawIdx);
   if(!form) return;
   const ta=form.querySelector('.plan-revise-input');
@@ -10562,15 +10597,19 @@ async function _submitPlanRevision(rawIdx){
   if(sendBtn) sendBtn.disabled=true;
   if(typeof setComposerStatus==='function') setComposerStatus('✎ Sending revision feedback…');
   try{
-    await api('/api/chat/plan/revise',{
+    const response=await api('/api/workflows/'+encodeURIComponent(plan.id)+'/revise',{
       method:'POST',
       body:JSON.stringify({
         session_id:sid,
+        version:plan.version,
         feedback:feedback,
+        profile:S.activeProfile||S.session.profile||'default',
         workspace:S.session.workspace||'',
         model:S.session.model||''
       })
     });
+    if(response.workflow&&typeof _applyWorkflowState==='function') _applyWorkflowState(response.workflow);
+    if(response.stream_id&&typeof attachLiveStream==='function') attachLiveStream(sid,response.stream_id,[]);
     // Mark the plan as awaiting revision
     const msg=S.messages[rawIdx];
     if(msg) msg._planStatus='revising';

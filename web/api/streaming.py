@@ -2281,6 +2281,8 @@ def _run_agent_streaming(
     goal_related=False,
     mode="",
     sandbox_disabled=False,
+    workflow_plan_id="",
+    workflow_version=None,
 ):
     """Run agent in background thread, writing SSE events to STREAMS[stream_id].
 
@@ -2488,6 +2490,7 @@ def _run_agent_streaming(
     _checkpoint_stop = None
     _ckpt_thread = None
     _agent_lock = None
+    _profile_home = None
     try:
         s = get_session(session_id)
         update_active_run(stream_id, phase="running", session_id=session_id)
@@ -3008,6 +3011,20 @@ def _run_agent_streaming(
                 except Exception:
                     logger.debug('Failed to update live prompt estimate on tool completion', exc_info=True)
 
+            if mode == "execute":
+                # This is intentionally immediately before AIAgent construction.
+                # Route-level validation prevents forged API calls, while this
+                # second check prevents an internal/direct worker invocation
+                # from turning a stale approval into a mutating agent run.
+                from runtime.workflows import WorkflowStore
+
+                WorkflowStore(profile_home=Path(_profile_home)).assert_execution_authorized(
+                    session_id,
+                    workflow_plan_id,
+                    workflow_version,
+                    stream_id=stream_id,
+                )
+
             _AIAgent = _get_ai_agent()
             if _AIAgent is None:
                 raise ImportError(_aiagent_import_error_detail())
@@ -3486,13 +3503,64 @@ def _run_agent_streaming(
                 workspace_system_msg += plan_instruction
 
             user_message = _build_native_multimodal_message(workspace_ctx, msg_text, attachments, workspace, cfg=_cfg)
-            result = agent.run_conversation(
-                user_message=user_message,
-                system_message=workspace_system_msg,
-                conversation_history=_sanitize_messages_for_api(_previous_context_messages),
-                task_id=session_id,
-                persist_user_message=msg_text,
-            )
+            from runtime.workflows import workflow_context
+
+            with workflow_context(
+                mode=mode,
+                session_id=session_id,
+                plan_id=workflow_plan_id,
+            ):
+                result = agent.run_conversation(
+                    user_message=user_message,
+                    system_message=workspace_system_msg,
+                    conversation_history=_sanitize_messages_for_api(_previous_context_messages),
+                    task_id=session_id,
+                    persist_user_message=msg_text,
+                )
+            # A plan is usable only after the server has persisted the exact
+            # generated markdown against the requested version. This keeps
+            # rendered chat text from becoming an implicit approval record.
+            if mode == "plan" and workflow_plan_id and isinstance(workflow_version, int):
+                _plan_markdown = ""
+                for _workflow_message in reversed(result.get("messages") or []):
+                    if not isinstance(_workflow_message, dict) or _workflow_message.get("role") != "assistant":
+                        continue
+                    _raw_plan = _workflow_message.get("content")
+                    if isinstance(_raw_plan, str):
+                        _plan_markdown = _raw_plan.strip()
+                    elif isinstance(_raw_plan, list):
+                        _plan_markdown = "\n".join(
+                            str(part.get("text") or "")
+                            for part in _raw_plan
+                            if isinstance(part, dict)
+                        ).strip()
+                    if _plan_markdown:
+                        break
+                try:
+                    from runtime.workflows import WorkflowStore
+
+                    _workflow_store = WorkflowStore(profile_home=Path(_profile_home))
+                    if not _plan_markdown:
+                        raise RuntimeError("The planner returned no plan text")
+                    _workflow_state = _workflow_store.record_plan(
+                        session_id,
+                        workflow_plan_id,
+                        workflow_version,
+                        _plan_markdown,
+                    )
+                    put("workflow", _workflow_state)
+                    put("plan", _workflow_state)
+                except Exception as _workflow_error:
+                    logger.warning("Workflow plan persistence failed for %s: %s", session_id, _workflow_error)
+                    try:
+                        _workflow_state = WorkflowStore(profile_home=Path(_profile_home)).fail(
+                            session_id,
+                            workflow_plan_id,
+                            reason=str(_workflow_error),
+                        )
+                        put("workflow", _workflow_state)
+                    except Exception:
+                        pass
             # ── Ephemeral mode (/btw): deliver answer, skip persistence, cleanup ──
             if ephemeral:
                 _answer = ''
@@ -3612,13 +3680,20 @@ def _run_agent_streaming(
                             _self_healed = True
                             _token_sent = False
                             try:
-                                _heal_result = agent.run_conversation(
-                                    user_message=user_message,
-                                    system_message=workspace_system_msg,
-                                    conversation_history=_sanitize_messages_for_api(_previous_context_messages),
-                                    task_id=session_id,
-                                    persist_user_message=msg_text,
-                                )
+                                from runtime.workflows import workflow_context
+
+                                with workflow_context(
+                                    mode=mode,
+                                    session_id=session_id,
+                                    plan_id=workflow_plan_id,
+                                ):
+                                    _heal_result = agent.run_conversation(
+                                        user_message=user_message,
+                                        system_message=workspace_system_msg,
+                                        conversation_history=_sanitize_messages_for_api(_previous_context_messages),
+                                        task_id=session_id,
+                                        persist_user_message=msg_text,
+                                    )
                                 _heal_ok = any(
                                     m.get('role') == 'assistant' and str(m.get('content') or '').strip()
                                     for m in (_heal_result.get('messages') or [])
@@ -4209,6 +4284,22 @@ def _run_agent_streaming(
                         })
             except Exception as _goal_exc:
                 logger.debug("Goal continuation hook failed for session %s: %s", session_id, _goal_exc)
+            if mode == "execute" and workflow_plan_id:
+                try:
+                    from runtime.workflows import WorkflowStore
+
+                    _workflow_store = WorkflowStore(profile_home=Path(_profile_home))
+                    if result.get("failed") or result.get("error"):
+                        _workflow_state = _workflow_store.fail(
+                            session_id,
+                            workflow_plan_id,
+                            reason=str(result.get("error") or "execution failed"),
+                        )
+                    else:
+                        _workflow_state = _workflow_store.finish_execution(session_id, workflow_plan_id)
+                    put("workflow", _workflow_state)
+                except Exception as _workflow_error:
+                    logger.warning("Workflow execution finalization failed for %s: %s", session_id, _workflow_error)
             raw_session = s.compact() | {'messages': s.messages, 'tool_calls': tool_calls}
             put('done', {'session': redact_session_data(raw_session), 'usage': usage})
             # Emit one last metering packet for the live message-header TPS label.
@@ -4272,6 +4363,23 @@ def _run_agent_streaming(
     except Exception as e:
         print('[webui] stream error:\n' + traceback.format_exc(), flush=True)
         err_str = str(e)
+        if workflow_plan_id:
+            try:
+                from runtime.workflows import WorkflowStore
+
+                _workflow_store = (
+                    WorkflowStore(profile_home=Path(_profile_home))
+                    if _profile_home
+                    else WorkflowStore()
+                )
+                _workflow_state = _workflow_store.fail(
+                    session_id,
+                    workflow_plan_id,
+                    reason=err_str,
+                )
+                put("workflow", _workflow_state)
+            except Exception:
+                pass
         # Sanitize HTML from provider error responses — some providers return
         # full HTML pages (e.g. nginx "404 page not found") instead of JSON errors.
         # Strip HTML tags to avoid rendering raw markup in the chat message.
