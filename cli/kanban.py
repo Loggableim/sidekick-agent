@@ -96,6 +96,21 @@ def _parse_workspace_flag(value: str) -> tuple[str, Optional[str]]:
     )
 
 
+def _effective_dispatch_cap(requested: Optional[int]) -> int:
+    """Return the configured hard cap, optionally lowered by ``--max``."""
+    try:
+        from cli.config import load_config
+
+        configured = kb.effective_max_spawn(
+            (load_config().get("kanban", {}) or {}).get("max_spawn")
+        )
+    except Exception:
+        configured = kb.DEFAULT_MAX_SPAWN
+    if requested is None:
+        return configured
+    return min(configured, kb.effective_max_spawn(requested))
+
+
 def _check_dispatcher_presence() -> tuple[bool, str]:
     """Return ``(running, message)``.
 
@@ -1687,7 +1702,7 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
         res = kb.dispatch_once(
             conn,
             dry_run=args.dry_run,
-            max_spawn=args.max,
+            max_spawn=_effective_dispatch_cap(args.max),
             failure_limit=getattr(args, "failure_limit", kb.DEFAULT_SPAWN_FAILURE_LIMIT),
         )
     if getattr(args, "json", False):
@@ -1857,7 +1872,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
     try:
         kb.run_daemon(
             interval=args.interval,
-            max_spawn=args.max,
+            max_spawn=_effective_dispatch_cap(args.max),
             failure_limit=getattr(args, "failure_limit", kb.DEFAULT_SPAWN_FAILURE_LIMIT),
             on_tick=_on_tick,
         )

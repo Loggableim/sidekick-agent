@@ -666,6 +666,17 @@ from runtime.gateway.whatsapp_identity import (
 logger = logging.getLogger(__name__)
 
 
+def _kanban_board_dispatch_cap(
+    max_spawn: int,
+    running_by_board: dict[str, int],
+    board_slug: str,
+    spawned_this_tick: int,
+) -> int:
+    """Return this board's local cap within the shared gateway budget."""
+    remaining = max(0, max_spawn - sum(running_by_board.values()) - spawned_this_tick)
+    return running_by_board.get(board_slug, 0) + remaining
+
+
 # Sentinel placed into _running_agents immediately when a session starts
 # processing, *before* any await.  Prevents a second message for the same
 # session from bypassing the "already running" guard during the async gap
@@ -4549,10 +4560,10 @@ class GatewayRunner:
         interval = float(kanban_cfg.get("dispatch_interval_seconds", 60) or 60)
         interval = max(interval, 1.0)  # sanity floor — tighter than this is a footgun
 
-        # Read max_spawn config to limit concurrent kanban tasks
-        max_spawn = kanban_cfg.get("max_spawn", None)
-        if max_spawn is not None:
-            logger.info(f"kanban dispatcher: max_spawn={max_spawn}")
+        # A hard gateway-wide cap prevents a large ready queue from spawning
+        # thousands of Sidekick process trees in a single tick.
+        max_spawn = _kb.effective_max_spawn(kanban_cfg.get("max_spawn"))
+        logger.info("kanban dispatcher: max_spawn=%d", max_spawn)
 
         raw_failure_limit = kanban_cfg.get("failure_limit", _kb.DEFAULT_FAILURE_LIMIT)
         try:
@@ -4584,7 +4595,7 @@ class GatewayRunner:
         bad_ticks = 0
         last_warn_at = 0
 
-        def _tick_once_for_board(slug: str) -> "Optional[object]":
+        def _tick_once_for_board(slug: str, board_cap: int) -> "Optional[object]":
             """Run one dispatch_once for a specific board.
 
             Runs in a worker thread via `asyncio.to_thread`. `board=slug`
@@ -4605,7 +4616,7 @@ class GatewayRunner:
                 return _kb.dispatch_once(
                     conn,
                     board=slug,
-                    max_spawn=max_spawn,
+                    max_spawn=board_cap,
                     failure_limit=failure_limit,
                 )
             except Exception:
@@ -4629,10 +4640,46 @@ class GatewayRunner:
                 boards = _kb.list_boards(include_archived=False)
             except Exception:
                 boards = [_kb.read_board_metadata(_kb.DEFAULT_BOARD)]
+            # dispatch_once enforces a live cap per board. Allocate the
+            # gateway-wide budget across boards so several boards cannot each
+            # start max_spawn workers in the same tick.
+            running_by_board: dict[str, int] = {}
+            for b in boards:
+                slug = b.get("slug") or _kb.DEFAULT_BOARD
+                conn = None
+                try:
+                    conn = _kb.connect(board=slug)
+                    running_by_board[slug] = int(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM tasks WHERE status = 'running'"
+                        ).fetchone()[0]
+                    )
+                except Exception:
+                    logger.exception(
+                        "kanban dispatcher: cannot count running workers on board %s", slug
+                    )
+                    running_by_board[slug] = max_spawn
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+
+            spawned_this_tick = 0
             out: list[tuple[str, "Optional[object]"]] = []
             for b in boards:
                 slug = b.get("slug") or _kb.DEFAULT_BOARD
-                out.append((slug, _tick_once_for_board(slug)))
+                # dispatch_once compares its cap only with workers in this
+                # board, so include existing board workers plus its allocated
+                # share of the remaining gateway-wide capacity.
+                board_cap = _kanban_board_dispatch_cap(
+                    max_spawn, running_by_board, slug, spawned_this_tick
+                )
+                result = _tick_once_for_board(slug, board_cap)
+                out.append((slug, result))
+                if result is not None:
+                    spawned_this_tick += len(getattr(result, "spawned", []) or [])
             return out
 
         def _ready_nonempty() -> bool:

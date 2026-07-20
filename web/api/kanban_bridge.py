@@ -713,7 +713,13 @@ def _dispatch_payload(parsed):
     board = _resolve_board(parsed)
     kb = _kb()
     dry_run = _bool_query(parsed, "dry_run", False)
-    max_spawn = _int_query(parsed, "max", 8, minimum=1, maximum=100)
+    from cli.config import load_config
+
+    configured_max = kb.effective_max_spawn(
+        (load_config().get("kanban", {}) or {}).get("max_spawn")
+    )
+    requested_max = _int_query(parsed, "max", configured_max, minimum=1, maximum=100)
+    max_spawn = min(configured_max, kb.effective_max_spawn(requested_max))
     if not hasattr(kb, "dispatch_once"):
         raise ValueError("dispatcher is unavailable")
     with _conn(board=board) as conn:

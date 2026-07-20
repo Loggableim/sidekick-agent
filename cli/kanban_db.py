@@ -2909,6 +2909,11 @@ DEFAULT_FAILURE_LIMIT = 2
 # Legacy alias — callers / tests still reference the old name.
 DEFAULT_SPAWN_FAILURE_LIMIT = DEFAULT_FAILURE_LIMIT
 
+# A Kanban worker is a Sidekick process tree. Keep the ceiling hard so a
+# large ready queue cannot exhaust Windows commit space or handles in one tick.
+DEFAULT_MAX_SPAWN = 16
+MIN_MAX_SPAWN = 1
+
 # Max bytes to keep in a single worker log file. The dispatcher truncates
 # and rotates on spawn if the file is larger than this at spawn time.
 DEFAULT_LOG_ROTATE_BYTES = 2 * 1024 * 1024   # 2 MiB
@@ -3683,13 +3688,24 @@ def has_spawnable_ready(conn: sqlite3.Connection) -> bool:
     return False
 
 
+def effective_max_spawn(value: Any = None) -> int:
+    """Return a safe worker cap from config, CLI, or HTTP input."""
+    if value is None:
+        return DEFAULT_MAX_SPAWN
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_SPAWN
+    return max(MIN_MAX_SPAWN, min(parsed, DEFAULT_MAX_SPAWN))
+
+
 def dispatch_once(
     conn: sqlite3.Connection,
     *,
     spawn_fn=None,
     ttl_seconds: int = DEFAULT_CLAIM_TTL_SECONDS,
     dry_run: bool = False,
-    max_spawn: Optional[int] = None,
+    max_spawn: Optional[int] = DEFAULT_MAX_SPAWN,
     failure_limit: int = DEFAULT_SPAWN_FAILURE_LIMIT,
     board: Optional[str] = None,
 ) -> DispatchResult:
@@ -3767,6 +3783,8 @@ def dispatch_once(
     result.timed_out = enforce_max_runtime(conn)
     result.promoted = recompute_ready(conn)
 
+    max_spawn = effective_max_spawn(max_spawn)
+
     # Count tasks already running so max_spawn enforces concurrency rather
     # than a per-tick spawn budget. See the docstring above for the full
     # rationale; the short version is that a 60-second tick interval with a
@@ -3774,13 +3792,11 @@ def dispatch_once(
     # board, since "running" tasks aren't reclaimed by completion alone —
     # they sit in status='running' until the worker calls
     # kanban_complete/kanban_block (or the dispatcher TTL-reclaims them).
-    running_count = 0
-    if max_spawn is not None:
-        running_count = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM tasks WHERE status = 'running'"
-            ).fetchone()[0]
-        )
+    running_count = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status = 'running'"
+        ).fetchone()[0]
+    )
 
     ready_rows = conn.execute(
         "SELECT id, assignee FROM tasks "
@@ -3789,7 +3805,7 @@ def dispatch_once(
     ).fetchall()
     spawned = 0
     for row in ready_rows:
-        if max_spawn is not None and running_count + spawned >= max_spawn:
+        if running_count + spawned >= max_spawn:
             break
         if not row["assignee"]:
             result.skipped_unassigned.append(row["id"])
