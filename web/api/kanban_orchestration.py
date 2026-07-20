@@ -39,6 +39,19 @@ def session_has_kanban_orchestration(session: Any) -> bool:
     return "kanban" in _toolset_list(getattr(session, "enabled_toolsets", None), None)
 
 
+def webui_toolsets_for_session(
+    toolsets: list[str],
+    session: Any,
+    *,
+    profile_has_kanban: bool,
+) -> list[str]:
+    """Filter inferred WebUI toolsets without changing profile configuration."""
+    resolved = list(toolsets or [])
+    if profile_has_kanban or session_has_kanban_orchestration(session):
+        return resolved
+    return [toolset for toolset in resolved if toolset != "kanban"]
+
+
 def activate_kanban_orchestration(
     session: Any,
     message: str | None,

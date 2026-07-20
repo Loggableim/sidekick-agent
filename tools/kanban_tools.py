@@ -70,6 +70,8 @@ def _check_kanban_mode() -> bool:
     """
     if os.environ.get("SIDEKICK_KANBAN_TASK"):
         return True
+    if os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED"):
+        return True
     return _profile_has_kanban_toolset()
 
 
@@ -84,6 +86,8 @@ def _check_kanban_orchestrator_mode() -> bool:
     """
     if os.environ.get("SIDEKICK_KANBAN_TASK"):
         return False
+    if os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED"):
+        return True
     return _profile_has_kanban_toolset()
 
 

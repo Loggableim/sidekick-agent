@@ -32,6 +32,7 @@ from web.api.agent_sessions import (
     read_session_lineage_report,
 )
 from web.api.compression_anchor import visible_messages_for_anchor
+from web.api.kanban_orchestration import activate_kanban_orchestration
 from web.api.nova_paths import get_nova_state_snapshot_path
 
 logger = logging.getLogger(__name__)
@@ -10470,6 +10471,11 @@ def _start_chat_stream_for_session(
     diag.stage("session_lock_wait") if diag else None
     with session_lock:
         diag.stage("save_pending_state") if diag else None
+        activate_kanban_orchestration(
+            s,
+            msg,
+            _resolve_cli_toolsets(),
+        )
         _prepare_chat_start_session_for_stream(
             s,
             msg=msg,

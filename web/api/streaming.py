@@ -2314,6 +2314,7 @@ def _run_agent_streaming(
     old_cwd = None
     old_exec_ask = None
     old_session_key = None
+    old_kanban_orchestrated = None
     old_sidekick_home = None
     old_profile_env = {}
 
@@ -2491,6 +2492,11 @@ def _run_agent_streaming(
     try:
         s = get_session(session_id)
         update_active_run(stream_id, phase="running", session_id=session_id)
+        try:
+            from web.api.kanban_orchestration import session_has_kanban_orchestration
+            _kanban_orchestrated = session_has_kanban_orchestration(s)
+        except Exception:
+            _kanban_orchestrated = False
         # Set up workspace context for this streaming thread so that
         # subsequent Session.save() and Session.load() calls use the
         # correct workspace-specific session directory.
@@ -2595,6 +2601,7 @@ def _run_agent_streaming(
             old_cwd = os.environ.get('TERMINAL_CWD')
             old_exec_ask = os.environ.get('SIDEKICK_EXEC_ASK')
             old_session_key = os.environ.get('SIDEKICK_SESSION_KEY')
+            old_kanban_orchestrated = os.environ.get('SIDEKICK_KANBAN_ORCHESTRATED')
             old_sidekick_home = os.environ.get('SIDEKICK_HOME')
             old_browser_session_id = os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID')
             old_browser_base_url = os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL')
@@ -2604,6 +2611,10 @@ def _run_agent_streaming(
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['SIDEKICK_EXEC_ASK'] = '1'
             os.environ['SIDEKICK_SESSION_KEY'] = session_id
+            if _kanban_orchestrated:
+                os.environ['SIDEKICK_KANBAN_ORCHESTRATED'] = '1'
+            else:
+                os.environ.pop('SIDEKICK_KANBAN_ORCHESTRATED', None)
             os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
             os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
             os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
@@ -3087,6 +3098,18 @@ def _run_agent_streaming(
                         _toolsets = _override
             except Exception as _ts_err:
                 print(f"[webui] WARNING: failed to read per-session toolsets for {session_id}: {_ts_err}", flush=True)
+
+            from web.api.kanban_orchestration import webui_toolsets_for_session
+            try:
+                from tools.kanban_tools import _profile_has_kanban_toolset
+                _profile_has_kanban = bool(_profile_has_kanban_toolset())
+            except Exception:
+                _profile_has_kanban = False
+            _toolsets = webui_toolsets_for_session(
+                _toolsets,
+                s,
+                profile_has_kanban=_profile_has_kanban,
+            )
 
             # Fallback model from profile config (e.g. for rate-limit recovery)
             _fallback = _cfg.get('fallback_model') or _cfg.get('fallback_providers') or None
@@ -4261,6 +4284,10 @@ def _run_agent_streaming(
                 os.environ.pop('SIDEKICK_SESSION_KEY', None)
             else:
                 os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
+            if old_kanban_orchestrated is None:
+                os.environ.pop('SIDEKICK_KANBAN_ORCHESTRATED', None)
+            else:
+                os.environ['SIDEKICK_KANBAN_ORCHESTRATED'] = old_kanban_orchestrated
             _restore_streaming_home_env(old_sidekick_home)
             _restore_streaming_browser_env(
                 old_browser_session_id,
