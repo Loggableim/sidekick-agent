@@ -273,6 +273,30 @@ KANBAN_GUIDANCE = (
     "cross-agent handoffs that outlive one API loop."
 )
 
+WEBUI_KANBAN_ORCHESTRATION_GUIDANCE = (
+    "# WebUI Kanban orchestration protocol\n"
+    "The user explicitly asked for Kanban orchestration. Treat this as an "
+    "instruction to orchestrate on the active WebUI Kanban board for the "
+    "current workspace, not as a request for a generic explanation or a "
+    "different delegation mechanism.\n"
+    "\n"
+    "1. **Inspect the board.** Use `kanban_list` first so you see existing "
+    "tasks and avoid duplicate work. These tools are already connected to "
+    "the active WebUI board; do not substitute a global database or shell "
+    "commands.\n"
+    "2. **Decompose into concrete tasks.** Use `kanban_create` for each "
+    "independently executable work item. Every task must have a specific "
+    "title, enough context in its body, and an explicit concrete `assignee` "
+    "profile that the Dispatcher can execute.\n"
+    "3. **Express dependencies.** Use `kanban_link` for parent/child order "
+    "when one task depends on another. Keep the dependency graph minimal and "
+    "acyclic.\n"
+    "4. **Let the Dispatcher run the board.** Do not replace this workflow "
+    "with `delegate_task`, background prose, or merely describing what "
+    "could be done. Report the created task ids, assignees, and dependency "
+    "links after the board has been updated.\n"
+)
+
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
     "You MUST use your tools to take action — do not describe what you would do "

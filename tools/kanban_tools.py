@@ -43,6 +43,14 @@ KANBAN_LIST_DEFAULT_LIMIT = 50
 KANBAN_LIST_MAX_LIMIT = 200
 
 
+def _webui_kanban_orchestrated() -> bool:
+    try:
+        from web.api.kanban_orchestration import is_webui_kanban_orchestrated
+        return is_webui_kanban_orchestrated()
+    except Exception:
+        return bool(os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED"))
+
+
 def _profile_has_kanban_toolset() -> bool:
     # Uses load_config() which has mtime-based caching, so this adds
     # negligible overhead. The check_fn results are further TTL-cached
@@ -70,7 +78,7 @@ def _check_kanban_mode() -> bool:
     """
     if os.environ.get("SIDEKICK_KANBAN_TASK"):
         return True
-    if os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED"):
+    if _webui_kanban_orchestrated():
         return True
     return _profile_has_kanban_toolset()
 
@@ -86,7 +94,7 @@ def _check_kanban_orchestrator_mode() -> bool:
     """
     if os.environ.get("SIDEKICK_KANBAN_TASK"):
         return False
-    if os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED"):
+    if _webui_kanban_orchestrated():
         return True
     return _profile_has_kanban_toolset()
 
@@ -152,6 +160,13 @@ def _connect():
     """Import + connect lazily so the module imports cleanly in non-kanban
     contexts (e.g. test rigs that import every tool module)."""
     from sidekick_cli import kanban_db as kb
+    if _webui_kanban_orchestrated():
+        # The WebUI streaming thread has already selected the active
+        # workspace. The bridge temporarily pins that workspace while
+        # resolving the active board, so model calls hit the same DB the
+        # visible WebUI board uses instead of the global fallback DB.
+        from web.api.kanban_bridge import _conn as webui_conn
+        return kb, webui_conn()
     return kb, kb.connect()
 
 

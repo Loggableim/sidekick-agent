@@ -146,7 +146,7 @@ from runtime.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
     MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
     SIDEKICK_AGENT_HELP_GUIDANCE,
-    KANBAN_GUIDANCE, CORE_WORK_GUIDANCE,
+    KANBAN_GUIDANCE, WEBUI_KANBAN_ORCHESTRATION_GUIDANCE, CORE_WORK_GUIDANCE,
 )
 from runtime.model_metadata import (
     fetch_model_metadata,
@@ -5712,7 +5712,20 @@ class AIAgent:
         # SIDEKICK_KANBAN_TASK env var). Normal chat sessions never see
         # this block.
         if "kanban_show" in self.valid_tool_names:
-            tool_guidance.append(KANBAN_GUIDANCE)
+            try:
+                from web.api.kanban_orchestration import is_webui_kanban_orchestrated
+                _webui_kanban_orchestrated = is_webui_kanban_orchestrated()
+            except Exception:
+                _webui_kanban_orchestrated = bool(
+                    os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED")
+                )
+            if (
+                _webui_kanban_orchestrated
+                and not os.environ.get("SIDEKICK_KANBAN_TASK")
+            ):
+                tool_guidance.append(WEBUI_KANBAN_ORCHESTRATION_GUIDANCE)
+            else:
+                tool_guidance.append(KANBAN_GUIDANCE)
         if tool_guidance:
             stable_parts.append(" ".join(tool_guidance))
 

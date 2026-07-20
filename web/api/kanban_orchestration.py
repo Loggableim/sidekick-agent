@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import threading
 from typing import Any
 
 
@@ -10,6 +12,27 @@ _ORCHESTRATION_VERB = (
     r"(?:orchestriert|orchestriere|orchestrieren|orchestrier|"
     r"orchestrate|orchestrated|orchestrating)"
 )
+_KANBAN_ORCHESTRATION_LOCAL = threading.local()
+
+
+def set_webui_kanban_orchestration(enabled: bool) -> None:
+    """Set the WebUI orchestration marker for the current agent thread."""
+    _KANBAN_ORCHESTRATION_LOCAL.enabled = bool(enabled)
+
+
+def clear_webui_kanban_orchestration() -> None:
+    """Clear the current thread's WebUI orchestration marker."""
+    try:
+        del _KANBAN_ORCHESTRATION_LOCAL.enabled
+    except AttributeError:
+        pass
+
+
+def is_webui_kanban_orchestrated() -> bool:
+    """Return the thread-safe WebUI marker, with an env fallback for workers/tests."""
+    if hasattr(_KANBAN_ORCHESTRATION_LOCAL, "enabled"):
+        return bool(_KANBAN_ORCHESTRATION_LOCAL.enabled)
+    return bool(os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED"))
 
 
 def is_kanban_orchestration_request(message: str | None) -> bool:

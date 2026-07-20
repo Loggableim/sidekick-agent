@@ -62,3 +62,25 @@ def test_kanban_guards_accept_webui_orchestration_marker(monkeypatch):
 
     assert kanban_tools._check_kanban_mode() is True
     assert kanban_tools._check_kanban_orchestrator_mode() is True
+
+
+def test_webui_connection_uses_active_board_bridge(monkeypatch):
+    from tools import kanban_tools
+    from web.api import kanban_bridge
+
+    sentinel = object()
+    monkeypatch.setenv("SIDEKICK_KANBAN_ORCHESTRATED", "1")
+    monkeypatch.setattr(kanban_bridge, "_conn", lambda: sentinel)
+
+    _, connection = kanban_tools._connect()
+
+    assert connection is sentinel
+
+
+def test_webui_guidance_describes_board_orchestration():
+    from runtime.prompt_builder import WEBUI_KANBAN_ORCHESTRATION_GUIDANCE
+
+    assert "active WebUI Kanban board" in WEBUI_KANBAN_ORCHESTRATION_GUIDANCE
+    assert "kanban_list" in WEBUI_KANBAN_ORCHESTRATION_GUIDANCE
+    assert "kanban_create" in WEBUI_KANBAN_ORCHESTRATION_GUIDANCE
+    assert "kanban_link" in WEBUI_KANBAN_ORCHESTRATION_GUIDANCE
