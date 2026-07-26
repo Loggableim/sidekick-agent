@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -501,24 +502,23 @@ def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path)
     sidekick_home = tmp_path / "home"
     monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
     client, headers = _webui_client()
-    workspace_dir = sidekick_home / "workspace"
-    workspace_dir.mkdir(parents=True, exist_ok=True)
 
     created_response = client.post("/api/session/new", json={"title": "Chat Session"}, headers=headers)
     assert created_response.status_code == 200
     session_id = created_response.json()["session"]["session_id"]
 
-    updated_response = client.post(
-        "/api/session/update",
-        json={
-            "session_id": session_id,
-            "workspace": str(workspace_dir),
-        },
-        headers=headers,
-    )
-    assert updated_response.status_code == 200
-    updated = updated_response.json()
-    assert updated["session"]["workspace"] == str(workspace_dir)
+    with tempfile.TemporaryDirectory(prefix="sidekick-test-workspace-", dir=Path.home()) as workspace_dir:
+        updated_response = client.post(
+            "/api/session/update",
+            json={
+                "session_id": session_id,
+                "workspace": workspace_dir,
+            },
+            headers=headers,
+        )
+        assert updated_response.status_code == 200
+        updated = updated_response.json()
+        assert updated["session"]["workspace"] == workspace_dir
 
 
 def test_web_server_root_serves_html(monkeypatch, tmp_path):
