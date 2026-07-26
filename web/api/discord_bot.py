@@ -69,6 +69,12 @@ def _api(method, path, data=None):
     """Make Discord API call via urllib (stdlib, no requests dep)"""
     import urllib.request, urllib.error
     url = f'https://discord.com/api/v10{path}'
+    if not _active_bot_token():
+        return {
+            'error': True,
+            'message': 'Discord bot token is not configured',
+            'status': 503,
+        }
     hdrs = _get_headers()
     if data is not None:
         body = json.dumps(data).encode()

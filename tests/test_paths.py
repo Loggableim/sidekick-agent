@@ -512,15 +512,15 @@ def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path)
         json={
             "session_id": session_id,
             "workspace": str(workspace_dir),
-            "model": "gpt-test",
-            "model_provider": "test-provider",
+            "model": "gpt-4o-mini",
+            "model_provider": "openai",
         },
         headers=headers,
     )
     assert updated_response.status_code == 200
     updated = updated_response.json()
-    assert updated["session"]["model"] == "gpt-test"
-    assert updated["session"]["model_provider"] == "test-provider"
+    assert updated["session"]["model"] == "gpt-4o-mini"
+    assert updated["session"]["model_provider"] == "openai"
 
 
 def test_web_server_root_serves_html(monkeypatch, tmp_path):

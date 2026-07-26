@@ -19,7 +19,10 @@ def test_core_work_guidance_covers_evidence_scope_and_verification():
 def test_agent_injects_core_work_guidance_for_custom_souls_too(monkeypatch):
     monkeypatch.setitem(AIAgent._build_system_prompt_parts.__globals__, "load_soul_md", lambda: "custom persona")
     agent = AIAgent(
-        model="prompt-guidance-test",
+        model="gpt-4o-mini",
+        provider="openai",
+        api_key="test-key",
+        base_url="https://api.openai.com/v1",
         enabled_toolsets=[],
         quiet_mode=True,
         skip_context_files=True,

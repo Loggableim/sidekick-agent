@@ -2613,6 +2613,18 @@ def test_discord_fastapi_admin_updates_member_roles_when_available(monkeypatch):
     ]
 
 
+def test_discord_api_reports_missing_token_without_raising(monkeypatch):
+    from web.api import discord_bot
+
+    monkeypatch.setattr(discord_bot, "_active_bot_token", lambda: "")
+
+    assert discord_bot._api("GET", "/guilds/example/channels") == {
+        "error": True,
+        "message": "Discord bot token is not configured",
+        "status": 503,
+    }
+
+
 def test_websearch_mobile_history_overlays_search_content():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
@@ -3468,13 +3480,11 @@ def test_game_mode_chat_start_routes_nova_local_models_to_ollama_cloud_deepseek(
     monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
     monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
     monkeypatch.setattr(
-        "web.api.routes._start_chat_stream_for_session",
+        routes,
+        "_start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
     )
-    monkeypatch.setattr(
-        "web.api.routes.j",
-        lambda handler, payload, status=200, extra_headers=None: payload,
-    )
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
 
     payload = routes._handle_chat_start(
         SimpleNamespace(headers={}),
@@ -3528,13 +3538,11 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
     monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
     monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
     monkeypatch.setattr(
-        "web.api.routes._start_chat_stream_for_session",
+        routes,
+        "_start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
     )
-    monkeypatch.setattr(
-        "web.api.routes.j",
-        lambda handler, payload, status=200, extra_headers=None: payload,
-    )
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
 
     payload = routes._handle_chat_start(
         SimpleNamespace(headers={}),
@@ -3597,10 +3605,7 @@ def test_game_mode_chat_start_routes_nova_instance_spaces_to_ollama_cloud_deepse
         "web.api.routes._start_chat_stream_for_session",
         lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
     )
-    monkeypatch.setattr(
-        "web.api.routes.j",
-        lambda handler, payload, status=200, extra_headers=None: payload,
-    )
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
 
     payload = routes._handle_chat_start(
         SimpleNamespace(headers={}),
@@ -3842,10 +3847,7 @@ def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deep
         lambda resolver, requested=None: {"api_key": "test-key", "provider": requested, "base_url": "http://127.0.0.1:11434"},
     )
     monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
-    monkeypatch.setattr(
-        "web.api.routes.j",
-        lambda handler, payload, status=200, extra_headers=None: payload,
-    )
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
 
     payload = routes._handle_session_compress(
         SimpleNamespace(headers={}),
@@ -3933,10 +3935,7 @@ def test_game_mode_handoff_summary_routes_nova_local_model_to_ollama_cloud_deeps
         lambda resolver, requested=None: {"api_key": "test-key", "provider": requested, "base_url": "http://127.0.0.1:11434"},
     )
     monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
-    monkeypatch.setattr(
-        "web.api.routes.j",
-        lambda handler, payload, status=200, extra_headers=None: payload,
-    )
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
 
     payload = routes._handle_handoff_summary(
         SimpleNamespace(headers={}),
