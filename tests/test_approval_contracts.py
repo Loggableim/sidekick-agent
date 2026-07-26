@@ -48,7 +48,7 @@ def test_workflow_chip_includes_current_approval_mode():
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
 
     sync_start = ui_js.index("function syncWorkflowChip()")
-    sync_end = ui_js.index("function _workflowApplyBrowserQaAction", sync_start)
+    sync_end = ui_js.index("function workflowRefreshHeaderMenu", sync_start)
     sync_body = ui_js[sync_start:sync_end]
 
     assert "const normalizeApproval=(mode)=>{" in sync_body

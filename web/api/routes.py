@@ -11697,7 +11697,7 @@ def _async_ollama_title(session_id: str) -> None:
         if not s:
             return
         # Nur fortsetzen wenn der Titel noch unser Platzhalter ist (User hat nicht umbenannt)
-        if s.title != "â³ Titel wird generiert...":
+        if s.title != "⏳ Titel wird generiert...":
             return
 
         if is_game_mode_enabled():

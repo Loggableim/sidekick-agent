@@ -183,34 +183,17 @@ def test_browser_action_trace_is_visible_and_bounded():
     assert "_browserSetActionSummary(actionSummaryParts.join(' \u00b7 '));" in render_body
 
 
-def test_browser_titlebar_status_row_collapses_to_icon_menu():
+def test_browser_titlebar_workflow_pill_is_the_only_menu_trigger():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
 
-    assert 'class="titlebar-actions titlebar-actions--workflow-compact"' in index_html
-    assert 'id="workflowHeaderCompactOverride"' in index_html
-    assert '.titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group' in index_html
-    assert '.titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group > #browserStatusBadge' in index_html
-    assert 'class="titlebar-status-cluster titlebar-status-cluster--compact"' in index_html
-    assert 'data-testid="workflow-status-menu-button"' in index_html
-    assert 'Status menu. Shortcut Cmd/Ctrl+Shift+K.' in index_html
-    assert 'id="workflowHeaderMenuSummary"' in index_html
-    assert 'class="workflow-header-menu-summary"' in index_html
-    assert '<svg width="16" height="16" viewBox="0 0 24 24"' in index_html
-    assert 'aria-label="Workflow status overview"' in index_html
-    assert 'data-tooltip="Workflow status overview"' in index_html
-    assert '.titlebar-status-cluster.titlebar-status-cluster--compact > :not(.titlebar-workflow-group)' in style_css
-    assert '.titlebar-status-cluster.titlebar-status-cluster--compact .titlebar-workflow-badge' in style_css
-    assert '.workflow-header-menu-summary' in style_css
-    assert 'backdrop-filter: none' in style_css
-    assert '.titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group' in style_css
-    assert '.titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group > #browserStatusBadge' in style_css
-    assert 'display: inline-flex !important;' in style_css
-    assert '.titlebar-actions.titlebar-actions--workflow-compact > #approvalModeBadge' in style_css
-    assert "function _workflowHeaderStatusSummaryText()" in ui_js
-    assert "function _workflowSetHeaderMenuSummary(summaryText)" in ui_js
-    assert "summary.title=label;" in ui_js
-    assert "summary.setAttribute('aria-label',label);" in ui_js
-    assert "summary.dataset.tooltip=label;" in ui_js
-    assert "_workflowSetHeaderMenuSummary(_workflowHeaderStatusSummaryText());" in ui_js
+    assert 'class="titlebar-actions" id="titlebarActions"' in index_html
+    assert 'class="titlebar-status-cluster"' in index_html
+    assert 'id="workflowStatusMenuBtn"' not in index_html
+    assert 'id="workflowHeaderCompactOverride"' not in index_html
+    assert 'aria-controls="workflowStatusMenu"' in index_html
+    assert 'max-height:min(60vh,420px);overflow:auto;overscroll-behavior:contain;' in index_html
+    assert 'titlebar-status-cluster--compact' not in style_css
+    assert 'workflow-header-menu-summary' not in style_css
+    assert "function syncWorkflowChip()" in ui_js

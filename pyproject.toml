@@ -15,6 +15,7 @@ dependencies = [
     "prompt_toolkit>=3.0",
     "fire>=0.5",
     "wcwidth>=0.2",
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

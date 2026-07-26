@@ -150,16 +150,13 @@ print(f'home={h}')""",
 )
 
 test_code(
-    "shared.paths: env var priority (SIDEKICK > SIDEKICK)",
+    "shared.paths: SIDEKICK_HOME override",
     """import os
-os.environ['SIDEKICK_HOME'] = '/tmp/sk-prio-test'
 os.environ['SIDEKICK_HOME'] = '/tmp/sidekick-prio-test'
 from shared.paths import sidekick_home
 h = sidekick_home()
 os.environ.pop('SIDEKICK_HOME', None)
-os.environ.pop('SIDEKICK_HOME', None)
-# SIDEKICK_HOME should win
-assert 'sk-prio-test' in str(h), f'Expected sk-prio-test, got {h}'
+assert 'sidekick-prio-test' in str(h), f'Expected sidekick-prio-test, got {h}'
 print('OK')""",
     grep="OK"
 )
@@ -201,13 +198,13 @@ print('OK')""",
 )
 
 test_code(
-    "shared.sessions: legacy migration mock",
-    """import os, tempfile
-from pathlib import Path
-from shared.sessions import migrate_legacy_sessions
-n = migrate_legacy_sessions()
-print(f'migrated={n}')""",
-    grep="migrated="
+    "shared.sessions: legacy default-title compatibility",
+    """from shared.sessions import is_default_session_title
+assert is_default_session_title('Untitled')
+assert is_default_session_title('New Chat')
+assert is_default_session_title('New chat')
+print('OK')""",
+    grep="OK"
 )
 
 test_code(
@@ -325,9 +322,8 @@ def capture_help(*args: str) -> str:
     )
     return proc.stdout + proc.stderr
 
-blocked_tokens = ("Sidekick", "NousResearch", "LastBrowser")
+blocked_tokens = ("Hermes", "NousResearch", "LastBrowser")
 allowed_markers = (
-    "SIDEKICK_",
     "SIDEKICK_",
     "~/.sidekick",
     "legacy",

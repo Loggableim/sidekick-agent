@@ -295,6 +295,25 @@ function _browserSetEmptyVisible(visible, opts = {}) {
   if (wrap) wrap.classList.toggle('has-empty-state', isVisible);
 }
 
+function _browserIsBlankState(state) {
+  if (!state || !state.session_id) return true;
+  const url = String(state.url || '').trim().toLowerCase();
+  return !url || url.startsWith('about:blank');
+}
+
+function _browserSyncEmptyStateText(state) {
+  const title = _browserEl('browserEmptyStateTitle');
+  const text = _browserEl('browserEmptyStateText');
+  if (!title || !text) return;
+  if (_browserIsBlankState(state) && state && state.session_id) {
+    title.textContent = 'Browser attached';
+    text.textContent = 'Open a URL or run a browser action to show the live viewport.';
+    return;
+  }
+  title.textContent = 'Browser not attached';
+  text.textContent = 'Open a chat session to attach the browser runtime.';
+}
+
 function _browserClearViewport() {
   const img = _browserEl('browserFrameImage');
   if (img) {
@@ -3831,6 +3850,10 @@ function _browserApplyFrameHitBounds(state) {
 function _browserSetCursor(state) {
   const cursor = _browserEl('browserCursor');
   if (!cursor || !state) return;
+  if (_browserIsBlankState(state)) {
+    cursor.classList.remove('visible');
+    return;
+  }
   const x = Number(state.cursor_x || 0) || 0;
   const y = Number(state.cursor_y || 0) || 0;
   const point = _browserFramePointToStagePercent(state, x, y);
@@ -3917,10 +3940,14 @@ function _browserRender(state, opts = {}) {
   state.can_go_back = canGoBack;
   state.can_go_forward = canGoForward;
   _browserSetStageRatio(state);
-  _browserApplyFrameHitBounds(state);
-  _browserSetImage(state);
+  const isBlankState = _browserIsBlankState(state);
+  if (isBlankState) _browserClearViewport();
+  else {
+    _browserApplyFrameHitBounds(state);
+    _browserSetImage(state);
+  }
   _browserSetCursor(state);
-  if (state.click_ts != null) _browserFlashClick(state);
+  if (!isBlankState && state.click_ts != null) _browserFlashClick(state);
   _browserSetSessionLabel(state);
   _browserUpdateHeaderBadge();
   const isBlocked = state.status === 'blocked';
@@ -3949,14 +3976,8 @@ function _browserRender(state, opts = {}) {
   if (_browserLastTestReportText || _browserLastTestReport) {
     _browserRenderQaCard(_browserLastTestReportText, _browserLastTestReport);
   }
-  const showEmpty = !state.session_id || (!state.frame_rev && !state.url);
-  _browserSetEmptyVisible(showEmpty, !state.session_id ? {
-    title: 'Browser not attached',
-    text: 'Open a chat session to attach the browser runtime.',
-  } : {
-    title: 'Loading browser',
-    text: 'Waiting for a browser frame from this session.',
-  });
+  _browserSyncEmptyStateText(state);
+  _browserSetEmptyVisible(isBlankState);
   const stage = _browserEl('browserStage');
   if (stage) {
     stage.style.opacity = state.session_id ? '1' : '.65';
@@ -4055,6 +4076,7 @@ function browserSetDrawerOpen(open, opts = {}) {
   _browserSyncDrawerButton(nextOpen);
   _browserSetDrawerAccessibility(nextOpen);
   _browserUpdateHeaderBadge();
+  if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
   if (nextOpen) {
     void browserRefreshWebBackend();
   }
@@ -4277,9 +4299,9 @@ async function browserSyncToCurrentSession(opts = {}) {
       return _browserState;
     }
     _browserSetPill('idle', 'Loading');
-    _browserSetStatusUrl('Loading browser state...');
-      _browserSetEmptyVisible(true, {
-        title: 'Loading browser state',
+    _browserSetStatusUrl('Loading Browser state...');
+    _browserSetEmptyVisible(true, {
+        title: 'Loading Browser state',
         text: 'Fetching the current page and controls for this session.',
       });
     _browserSetButtonsDisabled(true, null);
