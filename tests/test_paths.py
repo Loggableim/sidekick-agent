@@ -498,9 +498,10 @@ def test_web_server_session_endpoints(monkeypatch, tmp_path):
 
 
 def test_web_server_chat_endpoint_appends_assistant_reply(monkeypatch, tmp_path):
-    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    sidekick_home = tmp_path / "home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
     client, headers = _webui_client()
-    workspace_dir = tmp_path / "workspace"
+    workspace_dir = sidekick_home / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
     created_response = client.post("/api/session/new", json={"title": "Chat Session"}, headers=headers)
