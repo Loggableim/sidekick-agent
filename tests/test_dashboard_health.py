@@ -3249,15 +3249,19 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "btn.style.display='none'" not in cast_js
 
 
-def test_hub_cast_monitor_starts_immediately_and_retries_every_15_seconds():
+def test_hub_cast_monitor_polls_status_immediately_and_retries_every_15_seconds():
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     cast_js = ui_js[ui_js.index("let _castActive=false;") : ui_js.index("function _initDashboardLinkProbe()")]
 
     assert "const CAST_RECONNECT_INTERVAL_MS=15000;" in cast_js
     assert "let _castConnectPromise=null;" in cast_js
+    assert "let _castStatusPromise=null;" in cast_js
+    assert "function _refreshHubCastStatus()" in cast_js
+    assert "_castFetch('/api/cast/status')" in cast_js
     assert "function _startHubCastMonitor()" in cast_js
-    assert "_ensureHubCastConnected({interactive:false});" in cast_js
-    assert "setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS)" in cast_js
+    assert "_refreshHubCastStatus();" in cast_js
+    assert "setInterval(_refreshHubCastStatus,CAST_RECONNECT_INTERVAL_MS)" in cast_js
+    assert "_ensureHubCastConnected({interactive:false});" not in cast_js
     assert "setTimeout(_refreshCastStatus,2000)" not in cast_js
 
 
@@ -4754,19 +4758,20 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    titlebar_start = index_html.index('<div class="titlebar-actions" id="titlebarActions">')
-    lang_start = index_html.index("titlebarLangSelector", titlebar_start)
-    cast_start = index_html.index("btnCastToggle", lang_start)
-    titlebar_actions = index_html[titlebar_start:cast_start]
+    utility_actions_start = index_html.index('id="titlebarUtilityActions"')
+    titlebar_actions_start = index_html.index(
+        '<div class="titlebar-actions" id="titlebarActions">'
+    )
+    lang_start = index_html.index("titlebarLangSelector", utility_actions_start)
+    game_mode_start = index_html.index('id="btnGameModeToggle"', titlebar_actions_start)
+    utility_actions = index_html[utility_actions_start:titlebar_actions_start]
 
     assert re.search(
         r'id="btnLangSelector"[^>]+aria-label="Language"[^>]+aria-haspopup="menu"[^>]+aria-expanded="false"[^>]+aria-controls="langDropdown"[^>]+onclick="toggleLangDropdown\(event\)"',
-        titlebar_actions,
+        utility_actions,
         re.S,
     )
-    assert 'id="btnGameModeToggle"' in titlebar_actions
-    assert "toggleGameMode()" in titlebar_actions
-    assert "game_mode_toggle" in titlebar_actions
+    assert utility_actions_start < lang_start < titlebar_actions_start < game_mode_start
     assert "settingsGameModeEnabled" in index_html
     assert "window._gameModeEnabled=!!s.game_mode_enabled" in boot_js
     assert "_syncGameModeStateFromServer" in boot_js

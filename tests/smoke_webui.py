@@ -160,6 +160,13 @@ def run_smoke() -> Result:
                 browser = p.chromium.launch(headless=True)
                 try:
                     page = browser.new_page(viewport={"width": 1900, "height": 1100}, device_scale_factor=1)
+                    cast_responses: list[tuple[str, int]] = []
+
+                    def record_cast_response(response):
+                        if "/api/cast/" in response.url:
+                            cast_responses.append((response.request.method, response.status))
+
+                    page.on("response", record_cast_response)
                     # The WebUI keeps event streams open after rendering, so
                     # networkidle is not a meaningful readiness condition.
                     page.goto(f"http://127.0.0.1:{port}/session/{session_id}", wait_until="domcontentloaded", timeout=15000)
@@ -170,7 +177,17 @@ def run_smoke() -> Result:
                         "typeof window._sendKey === 'string' && typeof window._gameModeEnabled === 'boolean'",
                         timeout=10000,
                     )
-                    page.wait_for_timeout(100)
+                    page.wait_for_function(
+                        "document.getElementById('btnCastToggle')?.getAttribute('aria-label') !== 'Hub Cast'",
+                        timeout=2000,
+                    )
+
+                    _mark(
+                        result,
+                        "cast monitor does not start cast on load",
+                        not any(method == "POST" for method, _ in cast_responses),
+                        f"responses={cast_responses}",
+                    )
 
                     composer = page.locator("#composerBox").first
                     strip = page.locator("#composerStatusStrip").first
@@ -412,6 +429,36 @@ def run_smoke() -> Result:
                     composer_clean = all(v is None for v in composer_tooltips.values())
                     _mark(result, "desktop browser layout", ok and topbar_clean and composer_clean and "browser browser" not in workflow_before.lower() and "browser browser" not in workflow_open.lower() and "browser browser" not in workflow_restored.lower() and "browser closed" in workflow_before.lower() and "browser open" in workflow_open.lower() and "browser closed" in workflow_restored.lower() and queue_empty_hidden and browser_empty_ok and busy_visible and busy_hidden and bool(busy_text.strip()) and "is-loading" in busy_loading, detail)
                     _mark(result, "theme toggle restores state", dark_after != dark_before and dark_restored == dark_before, f"before={dark_before} after={dark_after} restored={dark_restored}")
+
+                    navigation_errors: list[str] = []
+                    page.on("pageerror", lambda error: navigation_errors.append(str(error)))
+                    page.on(
+                        "console",
+                        lambda message: navigation_errors.append(message.text)
+                        if message.type == "error"
+                        else None,
+                    )
+                    navigation_states: dict[str, bool] = {}
+                    for panel_name in (
+                        "tasks", "kanban", "skills", "agents", "memory", "workspaces",
+                        "profiles", "todos", "insights", "logs", "gmail", "browser",
+                        "discord", "appstore", "settings",
+                    ):
+                        tab = page.locator(f".rail [data-panel='{panel_name}']").first
+                        tab.click()
+                        navigation_states[panel_name] = bool(
+                            tab.evaluate("element => element.classList.contains('active')")
+                            and page.locator("main.main").evaluate(
+                                "(element, panel) => element.classList.contains('showing-' + panel)",
+                                panel_name,
+                            )
+                        )
+                    _mark(
+                        result,
+                        "primary navigation opens every panel without browser errors",
+                        all(navigation_states.values()) and not navigation_errors,
+                        f"states={navigation_states} errors={navigation_errors}",
+                    )
                 finally:
                     browser.close()
     finally:
