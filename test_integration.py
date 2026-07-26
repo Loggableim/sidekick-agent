@@ -31,24 +31,25 @@ from shared.paths import sidekick_home
 h = sidekick_home()
 check("SIDEKICK_ bevorzugt", 'sidekick' in str(h), f"got {h}")
 
-# Test: Fallback auf SIDEKICK_
+# Test: Fallback auf den Standardpfad ohne gesetztes Home
 del os.environ['SIDEKICK_HOME']
 h2 = sidekick_home()
 check("Fallback auf SIDEKICK_", 'sidekick' in str(h2), f"got {h2}")
 
-del os.environ['SIDEKICK_HOME']
+# CI setzt SIDEKICK_HOME nicht zwingend. Die Bereinigung muss deshalb
+# idempotent sein, nachdem der vorherige Test die Variable entfernt hat.
+os.environ.pop('SIDEKICK_HOME', None)
 
 # Test: os.getenv Dual-Read
 os.environ['SIDEKICK_API_TIMEOUT'] = '42.0'
-os.environ['SIDEKICK_API_TIMEOUT'] = '99.0'
 v = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('SIDEKICK_API_TIMEOUT', '1800.0'))
 check("os.getenv primary", v == 42.0, f"got {v}")
 
-del os.environ['SIDEKICK_API_TIMEOUT']
+os.environ['SIDEKICK_API_TIMEOUT'] = '99.0'
 v2 = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('SIDEKICK_API_TIMEOUT', '1800.0'))
-check("os.getenv fallback", v2 == 99.0, f"got {v2}")
+check("os.getenv updated", v2 == 99.0, f"got {v2}")
 
-del os.environ['SIDEKICK_API_TIMEOUT']
+os.environ.pop('SIDEKICK_API_TIMEOUT', None)
 v3 = float(os.getenv('SIDEKICK_API_TIMEOUT') or os.getenv('SIDEKICK_API_TIMEOUT', '1800.0'))
 check("os.getenv default", v3 == 1800.0, f"got {v3}")
 
