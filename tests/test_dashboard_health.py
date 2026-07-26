@@ -3509,12 +3509,13 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
 
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": True})
+    nova_workspace = tmp_path / "spaces" / "nova"
 
     captured = {}
     session = SimpleNamespace(
         session_id="nova-session",
         profile="default",
-        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        workspace=str(nova_workspace),
         model="qwen3:4b",
         model_provider="ollama",
         active_stream_id=None,
@@ -3524,7 +3525,7 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
     )
 
     monkeypatch.setattr(routes, "get_session", lambda sid: session)
-    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: r"C:\\sidekick\\home\\spaces\\nova")
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: str(nova_workspace))
     monkeypatch.setattr(
         routes,
         "_resolve_compatible_session_model_state",
@@ -3549,7 +3550,7 @@ def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monke
         {
             "session_id": "nova-session",
             "message": "hello nova",
-            "workspace": r"C:\\sidekick\\home\\spaces\\nova",
+            "workspace": str(nova_workspace),
         },
     )
 
@@ -3809,12 +3810,13 @@ def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deep
 
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": True})
+    nova_workspace = tmp_path / "spaces" / "nova"
 
     captured = {}
     session = SimpleNamespace(
         session_id="nova-session",
         profile="default",
-        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        workspace=str(nova_workspace),
         model="qwen3:4b",
         model_provider="ollama",
         active_stream_id=None,
@@ -3828,7 +3830,7 @@ def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deep
         pending_user_message=None,
         tool_calls=[],
         save=lambda: None,
-        compact=lambda: {"session_id": "nova-session", "workspace": r"C:\\sidekick\\home\\spaces\\nova"},
+        compact=lambda: {"session_id": "nova-session", "workspace": str(nova_workspace)},
     )
 
     class _FakeCompressor:
@@ -3868,12 +3870,13 @@ def test_game_mode_handoff_summary_routes_nova_local_model_to_ollama_cloud_deeps
 
     monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
     cfg.save_settings({"game_mode_enabled": True})
+    nova_workspace = tmp_path / "spaces" / "nova"
 
     captured = {}
     session = SimpleNamespace(
         session_id="nova-session",
         profile="default",
-        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        workspace=str(nova_workspace),
         model="qwen3:4b",
         model_provider="ollama",
         workspace_slug=None,
