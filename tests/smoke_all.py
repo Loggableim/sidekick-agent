@@ -78,7 +78,9 @@ test("sidekick --help", [sys.executable, "-m", "sidekick_app", "--help"], grep="
 
 test("sidekick --version", [sys.executable, "-m", "sidekick_app", "--version"], grep="Sidekick Agent")
 
-test("sidekick doctor", [sys.executable, "-m", "sidekick_app", "doctor"], valid_exit_codes={0, 1})
+# Doctor reports the count of actionable setup findings. A fresh CI home has
+# no credentials yet, so two expected setup findings must not fail the smoke.
+test("sidekick doctor", [sys.executable, "-m", "sidekick_app", "doctor"], valid_exit_codes={0, 1, 2})
 
 # ── Import smoke ──
 print("\n── Import smoke ──")
