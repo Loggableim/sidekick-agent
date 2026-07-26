@@ -4,6 +4,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+import sys
 import time
 import zipfile
 from dataclasses import dataclass, field
@@ -75,7 +76,7 @@ def _redact(text: str) -> str:
 
 
 def repair_known_config_yaml(text: str) -> tuple[str, bool]:
-    """Repair the observed HermesPortable custom_providers indentation slip.
+    """Repair a known ``custom_providers`` indentation slip.
 
     A root-level ``key_env`` between two provider entries makes the whole YAML
     invalid. The safe interpretation is that the key belongs to the previous
@@ -315,15 +316,22 @@ def _print_result(result: RepairResult) -> None:
 
 
 def run_local_state_repair(args: Any) -> int:
-    source = Path(getattr(args, "source", None) or r"C:\hermesportable\home")
-    target = Path(getattr(args, "target", None) or r"C:\sidekick\home")
+    from shared.constants import get_sidekick_home
+
+    source_value = str(getattr(args, "source", "") or "").strip()
+    if not source_value:
+        print("--from PATH is required; state import is always explicit", file=sys.stderr)
+        return 2
+    source = Path(source_value)
+    target = Path(getattr(args, "target", None) or get_sidekick_home())
     apply = bool(getattr(args, "apply", False))
     set_user_env = apply and not bool(getattr(args, "no_user_env", False))
     plan = build_repair_plan(source, target, apply=apply)
     _print_plan(plan)
+    source_missing = any(w.startswith("source does not exist:") for w in plan.warnings)
     if not apply:
         print("  next   : re-run with --apply to copy local state")
-        return 0
+        return 2 if source_missing else 0
     result = apply_repair_plan(plan, set_user_env=set_user_env)
     _print_result(result)
     return 0 if not any(w.startswith("source missing") for w in result.warnings) else 2

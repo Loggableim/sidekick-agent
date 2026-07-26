@@ -8,16 +8,16 @@ Features ASCII art branding, interactive REPL, toolset selection, and rich forma
 Usage:
     python cli.py                          # Start interactive mode with all tools
     python cli.py --toolsets web,terminal  # Start with specific toolsets
-    python cli.py --skills hermes-agent-dev,github-auth
+    python cli.py --skills sidekick-agent-dev,github-auth
     python cli.py --list-tools             # List available tools and exit
 """
 
-# IMPORTANT: hermes_bootstrap must be the very first import — UTF-8 stdio
-# on Windows.  No-op on POSIX.  See hermes_bootstrap.py for full rationale.
+# IMPORTANT: sidekick_bootstrap must be the very first import — UTF-8 stdio
+# on Windows.  No-op on POSIX.  See sidekick_bootstrap.py for full rationale.
 try:
     from runtime._compat import shim_bootstrap # noqa: F401
 except ModuleNotFoundError:
-    # Graceful fallback when hermes_bootstrap isn't registered in the venv
+    # Graceful fallback when sidekick_bootstrap isn't registered in the venv
     # yet — happens during partial ``sidekick update`` where git-reset landed
     # new code but ``uv pip install -e .`` didn't finish.  Missing bootstrap
     # means UTF-8 stdio setup is skipped on Windows; POSIX is unaffected.
@@ -114,7 +114,7 @@ from shared.utils import base_url_host_matches, is_truthy_value
 
 _sidekick_home = get_sidekick_home()
 _project_env = Path(__file__).parent / '.env'
-load_sidekick_dotenv(hermes_home=_sidekick_home, project_env=_project_env)
+load_sidekick_dotenv(sidekick_home=_sidekick_home, project_env=_project_env)
 
 
 _REASONING_TAGS = (
@@ -280,13 +280,13 @@ def load_cli_config() -> Dict[str, Any]:
     Environment variables take precedence over config file values.
     Returns default values if no config file exists.
 
-    If HERMES_IGNORE_USER_CONFIG=1 is set (via ``sidekick chat --ignore-user-config``),
+    If SIDEKICK_IGNORE_USER_CONFIG=1 is set (via ``sidekick chat --ignore-user-config``),
     the user config at ``~/.sidekick/config.yaml`` is skipped entirely and only the
     built-in defaults plus the project-level ``cli-config.yaml`` (if any) are used.
     Credentials in ``.env`` are still loaded — this flag only suppresses
     behavioral/config settings.
     """
-    # Check user config first ({HERMES_HOME}/config.yaml)
+    # Check user config first ({SIDEKICK_HOME}/config.yaml)
     user_config_path = _sidekick_home / 'config.yaml'
     project_config_path = Path(__file__).parent / 'cli-config.yaml'
 
@@ -481,7 +481,7 @@ def load_cli_config() -> Dict[str, Any]:
     # Apply terminal config to environment variables (so terminal_tool picks them up)
     terminal_config = defaults.get("terminal", {})
     
-    # Normalize config key: the new config system (hermes_cli/config.py) and all
+    # Normalize config key: the new config system (sidekick_cli/config.py) and all
     # documentation use "backend", the legacy cli-config.yaml uses "env_type".
     # Accept both, with "backend" taking precedence (it's the documented key).
     if "backend" in terminal_config:
@@ -489,7 +489,7 @@ def load_cli_config() -> Dict[str, Any]:
     
     # CWD resolution for CLI/TUI. The gateway has its own config bridge in
     # gateway/run.py but may lazily import cli.py (triggering this code).
-    # Local backend: always os.getcwd(). Use `cd /dir && hermes` to control it.
+    # Local backend: always os.getcwd(). Use `cd /dir && sidekick` to control it.
     # Non-local with placeholder: pop so terminal_tool uses its per-backend default.
     # Non-local with explicit path: keep as-is.
     _CWD_PLACEHOLDERS = (".", "auto", "cwd")
@@ -534,9 +534,9 @@ def load_cli_config() -> Dict[str, Any]:
     }
     
     # Bridge config → env vars for terminal_tool. TERMINAL_CWD is force-exported
-    # UNLESS we're inside a gateway process (detected by _HERMES_GATEWAY marker)
+    # UNLESS we're inside a gateway process (detected by _SIDEKICK_GATEWAY marker)
     # where it was already set correctly by gateway/run.py's config bridge.
-    _is_gateway = os.environ.get("_HERMES_GATEWAY") == "1"
+    _is_gateway = os.environ.get("_SIDEKICK_GATEWAY") == "1"
     for config_key, env_var in env_mappings.items():
         if config_key in terminal_config:
             if env_var == "TERMINAL_CWD":
@@ -672,14 +672,14 @@ from rich.text import Text as _RichText
 import fire
 
 # Import the agent and tool systems
-# run_agent bridge — the real AIAgent (15K LOC) lives in cids-hermes-agent/run_agent.py
+# run_agent bridge — the real AIAgent (15K LOC) lives in cids-sidekick-agent/run_agent.py
 # and will be ported as runtime/agent.py in a follow-up. This shim provides
 # enough for the CLI to boot.
 # Import the REAL run_agent FIRST so the compat stub can re-export its
-# module-level attributes (_hermes_home, get_tool_definitions, etc.).
+# module-level attributes (_sidekick_home, get_tool_definitions, etc.).
 # If we overwrite sys.modules["run_agent"] with the stub before the stub
 # gets to import the real one, the stub imports ITSELF → all re-exports
-# are None → "module has no attribute '_hermes_home'" crashes the WebUI.
+# are None → "module has no attribute '_sidekick_home'" crashes the WebUI.
 import run_agent as _real_run_agent  # noqa: E402
 import runtime._compat.run_agent as _run_agent_stub  # noqa: E402
 # Copy real module attributes onto the stub so both import paths work
@@ -690,9 +690,9 @@ for _attr in dir(_real_run_agent):
                 setattr(_run_agent_stub, _attr, getattr(_real_run_agent, _attr))
             except Exception:
                 pass
-# Alias: real run_agent uses _sidekick_home, but WebUI code expects _hermes_home
-if getattr(_run_agent_stub, "_hermes_home", None) is None:
-    _run_agent_stub._hermes_home = getattr(_real_run_agent, "_sidekick_home", None)
+# Alias: real run_agent uses _sidekick_home, but WebUI code expects _sidekick_home
+if getattr(_run_agent_stub, "_sidekick_home", None) is None:
+    _run_agent_stub._sidekick_home = getattr(_real_run_agent, "_sidekick_home", None)
 sys.modules["run_agent"] = _run_agent_stub
 
 from run_agent import AIAgent
@@ -819,7 +819,7 @@ def _git_repo_root() -> Optional[str]:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if result.returncode == 0:
             return _normalize_git_bash_path(result.stdout.strip())
@@ -877,7 +877,12 @@ def _setup_worktree(repo_root: str = None) -> Optional[Dict[str, str]]:
     try:
         result = subprocess.run(
             ["git", "worktree", "add", str(wt_path), "-b", branch_name, "HEAD"],
-            capture_output=True, text=True, timeout=30, cwd=repo_root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            cwd=repo_root,
         )
         if result.returncode != 0:
             print(f"\033[31m✗ Failed to create worktree: {result.stderr.strip()}\033[0m")
@@ -994,7 +999,7 @@ def _cleanup_worktree(info: Dict[str, str] = None) -> None:
     try:
         result = subprocess.run(
             ["git", "log", "--oneline", "HEAD", "--not", "--remotes"],
-            capture_output=True, text=True, timeout=10, cwd=wt_path,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, cwd=wt_path,
         )
         has_unpushed = bool(result.stdout.strip())
     except Exception:
@@ -1011,7 +1016,7 @@ def _cleanup_worktree(info: Dict[str, str] = None) -> None:
     try:
         subprocess.run(
             ["git", "worktree", "remove", wt_path, "--force"],
-            capture_output=True, text=True, timeout=15, cwd=repo_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, cwd=repo_root,
         )
     except Exception as e:
         logger.debug("Failed to remove worktree: %s", e)
@@ -1020,7 +1025,7 @@ def _cleanup_worktree(info: Dict[str, str] = None) -> None:
     try:
         subprocess.run(
             ["git", "branch", "-D", branch],
-            capture_output=True, text=True, timeout=10, cwd=repo_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, cwd=repo_root,
         )
     except Exception as e:
         logger.debug("Failed to delete branch %s: %s", branch, e)
@@ -1033,7 +1038,7 @@ def _run_state_db_auto_maintenance(session_db) -> None:
     """Call ``SessionDB.maybe_auto_prune_and_vacuum`` using current config.
 
     Reads the ``sessions:`` section from config.yaml via
-    :func:`hermes_cli.config.load_config` (the authoritative loader that
+    :func:`sidekick_cli.config.load_config` (the authoritative loader that
     deep-merges DEFAULT_CONFIG, so unmigrated configs still get default
     values). Honours ``auto_prune`` / ``retention_days`` /
     ``vacuum_after_prune`` / ``min_interval_hours``, and delegates to the
@@ -1087,7 +1092,7 @@ def _run_checkpoint_auto_maintenance() -> None:
     """Call ``checkpoint_manager.maybe_auto_prune_checkpoints`` using current config.
 
     Reads the ``checkpoints:`` section from config.yaml via
-    :func:`hermes_cli.config.load_config`. Honours ``auto_prune`` /
+    :func:`sidekick_cli.config.load_config`. Honours ``auto_prune`` /
     ``retention_days`` / ``delete_orphans`` / ``min_interval_hours``.
     Never raises — maintenance must never block interactive startup.
     """
@@ -1115,7 +1120,7 @@ def _prune_stale_worktrees(repo_root: str, max_age_hours: int = 24) -> None:
     - 24h–72h: remove if no unpushed commits.
     - Over 72h: force remove regardless (nothing should sit this long).
 
-    Also prunes orphaned ``hermes/*`` and ``pr-*`` local branches that
+    Also prunes orphaned ``sidekick/*`` and ``pr-*`` local branches that
     have no corresponding worktree.
     """
     import subprocess
@@ -1149,7 +1154,7 @@ def _prune_stale_worktrees(repo_root: str, max_age_hours: int = 24) -> None:
             try:
                 result = subprocess.run(
                     ["git", "log", "--oneline", "HEAD", "--not", "--remotes"],
-                    capture_output=True, text=True, timeout=5, cwd=str(entry),
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, cwd=str(entry),
                 )
                 if result.stdout.strip():
                     continue  # Has unpushed commits — skip
@@ -1160,18 +1165,18 @@ def _prune_stale_worktrees(repo_root: str, max_age_hours: int = 24) -> None:
         try:
             branch_result = subprocess.run(
                 ["git", "branch", "--show-current"],
-                capture_output=True, text=True, timeout=5, cwd=str(entry),
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, cwd=str(entry),
             )
             branch = branch_result.stdout.strip()
 
             subprocess.run(
                 ["git", "worktree", "remove", str(entry), "--force"],
-                capture_output=True, text=True, timeout=15, cwd=repo_root,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, cwd=repo_root,
             )
             if branch:
                 subprocess.run(
                     ["git", "branch", "-D", branch],
-                    capture_output=True, text=True, timeout=10, cwd=repo_root,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, cwd=repo_root,
                 )
             logger.debug("Pruned stale worktree: %s (force=%s)", entry.name, force)
         except Exception as e:
@@ -1181,7 +1186,7 @@ def _prune_stale_worktrees(repo_root: str, max_age_hours: int = 24) -> None:
 
 
 def _prune_orphaned_branches(repo_root: str) -> None:
-    """Delete local ``hermes/hermes-*`` and ``pr-*`` branches with no worktree.
+    """Delete local ``sidekick/sidekick-*`` and ``pr-*`` branches with no worktree.
 
     These are auto-generated by ``sidekick -w`` sessions and PR review
     workflows respectively.  Once their worktree is gone they serve no
@@ -1192,7 +1197,7 @@ def _prune_orphaned_branches(repo_root: str) -> None:
     try:
         result = subprocess.run(
             ["git", "branch", "--format=%(refname:short)"],
-            capture_output=True, text=True, timeout=10, cwd=repo_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, cwd=repo_root,
         )
         if result.returncode != 0:
             return
@@ -1205,7 +1210,7 @@ def _prune_orphaned_branches(repo_root: str) -> None:
     try:
         wt_result = subprocess.run(
             ["git", "worktree", "list", "--porcelain"],
-            capture_output=True, text=True, timeout=10, cwd=repo_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10, cwd=repo_root,
         )
         for line in wt_result.stdout.split("\n"):
             if line.startswith("branch refs/heads/"):
@@ -1217,7 +1222,7 @@ def _prune_orphaned_branches(repo_root: str) -> None:
     try:
         head_result = subprocess.run(
             ["git", "branch", "--show-current"],
-            capture_output=True, text=True, timeout=5, cwd=repo_root,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5, cwd=repo_root,
         )
         current = head_result.stdout.strip()
         if current:
@@ -1241,7 +1246,7 @@ def _prune_orphaned_branches(repo_root: str) -> None:
         try:
             subprocess.run(
                 ["git", "branch", "-D"] + batch,
-                capture_output=True, text=True, timeout=30, cwd=repo_root,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30, cwd=repo_root,
             )
         except Exception as e:
             logger.debug("Failed to prune orphaned branches: %s", e)
@@ -2114,8 +2119,8 @@ class ChatConsole:
         """
         yield self
 
-# ASCII Art - HERMES-AGENT logo (full width, single line - requires ~95 char terminal)
-HERMES_AGENT_LOGO = """[bold #FFD700]██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗       █████╗  ██████╗ ███████╗███╗   ██╗████████╗[/]
+# ASCII Art - SIDEKICK-AGENT logo (full width, single line - requires ~95 char terminal)
+SIDEKICK_AGENT_LOGO = """[bold #FFD700]██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗       █████╗  ██████╗ ███████╗███╗   ██╗████████╗[/]
 [bold #FFD700]██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝      ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝[/]
 [#FFBF00]███████║█████╗  ██████╔╝██╔████╔██║█████╗  ███████╗█████╗███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║[/]
 [#FFBF00]██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ╚════██║╚════╝██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║[/]
@@ -2123,7 +2128,7 @@ HERMES_AGENT_LOGO = """[bold #FFD700]██╗  ██╗███████�
 [#CD7F32]╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝      ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝[/]"""
 
 # ASCII Art - Sidekick Caduceus (compact, fits in left panel)
-HERMES_CADUCEUS = """[#CD7F32]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀⠀⢀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀[/]
+SIDEKICK_CADUCEUS = """[#CD7F32]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣀⡀⠀⣀⣀⠀⢀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀[/]
 [#CD7F32]⠀⠀⠀⠀⠀⠀⢀⣠⣴⣾⣿⣿⣇⠸⣿⣿⠇⣸⣿⣿⣷⣦⣄⡀⠀⠀⠀⠀⠀⠀[/]
 [#FFBF00]⠀⢀⣠⣴⣶⠿⠋⣩⡿⣿⡿⠻⣿⡇⢠⡄⢸⣿⠟⢿⣿⢿⣍⠙⠿⣶⣦⣄⡀⠀[/]
 [#FFBF00]⠀⠀⠉⠉⠁⠶⠟⠋⠀⠉⠀⢀⣈⣁⡈⢁⣈⣁⡀⠀⠉⠀⠙⠻⠶⠈⠉⠉⠀⠀[/]
@@ -2504,7 +2509,7 @@ class SidekickCLI:
         self.checkpoint_max_file_size_mb = cp_cfg.get("max_file_size_mb", 10)
         self.pass_session_id = pass_session_id
         # --ignore-rules: honor either the constructor flag or the env var set
-        # by `sidekick chat --ignore-rules` in hermes_cli/main.py. When true we
+        # by `sidekick chat --ignore-rules` in sidekick_cli/main.py. When true we
         # pass skip_context_files=True and skip_memory=True to AIAgent so
         # AGENTS.md/SOUL.md/.cursorrules and persistent memory are not loaded.
         self.ignore_rules = ignore_rules or (os.environ.get("SIDEKICK_IGNORE_RULES")) == "1"
@@ -2587,7 +2592,7 @@ class SidekickCLI:
 
         # Opportunistic state.db maintenance — runs at most once per
         # min_interval_hours, tracked via state_meta in state.db itself so
-        # it's shared across all Sidekick processes for this HERMES_HOME.
+        # it's shared across all Sidekick processes for this SIDEKICK_HOME.
         # Never blocks startup on failure.
         _run_state_db_auto_maintenance(self._session_db)
 
@@ -2609,7 +2614,7 @@ class SidekickCLI:
             self.session_id = f"{timestamp_str}_{short_uuid}"
         
         # History file for persistent input recall across sessions
-        self._history_file = _sidekick_home / ".hermes_history"
+        self._history_file = _sidekick_home / ".sidekick_history"
         self._last_invalidate: float = 0.0  # throttle UI repaints
         self._app = None
 
@@ -4304,13 +4309,13 @@ class SidekickCLI:
                 )
 
         # Warn if the configured model is a Nous Sidekick LLM (not agentic)
-        from cli.model_switch import is_nous_hermes_non_agentic
+        from cli.model_switch import is_nous_sidekick_non_agentic
 
         model_name = getattr(self, "model", "") or ""
-        if is_nous_hermes_non_agentic(model_name):
+        if is_nous_sidekick_non_agentic(model_name):
             self._console_print()
             self._console_print(
-                "[bold yellow]⚠  Nous Hermes 3 & 4 models are NOT agentic and are not "
+                "[bold yellow]⚠  Nous Sidekick 3 & 4 models are NOT agentic and are not "
                 "designed for use with Sidekick Agent.[/]"
             )
             self._console_print(
@@ -4344,7 +4349,7 @@ class SidekickCLI:
             )
             self._console_print(
                 "[dim]Use a session ID from a previous CLI run "
-                "(hermes sessions list).[/]"
+                "(sidekick sessions list).[/]"
             )
             return False
 
@@ -4962,7 +4967,7 @@ class SidekickCLI:
         if _remainder:
             _cprint(f"  {_DIM}Now type your prompt (or use --image in single-query mode): {_remainder}{_RST}")
         elif _is_termux_environment():
-            _cprint(f"  {_DIM}Tip: type your next message, or run hermes chat -q --image {_termux_example_image_path(image_path.name)} \"What do you see?\"{_RST}")
+            _cprint(f"  {_DIM}Tip: type your next message, or run sidekick chat -q --image {_termux_example_image_path(image_path.name)} \"What do you see?\"{_RST}")
 
     def _preprocess_images_with_vision(self, text: str, images: list, *, announce: bool = True) -> str:
         """Analyze attached images via the vision tool and return enriched text.
@@ -5269,7 +5274,7 @@ class SidekickCLI:
                 tools_disable_enable_command(ns)
                 return
 
-            # Buffer reports isatty()=True so color() in hermes_cli/colors.py
+            # Buffer reports isatty()=True so color() in sidekick_cli/colors.py
             # still emits ANSI escapes. StringIO.isatty() is False, which
             # would otherwise strip all colors before we re-render them.
             class _TTYBuf(StringIO):
@@ -7157,7 +7162,7 @@ class SidekickCLI:
     def _handle_curator_command(self, cmd: str):
         """Handle /curator slash command.
 
-        Delegates to hermes_cli.curator so the CLI and the `sidekick curator`
+        Delegates to sidekick_cli.curator so the CLI and the `sidekick curator`
         subcommand share the same handler set.
         """
         import shlex
@@ -7198,7 +7203,7 @@ class SidekickCLI:
             print(output)
 
     def _handle_skills_command(self, cmd: str):
-        """Handle /skills slash command — delegates to hermes_cli.skills_hub."""
+        """Handle /skills slash command — delegates to sidekick_cli.skills_hub."""
         from cli.skills_hub import handle_skills_slash
         handle_skills_slash(cmd, ChatConsole())
 
@@ -7274,7 +7279,7 @@ class SidekickCLI:
         cmd_original = command.strip()
 
         # Resolve aliases via central registry so adding an alias is a one-line
-        # change in hermes_cli/commands.py instead of touching every dispatch site.
+        # change in sidekick_cli/commands.py instead of touching every dispatch site.
         from cli.commands import resolve_command as _resolve_cmd
         _base_word = cmd_lower.split()[0].lstrip("/")
         _cmd_def = _resolve_cmd(_base_word)
@@ -7606,7 +7611,7 @@ class SidekickCLI:
                         try:
                             result = subprocess.run(
                                 exec_cmd, shell=True, capture_output=True,
-                                text=True, timeout=30
+                                text=True, encoding="utf-8", errors="replace", timeout=30
                             )
                             output = result.stdout.strip() or result.stderr.strip()
                             if output:
@@ -8146,6 +8151,8 @@ class SidekickCLI:
             state = mgr.resume()
             if state is None:
                 _cprint(f"  {_DIM}No goal to resume.{_RST}")
+            elif getattr(state, "status", "") != "active":
+                _cprint(f"  {mgr.status_line()}")
             else:
                 prompt = None
                 try:
@@ -8412,7 +8419,7 @@ class SidekickCLI:
         current = is_truthy_value(os.environ.get("SIDEKICK_YOLO_MODE"))
         if current:
             os.environ.pop("SIDEKICK_YOLO_MODE", None)
-            os.environ.pop("HERMES_YOLO_MODE", None)
+            os.environ.pop("SIDEKICK_YOLO_MODE", None)
             _cprint(
                 f"  ⚠ YOLO mode {_Colors.BOLD}{_Colors.RED}OFF{_Colors.RESET}"
                 " — dangerous commands will require approval."
@@ -8800,7 +8807,7 @@ class SidekickCLI:
             # above the file handler level filters records before they
             # reach handlers, so agent.log / errors.log lose visibility
             # into stream-retry events, credential rotations, etc.
-            # Console quietness is enforced by hermes_logging not
+            # Console quietness is enforced by sidekick_logging not
             # installing a console StreamHandler in non-verbose mode.
 
     def _show_insights(self, command: str = "/insights"):
@@ -11082,7 +11089,7 @@ class SidekickCLI:
             if _redact_raw.lower() not in {"1", "true", "yes", "on"}:
                 self._console_print(
                     "[bold red]⚠  Secret redaction is DISABLED[/] "
-                    f"(HERMES_REDACT_SECRETS={_redact_raw}). "
+                    f"(SIDEKICK_REDACT_SECRETS={_redact_raw}). "
                     "API keys and tokens may appear verbatim in chat output, "
                     "session JSONs, and logs. Set "
                     "[cyan]security.redact_secrets: true[/] in config.yaml "
@@ -13067,7 +13074,7 @@ class SidekickCLI:
             spawned with ``os.setsid`` and therefore survives as an orphan
             with PPID=1.
 
-            Grace window (``HERMES_SIGTERM_GRACE``, default 1.5 s) gives
+            Grace window (``SIDEKICK_SIGTERM_GRACE``, default 1.5 s) gives
             the daemon time to: detect the interrupt (next 200 ms poll) →
             call _kill_process (SIGTERM + 1 s wait + SIGKILL if needed) →
             return from _wait_for_process.  ``time.sleep`` releases the
@@ -13348,7 +13355,10 @@ def main(
         # ── Git worktree isolation (#652) ──
         # Create an isolated worktree so this agent instance doesn't collide
         # with other agents working on the same repo.
-        use_worktree = worktree or w or CLI_CONFIG.get("worktree", False)
+        from cli.config import get_worktree_settings
+
+        worktree_settings = get_worktree_settings(CLI_CONFIG)
+        use_worktree = worktree or w or worktree_settings["enabled"]
         wt_info = None
         if use_worktree:
             # Prune stale worktrees from crashed/killed sessions
@@ -13359,7 +13369,8 @@ def main(
             if wt_info:
                 _active_worktree = wt_info
                 os.environ["TERMINAL_CWD"] = wt_info["path"]
-                atexit.register(_cleanup_worktree, wt_info)
+                if worktree_settings["cleanup_on_exit"]:
+                    atexit.register(_cleanup_worktree, wt_info)
             else:
                 # Worktree was explicitly requested but setup failed —
                 # don't silently run without isolation.
@@ -13371,7 +13382,7 @@ def main(
     query = query or q
     
     # Parse toolsets - handle both string and tuple/list inputs
-    # Default to hermes-cli toolset which includes cronjob management tools
+    # Default to sidekick-cli toolset which includes cronjob management tools
     toolsets_list = None
     if toolsets:
         if isinstance(toolsets, str):
@@ -13459,7 +13470,7 @@ def main(
     # per-thread interrupt flag the worker's poll loop checks every 200 ms.
     # Give the worker a grace window to call _kill_process (SIGTERM to the
     # process group, then SIGKILL after 1 s), then raise KeyboardInterrupt
-    # so main unwinds normally.  HERMES_SIGTERM_GRACE overrides the 1.5 s
+    # so main unwinds normally.  SIDEKICK_SIGTERM_GRACE overrides the 1.5 s
     # default for debugging.
     def _signal_handler_q(signum, frame):
         logger.debug("Received signal %s in single-query mode", signum)

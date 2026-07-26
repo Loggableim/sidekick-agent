@@ -32,6 +32,7 @@ from web.api.config import (
     resolve_custom_provider_connection,
     model_with_provider_context,
 )
+from web.api._home import get_webui_home
 from web.api.helpers import redact_session_data, _redact_text
 from web.api.compression_anchor import visible_messages_for_anchor
 from web.api.metering import meter
@@ -57,6 +58,14 @@ _NOVA_SELF_QUERY_HINTS = (
     "wer bist du",
     "was unterscheidet dich",
     "was willst du",
+)
+
+_SSE_DISCONNECT_ERRORS = (
+    BrokenPipeError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    TimeoutError,
+    OSError,
 )
 
 
@@ -90,6 +99,48 @@ def _prewarm_skill_tool_modules():
             __import__(_mod_name)
         except ImportError:
             pass
+
+
+def _apply_streaming_home_env(profile_home: str) -> None:
+    """Set the active streaming profile home."""
+    os.environ["SIDEKICK_HOME"] = profile_home
+
+
+def _restore_streaming_home_env(old_sidekick_home: str | None) -> None:
+    """Restore the active profile home after a streaming turn finishes."""
+    if old_sidekick_home is None:
+        os.environ.pop("SIDEKICK_HOME", None)
+        return
+
+    os.environ["SIDEKICK_HOME"] = old_sidekick_home
+
+
+def _restore_streaming_browser_env(
+    old_browser_session_id: str | None,
+    old_browser_base_url: str | None,
+    old_browser_permission_mode: str | None,
+    old_browser_permission_token: str | None,
+) -> None:
+    """Restore browser-scoped env vars after a streaming turn finishes."""
+    if old_browser_session_id is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_SESSION_ID", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_SESSION_ID"] = old_browser_session_id
+
+    if old_browser_base_url is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_BASE_URL", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_BASE_URL"] = old_browser_base_url
+
+    if old_browser_permission_mode is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE"] = old_browser_permission_mode
+
+    if old_browser_permission_token is None:
+        os.environ.pop("SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN", None)
+    else:
+        os.environ["SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN"] = old_browser_permission_token
 
 
 def _load_nova_session_start_module():
@@ -128,7 +179,7 @@ def _nova_cognitive_system_block(
 ) -> str:
     slug = str(workspace_slug or "").strip().lower()
     path = str(workspace_path or "").replace("\\", "/").lower()
-    if slug != "nova" and "/home/spaces/nova" not in path:
+    if slug != "nova":
         return ""
     try:
         from web.api.nova_lifecycle import pre_turn
@@ -274,12 +325,12 @@ def _classify_provider_error(err_str: str, exc=None, *, silent_failure: bool = F
         )
     )
     _is_not_found = (
-        # model_not_found hints mention Settings / `hermes model` below.
+        # model_not_found hints mention Settings / `sidekick model` below.
         '404' in err_str
         or 'not found' in _err_lower
         or 'does not exist' in _err_lower
         or 'model not found' in _err_lower
-        or 'model_not_found' in _err_lower  # hint below points to Settings / `hermes model`
+        or 'model_not_found' in _err_lower  # hint below points to Settings / `sidekick model`
         or 'invalid model' in _err_lower
         or 'does not match any known model' in _err_lower
         or 'unknown model' in _err_lower
@@ -345,7 +396,7 @@ def _aiagent_import_error_detail() -> str:
     on sys.path") leaves users guessing at which python is running, where it's
     looking, and what to fix. We assemble the same evidence a maintainer would
     ask for first (issue #1695): the python that's running, the agent_dir env
-    var if set, the sys.path entries that mention 'hermes', and the most-common
+    var if set, the sys.path entries that mention 'sidekick', and the most-common
     fix (`pip install -e .` in the agent dir).
 
     Kept as a separate helper so it stays out of the hot path until we actually
@@ -357,14 +408,14 @@ def _aiagent_import_error_detail() -> str:
     lines = ["AIAgent not available -- check that Sidekick agent is on sys.path"]
     lines.append("")
     lines.append(f"  python:  {_sys.executable}")
-    agent_dir = _os.environ.get("SIDEKICK_WEBUI_AGENT_DIR") or _os.environ.get("SIDEKICK_WEBUI_AGENT_DIR")
+    agent_dir = _os.environ.get("SIDEKICK_WEBUI_AGENT_DIR")
     if agent_dir:
         lines.append(f"  SIDEKICK_WEBUI_AGENT_DIR: {agent_dir}")
     else:
         lines.append("  SIDEKICK_WEBUI_AGENT_DIR: (not set)")
 
     # Show only the sys.path entries that look relevant — full sys.path is noisy.
-    relevant = [p for p in _sys.path if "hermes" in p.lower() or "agent" in p.lower()]
+    relevant = [p for p in _sys.path if "sidekick" in p.lower() or "agent" in p.lower()]
     if relevant:
         lines.append("  sys.path entries mentioning sidekick/agent:")
         for entry in relevant[:6]:
@@ -563,7 +614,9 @@ def _build_agent_thread_env(profile_runtime_env: dict | None, workspace: str, se
         _browser_permission_token = ""
     env.update({
         'TERMINAL_CWD': str(workspace),
+        'SIDEKICK_PLATFORM': 'webui',
         'SIDEKICK_EXEC_ASK': '1',
+        'SIDEKICK_SESSION_PLATFORM': 'webui',
         'SIDEKICK_SESSION_KEY': session_id,
         'SIDEKICK_HOME': profile_home,
         'SIDEKICK_WEBUI_BROWSER_SESSION_ID': session_id,
@@ -654,7 +707,7 @@ def _build_native_multimodal_message(workspace_ctx: str, msg_text: str, attachme
     """Build native multimodal content parts for current-turn image uploads.
 
     WebUI uploads files into the active workspace. For image files, pass the
-    bytes to Hermes as OpenAI-style image_url data URLs so vision-capable main
+    bytes to Sidekick as OpenAI-style image_url data URLs so vision-capable main
     models can consume them in the same request. Non-image files intentionally
     stay as text path attachments so the agent can inspect them with file tools.
 
@@ -1121,6 +1174,15 @@ def generate_title_raw_via_aux(
     """Return (raw_text, status) via auxiliary LLM route."""
     if not user_text or not assistant_text:
         return None, 'missing_exchange'
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            provider = "ollama-cloud"
+            model = "deepseek-v4-flash"
+            base_url = ""
+    except Exception:
+        pass
     qa, prompts = _title_prompts(user_text, assistant_text)
     base_max_tokens = _title_completion_budget(provider, model, base_url)
     reasoning_extra = {"reasoning": {"enabled": False}}
@@ -1179,6 +1241,19 @@ def generate_title_raw_via_agent(agent, user_text: str, assistant_text: str) -> 
         return None, 'missing_exchange'
     if agent is None:
         return None, 'missing_agent'
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            return generate_title_raw_via_aux(
+                user_text,
+                assistant_text,
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                base_url="",
+            )
+    except Exception:
+        pass
 
     qa, prompts = _title_prompts(user_text, assistant_text)
     base_max_tokens = _title_completion_budget(
@@ -1374,12 +1449,12 @@ def _fallback_title_from_exchange(user_text: str, assistant_text: str) -> Option
         if not _contains_latin(topic_name):
             if any(k in combined for k in ('time', 'schedule', 'efficiency', 'manage', 'fitness', 'singing', 'calligraphy')):
                 return 'Time management discussion'
-            if any(k in combined for k in ('hermes', 'codex', 'ai')):
+            if any(k in combined for k in ('sidekick', 'codex', 'ai')):
                 return 'AI productivity discussion'
             return 'Conversation topic'
         if any(k in combined for k in ('time', 'schedule', 'efficiency', 'manage', 'fitness', 'singing', 'calligraphy')):
             return f'{topic_name} time management'
-        if any(k in combined for k in ('hermes', 'codex', 'ai')):
+        if any(k in combined for k in ('sidekick', 'codex', 'ai')):
             return f'{topic_name} AI productivity'
         return f'{topic_name} discussion'
 
@@ -2056,8 +2131,13 @@ def _extract_tool_calls_from_messages(messages, live_tool_calls=None):
 def _sse(handler, event, data):
     """Write one SSE event to the response stream."""
     payload = f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-    handler.wfile.write(payload.encode('utf-8'))
-    handler.wfile.flush()
+    try:
+        handler.wfile.write(payload.encode('utf-8'))
+        handler.wfile.flush()
+    except _SSE_DISCONNECT_ERRORS:
+        # Long-lived EventSource clients are allowed to disappear at any time.
+        # Treat those disconnects as normal shutdown rather than request errors.
+        return
 
 
 def _materialize_pending_user_turn_before_error(session) -> bool:
@@ -2138,8 +2218,8 @@ def _attempt_credential_self_heal(
     applicable (e.g. auth.json unchanged, provider unresolvable).
 
     Steps:
-    1. Re-read ``~/.hermes/auth.json`` to pick up fresh credentials that
-       may have been written by a concurrent ``hermes model`` CLI invocation.
+    1. Re-read ``~/.sidekick/auth.json`` to pick up fresh credentials that
+       may have been written by a concurrent ``sidekick model`` CLI invocation.
     2. Evict the session's cached agent so it is rebuilt with fresh keys.
     3. Evict the provider's credential-pool cache entry.
     4. Re-resolve the runtime provider.
@@ -2235,7 +2315,7 @@ def _run_agent_streaming(
     old_cwd = None
     old_exec_ask = None
     old_session_key = None
-    old_hermes_home = None
+    old_sidekick_home = None
     old_profile_env = {}
 
     # MCP discovery moved to AFTER the per-profile SIDEKICK_HOME mutation below
@@ -2412,6 +2492,15 @@ def _run_agent_streaming(
     try:
         s = get_session(session_id)
         update_active_run(stream_id, phase="running", session_id=session_id)
+        try:
+            from web.api.kanban_orchestration import (
+                session_has_kanban_orchestration,
+                set_webui_kanban_orchestration,
+            )
+            _kanban_orchestrated = session_has_kanban_orchestration(s)
+            set_webui_kanban_orchestration(_kanban_orchestrated)
+        except Exception:
+            _kanban_orchestrated = False
         # Set up workspace context for this streaming thread so that
         # subsequent Session.save() and Session.load() calls use the
         # correct workspace-specific session directory.
@@ -2452,14 +2541,14 @@ def _run_agent_streaming(
         try:
             from web.api.profiles import (
                 _patch_skill_home_modules,
-                get_hermes_home_for_profile,
+                get_profile_home,
                 get_profile_runtime_env,
             )
-            _profile_home_path = get_hermes_home_for_profile(getattr(s, 'profile', None))
+            _profile_home_path = get_profile_home(getattr(s, 'profile', None))
             _profile_home = str(_profile_home_path)
             _profile_runtime_env = get_profile_runtime_env(_profile_home_path)
         except ImportError:
-            _profile_home = os.environ.get('SIDEKICK_HOME') or os.environ.get('SIDEKICK_HOME', '')
+            _profile_home = str(get_webui_home())
             _profile_runtime_env = {}
             _patch_skill_home_modules = None
         
@@ -2514,33 +2603,25 @@ def _run_agent_streaming(
         with _ENV_LOCK:
             old_profile_env = {key: os.environ.get(key) for key in _profile_runtime_env}
             old_cwd = os.environ.get('TERMINAL_CWD')
-            old_exec_ask = os.environ.get('SIDEKICK_EXEC_ASK') or os.environ.get('SIDEKICK_EXEC_ASK')
-            old_session_key = os.environ.get('SIDEKICK_SESSION_KEY') or os.environ.get('SIDEKICK_SESSION_KEY')
+            old_exec_ask = os.environ.get('SIDEKICK_EXEC_ASK')
+            old_session_key = os.environ.get('SIDEKICK_SESSION_KEY')
             old_sidekick_home = os.environ.get('SIDEKICK_HOME')
-            old_hermes_home = os.environ.get('SIDEKICK_HOME')
-            old_browser_session_id = os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID') or os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID')
-            old_browser_base_url = os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL') or os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL')
-            old_browser_permission_mode = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE') or os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE')
-            old_browser_permission_token = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN') or os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN')
+            old_browser_session_id = os.environ.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID')
+            old_browser_base_url = os.environ.get('SIDEKICK_WEBUI_BROWSER_BASE_URL')
+            old_browser_permission_mode = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE')
+            old_browser_permission_token = os.environ.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN')
             os.environ.update(_profile_runtime_env)
             os.environ['TERMINAL_CWD'] = str(s.workspace)
             os.environ['SIDEKICK_EXEC_ASK'] = '1'
-            os.environ['SIDEKICK_EXEC_ASK'] = '1'
             os.environ['SIDEKICK_SESSION_KEY'] = session_id
-            os.environ['SIDEKICK_SESSION_KEY'] = session_id
-            os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
-            os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
-            os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
-            os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', '')
-            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN') or _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', '')
+            os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_SESSION_ID', session_id)
+            os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_BASE_URL', 'http://127.0.0.1:8787')
+            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', 'none')
+            os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = _thread_env.get('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', '')
             if _profile_home:
-                os.environ['SIDEKICK_HOME'] = _profile_home
-                os.environ['SIDEKICK_HOME'] = _profile_home
+                _apply_streaming_home_env(_profile_home)
                 # Patch module-level caches to match the active profile.
-                # _set_hermes_home() does this for process-wide switches
+                # _set_sidekick_home() does this for process-wide switches
                 # but per-request switches skip it (#1700).
                 # Modules were prewarmed by _prewarm_skill_tool_modules()
                 # above, so we only do lightweight sys.modules lookups and
@@ -2551,7 +2632,7 @@ def _run_agent_streaming(
         # Lock released — agent runs without holding it
         # ── MCP Server Discovery (lazy import, idempotent) ──
         # MUST run AFTER the SIDEKICK_HOME mutation above — `discover_mcp_tools()`
-        # reads `~/.hermes/config.yaml` via `get_hermes_home()`, which uses
+        # reads the active Sidekick config via `get_sidekick_home()`, which uses
         # `os.environ['SIDEKICK_HOME']`.  Calling it before the mutation always
         # loaded the default profile's `mcp_servers`, even when the session
         # was stamped with a non-default profile.  See issue #1968.
@@ -2561,7 +2642,7 @@ def _run_agent_streaming(
         # named e.g. `postgres`, profile B's discovery sees it as already
         # connected and skips it — even if B's config points at a different
         # binary.  Fully fixing multi-profile concurrent use requires keying
-        # `_servers` by `(profile_home, name)` upstream in hermes-agent; that
+        # `_servers` by `(profile_home, name)` upstream in sidekick-agent; that
         # lives outside this WebUI repo.  This change fixes the headline bug
         # for users who run a single non-default profile per WebUI process.
         try:
@@ -2607,7 +2688,7 @@ def _run_agent_streaming(
             logger.debug("Clarify module not available, falling back to polling")
 
         def _clarify_callback_impl(question, choices, sid, cancel_evt, put_event):
-            """Bridge Hermes clarify prompts to the WebUI."""
+            """Bridge Sidekick clarify prompts to the WebUI."""
             timeout = _clarify_timeout_seconds()
             choices_list = [str(choice) for choice in (choices or [])]
             data = {
@@ -2952,7 +3033,7 @@ def _run_agent_streaming(
                 model_with_provider_context(model, provider_context)
             )
 
-            # Resolve API key via Hermes runtime provider (matches gateway behaviour).
+            # Resolve API key via Sidekick runtime provider (matches gateway behaviour).
             # Pass the resolved provider so non-default providers get their own credentials.
             resolved_api_key = None
             try:
@@ -3017,6 +3098,18 @@ def _run_agent_streaming(
             except Exception as _ts_err:
                 print(f"[webui] WARNING: failed to read per-session toolsets for {session_id}: {_ts_err}", flush=True)
 
+            from web.api.kanban_orchestration import webui_toolsets_for_session
+            try:
+                from tools.kanban_tools import _profile_has_kanban_toolset
+                _profile_has_kanban = bool(_profile_has_kanban_toolset())
+            except Exception:
+                _profile_has_kanban = False
+            _toolsets = webui_toolsets_for_session(
+                _toolsets,
+                s,
+                profile_has_kanban=_profile_has_kanban,
+            )
+
             # Fallback model from profile config (e.g. for rate-limit recovery)
             _fallback = _cfg.get('fallback_model') or _cfg.get('fallback_providers') or None
             _fallback_resolved = None
@@ -3039,7 +3132,7 @@ def _run_agent_streaming(
                     }
 
             # Build kwargs defensively — guard newer params so the WebUI
-            # degrades gracefully when run against an older hermes-agent build.
+            # degrades gracefully when run against an older sidekick-agent build.
             # (fixes: TypeError: AIAgent.__init__() got an unexpected keyword
             # argument 'credential_pool' — issue #772)
             import inspect as _inspect
@@ -3050,7 +3143,7 @@ def _run_agent_streaming(
             # this WebUI-created agents silently use AIAgent's constructor
             # default (90), so long browser-originated tasks hit the
             # "maximum number of tool-calling iterations" summary path even
-            # after the operator raises Hermes' global turn budget.
+            # after the operator raises Sidekick' global turn budget.
             _max_iterations_cfg = None
             try:
                 _raw_max_iterations = None
@@ -3058,7 +3151,7 @@ def _run_agent_streaming(
                 if isinstance(_agent_cfg_for_iterations, dict):
                     _raw_max_iterations = _agent_cfg_for_iterations.get('max_turns')
                 if _raw_max_iterations is None and isinstance(_cfg, dict):
-                    # Back-compat for older Hermes config files that used a
+                    # Back-compat for older Sidekick config files that used a
                     # root-level max_turns key.
                     _raw_max_iterations = _cfg.get('max_turns')
                 if _raw_max_iterations is not None:
@@ -3137,7 +3230,7 @@ def _run_agent_streaming(
                 _agent_kwargs['max_iterations'] = _max_iterations_cfg
             if 'max_tokens' in _agent_params and _max_tokens_cfg is not None:
                 _agent_kwargs['max_tokens'] = _max_tokens_cfg
-            # Params added in newer hermes-agent — skip if not supported
+            # Params added in newer sidekick-agent — skip if not supported
             if 'api_mode' in _agent_params:
                 _agent_kwargs['api_mode'] = _rt.get('api_mode')
             if 'acp_command' in _agent_params:
@@ -3351,7 +3444,7 @@ def _run_agent_streaming(
                 )
             _copilot_protocol = "\n".join(_copilot_protocol_lines)
             # Resolve personality prompt from config.yaml agent.personalities
-            # (matches hermes-agent CLI behavior — passes via ephemeral_system_prompt)
+            # (matches sidekick-agent CLI behavior — passes via ephemeral_system_prompt)
             _personality_prompt = None
             _pname = getattr(s, 'personality', None)
             if _pname:
@@ -3709,7 +3802,7 @@ def _run_agent_streaming(
                     # Carry profile identity across the compression boundary.
                     # Without this, s.profile stays None on the continuation
                     # session. On the next request, _run_agent_streaming calls
-                    # get_hermes_home_for_profile(getattr(s, 'profile', None))
+                    # get_profile_home(getattr(s, 'profile', None))
                     # which falls back to the default profile's SIDEKICK_HOME.
                     # Memory writes then land in the wrong profile's MEMORY.md.
                     # Stamping here also ensures s.save() persists a non-null
@@ -3922,7 +4015,7 @@ def _run_agent_streaming(
                         if _resolved_cl:
                             s.context_length = _resolved_cl
                     except TypeError:
-                        # Older hermes-agent builds whose get_model_context_length
+                        # Older sidekick-agent builds whose get_model_context_length
                         # signature pre-dates the config_context_length /
                         # custom_providers kwargs. Retry with the legacy 2-arg
                         # form so the indicator still resolves *something*.
@@ -3937,7 +4030,7 @@ def _run_agent_streaming(
                         except Exception:
                             pass
                     except Exception:
-                        # Older hermes-agent builds may not expose this helper.
+                        # Older sidekick-agent builds may not expose this helper.
                         # Better to leave context_length=0 than crash the save.
                         pass
                 if not ephemeral and s.messages:
@@ -3980,8 +4073,7 @@ def _run_agent_streaming(
                         logger.debug("Failed to append completed turn journal event", exc_info=True)
                     try:
                         _nova_slug = str(getattr(s, 'workspace_slug', '') or _ws_slug or '').strip().lower()
-                        _nova_path = str(getattr(s, 'workspace', '') or '').replace('\\', '/').lower()
-                        if _nova_slug == 'nova' or '/home/spaces/nova' in _nova_path:
+                        if _nova_slug == 'nova':
                             from web.api.nova_lifecycle import post_turn as _nova_post_turn
 
                             _nu, _na = _latest_exchange_snippets(s.messages)
@@ -4069,7 +4161,7 @@ def _run_agent_streaming(
                             custom_providers=_cfg_custom_providers,
                         )
                     except TypeError:
-                        # Older hermes-agent builds: fall back to legacy 2-arg form.
+                        # Older sidekick-agent builds: fall back to legacy 2-arg form.
                         _fb_cl = _get_cl(
                             getattr(agent, 'model', resolved_model or '') or '',
                             getattr(agent, 'base_url', '') or '',
@@ -4103,7 +4195,7 @@ def _run_agent_streaming(
                     })
             except Exception:
                 logger.debug("Failed to drain pending steer for session %s", session_id)
-            # /goal parity: after a successful assistant turn, run the Hermes
+            # /goal parity: after a successful assistant turn, run the Sidekick
             # GoalManager judge before terminal done/stream_end events. The
             # frontend surfaces the status line and queues continuation_prompt as
             # a normal next user message so /queue and user input keep priority.
@@ -4112,7 +4204,9 @@ def _run_agent_streaming(
             try:
                 from web.api.goals import evaluate_goal_after_turn, has_active_goal
 
-                if not goal_related or not has_active_goal(session_id, profile_home=_profile_home):
+                _goal_space_slug = str(getattr(s, 'workspace_slug', '') or getattr(s, 'space_slug', '') or getattr(s, 'space', '') or '').strip().lower() or None
+
+                if not goal_related or not has_active_goal(session_id, profile_home=_profile_home, space_slug=_goal_space_slug):
                     _goal_decision = {}
                 else:
                     _last_goal_response = ''
@@ -4142,6 +4236,7 @@ def _run_agent_streaming(
                         _last_goal_response,
                         user_initiated=True,
                         profile_home=_profile_home,
+                        space_slug=_goal_space_slug,
                     )
                 decision = _goal_decision or {}
                 _goal_message = str(decision.get('message') or '').strip()
@@ -4215,56 +4310,33 @@ def _run_agent_streaming(
                     else: os.environ[_key] = _old_value
                 if old_cwd is None: os.environ.pop('TERMINAL_CWD', None)
                 else: os.environ['TERMINAL_CWD'] = old_cwd
-                if old_exec_ask is None:
-                    os.environ.pop('SIDEKICK_EXEC_ASK', None)
-                    os.environ.pop('SIDEKICK_EXEC_ASK', None)
-                else:
-                    os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
-                    os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
-                if old_session_key is None:
-                    os.environ.pop('SIDEKICK_SESSION_KEY', None)
-                    os.environ.pop('SIDEKICK_SESSION_KEY', None)
-                else:
-                    os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
-                    os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
-                if old_sidekick_home is None and old_hermes_home is None:
-                    os.environ.pop('SIDEKICK_HOME', None)
-                    os.environ.pop('SIDEKICK_HOME', None)
-                else:
-                    if old_sidekick_home is not None:
-                        os.environ['SIDEKICK_HOME'] = old_sidekick_home
-                    else:
-                        os.environ.pop('SIDEKICK_HOME', None)
-                    if old_hermes_home is not None:
-                        os.environ['SIDEKICK_HOME'] = old_hermes_home
-                    else:
-                        os.environ.pop('SIDEKICK_HOME', None)
-                if old_browser_session_id is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_SESSION_ID', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_SESSION_ID', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = old_browser_session_id
-                    os.environ['SIDEKICK_WEBUI_BROWSER_SESSION_ID'] = old_browser_session_id
-                if old_browser_base_url is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_BASE_URL', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_BASE_URL', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = old_browser_base_url
-                    os.environ['SIDEKICK_WEBUI_BROWSER_BASE_URL'] = old_browser_base_url
-                if old_browser_permission_mode is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = old_browser_permission_mode
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_MODE'] = old_browser_permission_mode
-                if old_browser_permission_token is None:
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', None)
-                    os.environ.pop('SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN', None)
-                else:
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = old_browser_permission_token
-                    os.environ['SIDEKICK_WEBUI_BROWSER_PERMISSION_TOKEN'] = old_browser_permission_token
+            if old_exec_ask is None:
+                os.environ.pop('SIDEKICK_EXEC_ASK', None)
+            else:
+                os.environ['SIDEKICK_EXEC_ASK'] = old_exec_ask
+            if old_session_key is None:
+                os.environ.pop('SIDEKICK_SESSION_KEY', None)
+            else:
+                os.environ['SIDEKICK_SESSION_KEY'] = old_session_key
+            _restore_streaming_home_env(old_sidekick_home)
+            _restore_streaming_browser_env(
+                old_browser_session_id,
+                old_browser_base_url,
+                old_browser_permission_mode,
+                old_browser_permission_token,
+            )
+            try:
+                from web.api.kanban_orchestration import clear_webui_kanban_orchestration
+                clear_webui_kanban_orchestration()
+            except Exception:
+                pass
 
     except Exception as e:
+        try:
+            from web.api.kanban_orchestration import clear_webui_kanban_orchestration
+            clear_webui_kanban_orchestration()
+        except Exception:
+            pass
         print('[webui] stream error:\n' + traceback.format_exc(), flush=True)
         err_str = str(e)
         # Sanitize HTML from provider error responses — some providers return
@@ -4283,7 +4355,7 @@ def _run_agent_streaming(
         _exc_is_auth = _classification['type'] == 'auth_mismatch'  # detects '401' and 'unauthorized' via _classify_provider_error.
         _exc_is_not_found = _classification['type'] == 'model_not_found'  # detects '404', 'not found', 'does not exist', and 'invalid model'.
 
-        # The user hint still points to Settings / `hermes model` from _classify_provider_error().
+        # The user hint still points to Settings / `sidekick model` from _classify_provider_error().
         if _exc_is_quota:
             _exc_label, _exc_type, _exc_hint = (
                 _classification['label'], _classification['type'], _classification['hint'],
@@ -4503,7 +4575,7 @@ def _handle_chat_steer(handler, body: dict) -> bool:
                            "stream_id": None})
     agent = cached[0]
     if not hasattr(agent, "steer"):
-        # Older hermes-agent that pre-dates the steer() method
+        # Older sidekick-agent that pre-dates the steer() method
         return j(handler, {"accepted": False, "fallback": "agent_lacks_steer",
                            "stream_id": None})
 

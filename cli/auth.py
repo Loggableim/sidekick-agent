@@ -746,9 +746,9 @@ def _oauth_trace(event: str, *, sequence_id: Optional[str] = None, **fields: Any
 
 def _auth_file_path() -> Path:
     path = get_sidekick_home() / "auth.json"
-    # Seat belt: if pytest is running and HERMES_HOME resolves to the real
+    # Seat belt: if pytest is running and SIDEKICK_HOME resolves to the real
     # user's auth store, refuse rather than silently corrupt it. This catches
-    # tests that forgot to monkeypatch HERMES_HOME, tests invoked without the
+    # tests that forgot to monkeypatch SIDEKICK_HOME, tests invoked without the
     # hermetic conftest, or sandbox escapes via threads/subprocesses. In
     # production (no PYTEST_CURRENT_TEST) this is a single dict lookup.
     if os.environ.get("PYTEST_CURRENT_TEST"):
@@ -760,7 +760,7 @@ def _auth_file_path() -> Path:
         if resolved == real_home_auth:
             raise RuntimeError(
                 f"Refusing to touch real user auth store during test run: {path}. "
-                "Set HERMES_HOME to a tmp_path in your test fixture, or run "
+                "Set SIDEKICK_HOME to a tmp_path in your test fixture, or run "
                 "via scripts/run_tests.sh for hermetic CI-parity env."
             )
     return path
@@ -770,15 +770,15 @@ def _global_auth_file_path() -> Optional[Path]:
     """Return the global-root auth.json when the process is in profile mode.
 
     Returns ``None`` when the profile and global root resolve to the same
-    directory (classic mode, or custom HERMES_HOME that is not a profile).
+    directory (classic mode, or custom SIDEKICK_HOME that is not a profile).
     Used by read-only fallback paths so providers authed at the root are
     visible to profile processes that haven't configured them locally.
 
     See issue #18594 follow-up (credential_pool shadowing).
     """
     try:
-        from runtime._compat.shim_constants import get_default_hermes_root
-        global_root = get_default_hermes_root()
+        from runtime._compat.shim_constants import get_default_sidekick_root
+        global_root = get_default_sidekick_root()
     except Exception:
         return None
     profile_home = get_sidekick_home()
@@ -804,9 +804,9 @@ def _load_global_auth_store() -> Dict[str, Any]:
     or the global auth.json is absent). Never raises on missing file.
 
     Seat belt: under pytest, refuses to read the real user's
-    ``~/.sidekick/auth.json`` even when HERMES_HOME is set to a profile
+    ``~/.sidekick/auth.json`` even when SIDEKICK_HOME is set to a profile
     path. The hermetic conftest does not redirect ``HOME``, so
-    ``get_default_hermes_root()`` for a profile-shaped HERMES_HOME can
+    ``get_default_sidekick_root()`` for a profile-shaped SIDEKICK_HOME can
     still resolve to the real user's home on a dev machine. That would
     leak real credentials into tests. This guard uses the unmodified
     ``HOME`` env var (what ``os.path.expanduser('~')`` would resolve to),
@@ -2302,7 +2302,7 @@ def _spotify_interactive_setup(redirect_uri_hint: str) -> str:
     
 
     print()
-    print("Saved HERMES_SPOTIFY_CLIENT_ID to ~/.sidekick/.env")
+    print("Saved SIDEKICK_SPOTIFY_CLIENT_ID to ~/.sidekick/.env")
     print()
     return raw
 
@@ -2312,7 +2312,7 @@ def login_spotify_command(args) -> None:
 
     # Interactive wizard: if no client_id is configured anywhere, walk the
     # user through creating the Spotify developer app instead of crashing
-    # with "HERMES_SPOTIFY_CLIENT_ID is required".
+    # with "SIDEKICK_SPOTIFY_CLIENT_ID is required".
     explicit_client_id = getattr(args, "client_id", None)
     try:
         client_id = _spotify_client_id(explicit_client_id, existing_state)
@@ -2677,7 +2677,7 @@ def resolve_codex_runtime_credentials(
         "provider": "openai-codex",
         "base_url": base_url,
         "api_key": access_token,
-        "source": "hermes-auth-store",
+        "source": "sidekick-auth-store",
         "last_refresh": data.get("last_refresh"),
         "auth_mode": "chatgpt",
     }
@@ -3031,7 +3031,7 @@ def resolve_external_process_provider_credentials(provider_id: str) -> Dict[str,
     if not resolved_command and not base_url.startswith("acp+tcp://"):
         raise AuthError(
             f"Could not find the Copilot CLI command '{command}'. "
-            "Install GitHub Copilot CLI or set HERMES_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
+            "Install GitHub Copilot CLI or set SIDEKICK_COPILOT_ACP_COMMAND/COPILOT_CLI_PATH.",
             provider=provider_id,
             code="missing_copilot_cli",
         )

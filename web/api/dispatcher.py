@@ -15,11 +15,22 @@ import sys
 import threading
 import time
 from pathlib import Path
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
 # ── Worker pool ─────────────────────────────────────────────────────────────
-_MAX_CONCURRENT_WORKERS = 4
+def _configured_worker_limit() -> int:
+    try:
+        from cli.config import load_config
+        from cli.kanban_db import effective_max_spawn
+
+        return effective_max_spawn((load_config().get("kanban", {}) or {}).get("max_spawn"))
+    except Exception:
+        return 16
+
+
+_MAX_CONCURRENT_WORKERS = _configured_worker_limit()
 _worker_semaphore = threading.Semaphore(_MAX_CONCURRENT_WORKERS)
 _active_dispatches: dict[str, dict] = {}  # task_id -> info
 _dispatches_lock = threading.Lock()
@@ -108,8 +119,7 @@ def _iterate_space_boards(space, agents: list[str], result: dict, *, dry_run: bo
     kb = _kb()
 
     # Temporarily set kanban home to this space's root
-    _set_space_kanban_home(str(space.root))
-    try:
+    with _kanban_home_override(str(space.root)):
         # Get list of boards
         boards = ["default"]  # At minimum the default board
         try:
@@ -128,8 +138,6 @@ def _iterate_space_boards(space, agents: list[str], result: dict, *, dry_run: bo
                     _dispatch_ready_tasks(space, agents, conn, tasks, board_slug, result, dry_run=dry_run)
             except Exception as e:
                 logger.debug("board %s/%s scan failed: %s", space.slug, board_slug, e)
-    finally:
-        _clear_kanban_home()
 
 
 def _dispatch_ready_tasks(space, agents, conn, tasks, board_slug, result, *, dry_run: bool = False) -> None:
@@ -158,18 +166,28 @@ def _dispatch_ready_tasks(space, agents, conn, tasks, board_slug, result, *, dry
         if not task_id:
             continue
 
+        # Reserve capacity before changing state. This prevents an oversized
+        # ready queue from creating thousands of waiting threads/tasks.
+        if not _worker_semaphore.acquire(blocking=False):
+            break
+
         try:
             _patch_task(conn, task_id, {"status": IN_PROGRESS_STATUS})
         except Exception as e:
             logger.warning("failed to set task %s to in_progress: %s", task_id, e)
+            _worker_semaphore.release()
             continue
 
         # Dispatch worker thread
-        _spawn_worker(space, assignee, task_id, board_slug)
-        result["dispatched"] += 1
+        if _spawn_worker(space, assignee, task_id, board_slug, slot_reserved=True):
+            result["dispatched"] += 1
+        else:
+            _patch_task(conn, task_id, {"status": "ready"})
 
 
-def _spawn_worker(space, agent_slug: str, task_id: str, board_slug: str) -> None:
+def _spawn_worker(
+    space, agent_slug: str, task_id: str, board_slug: str, *, slot_reserved: bool = False
+) -> bool:
     """Spawn a background thread to work on a kanban task.
 
     The worker loads the agent's SOUL.md + space config and runs
@@ -177,10 +195,14 @@ def _spawn_worker(space, agent_slug: str, task_id: str, board_slug: str) -> None
     """
     worker_id = f"{space.slug}/{board_slug}/{task_id}"
 
+    if not slot_reserved and not _worker_semaphore.acquire(blocking=False):
+        return False
+
     with _dispatches_lock:
         if worker_id in _active_dispatches:
             logger.debug("worker %s already active, skipping", worker_id)
-            return
+            _worker_semaphore.release()
+            return False
         _active_dispatches[worker_id] = {
             "space": space.slug,
             "board": board_slug,
@@ -191,9 +213,6 @@ def _spawn_worker(space, agent_slug: str, task_id: str, board_slug: str) -> None
         }
 
     def _work():
-        if not _worker_semaphore.acquire(timeout=30):
-            logger.warning("worker %s: semaphore timeout, aborting", worker_id)
-            return
         try:
             _execute_task(space, agent_slug, task_id, board_slug, worker_id)
         finally:
@@ -202,7 +221,14 @@ def _spawn_worker(space, agent_slug: str, task_id: str, board_slug: str) -> None
                 _active_dispatches.pop(worker_id, None)
 
     t = threading.Thread(target=_work, name=f"dispatch-{space.slug[:8]}-{task_id[:8]}", daemon=True)
-    t.start()
+    try:
+        t.start()
+    except Exception:
+        with _dispatches_lock:
+            _active_dispatches.pop(worker_id, None)
+        _worker_semaphore.release()
+        raise
+    return True
 
 
 def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_id: str) -> None:
@@ -219,17 +245,17 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 
     logger.info("dispatch worker %s starting", worker_id)
 
-    # ── Resolve `hermes` binary ──────────────────────────────────────────
-    hermes_bin = shutil.which("sidekick") or shutil.which("hermes")
-    if not hermes_bin:
-        hermes_bin = sys.executable
-        hermes_args = ["-m", "sidekick_cli.main"]
+    # ── Resolve `sidekick` binary ──────────────────────────────────────────
+    sidekick_bin = shutil.which("sidekick") or shutil.which("sidekick")
+    if not sidekick_bin:
+        sidekick_bin = sys.executable
+        sidekick_args = ["-m", "sidekick_cli.main"]
     else:
-        hermes_args = []
+        sidekick_args = []
 
     # ── Build command ────────────────────────────────────────────────────
     cmd = (
-        [hermes_bin] + hermes_args +
+        [sidekick_bin] + sidekick_args +
         ["-p", agent_slug,
          "--skills", "kanban-worker",
          "chat",
@@ -239,14 +265,14 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
     # ── Environment ──────────────────────────────────────────────────────
     env = dict(os.environ)
     env["SIDEKICK_KANBAN_TASK"] = task_id
-    env["HERMES_KANBAN_TASK"] = task_id
+    env["SIDEKICK_KANBAN_TASK"] = task_id
     env["SIDEKICK_KANBAN_BOARD"] = board_slug
-    env["HERMES_KANBAN_BOARD"] = board_slug
+    env["SIDEKICK_KANBAN_BOARD"] = board_slug
     env["SIDEKICK_PROFILE"] = agent_slug
-    env["HERMES_PROFILE"] = agent_slug
+    env["SIDEKICK_PROFILE"] = agent_slug
     # Pin kanban home so the worker reads the right board
     env["SIDEKICK_KANBAN_HOME"] = str(space.root)
-    env["HERMES_KANBAN_HOME"] = str(space.root)
+    env["SIDEKICK_KANBAN_HOME"] = str(space.root)
 
     # ── Worker log (per-space/board/task) ──────────────────────────────
     log_dir = Path(space.root) / "kanban" / "boards" / board_slug / "logs"
@@ -289,47 +315,41 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 
         if exit_code != 0:
             # Worker crashed / was killed — reset task to ready
-            _set_space_kanban_home(str(space.root))
+            with _kanban_home_override(str(space.root)):
+                try:
+                    from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
+                    with _kb_conn(board=board_slug) as conn:
+                        _patch(conn, task_id, {"status": "ready"})
+                except Exception as e:
+                    logger.warning(
+                        "worker %s: failed to reset crashed task to ready: %s",
+                        worker_id, e,
+                    )
+
+    except FileNotFoundError:
+        logger.error(
+            "dispatch worker %s: `sidekick` executable not found on PATH "
+            "(tried: %s); cannot spawn worker",
+            worker_id, sidekick_bin,
+        )
+        with _kanban_home_override(str(space.root)):
+            try:
+                from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
+                with _kb_conn(board=board_slug) as conn:
+                    _patch(conn, task_id, {"status": "blocked",
+                                           "block_reason": "sidekick binary not found on PATH"})
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.exception("dispatch worker %s: spawn failed: %s", worker_id, e)
+        with _kanban_home_override(str(space.root)):
             try:
                 from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
                 with _kb_conn(board=board_slug) as conn:
                     _patch(conn, task_id, {"status": "ready"})
-            except Exception as e:
-                logger.warning(
-                    "worker %s: failed to reset crashed task to ready: %s",
-                    worker_id, e,
-                )
-            finally:
-                _clear_kanban_home()
-
-    except FileNotFoundError:
-        logger.error(
-            "dispatch worker %s: `hermes` executable not found on PATH "
-            "(tried: %s); cannot spawn worker",
-            worker_id, hermes_bin,
-        )
-        _set_space_kanban_home(str(space.root))
-        try:
-            from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
-            with _kb_conn(board=board_slug) as conn:
-                _patch(conn, task_id, {"status": "blocked",
-                                       "block_reason": "sidekick binary not found on PATH"})
-        except Exception:
-            pass
-        finally:
-            _clear_kanban_home()
-
-    except Exception as e:
-        logger.exception("dispatch worker %s: spawn failed: %s", worker_id, e)
-        _set_space_kanban_home(str(space.root))
-        try:
-            from web.api.kanban_bridge import _conn as _kb_conn, _patch_task as _patch
-            with _kb_conn(board=board_slug) as conn:
-                _patch(conn, task_id, {"status": "ready"})
-        except Exception:
-            pass
-        finally:
-            _clear_kanban_home()
+            except Exception:
+                pass
 
     logger.info("dispatch worker %s completed", worker_id)
 
@@ -339,11 +359,31 @@ def _execute_task(space, agent_slug: str, task_id: str, board_slug: str, worker_
 def _set_space_kanban_home(space_root: str) -> None:
     """Set kanban home for this thread (bypasses request-local)."""
     os.environ["SIDEKICK_KANBAN_HOME"] = space_root
+    os.environ["SIDEKICK_KANBAN_HOME"] = space_root
 
 
 def _clear_kanban_home() -> None:
     os.environ.pop("SIDEKICK_KANBAN_HOME", None)
-    os.environ.pop("HERMES_KANBAN_HOME", None)
+    os.environ.pop("SIDEKICK_KANBAN_HOME", None)
+
+
+@contextmanager
+def _kanban_home_override(space_root: str):
+    """Temporarily pin both kanban home env vars and restore prior values."""
+    old_home = os.environ.get("SIDEKICK_KANBAN_HOME")
+    old_sidekick_home = os.environ.get("SIDEKICK_KANBAN_HOME")
+    _set_space_kanban_home(space_root)
+    try:
+        yield
+    finally:
+        if old_home is None:
+            os.environ.pop("SIDEKICK_KANBAN_HOME", None)
+        else:
+            os.environ["SIDEKICK_KANBAN_HOME"] = old_home
+        if old_sidekick_home is None:
+            os.environ.pop("SIDEKICK_KANBAN_HOME", None)
+        else:
+            os.environ["SIDEKICK_KANBAN_HOME"] = old_sidekick_home
 
 
 # ── Status / Monitoring ─────────────────────────────────────────────────────

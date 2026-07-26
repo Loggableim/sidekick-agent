@@ -7,22 +7,30 @@ back to a stale repo-local ``home`` directory.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from web.api._home import get_active_webui_home, get_webui_home
+
+
+def _active_nova_home() -> Path:
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return get_webui_home()
 
 
 def get_nova_space_root() -> Path:
-    # Prefer the active Sidekick home, but keep the legacy HERMES_HOME
-    # fallback so older installs and tests continue to resolve correctly.
-    raw_home = (os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME") or "").strip()
-    if raw_home:
-        return Path(raw_home).expanduser() / "spaces" / "nova"
-    return Path(__file__).resolve().parents[2] / "home" / "spaces" / "nova"
+    return _active_nova_home() / "spaces" / "nova"
 
 
 def get_nova_session_start_path() -> Path:
     return get_nova_space_root() / "session_start.py"
 
 
+def get_nova_source_root() -> Path:
+    """Return the immutable Nova package bundled with Sidekick."""
+    return Path(__file__).resolve().parents[2] / "nova"
+
+
 def get_nova_state_snapshot_path() -> Path:
-    return get_nova_space_root() / "state_snapshot.py"
+    return get_nova_source_root() / "state_snapshot.py"

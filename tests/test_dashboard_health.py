@@ -164,7 +164,7 @@ def test_workspaces_endpoint_merges_space_engine_entries(monkeypatch, tmp_path):
     client = TestClient(web_server.app)
     response = client.get(
         "/api/workspaces",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -189,7 +189,7 @@ def test_workspaces_endpoint_requires_session_token(monkeypatch, tmp_path):
 
     authorized = client.get(
         "/api/workspaces",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
     assert authorized.status_code == 200
 
@@ -260,12 +260,108 @@ def test_profile_delete_default_returns_delete_specific_error(monkeypatch):
     assert "Cannot delete the default profile" in response["payload"]["error"]
 
 
+def test_admin_reload_succeeds_without_compact_attr(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr(routes, "j", lambda _handler, payload, status=200, extra_headers=None: {"status": status, "payload": payload})
+
+    reloaded_models = SimpleNamespace(get_session=object(), Session=object())
+
+    monkeypatch.setattr("importlib.reload", lambda module: reloaded_models)
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/admin/reload"),
+    )
+
+    assert response["status"] == 200
+    assert response["payload"]["status"] == "ok"
+    assert response["payload"]["reloaded"] == "api.models"
+
+
+def test_agent_profile_creation_uses_utf8_subprocess_capture(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import agents
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
+    monkeypatch.setattr("web.api.helpers.j", lambda _handler, payload, status=200, extra_headers=None: {"status": status, "payload": payload})
+    monkeypatch.setattr("web.api.helpers.bad", lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}})
+    monkeypatch.setattr(agents, "get_agent", lambda _slug: object())
+    monkeypatch.setattr(agents, "update_agent", lambda _slug, _updates: None)
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"profile_name": "über-profile"})
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="Profil angelegt ✓", stderr="")
+
+    monkeypatch.setattr(routes.subprocess, "run", fake_run)
+
+    response = routes.handle_post(
+        SimpleNamespace(headers={}),
+        SimpleNamespace(path="/api/agents/nova/profile"),
+    )
+
+    assert response["status"] == 200
+    assert response["payload"]["ok"] is True
+    assert response["payload"]["profile"] == "über-profile"
+    assert response["payload"]["output"] == "Profil angelegt ✓"
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
+
+
+def test_apply_patch_fallback_uses_utf8_subprocess_capture(monkeypatch):
+    from types import SimpleNamespace
+    import builtins
+    from web.api import routes
+
+    monkeypatch.setattr(routes, "j", lambda _handler, payload, status=200, extra_headers=None: {"status": status, "payload": payload})
+    monkeypatch.setattr(routes, "bad", lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}})
+
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tools.patch":
+            raise ImportError("tools.patch unavailable")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="Patch appliziert ✓", stderr="")
+
+    monkeypatch.setattr(routes.subprocess, "run", fake_run)
+
+    response = routes._handle_apply_patch(
+        SimpleNamespace(headers={}),
+        {"patchId": "p1", "action": "accept", "patch_content": "--- a\n+++ b\n"},
+    )
+
+    assert response["status"] == 200
+    assert response["payload"]["ok"] is True
+    assert response["payload"]["action"] == "accepted"
+    assert response["payload"]["result"] == "Patch appliziert ✓"
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["text"] is True
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
+
+
 def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     monkeypatch.setattr(
         "web.api.config.get_available_models",
         lambda: {
@@ -285,7 +381,7 @@ def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     client = TestClient(web_server.app)
     response = client.get(
         "/api/models",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -299,8 +395,6 @@ def test_live_models_endpoint_returns_json_for_matching_provider(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     monkeypatch.setattr(
         "web.api.config.get_available_models",
         lambda: {
@@ -320,7 +414,7 @@ def test_live_models_endpoint_returns_json_for_matching_provider(monkeypatch, tm
     client = TestClient(web_server.app)
     response = client.get(
         "/api/models/live?provider=opencode-zen",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -335,8 +429,6 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     class _FakeSessionDB:
         def __init__(self, *args, **kwargs):
             self._conn = self
@@ -369,7 +461,7 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     client = TestClient(web_server.app)
     response = client.get(
         "/api/sessions",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -383,8 +475,6 @@ def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     space_sessions = tmp_path / "home" / "spaces" / "color" / "sessions"
     space_sessions.mkdir(parents=True)
     index = [
@@ -454,7 +544,7 @@ def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch
     client = TestClient(web_server.app)
     response = client.get(
         "/api/sessions?workspace=color",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -468,8 +558,6 @@ def test_default_workspace_query_uses_default_space_index(monkeypatch, tmp_path)
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     space_sessions = tmp_path / "home" / "spaces" / "default" / "sessions"
     space_sessions.mkdir(parents=True)
     (space_sessions / "_index.json").write_text(
@@ -509,7 +597,7 @@ def test_default_workspace_query_uses_default_space_index(monkeypatch, tmp_path)
     monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace() if slug == "default" else None)
 
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
 
     response = client.get("/api/sessions?workspace=default", headers=headers)
     assert response.status_code == 200
@@ -531,8 +619,6 @@ def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: False)
-
     monkeypatch.setattr(
         web_server,
         "_load_space_sessions",
@@ -545,7 +631,7 @@ def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
     client = TestClient(web_server.app)
     response = client.get(
         "/api/sessions/search?workspace=color&q=palette",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -558,12 +644,11 @@ def test_sessions_search_is_space_scoped(monkeypatch, tmp_path):
     assert payload["results"][0]["match_type"] == "title"
 
 
-def test_session_space_routes_do_not_proxy_for_old_static_ui(monkeypatch, tmp_path):
+def test_session_space_routes_stay_in_fastapi(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from cli import web_server
 
-    monkeypatch.setattr(web_server, "_is_old_frontend", lambda: True)
     monkeypatch.setattr(
         web_server,
         "_load_space_sessions",
@@ -577,13 +662,8 @@ def test_session_space_routes_do_not_proxy_for_old_static_ui(monkeypatch, tmp_pa
         ],
     )
 
-    async def _fail_proxy(request):
-        raise AssertionError("space-scoped session routes must stay on FastAPI")
-
-    monkeypatch.setattr(web_server, "_proxy_request_to_stdlib", _fail_proxy)
-
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
 
     sessions = client.get("/api/sessions?workspace=color", headers=headers)
     assert sessions.status_code == 200
@@ -647,7 +727,7 @@ def test_space_session_detail_repairs_stale_stream_state(monkeypatch, tmp_path):
 
     response = TestClient(web_server.app).get(
         "/api/session?session_id=color-live&workspace=color&messages=0&resolve_model=0",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -674,6 +754,599 @@ def test_space_session_detail_repairs_stale_stream_state(monkeypatch, tmp_path):
     assert index[0]["has_pending_user_message"] is False
     assert index[0]["message_count"] == 2
     assert index[0]["is_streaming"] is False
+
+
+def test_sessiondb_state_meta_roundtrips(tmp_path):
+    from runtime._compat.shim_state import SessionDB
+
+    db_path = tmp_path / "home" / "state.db"
+    db = SessionDB(db_path=db_path)
+
+    db.set_meta("goal:test-session", '{"goal":"Ship it","status":"active"}')
+    assert db.get_meta("goal:test-session") == '{"goal":"Ship it","status":"active"}'
+    assert db.get_meta("goal:missing") is None
+
+    reopened = SessionDB(db_path=db_path)
+    assert reopened.get_meta("goal:test-session") == '{"goal":"Ship it","status":"active"}'
+
+
+def test_session_detail_includes_persisted_goal_state(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    from runtime._compat.shim_state import SessionDB
+    from web.api.models import Session
+
+    space_sessions = tmp_path / "home" / "spaces" / "color" / "sessions"
+    space_sessions.mkdir(parents=True)
+    db = SessionDB(db_path=tmp_path / "home" / "spaces" / "color" / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    session = Session(session_id="goal-session", profile="default", workspace=r"C:\\workspace")
+    session.messages = []
+    session.tool_calls = []
+    session_payload = session.compact()
+    session_payload.update(
+        {
+            "profile": "default",
+            "workspace_slug": "color",
+            "messages": [],
+            "tool_calls": [],
+        }
+    )
+    (space_sessions / "goal-session.json").write_text(json.dumps(session_payload), encoding="utf-8")
+
+    monkeypatch.setattr("web.api.routes._clear_stale_stream_state", lambda s: None)
+    monkeypatch.setattr("web.api.routes._lookup_cli_session_metadata", lambda sid: None)
+    monkeypatch.setattr("web.api.routes._is_messaging_session_record", lambda record: False)
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+            self.sessions_dir = root / "sessions"
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(tmp_path / "home" / "spaces" / slug) if slug == "color" else None,
+    )
+
+    response = TestClient(web_server.app).get(
+        "/api/session?session_id=goal-session&workspace=color&messages=0&resolve_model=0",
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["session"]
+    assert payload["session_id"] == "goal-session"
+    assert payload["goal"]["goal"] == "Ship it"
+    assert payload["goal"]["status"] == "active"
+    assert payload["goal"]["turns_used"] == 2
+    assert payload["goal"]["max_turns"] == 12
+    assert payload["goal"]["session_id"] == "goal-session"
+    assert payload["goal"]["space"] == "color"
+
+
+def test_goal_command_payload_uses_space_goal_store(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api.goals import goal_command_payload
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(space_root) if slug == "color" else None,
+    )
+
+    payload = goal_command_payload("goal-session", "status", space_slug="color")
+
+    assert payload["goal"]["goal"] == "Ship it"
+    assert payload["goal"]["status"] == "active"
+    assert payload["goal"]["turns_used"] == 2
+    assert payload["goal"]["max_turns"] == 12
+    assert payload["goal"]["space"] == "color"
+
+
+def test_goal_state_for_session_omits_cleared_goal(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api.goals import goal_state_for_session
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "cleared",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(space_root) if slug == "color" else None,
+    )
+
+    assert goal_state_for_session("goal-session", space_slug="color") is None
+
+
+def test_webui_profile_goal_auto_pauses_after_repeated_judge_parse_failures(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.goals import evaluate_goal_after_turn, goal_command_payload, goal_state_for_session
+
+    monkeypatch.setattr(
+        "web.api.goals.judge_goal",
+        lambda *args, **kwargs: ("continue", "judge reply was not JSON", True),
+    )
+
+    profile_home = tmp_path / "home" / "profiles" / "default"
+    profile_home.mkdir(parents=True)
+
+    payload = goal_command_payload("goal-session", "Ship it", profile_home=profile_home)
+    assert payload["goal"]["status"] == "active"
+
+    decision = None
+    for _ in range(3):
+        decision = evaluate_goal_after_turn(
+            "goal-session",
+            "assistant reply",
+            profile_home=profile_home,
+        )
+
+    assert decision is not None
+    assert decision["status"] == "paused"
+    assert decision["should_continue"] is False
+
+    state = goal_state_for_session("goal-session", profile_home=profile_home)
+    assert state is not None
+    assert state["status"] == "paused"
+    assert "unparseable output" in str(state["paused_reason"])
+    assert "judge model" in decision["message"]
+
+
+def test_goal_command_status_omits_cleared_goal(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api.goals import goal_command_payload
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "cleared",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    class _FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: _FakeWorkspace(space_root) if slug == "color" else None,
+    )
+
+    payload = goal_command_payload("goal-session", "status", space_slug="color")
+
+    assert payload["goal"] is None
+    assert payload["message_key"] == "goal_status_none"
+
+
+def test_goal_route_uses_workspace_slug_from_request_body(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from runtime._compat.shim_state import SessionDB
+    from web.api import routes
+    from web.api.models import Session
+    import io
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    session = Session(session_id="goal-session", profile="default", workspace=r"C:\\workspace")
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: type("WS", (), {"root": space_root})() if slug == "color" else None,
+    )
+
+    class _FakeHandler:
+        def __init__(self):
+            self.headers = {}
+            self.status = None
+            self.sent_headers = {}
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, key, value):
+            self.sent_headers[key] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _FakeHandler()
+    routes._handle_goal_command(
+        handler,
+        {
+            "session_id": "goal-session",
+            "args": "status",
+            "workspace_slug": "color",
+            "workspace": r"C:\\workspace",
+            "profile": "default",
+        },
+    )
+
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))["goal"]
+    assert payload["goal"] == "Ship it"
+    assert payload["status"] == "active"
+    assert payload["space"] == "color"
+
+
+def test_goal_route_accepts_legacy_space_field_from_request_body(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    from runtime._compat.shim_state import SessionDB
+    from web.api import routes
+    from web.api.models import Session
+    import io
+
+    space_root = tmp_path / "home" / "spaces" / "color"
+    space_root.mkdir(parents=True)
+    db = SessionDB(db_path=space_root / "goals.db")
+    db.set_meta(
+        "goal:goal-session",
+        json.dumps(
+            {
+                "goal": "Ship it",
+                "status": "active",
+                "turns_used": 2,
+                "max_turns": 12,
+                "created_at": 123.0,
+                "last_turn_at": 456.0,
+            }
+        ),
+    )
+
+    session = Session(session_id="goal-session", profile="default", workspace=r"C:\\workspace")
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr(
+        "web.api.space_engine.get_workspace",
+        lambda slug: type("WS", (), {"root": space_root})() if slug == "color" else None,
+    )
+
+    class _FakeHandler:
+        def __init__(self):
+            self.headers = {}
+            self.status = None
+            self.sent_headers = {}
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, key, value):
+            self.sent_headers[key] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _FakeHandler()
+    routes._handle_goal_command(
+        handler,
+        {
+            "session_id": "goal-session",
+            "args": "status",
+            "space": "color",
+            "workspace": r"C:\\workspace",
+            "profile": "default",
+        },
+    )
+
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))["goal"]
+    assert payload["goal"] == "Ship it"
+    assert payload["status"] == "active"
+    assert payload["space"] == "color"
+
+
+def test_chat_start_marks_active_goal_turns_as_goal_related(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    from web.api import routes
+
+    captured = {}
+
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        model="gpt-4o",
+        model_provider="openai",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.routes.resolve_trusted_workspace", lambda value: r"C:\\workspace")
+    monkeypatch.setattr(
+        "web.api.routes._resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("gpt-4o", "openai", False),
+    )
+    monkeypatch.setattr(
+        "web.api.routes.resolve_active_provider_context",
+        lambda: {"provider": "openai", "model": "gpt-4o"},
+    )
+    monkeypatch.setattr("web.api.routes._game_mode_guard_payload_for_model", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: True)
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
+
+    routes._handle_chat_start(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "message": "implement the feature",
+            "workspace": r"C:\\workspace",
+            "model": "gpt-4o",
+            "model_provider": "openai",
+        },
+    )
+
+    assert captured["goal_related"] is True
+
+
+def test_goal_command_kickoff_routes_nova_local_models_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        workspace_slug="nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.routes.resolve_trusted_workspace", lambda value: r"C:\\workspace")
+    monkeypatch.setattr(
+        "web.api.routes._resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("qwen3:4b", "ollama", False),
+    )
+    monkeypatch.setattr(
+        "web.api.goals.goal_command_payload",
+        lambda *args, **kwargs: {"ok": True, "kickoff_prompt": "kick off the goal"},
+    )
+    monkeypatch.setattr("web.api.goals.goal_state_snapshot", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr("web.api.goals.restore_goal_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
+
+    payload = routes._handle_goal_command(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "args": "Ship it",
+            "workspace": r"C:\\workspace",
+            "workspace_slug": "nova",
+            "profile": "default",
+            "model": "qwen3:4b",
+            "model_provider": "ollama",
+        },
+    )
+
+    assert payload["stream_id"] == "stream-1"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["model_provider"] == "ollama-cloud"
+    assert captured["normalized_model"] is True
+
+
+def test_plan_handlers_route_nova_local_models_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = []
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        workspace_slug="nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr("web.api.routes.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.routes.resolve_trusted_workspace", lambda value: r"C:\\workspace")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.append(kwargs) or {"stream_id": f"stream-{len(captured)}"},
+    )
+    monkeypatch.setattr("web.api.routes.j", lambda handler, payload, status=200, extra_headers=None: payload)
+
+    accept_payload = routes._handle_plan_accept(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "workspace": r"C:\\workspace",
+            "model": "qwen3:4b",
+            "model_provider": "ollama",
+        },
+    )
+    revise_payload = routes._handle_plan_revise(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "goal-session",
+            "workspace": r"C:\\workspace",
+            "feedback": "tighten the plan",
+            "model": "qwen3:4b",
+            "model_provider": "ollama",
+        },
+    )
+
+    assert accept_payload["stream_id"] == "stream-1"
+    assert revise_payload["stream_id"] == "stream-2"
+    assert captured[0]["model"] == "deepseek-v4-flash"
+    assert captured[0]["model_provider"] == "ollama-cloud"
+    assert captured[0]["normalized_model"] is True
+    assert captured[1]["model"] == "deepseek-v4-flash"
+    assert captured[1]["model_provider"] == "ollama-cloud"
+    assert captured[1]["normalized_model"] is True
+
+
+def test_start_chat_stream_marks_turns_goal_related_when_goal_is_active(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from types import SimpleNamespace
+    import threading
+    from contextlib import nullcontext
+    from web.api import routes
+
+    captured = {}
+    started = threading.Event()
+    session = SimpleNamespace(
+        session_id="goal-session",
+        profile="default",
+        workspace=r"C:\\workspace",
+        workspace_slug="color",
+        model="gpt-4o",
+        model_provider="openai",
+        active_stream_id=None,
+        pending_started_at=0.0,
+        pending_user_message=None,
+        pending_attachments=[],
+        messages=[],
+        save=lambda: None,
+    )
+
+    monkeypatch.setattr(
+        "web.api.routes._get_session_agent_lock",
+        lambda sid: nullcontext(),
+    )
+    monkeypatch.setattr("web.api.routes._prepare_chat_start_session_for_stream", lambda *args, **kwargs: None)
+    monkeypatch.setattr("web.api.routes.create_stream_channel", lambda: object())
+    monkeypatch.setattr("web.api.routes.set_last_workspace", lambda workspace: None)
+    monkeypatch.setattr("web.api.routes._run_agent_streaming", lambda *args, **kwargs: captured.update(kwargs) or started.set())
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: True)
+
+    response = routes._start_chat_stream_for_session(
+        session,
+        msg="implement the feature",
+        attachments=[],
+        workspace=r"C:\\workspace",
+        model="gpt-4o",
+        model_provider="openai",
+    )
+
+    assert response["stream_id"]
+    assert started.wait(1), "stream thread did not start"
+    assert captured["goal_related"] is True
+    assert response["stream_id"] in routes.STREAM_GOAL_RELATED
 
 
 def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp_path):
@@ -733,7 +1406,7 @@ def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp
 
     response = TestClient(web_server.app).get(
         "/api/sessions?workspace=color",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -755,12 +1428,12 @@ def test_workspace_api_wrapper_sends_dashboard_session_token():
     api_auth_js = Path("web/static/api-auth.js").read_text(encoding="utf-8")
     workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
 
-    assert "__HERMES_SESSION_TOKEN__" in api_auth_js
-    assert "X-Hermes-Session-Token" in api_auth_js
+    assert "__SIDEKICK_SESSION_TOKEN__" in api_auth_js
+    assert "X-Sidekick-Session-Token" in api_auth_js
     assert "__SIDEKICK_FETCH_AUTH_INSTALLED__" in api_auth_js
     assert "{ defaultJson: false }" in api_auth_js
-    assert "__HERMES_SESSION_TOKEN__" in workspace_js
-    assert "X-Hermes-Session-Token" in workspace_js
+    assert "__SIDEKICK_SESSION_TOKEN__" in workspace_js
+    assert "X-Sidekick-Session-Token" in workspace_js
     assert "hasDashboardToken" in workspace_js
     assert "onLoginPage" in workspace_js
 
@@ -776,15 +1449,106 @@ def test_expected_api_failures_do_not_pollute_webui_error_log():
     assert sessions_js.count("logError: false") >= 3
 
 
+def test_session_load_hydrates_goal_banner_from_server_state():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    assert "Object.prototype.hasOwnProperty.call(data.session, 'goal')" in sessions_js
+    assert "data.session.goal && typeof _updateGoalState === 'function'" in sessions_js
+    assert "typeof _clearGoalState === 'function'" in sessions_js
+    assert sessions_js.index("if (data.session && Object.prototype.hasOwnProperty.call(data.session, 'goal')) {") < sessions_js.index("const activeStreamId=S.session.active_stream_id||null;")
+
+
+def test_goal_command_sends_workspace_slug_for_space_sessions():
+    commands_js = Path("web/static/commands.js").read_text(encoding="utf-8")
+
+    assert "function _goalCommandRequestBody(args)" in commands_js
+    assert "workspace_slug: S.session.workspace_slug || S.session.space_slug || S.session.space || null" in commands_js
+    assert "space: S.session.space || S.session.space_slug || S.session.workspace_slug || null" in commands_js
+    assert commands_js.count("_goalCommandRequestBody(args)") == 3
+
+
+def test_switch_kanban_board_does_not_restart_polling_twice():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function switchKanbanBoard(slug){")
+    end = panels_js.index("// ── Create / rename / archive board modals ─", start)
+    body = panels_js[start:end]
+
+    assert body.count("_kanbanStartPolling();") == 0
+    assert "_kanbanEnsurePollingActive();" in body
+
+
+def test_switch_kanban_board_commits_local_state_after_server_confirmation():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function switchKanbanBoard(slug){")
+    end = panels_js.index("function openKanbanCreateBoard()", start)
+    body = panels_js[start:end]
+
+    assert body.index("await api('/api/kanban/boards/'") < body.index("_kanbanCurrentBoard = newBoard;")
+    assert body.index("await api('/api/kanban/boards/'") < body.index("_kanbanSetSavedBoard(slug);")
+    assert "showToast((t('kanban_unavailable') || 'Kanban unavailable') + ': ' + (e.message || e), 'error');" in body
+
+
+def test_load_kanban_ensures_polling_without_restarting_an_active_stream():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function loadKanban(animate){")
+    end = panels_js.index("function filterKanban()", start)
+    body = panels_js[start:end]
+
+    assert "_kanbanEnsurePollingActive();" in body
+    assert "_kanbanStartPolling();" not in body
+
+
+def test_kanban_board_resolution_uses_saved_hint_only_for_fallback_current():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function loadKanbanBoards(spaceLoadKey){")
+    end = panels_js.index("// Restrict board.color", start)
+    body = panels_js[start:end]
+
+    assert "const currentSource = (data && data.current_source) || 'explicit';" in body
+    assert "const savedExists = !!(saved && boards.some(b => b.slug === saved));" in body
+    assert "if (currentSource === 'fallback' && savedExists) {" in body
+    assert "if (serverCurrent === 'default' && savedExists) {" not in body
+
+
+def test_kanban_board_create_and_archive_do_not_restart_polling_after_reload():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+
+    create_start = panels_js.index("if (mode === 'create') {")
+    create_end = panels_js.index("} else if (mode === 'rename') {", create_start)
+    create_body = panels_js[create_start:create_end]
+    assert create_body.count("_kanbanStartPolling();") == 0
+    assert "_kanbanEnsurePollingActive();" in create_body
+
+    archive_start = panels_js.index("async function archiveKanbanBoard(){")
+    archive_end = panels_js.index("function _selectedLogsFile()", archive_start)
+    archive_body = panels_js[archive_start:archive_end]
+    assert archive_body.count("_kanbanStartPolling();") == 1
+    assert "_kanbanEnsurePollingActive();" in archive_body
+
+
 def test_game_mode_chat_start_rejection_keeps_chat_history_clean():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
 
-    assert "function _gameModeWouldBlockClientModel(model, provider)" in messages_js
+    assert "function _gameModeWouldBlockClientModel(model, provider, spaceSlug)" in messages_js
+    assert "function _gameModeAllowsNovaRemoteFallback(spaceSlug)" in messages_js
     assert "localProviders.has(p)" in messages_js
     assert "p.startsWith('custom:')&&localProviders.has(p.slice(7))" in messages_js
+    assert "local-gpu" in messages_js
+    assert "local-cpu" in messages_js
+    assert "local-qwen" in messages_js
+    assert "qwen-local" in messages_js
     assert "m.startsWith('@ollama:')" in messages_js
-    assert "selectedProvider=S.session&&S.session.model_provider||null" in messages_js
-    assert "if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider))" in messages_js
+    assert "const cfg=window._activeSpaceConfig;" in messages_js
+    assert "if(slug&&activeSpace&&slug!==activeSpace) return false;" in messages_js
+    assert "cfg&&typeof cfg==='object'&&cfg.nova&&typeof cfg.nova==='object'&&cfg.nova.enabled" in messages_js
+    assert "const selectedWorkspaceSlug=String(" in messages_js
+    assert "function _currentComposerModelState()" in messages_js
+    assert "const selectedModelState=_currentComposerModelState();" in messages_js
+    assert "if(_gameModeWouldBlockClientModel(selectedModelState.model,selectedModelState.model_provider,selectedWorkspaceSlug))" in messages_js
+    assert "model:selectedModelState.model" in messages_js
+    assert "workspace_slug:selectedWorkspaceSlug" in messages_js
+    assert "space_slug:selectedWorkspaceSlug" in messages_js
+    assert "model_provider:selectedModelState.model_provider" in messages_js
     assert "ollama-cloud" not in messages_js[messages_js.index("function _gameModeWouldBlockClientModel"):messages_js.index("async function send")]
 
     catch_start = messages_js.index("const gameModeBlocked=!!(e&&e.data&&e.data.error&&e.data.error.code==='game_mode_enabled')")
@@ -807,6 +1571,262 @@ def test_api_auth_script_loads_before_app_fetches():
     assert "'./static/api-auth.js' + VQ" in sw_js
 
 
+def test_kanban_db_missing_env_vars_fall_back_to_default_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    for name in (
+        "SIDEKICK_KANBAN_HOME",
+        "SIDEKICK_KANBAN_BOARD",
+        "SIDEKICK_KANBAN_DB",
+        "SIDEKICK_KANBAN_WORKSPACES_ROOT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from cli import kanban_db
+
+    assert kanban_db.kanban_home() == tmp_path / "home"
+    assert kanban_db.kanban_db_path() == tmp_path / "home" / "kanban.db"
+    assert kanban_db.workspaces_root() == tmp_path / "home" / "kanban" / "workspaces"
+    assert kanban_db.get_current_board() == "default"
+
+    boards = kanban_db.list_boards(include_archived=False)
+    assert boards and boards[0]["slug"] == "default"
+
+
+def test_kanban_db_honors_legacy_sidekick_kanban_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.setenv("SIDEKICK_KANBAN_HOME", str(tmp_path / "legacy-kanban"))
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_DB", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_DB", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", raising=False)
+
+    from cli import kanban_db
+
+    assert kanban_db.kanban_home() == tmp_path / "legacy-kanban"
+    assert kanban_db.kanban_db_path() == tmp_path / "legacy-kanban" / "kanban.db"
+    assert kanban_db.workspaces_root() == tmp_path / "legacy-kanban" / "kanban" / "workspaces"
+
+
+def test_kanban_db_honors_legacy_board_and_direct_paths(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "blog-sprint")
+    monkeypatch.setenv("SIDEKICK_KANBAN_DB", str(tmp_path / "legacy-db.sqlite"))
+    monkeypatch.setenv("SIDEKICK_KANBAN_WORKSPACES_ROOT", str(tmp_path / "legacy-workspaces"))
+
+    from cli import kanban_db
+
+    assert kanban_db.get_current_board() == "blog-sprint"
+    assert kanban_db.kanban_db_path() == tmp_path / "legacy-db.sqlite"
+    assert kanban_db.workspaces_root() == tmp_path / "legacy-workspaces"
+
+
+def test_kanban_command_restores_board_override_env(monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    from cli import kanban, kanban_db
+
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.setattr(kanban_db, "board_exists", lambda slug: True)
+    monkeypatch.setattr(kanban_db, "init_db", lambda *args, **kwargs: None)
+
+    def _fake_list(args):
+        assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
+        return 0
+
+    monkeypatch.setattr(kanban, "_cmd_list", _fake_list)
+
+    result = kanban.kanban_command(SimpleNamespace(kanban_action="list", board="blog-sprint"))
+
+    assert result == 0
+    assert os.environ.get("SIDEKICK_KANBAN_BOARD") is None
+
+
+def test_kanban_command_restores_both_board_override_envs(monkeypatch):
+    import os
+    from types import SimpleNamespace
+
+    from cli import kanban, kanban_db
+
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-sidekick")
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-sidekick")
+    monkeypatch.setattr(kanban_db, "board_exists", lambda slug: True)
+    monkeypatch.setattr(kanban_db, "init_db", lambda *args, **kwargs: None)
+
+    def _fake_list(args):
+        assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
+        assert os.environ["SIDEKICK_KANBAN_BOARD"] == "blog-sprint"
+        return 0
+
+    monkeypatch.setattr(kanban, "_cmd_list", _fake_list)
+
+    result = kanban.kanban_command(SimpleNamespace(kanban_action="list", board="blog-sprint"))
+
+    assert result == 0
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-sidekick"
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-sidekick"
+
+
+def test_pin_kanban_board_env_mirrors_legacy_board_env(monkeypatch):
+    import os
+
+    from cli import main
+
+    monkeypatch.delenv("SIDEKICK_KANBAN_BOARD", raising=False)
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "legacy-board")
+
+    main._pin_kanban_board_env()
+
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-board"
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "legacy-board"
+
+
+def test_pin_kanban_board_env_normalizes_existing_sidekick_board_env(monkeypatch):
+    import os
+
+    from cli import main
+
+    monkeypatch.setenv("SIDEKICK_KANBAN_BOARD", "primary-board")
+
+    main._pin_kanban_board_env()
+
+    assert os.environ["SIDEKICK_KANBAN_BOARD"] == "primary-board"
+
+
+def test_kanban_bridge_conn_restores_sidekick_env(monkeypatch, tmp_path):
+    import os
+
+    from web.api import kanban_bridge
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.setattr(kanban_bridge, "_get_ws_kanban_home", lambda: str(workspace_root))
+
+    class _FakeKB:
+        def init_db(self, board=None):
+            assert os.environ["SIDEKICK_KANBAN_HOME"] == str(workspace_root)
+
+        def connect(self, board=None):
+            return object()
+
+    monkeypatch.setattr(kanban_bridge, "_kb", lambda: _FakeKB())
+
+    conn = kanban_bridge._conn()
+
+    assert conn is not None
+    assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
+
+
+def test_dispatcher_kanban_home_helpers_set_and_clear_both_env_vars(monkeypatch):
+    import os
+
+    from web.api import dispatcher
+
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_KANBAN_HOME", raising=False)
+
+    dispatcher._set_space_kanban_home("space-root")
+
+    assert os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
+    assert os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
+
+    dispatcher._clear_kanban_home()
+
+    assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
+    assert os.environ.get("SIDEKICK_KANBAN_HOME") is None
+
+
+def test_dispatcher_kanban_home_override_restores_previous_env(monkeypatch):
+    from web.api import dispatcher
+
+    monkeypatch.setenv("SIDEKICK_KANBAN_HOME", "original-sidekick")
+    monkeypatch.setenv("SIDEKICK_KANBAN_HOME", "original-sidekick")
+
+    with dispatcher._kanban_home_override("space-root"):
+        assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
+        assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "space-root"
+
+    assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "original-sidekick"
+    assert dispatcher.os.environ["SIDEKICK_KANBAN_HOME"] == "original-sidekick"
+
+
+def test_kanban_board_list_reports_fallback_current_source(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import kanban_bridge
+
+    class _FakeKB:
+        DEFAULT_BOARD = "default"
+
+        def __init__(self):
+            self.cleared = False
+
+        def list_boards(self, include_archived=False):
+            return [
+                {"slug": "default", "name": "Default"},
+                {"slug": "blog-sprint", "name": "Blog Sprint"},
+            ]
+
+        def get_current_board(self):
+            return "ghost-board"
+
+        def clear_current_board(self):
+            self.cleared = True
+
+    fake = _FakeKB()
+    monkeypatch.setattr(kanban_bridge, "_kb", lambda: fake)
+    monkeypatch.setattr(kanban_bridge, "_board_counts_for_slug", lambda slug: {})
+
+    payload = kanban_bridge._list_boards_payload(SimpleNamespace(query=""))
+
+    assert fake.cleared is True
+    assert payload["current"] == "default"
+    assert payload["current_source"] == "fallback"
+    assert payload["boards"][0]["is_current"] is True
+    assert payload["boards"][1]["is_current"] is False
+
+
+def test_kanban_board_list_preserves_explicit_current_source(monkeypatch):
+    from types import SimpleNamespace
+    from web.api import kanban_bridge
+
+    class _FakeKB:
+        DEFAULT_BOARD = "default"
+
+        def __init__(self):
+            self.cleared = False
+
+        def list_boards(self, include_archived=False):
+            return [
+                {"slug": "default", "name": "Default"},
+                {"slug": "blog-sprint", "name": "Blog Sprint"},
+            ]
+
+        def get_current_board(self):
+            return "blog-sprint"
+
+        def clear_current_board(self):
+            self.cleared = True
+
+    fake = _FakeKB()
+    monkeypatch.setattr(kanban_bridge, "_kb", lambda: fake)
+    monkeypatch.setattr(kanban_bridge, "_board_counts_for_slug", lambda slug: {})
+
+    payload = kanban_bridge._list_boards_payload(SimpleNamespace(query=""))
+
+    assert fake.cleared is False
+    assert payload["current"] == "blog-sprint"
+    assert payload["current_source"] == "explicit"
+    assert payload["boards"][0]["is_current"] is False
+    assert payload["boards"][1]["is_current"] is True
+
+
 def test_mobile_settings_has_main_section_switcher():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
@@ -819,35 +1839,45 @@ def test_mobile_settings_has_main_section_switcher():
     assert "const dd=$('settingsSectionDropdown')" in panels_js
 
 
-def test_mobile_sidebar_is_forced_out_of_flex_flow():
+def test_settings_navigation_and_locale_labels_are_i18n_driven():
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
+
+    assert 'data-i18n="settings_section_switcher_label"' in index_html
+    assert 'data-i18n="settings_section_switcher_conversation"' in index_html
+    assert 'data-i18n="settings_section_switcher_appearance"' in index_html
+    assert 'data-i18n="settings_section_switcher_preferences"' in index_html
+    assert 'data-i18n="settings_section_switcher_providers"' in index_html
+    assert 'data-i18n="settings_section_switcher_plugins"' in index_html
+    assert 'data-i18n="settings_section_switcher_system"' in index_html
+    assert 'data-i18n="plugins_tab_title"' in index_html
+    assert 'data-i18n="settings_dashboard_mode_label"' in index_html
+    assert 'data-i18n="settings_dashboard_link_save"' in index_html
+    assert 'data-i18n="settings_gateway_status_label"' in index_html
+    assert 'data-i18n="settings_subagents_label"' in index_html
+
+    assert "settings_section_switcher_label: 'Settings section'" in i18n_js
+    assert "settings_section_switcher_label: 'Bereich auswählen'" in i18n_js
+    assert "settings_section_switcher_providers: 'Providers'" in i18n_js
+    assert "settings_section_switcher_providers: 'Anbieter'" in i18n_js
+    assert "plugins_section_meta: 'Installed apps and plugin settings. Gmail can be connected per space here.'" in i18n_js
+    assert "plugins_section_meta: 'Installierte Apps und Plugin-Einstellungen. Gmail kann hier pro Space verbunden werden.'" in i18n_js
+    assert "settings_dashboard_mode_desc: 'Show a nav-rail link when the official sidekick dashboard is reachable. Overrides are restricted to loopback URLs.'" in i18n_js
+    assert "settings_dashboard_mode_desc: 'Zeige einen Link in der Navigationsleiste an, wenn das offizielle Sidekick-Dashboard erreichbar ist. Überschreibungen sind auf Loopback-URLs beschränkt.'" in i18n_js
+    assert "settings_tab_appearance: 'Darstellung'" in i18n_js
+    assert "settings_tab_conversation: 'Konversation'" in i18n_js
+    assert "settings_tab_preferences: 'Einstellungen'" in i18n_js
+
+
+def test_desktop_sidebar_and_rightpanel_keep_flex_flow():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    assert "@media(max-width:640px)" in style_css
     assert ".sidebar{" in style_css
-    assert "position:fixed!important" in style_css
-    assert "left:-300px!important;" in style_css
-    assert "overflow:hidden!important" in style_css
-    assert "pointer-events:none!important" in style_css
-    assert "transform:none!important" in style_css
-    assert "transition:left .25s ease!important;" in style_css
-    assert ".sidebar.mobile-open{" in style_css
-    assert "transform:translate3d(300px,0,0)!important;" in style_css
-    assert "pointer-events:auto!important" in style_css
     assert ".rightpanel{" in style_css
-    assert "right:calc(-1 * var(--mobile-rightpanel-width))!important" in style_css
-    assert re.search(
-        r"\.rightpanel\{\s*"
-        r"--mobile-rightpanel-width:min\(300px,100vw\);\s*"
-        r"display:flex!important;\s*"
-        r"position:fixed!important;\s*"
-        r"right:calc\(-1 \* var\(--mobile-rightpanel-width\)\)!important;\s*"
-        r"top:calc\(38px \+ var\(--app-titlebar-safe-top,0px\)\)!important;",
-        style_css,
-        re.S,
-    )
-    assert "border-left-color:transparent!important" in style_css
-    assert ".rightpanel.mobile-open{" in style_css
-    assert "main.main{width:100%!important" in style_css
+    assert "@media(min-width:641px)" in style_css
+    assert ".sidebar{position:relative;}" in style_css
+    assert ".rightpanel{position:relative;}" in style_css
+    assert "main.main{width:100%!important;flex:1 1 auto!important;}" not in style_css
 
 
 def test_mobile_nav_click_closes_sidebar_and_keeps_hamburger_clickable():
@@ -861,9 +1891,10 @@ def test_mobile_nav_click_closes_sidebar_and_keeps_hamburger_clickable():
     assert "sidebar.style.setProperty('left','-300px','important')" in Path("web/static/boot.js").read_text(encoding="utf-8")
     assert "sidebar.style.setProperty('transform',open?'translate3d(300px,0,0)':'none','important')" in Path("web/static/boot.js").read_text(encoding="utf-8")
     assert "sidebar.style.removeProperty('left')" in Path("web/static/boot.js").read_text(encoding="utf-8")
-    assert ".app-titlebar{position:relative;z-index:220!important;}" in style_css
-    assert ".app-titlebar-hamburger{position:relative;z-index:221!important;}" in style_css
-    assert "top:calc(38px + var(--app-titlebar-safe-top,0px))!important;" in style_css
+    assert ".app-titlebar{display:flex;align-items:center;justify-content:flex-start;height:38px;flex-shrink:0;background:var(--sidebar);border-bottom:1px solid var(--border);padding:0 12px;padding-top:var(--app-titlebar-safe-top);padding-left:max(12px,env(safe-area-inset-left,0));padding-right:max(12px,env(safe-area-inset-right,0));box-sizing:content-box;font-size:12px;color:var(--muted);user-select:none;-webkit-app-region:drag;position:relative;z-index:20;}" in style_css
+    assert ".app-titlebar-hamburger{-webkit-app-region:no-drag;align-items:center;justify-content:center;background:none;border:none;color:var(--muted);border-radius:8px;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .15s,color .15s;}" in style_css
+    assert "z-index:220!important;" not in style_css
+    assert "z-index:221!important;" not in style_css
 
 
 def test_mobile_sidebar_and_workspace_panel_are_mutually_exclusive():
@@ -883,34 +1914,44 @@ def test_mobile_sidebar_and_workspace_panel_are_mutually_exclusive():
     assert "_setWorkspacePanelMode('closed')" in toggle_body
 
 
-def test_mobile_titlebar_center_stays_in_flex_flow():
+def test_titlebar_center_stays_desktop_aligned():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    assert "@media(max-width:640px)" in style_css
-    assert ".app-titlebar-center{position:static;" in style_css
-    assert "transform:none;" in style_css
-    assert '.app-titlebar-center .mode-btn{position:relative;flex:0 0 28px;width:28px;min-width:28px;padding:3px 0;overflow:hidden;font-size:0;}' in style_css
-    assert '.app-titlebar-center .mode-btn[data-mode="action"]::before{content:"\\2394";}' in style_css
-    assert '.app-titlebar-center .mode-btn[data-mode="plan"]::before{content:"\\1F9E0";}' in style_css
-    assert ".app-titlebar-center{flex:0 0 42px;min-width:42px;}" in style_css
-    assert ".app-titlebar-center .mode-toggle{flex:0 0 42px;min-width:42px;}" in style_css
-    assert ".app-titlebar-center .mode-btn{flex-basis:18px;width:18px;min-width:18px;}" in style_css
-    assert ".app-titlebar-center .mode-btn::before{font-size:11px;}" in style_css
-    assert ".compact-toggle-btn{display:none!important;}" in style_css
-    assert ".titlebar-space-spacer{display:none;}" in style_css
-    assert ".titlebar-space{flex:0 1 auto;min-width:0;max-width:112px;margin-right:0;}" in style_css
-    assert ".titlebar-space-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}" in style_css
+    assert ".app-titlebar-center{position:absolute;left:calc(50% + (var(--workspace-sidebar-width) - var(--workspace-rightpanel-width)) / 2);top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;gap:8px;min-width:0;max-width:220px;-webkit-app-region:no-drag;z-index:8;}" in style_css
+    assert ".titlebar-space-spacer {" in style_css
+    assert "width: 60px;" in style_css
+    assert ".titlebar-space {" in style_css
+    assert "margin-right: 2px;" in style_css
+    assert "--space-color: var(--accent, #7c5cfc);" in style_css
+    assert "max-width: 184px;" in style_css
+    assert "overflow: visible;" in style_css
+    assert "transition: max-width .18s ease;" in style_css
+    assert ".titlebar-space-name {" in style_css
+    assert "max-width: 120px;" in style_css
+    assert "opacity: 1;" in style_css
+    assert "font-weight: 500;" in style_css
+    assert "color: var(--space-color);" in style_css
+    assert "transition: max-width .18s ease, opacity .12s ease, margin .18s ease;" in style_css
+    assert ".titlebar-space:hover .titlebar-space-name" not in style_css
+    assert ".titlebar-space-name{margin-left:2px;}" in style_css
 
 
-def test_mobile_titlebar_keeps_language_game_mode_and_hub_visible():
+def test_titlebar_global_actions_remain_visible_on_desktop():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
 
-    assert ".titlebar-actions{display:inline-flex!important;flex:0 0 auto;align-items:center;gap:2px;margin-right:0;}" in mobile_guard
-    assert ".titlebar-actions #btnCastToggle" not in mobile_guard
-    assert ".cast-unavailable{color:#8a8f9d!important;filter:none;opacity:.88;}" in style_css
-    assert ".titlebar-actions #btnRebootSidekick," in mobile_guard
-    assert ".titlebar-actions #btnShutdownSidekick{display:none!important;}" in mobile_guard
+    assert ".titlebar-utility-actions{display:flex;align-items:center;gap:2px;margin-left:8px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
+    assert ".titlebar-actions{display:flex;align-items:center;gap:2px;margin-right:4px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
+    assert ".titlebar-utility-actions #btnCastToggle," in style_css
+    assert ".titlebar-actions #btnRebootSidekick," in style_css
+    assert ".titlebar-actions #btnShutdownSidekick{display:inline-flex!important;}" in style_css
+    assert ".titlebar-utility-actions .lang-dropdown{left:0;right:auto;}" in style_css
+    assert ".titlebar-actions:hover #btnCastToggle," not in style_css
+    assert '<div class="titlebar-utility-actions" id="titlebarUtilityActions"' in index_html
+    assert index_html.index('id="btnLangSelector"') < index_html.index('id="btnCastToggle"')
+    assert index_html.index('id="btnCastToggle"') < index_html.index('id="btnNovaYoloToggle"')
+    assert "move(document.getElementById('btnCastToggle'));" not in index_html
+    assert "langSelector.hidden = true;" not in index_html
 
 
 def test_agents_dashboard_chat_docks_existing_chat_view_in_main_area():
@@ -1085,6 +2126,7 @@ def test_compact_layout_toggle_exposes_pressed_state():
     assert 'id="compactToggleBtn"' in index_html
     assert 'aria-label="Compact layout"' in index_html
     assert 'aria-pressed="false"' in index_html
+    assert "workflowRunHeaderAction('compact-layout')" in index_html
 
     toggle_start = ui_js.index("function toggleCompactLayout()")
     init_start = ui_js.index("function _initCompactLayout()")
@@ -1133,22 +2175,14 @@ def test_space_dropdown_selection_uses_delegated_container_click():
     assert "_bindSpaceDropdownSelection(dd);" in spaces_js[spaces_js.index("function _openSpaceDropdown") :]
 
 
-def test_mobile_sidebar_nav_uses_scrollable_touch_targets():
+def test_desktop_sidebar_nav_does_not_use_mobile_touch_compaction():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
-    assert ".sidebar-nav{overflow-x:auto!important;overflow-y:hidden!important;" in mobile_guard
-    assert "scrollbar-width:none;-webkit-overflow-scrolling:touch;" in mobile_guard
-    assert ".sidebar-nav::-webkit-scrollbar{display:none;}" in mobile_guard
-    assert (
-        ".sidebar-nav .nav-tab:not(.nav-tab-space){flex:0 0 44px!important;"
-        "width:44px!important;min-width:44px!important;min-height:44px!important;"
-        "padding:0!important;}"
-    ) in mobile_guard
-    assert (
-        ".sidebar-nav .nav-tab-space{flex:0 0 64px!important;"
-        "min-width:64px!important;min-height:44px!important;}"
-    ) in mobile_guard
+    assert ".sidebar-nav{overflow-x:auto!important;overflow-y:hidden!important;" not in style_css
+    assert "scrollbar-width:none;-webkit-overflow-scrolling:touch;" not in style_css
+    assert ".sidebar-nav::-webkit-scrollbar{display:none;}" not in style_css
+    assert ".sidebar-nav .nav-tab:not(.nav-tab-space){flex:0 0 44px!important;" not in style_css
+    assert ".sidebar-nav .nav-tab-space{flex:0 0 64px!important;" not in style_css
 
 
 def test_desktop_rail_owns_vertical_overflow():
@@ -1171,17 +2205,12 @@ def test_short_desktop_rail_compacts_navigation_buttons():
     assert 'html[data-rail-expanded="1"] .rail-btn{height:34px;min-height:34px;}' in style_css
 
 
-def test_mobile_open_sidebar_layers_above_rightpanel():
+def test_mobile_open_sidebar_layering_rules_stay_scoped_to_mobile_media():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
-    sidebar_open = re.search(r"\.sidebar\.mobile-open\{(?P<body>[^}]+)\}", mobile_guard)
-    rightpanel = re.search(r"\.rightpanel\{(?P<body>[^}]+)\}", mobile_guard)
-
-    assert sidebar_open, "mobile sidebar open rule should be present"
-    assert rightpanel, "mobile rightpanel rule should be present"
-    assert "z-index:230!important;" in sidebar_open.group("body")
-    assert "z-index:200!important;" in rightpanel.group("body")
+    assert "@media(max-width:640px)" in style_css
+    assert ".sidebar.mobile-open{left:0;}" in style_css
+    assert ".rightpanel.mobile-open{right:0!important;box-shadow:-4px 0 24px rgba(0,0,0,.4)!important;}" in style_css
 
 
 def test_space_selector_buttons_bind_before_async_space_load():
@@ -1252,16 +2281,10 @@ def test_mobile_composer_config_button_has_scroll_row_priority():
     ) in style_css
 
 
-def test_mobile_composer_config_layers_above_rightpanel():
+def test_mobile_composer_config_layering_rules_were_removed():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    mobile_guard = style_css[style_css.rfind("@media(max-width:640px)") :]
-    assert ".rightpanel{" in mobile_guard
-    assert "z-index:200!important;" in mobile_guard
-    assert (
-        ".composer-wrap:has(.composer-mobile-config-panel.open){z-index:240!important;}"
-        in mobile_guard
-    )
+    assert ".composer-wrap:has(.composer-mobile-config-panel.open){z-index:240!important;}" not in style_css
 
 
 def test_browser_drawer_open_renders_as_fixed_bottom_sheet():
@@ -1317,7 +2340,7 @@ def test_workspace_load_errors_render_panel_error_state():
     workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
 
-    catch_start = workspace_js.index("  }catch(e){", workspace_js.index("async function loadDir(path, opts)"))
+    catch_start = workspace_js.index("  }catch(e){", workspace_js.index("async function loadDir(path)"))
     load_dir_end = workspace_js.index("async function _refreshGitBadge", catch_start)
     catch_body = workspace_js[catch_start:load_dir_end]
 
@@ -1545,7 +2568,7 @@ def test_discord_fastapi_admin_reads_from_gateway_when_available(monkeypatch):
     monkeypatch.setattr(web_server, "_discord_api", fake_discord_api, raising=False)
 
     client = TestClient(web_server.app)
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
     roles = client.get("/api/discord/guilds/guild-1/roles", headers=headers)
     members = client.get("/api/discord/guilds/guild-1/members?limit=2", headers=headers)
 
@@ -1579,7 +2602,7 @@ def test_discord_fastapi_admin_updates_member_roles_when_available(monkeypatch):
             "add_role_ids": ["role-add"],
             "remove_role_ids": ["role-remove"],
         },
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
 
     assert response.status_code == 200
@@ -1634,6 +2657,83 @@ def test_appstore_home_renders_empty_catalog_state():
     assert "appstore_empty_catalog_title" in home_body
     assert ".appstore-empty-state{" in style_css
     assert ".appstore-empty-state-icon{" in style_css
+
+
+def test_appstore_mail_contract_exposes_builtin_mail_app_and_setup_flow():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    appstore_js = panels_js[panels_js.index("const _APPSTORE_FALLBACK_APPS = ["):]
+
+    assert "key: 'imap-mail'" in appstore_js
+    assert "Mail einrichten" in panels_js
+    assert "function _appstoreOpenMailSettings()" in panels_js
+    assert "function _appstoreSaveMailSettings(" in panels_js
+    assert "api('/api/mail/setup'" in panels_js
+    assert "_appstoreSyncMailButtons()" in panels_js
+
+
+def test_appstore_mail_setup_prefill_uses_default_inbox_when_present():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    setup_start = panels_js.index("async function _appstoreOpenMailSettings() {")
+    save_start = panels_js.index("async function _appstoreSaveMailSettings(", setup_start)
+    setup_block = panels_js[setup_start:save_start]
+
+    assert re.search(
+        r"currentConfig\.inboxes\.find\(\s*(?:\(inbox\)|inbox)\s*=>\s*(?:inbox\s*&&\s*)?inbox\.default",
+        setup_block,
+    )
+    assert "currentConfig.inboxes.length > 0 ? currentConfig.inboxes[0] : {}" not in setup_block
+
+
+def test_appstore_setup_overlay_uses_fullscreen_modal_shell():
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert re.search(
+        r"\.appstore-overlay,\.appstore-setup-overlay\{\s*position:fixed;inset:0;z-index:10000;\s*display:flex;align-items:center;justify-content:center;\s*background:rgba\(0,0,0,0\.5\);backdrop-filter:blur\(4px\);\s*animation:appstoreFadeIn \.15s ease-out;\s*\}",
+        style_css,
+    )
+    assert re.search(
+        r"\.appstore-overlay-closing,\.appstore-setup-overlay-closing\{\s*opacity:0;transition:opacity \.2s;\s*\}",
+        style_css,
+    )
+    assert "@media(max-width:600px)" in style_css
+    assert re.search(r"\.appstore-overlay,\.appstore-setup-overlay\{\s*align-items:stretch;padding:0;\s*\}", style_css)
+
+
+def test_mail_panel_prefers_current_inbox_then_default_then_first():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    start = panels_js.index("async function loadMailPanel() {")
+    save = panels_js.index("async function _mailSwitchInbox(", start)
+    block = panels_js[start:save]
+
+    assert "_currentMailInboxId" in block
+    assert "inboxes.find(i => i.id === _currentMailInboxId)" in block
+    assert "inboxes.find(i=>i.default)" in block
+    assert "_mailSwitchInbox(selectedInbox.id);" in block
+
+
+def test_appstore_mail_keeps_special_ui_state_even_when_installed():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    setup_start = panels_js.index("async function _appstoreOpenMailSettings() {")
+    setup_fn = panels_js[setup_start:setup_start + 2600]
+
+    assert "mailAppEmail" in setup_fn
+    assert "mailAppPassword" in setup_fn
+    assert "mailAppAccountId" not in setup_fn
+    assert "mailAppLabel" not in setup_fn
+    assert "mailAppActivate" not in setup_fn
+
+
+def test_appstore_imap_mail_manifest_matches_auto_setup_contract():
+    from web.api._home import get_webui_home
+
+    manifest_path = get_webui_home() / "appstore" / "imap-mail.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["key"] == "imap-mail"
+    assert manifest["name"] == "Mail"
+    assert "automatisch" in manifest["desc"].lower()
+    assert "mail.json" in manifest["fullDesc"].lower()
+    assert manifest["setup_steps"] == []
 
 
 def test_insights_panel_bounds_wide_content_responsively():
@@ -1743,7 +2843,7 @@ def test_cast_status_without_config_reports_default_host_when_cockpit_unavailabl
         raise TimeoutError("not running")
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
 
@@ -1787,7 +2887,7 @@ def test_cast_status_without_config_uses_local_cockpit_when_available(monkeypatc
         return Resp()
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
@@ -1826,7 +2926,7 @@ def test_cast_toggle_without_config_starts_local_cockpit(monkeypatch, tmp_path):
         return Proc()
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setenv("SIDEKICK_COCKPIT_LAUNCHER", str(launcher))
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
@@ -1964,7 +3064,7 @@ def test_cast_autostart_reuses_running_local_cockpit_without_launch(monkeypatch)
         captured["status"] = status
 
     monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
-    monkeypatch.delenv("HERMES_CAST_API_HOST", raising=False)
+    monkeypatch.delenv("SIDEKICK_CAST_API_HOST", raising=False)
     monkeypatch.setattr(routes, "j", fake_j)
     monkeypatch.setattr(routes, "_cockpit_launch_available", lambda: True)
     monkeypatch.setattr(
@@ -1990,22 +3090,51 @@ def test_cast_autostart_reuses_running_local_cockpit_without_launch(monkeypatch)
 
 def test_boot_uses_realistic_metadata_timeouts():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
 
-    assert "_bootTimeout(api('/api/profile/active'),5000,'active profile')" in boot_js
+    assert "_bootTimeout(api('/api/settings'),20000,'settings')" in boot_js
+    assert "_bootTimeout(api('/api/profile/active'),20000,'active profile')" in boot_js
     assert "_bootTimeout(loadWorkspaceList(),10000,'workspace list')" in boot_js
     assert "_bootTimeout(_loadActiveSpaceConfig(),8000,'space config')" in boot_js
     assert "_bootTimeout(loadOnboardingWizard(),8000,'onboarding')" in boot_js
-    assert "_withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces')" in spaces_js
+    assert "if (saved && !_bootMissingSession &&" in boot_js
+    assert "suppressMissingSessionMessage ? {logError:false} : undefined" in sessions_js
+    assert "_withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces')" in spaces_js
 
 
 def test_visible_static_ui_text_is_not_mojibake():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
-    assert "????" not in index_html
+    assert "??" not in index_html
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+    commands_js = Path("web/static/commands.js").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    assert "📺" in index_html
+    assert "📁" in index_html
+    assert "🎯 Set Goal" in index_html
+    assert 'yolo-pill-icon" aria-hidden="true">⚡<' in index_html
+    assert "🤖 Eigenen Agenten erstellen" in index_html
+    assert "✉️ Verfassen" in index_html
+    assert "📧 Mail" in index_html
+    assert "💬 Discord" in index_html
+    assert "btn.setAttribute('aria-expanded', dd.hidden ? 'false' : 'true')" in i18n_js
+    assert "btn.setAttribute('aria-expanded', 'false')" in i18n_js
+    assert "return `  /${c.name}${usage} — ${c.desc}`;" in commands_js
+    assert "const bullet=trimmed.match(/^(?:[-*•]|\\\\d+\\\\.)\\\\s+(.*)$/);" in commands_js
+    assert commands_js.count("Running execute_code…") == 2
+    assert commands_js.count("Generating image…") == 2
+    assert commands_js.count("↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}") == 2
+    assert commands_js.count("meta.join(' · ')") == 2
+    assert commands_js.count("const BRAIN='🧠';") == 2
+    assert commands_js.count(" · display: ") == 2
+    assert "Reasoning effort set to " in ui_js
+    assert "Failed to set effort" in ui_js
+    assert "?? Reasoning effort set to " not in ui_js
+    assert "?? Failed to set effort" not in ui_js
+    assert " · allowed: " in ui_js
 
     assert ">▶</button>" in index_html
     assert "← Zurück" in index_html
@@ -2106,14 +3235,8 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
 
     assert 'style="display:none"' not in cast_button
     assert "cast-unavailable" in cast_button
-    assert 'id="castStatusIcon" aria-hidden="true"' in cast_button
-    assert '<svg width="16" height="16" viewBox="0 0 24 24"' in cast_button
-    assert "??" not in cast_button
     assert "let _castConfigured=true;" in ui_js
     assert "let _castHost='';" in ui_js
-    assert "const CAST_STATUS_ICON_HTML=" in ui_js
-    assert "const CAST_STATUS_LOADING_ICON_HTML=" in ui_js
-    assert "function _setCastStatusIcon(icon, loading)" in cast_js
     assert "s.configured!==false" in ui_js
     assert "if(!_castConfigured)_cleanupCastTimers()" not in cast_js
     assert "Hub Cast nicht konfiguriert" in ui_js
@@ -2124,20 +3247,21 @@ def test_unconfigured_cast_status_keeps_hub_button_visible():
     assert "_castFetch('/api/cast/start',{method:'POST'},10000)" in ui_js
     assert "_castFetch('/api/cast/toggle',{method:'POST'})" not in ui_js
     assert "btn.style.display='none'" not in cast_js
-    assert "icon.textContent=" not in cast_js
-    assert "_setCastStatusIcon(icon,true);" in cast_js
-    assert "_setCastStatusIcon(icon,false);" in cast_js
 
 
-def test_hub_cast_monitor_starts_immediately_and_retries_every_15_seconds():
+def test_hub_cast_monitor_polls_status_immediately_and_retries_every_15_seconds():
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     cast_js = ui_js[ui_js.index("let _castActive=false;") : ui_js.index("function _initDashboardLinkProbe()")]
 
     assert "const CAST_RECONNECT_INTERVAL_MS=15000;" in cast_js
     assert "let _castConnectPromise=null;" in cast_js
+    assert "let _castStatusPromise=null;" in cast_js
+    assert "function _refreshHubCastStatus()" in cast_js
+    assert "_castFetch('/api/cast/status')" in cast_js
     assert "function _startHubCastMonitor()" in cast_js
-    assert "_ensureHubCastConnected({interactive:false});" in cast_js
-    assert "setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS)" in cast_js
+    assert "_refreshHubCastStatus();" in cast_js
+    assert "setInterval(_refreshHubCastStatus,CAST_RECONNECT_INTERVAL_MS)" in cast_js
+    assert "_ensureHubCastConnected({interactive:false});" not in cast_js
     assert "setTimeout(_refreshCastStatus,2000)" not in cast_js
 
 
@@ -2274,6 +3398,10 @@ def test_game_mode_setting_persists_and_detects_local_model_servers(monkeypatch,
     assert json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))["game_mode_enabled"] is True
     assert cfg.game_mode_blocks_local_model_request("ollama", "") is True
     assert cfg.game_mode_blocks_local_model_request("custom:local-gpu", "http://127.0.0.1:8080/v1") is True
+    assert cfg.game_mode_blocks_local_model_request("local-gpu", "") is True
+    assert cfg.game_mode_blocks_local_model_request("local-cpu", "") is True
+    assert cfg.game_mode_blocks_local_model_request("local-qwen", "") is True
+    assert cfg.game_mode_blocks_local_model_request("custom:qwen-local", "http://127.0.0.1:8082/v1") is True
     assert cfg.game_mode_blocks_local_model_request("openai", "https://api.openai.com/v1") is False
 
 
@@ -2298,6 +3426,571 @@ def test_game_mode_chat_guard_builds_409_payload_for_local_models(monkeypatch, t
     assert payload["error"]["code"] == "game_mode_enabled"
     assert payload["game_mode_enabled"] is True
     assert "local model" in payload["error"]["message"].lower()
+
+
+def test_game_mode_chat_start_routes_nova_local_models_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="nova-session",
+        profile="default",
+        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        workspace_slug="nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: r"C:\\sidekick\\home\\spaces\\nova")
+    monkeypatch.setattr(
+        routes,
+        "_resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("qwen3:4b", "ollama", False),
+    )
+    monkeypatch.setattr(
+        routes,
+        "resolve_active_provider_context",
+        lambda: {"provider": "ollama", "model": "qwen3:4b", "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+
+    payload = routes._handle_chat_start(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "nova-session",
+            "message": "hello nova",
+            "workspace": r"C:\\sidekick\\home\\spaces\\nova",
+        },
+    )
+
+    assert payload["stream_id"] == "stream-1"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["model_provider"] == "ollama-cloud"
+    assert captured["normalized_model"] is True
+
+
+def test_game_mode_chat_start_infers_nova_from_workspace_path_without_slug(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="nova-session",
+        profile="default",
+        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: r"C:\\sidekick\\home\\spaces\\nova")
+    monkeypatch.setattr(
+        routes,
+        "_resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("qwen3:4b", "ollama", False),
+    )
+    monkeypatch.setattr(
+        routes,
+        "resolve_active_provider_context",
+        lambda: {"provider": "ollama", "model": "qwen3:4b", "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+
+    payload = routes._handle_chat_start(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "nova-session",
+            "message": "hello nova",
+            "workspace": r"C:\\sidekick\\home\\spaces\\nova",
+        },
+    )
+
+    assert payload["stream_id"] == "stream-1"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["model_provider"] == "ollama-cloud"
+    assert captured["normalized_model"] is True
+
+
+def test_game_mode_chat_start_routes_nova_instance_spaces_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="nova-session",
+        profile="default",
+        workspace=r"C:\\sidekick\\home\\spaces\\studio-alpha",
+        workspace_slug="studio-alpha",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[],
+        context_messages=[],
+        pending_user_message=None,
+    )
+
+    class FakeSpace:
+        def load_config(self):
+            return {"nova": {"enabled": True, "character": "Nova"}}
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: session.workspace)
+    monkeypatch.setattr(
+        routes,
+        "_resolve_compatible_session_model_state",
+        lambda requested_model, requested_provider: ("qwen3:4b", "ollama", False),
+    )
+    monkeypatch.setattr(
+        routes,
+        "resolve_active_provider_context",
+        lambda: {"provider": "ollama", "model": "qwen3:4b", "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("web.api.space_engine.get_space", lambda slug: FakeSpace() if slug == "studio-alpha" else None)
+    monkeypatch.setattr("web.api.goals.has_active_goal", lambda *args, **kwargs: False)
+    monkeypatch.setattr("web.api.profiles.get_profile_home", lambda profile: tmp_path / "home")
+    monkeypatch.setattr(
+        "web.api.routes._start_chat_stream_for_session",
+        lambda *args, **kwargs: captured.update(kwargs) or {"stream_id": "stream-1"},
+    )
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+
+    payload = routes._handle_chat_start(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "nova-session",
+            "message": "hello nova",
+            "workspace": r"C:\\sidekick\\home\\spaces\\studio-alpha",
+        },
+    )
+
+    assert payload["stream_id"] == "stream-1"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["model_provider"] == "ollama-cloud"
+    assert captured["normalized_model"] is True
+
+
+def test_chat_sync_sets_webui_session_context_for_approval(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import os
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": False})
+    monkeypatch.delenv("SIDEKICK_EXEC_ASK", raising=False)
+    monkeypatch.setenv("SIDEKICK_EXEC_ASK", "legacy-ask")
+    monkeypatch.setattr(cfg, "resolve_model_provider", lambda model: ("qwen3:4b", "openai", "https://api.openai.com/v1"))
+    monkeypatch.setattr(cfg, "resolve_custom_provider_connection", lambda provider: (None, None))
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+
+    captured = {}
+
+    class FakeAIAgent:
+        def __init__(self, *args, **kwargs):
+            from gateway.session_context import get_session_env
+            from tools.approval import _is_gateway_approval_context, get_current_session_key
+
+            captured["approval_session_key"] = get_current_session_key()
+            captured["approval_platform"] = get_session_env("SIDEKICK_SESSION_PLATFORM")
+            captured["is_gateway"] = _is_gateway_approval_context()
+
+        def run_conversation(self, **kwargs):
+            return {
+                "final_response": "ok",
+                "messages": [{"role": "assistant", "content": "ok"}],
+                "completed": True,
+            }
+
+    session = SimpleNamespace(
+        session_id="chat-sync-1",
+        workspace=str(workspace),
+        model="qwen3:4b",
+        model_provider="openai",
+        workspace_slug="nova",
+        space_slug="nova",
+        space="nova",
+        messages=[],
+        context_messages=[],
+        title="Existing title",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost=0,
+        compact=lambda: {
+            "session_id": "chat-sync-1",
+            "title": "Existing title",
+            "messages": [],
+        },
+        save=lambda: None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: str(workspace))
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model, provider, False))
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
+    monkeypatch.setattr("web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock", lambda resolver, requested: {"api_key": "token", "provider": "openai", "base_url": "https://api.openai.com/v1"})
+    monkeypatch.setattr("run_agent.AIAgent", FakeAIAgent)
+    monkeypatch.setattr("web.api.streaming._merge_display_messages_after_agent_result", lambda previous_messages, previous_context_messages, result_messages, msg: [{"role": "assistant", "content": "ok"}])
+    monkeypatch.setattr("web.api.streaming._restore_reasoning_metadata", lambda previous, result: result)
+    monkeypatch.setattr("web.api.streaming._sanitize_messages_for_api", lambda messages: messages)
+    monkeypatch.setattr("web.api.streaming._session_context_messages", lambda s: list(s.context_messages))
+    monkeypatch.setattr("web.api.streaming._workspace_context_prefix", lambda workspace: "")
+
+    payload = routes._handle_chat_sync(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "chat-sync-1",
+            "message": "hello",
+            "workspace": str(workspace),
+            "model": "qwen3:4b",
+        },
+    )
+
+    assert payload["answer"] == "ok"
+    assert captured["approval_session_key"] == "chat-sync-1"
+    assert captured["approval_platform"] == "webui"
+    assert captured["is_gateway"] is True
+    assert os.environ["SIDEKICK_EXEC_ASK"] == "legacy-ask"
+
+
+def test_game_mode_chat_sync_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(parents=True)
+    session = SimpleNamespace(
+        session_id="chat-sync-gm-1",
+        workspace=str(workspace),
+        model="qwen3:4b",
+        model_provider="ollama",
+        workspace_slug="nova",
+        space_slug="nova",
+        space="nova",
+        messages=[],
+        context_messages=[],
+        title="Existing title",
+        input_tokens=0,
+        output_tokens=0,
+        estimated_cost=0,
+        compact=lambda: {
+            "session_id": "chat-sync-gm-1",
+            "title": "Existing title",
+            "messages": [],
+        },
+        save=lambda: None,
+    )
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr(routes, "resolve_trusted_workspace", lambda value: str(workspace))
+    monkeypatch.setattr(routes, "_resolve_compatible_session_model_state", lambda model, provider: (model, provider, False))
+    monkeypatch.setattr(routes, "j", lambda handler, payload, status=200, extra_headers=None: payload)
+    monkeypatch.setattr(
+        "web.api.config.resolve_model_provider",
+        lambda model_id: (
+            "deepseek-v4-flash",
+            "ollama-cloud",
+            "https://ollama.example/v1",
+        )
+        if "deepseek-v4-flash" in str(model_id) or "ollama-cloud" in str(model_id)
+        else ("qwen3:4b", "ollama", "http://127.0.0.1:11434"),
+    )
+    monkeypatch.setattr(
+        "web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock",
+        lambda resolver, requested=None: {
+            "api_key": "token",
+            "provider": requested,
+            "base_url": "https://ollama.example/v1" if requested == "ollama-cloud" else "http://127.0.0.1:11434",
+        },
+    )
+
+    class FakeAIAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def run_conversation(self, **kwargs):
+            return {
+                "final_response": "ok",
+                "messages": [{"role": "assistant", "content": "ok"}],
+                "completed": True,
+            }
+
+    monkeypatch.setattr("run_agent.AIAgent", FakeAIAgent)
+    monkeypatch.setattr("web.api.streaming._merge_display_messages_after_agent_result", lambda previous_messages, previous_context_messages, result_messages, msg: [{"role": "assistant", "content": "ok"}])
+    monkeypatch.setattr("web.api.streaming._restore_reasoning_metadata", lambda previous, result: result)
+    monkeypatch.setattr("web.api.streaming._sanitize_messages_for_api", lambda messages: messages)
+    monkeypatch.setattr("web.api.streaming._session_context_messages", lambda s: list(s.context_messages))
+    monkeypatch.setattr("web.api.streaming._workspace_context_prefix", lambda workspace: "")
+
+    payload = routes._handle_chat_sync(
+        SimpleNamespace(headers={}),
+        {
+            "session_id": "chat-sync-gm-1",
+            "message": "hello",
+            "workspace": str(workspace),
+            "model": "qwen3:4b",
+        },
+    )
+
+    assert payload["answer"] == "ok"
+    assert captured["provider"] == "ollama-cloud"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["base_url"] == "https://ollama.example/v1"
+    assert session.model == "deepseek-v4-flash"
+    assert session.model_provider == "ollama-cloud"
+
+
+def test_game_mode_session_compress_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="nova-session",
+        profile="default",
+        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        active_stream_id=None,
+        messages=[
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "two"},
+            {"role": "user", "content": "three"},
+            {"role": "assistant", "content": "four"},
+        ],
+        context_messages=[],
+        pending_user_message=None,
+        tool_calls=[],
+        save=lambda: None,
+        compact=lambda: {"session_id": "nova-session", "workspace": r"C:\\sidekick\\home\\spaces\\nova"},
+    )
+
+    class _FakeCompressor:
+        def compress(self, original_messages, current_tokens, focus_topic=None):
+            return original_messages[:2]
+
+    class _FakeAgent:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.context_compressor = _FakeCompressor()
+
+    monkeypatch.setattr(routes, "get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.config.resolve_model_provider", lambda model_id: (model_id, "ollama", "http://127.0.0.1:11434"))
+    monkeypatch.setattr(
+        "web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock",
+        lambda resolver, requested=None: {"api_key": "test-key", "provider": requested, "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+
+    payload = routes._handle_session_compress(
+        SimpleNamespace(headers={}),
+        {"session_id": "nova-session"},
+    )
+
+    assert payload["ok"] is True
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["provider"] == "ollama-cloud"
+    assert payload["session"]["session_id"] == "nova-session"
+
+
+def test_game_mode_handoff_summary_routes_nova_local_model_to_ollama_cloud_deepseek(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": True})
+
+    captured = {}
+    session = SimpleNamespace(
+        session_id="nova-session",
+        profile="default",
+        workspace=r"C:\\sidekick\\home\\spaces\\nova",
+        model="qwen3:4b",
+        model_provider="ollama",
+        workspace_slug=None,
+        space_slug=None,
+        space=None,
+        source_label="Nova",
+        raw_source=None,
+        source_tag=None,
+        session_source=None,
+    )
+    messages = [
+        {"role": "user", "content": "hello", "timestamp": 1},
+        {"role": "assistant", "content": "hi", "timestamp": 2},
+    ]
+
+    class _FakeMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class _FakeChoice:
+        def __init__(self, content):
+            self.message = _FakeMessage(content)
+            self.finish_reason = "stop"
+            self.stop_reason = None
+
+    class _FakeResponse:
+        def __init__(self, content):
+            self.choices = [_FakeChoice(content)]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured["api_kwargs"] = kwargs
+            return _FakeResponse("Remote summary")
+
+    class _FakeClient:
+        def __init__(self):
+            self.chat = SimpleNamespace(completions=_FakeCompletions())
+
+    class _FakeAgent:
+        api_mode = ""
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            self.reasoning_config = {"enabled": True}
+
+        def _build_api_kwargs(self, api_messages):
+            return {"messages": api_messages, "model": captured.get("model")}
+
+        def _ensure_primary_openai_client(self, reason=""):
+            return _FakeClient()
+
+    monkeypatch.setattr("web.api.models.get_session", lambda sid: session)
+    monkeypatch.setattr("web.api.models.get_cli_session_messages", lambda sid: messages)
+    monkeypatch.setattr("web.api.models.count_conversation_rounds", lambda sid, since=None: 4)
+    monkeypatch.setattr("web.api.models.CONVERSATION_ROUND_THRESHOLD", 1, raising=False)
+    monkeypatch.setattr("web.api.config.resolve_model_provider", lambda model_id: (model_id, "ollama", "http://127.0.0.1:11434"))
+    monkeypatch.setattr(
+        "web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock",
+        lambda resolver, requested=None: {"api_key": "test-key", "provider": requested, "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("run_agent.AIAgent", _FakeAgent)
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+
+    payload = routes._handle_handoff_summary(
+        SimpleNamespace(headers={}),
+        {"session_id": "nova-session"},
+    )
+
+    assert payload["ok"] is True
+    assert payload["summary"] == "Remote summary"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert captured["provider"] == "ollama-cloud"
+    assert captured["session_id"] == "nova-session"
+
+
+def test_handoff_summary_handles_missing_session_without_crashing(monkeypatch, tmp_path):
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({"game_mode_enabled": False})
+
+    messages = [
+        {"role": "user", "content": "hello", "timestamp": 1},
+        {"role": "assistant", "content": "hi", "timestamp": 2},
+    ]
+    captured = {}
+    warnings = []
+
+    monkeypatch.setattr("web.api.models.get_session", lambda sid: (_ for _ in ()).throw(KeyError(sid)))
+    monkeypatch.setattr("web.api.models.get_cli_session_messages", lambda sid: messages)
+    monkeypatch.setattr("web.api.models.count_conversation_rounds", lambda sid, since=None: 4)
+    monkeypatch.setattr("web.api.models.CONVERSATION_ROUND_THRESHOLD", 1, raising=False)
+    monkeypatch.setattr(
+        "web.api.config.resolve_model_provider",
+        lambda model_id: ("qwen3:4b", "ollama", "http://127.0.0.1:11434"),
+    )
+    monkeypatch.setattr(
+        "web.api.oauth.resolve_runtime_provider_with_anthropic_env_lock",
+        lambda resolver, requested=None: {"api_key": "", "provider": requested, "base_url": "http://127.0.0.1:11434"},
+    )
+    monkeypatch.setattr("web.api.routes._persist_handoff_summary", lambda *args, **kwargs: captured.update({"persisted": True}) or {})
+    monkeypatch.setattr(
+        "web.api.routes.j",
+        lambda handler, payload, status=200, extra_headers=None: payload,
+    )
+    monkeypatch.setattr(routes.logger, "warning", lambda msg, *args, **kwargs: warnings.append(msg))
+
+    payload = routes._handle_handoff_summary(
+        SimpleNamespace(headers={}),
+        {"session_id": "missing-session"},
+    )
+
+    assert payload["ok"] is True
+    assert payload["fallback"] is True
+    assert payload["summary"]
+    assert captured["persisted"] is True
+    assert warnings == []
 
 
 def test_image_generation_tool_returns_game_mode_error(monkeypatch, tmp_path):
@@ -2354,6 +4047,70 @@ def test_game_mode_resource_release_cancels_local_runs_and_unloads_ollama(monkey
     assert payload["ollama"]["unloaded"][0]["model"] == "qwen3:4b"
     assert "image_generation_queue" in payload
     assert payload["gpu_processes"]["after"]["non_sidekick_top"][0]["process"] == "VRChat.exe"
+
+
+def test_game_mode_resource_release_skips_ollama_cloud_endpoints(monkeypatch):
+    from web.api import game_mode
+
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com/v1")
+    monkeypatch.setattr(
+        game_mode.cfg,
+        "get_config",
+        lambda: {
+            "model": {"provider": "ollama-cloud", "base_url": "https://ollama.com/v1"},
+            "providers": {"ollama-cloud": {"base_url": "https://ollama.com/v1"}},
+            "custom_providers": [{"name": "Ollama Cloud", "base_url": "https://ollama.com/v1"}],
+        },
+    )
+    with game_mode.cfg.ACTIVE_RUNS_LOCK:
+        game_mode.cfg.ACTIVE_RUNS.clear()
+
+    seen = []
+
+    def record_models(base_url):
+        seen.append(base_url)
+        if "ollama.com" in str(base_url).lower():
+            raise AssertionError(f"Game Mode release should not inspect remote Ollama URL: {base_url}")
+        return []
+
+    monkeypatch.setattr(game_mode, "_cancel_stream", lambda stream_id: False)
+    monkeypatch.setattr(game_mode, "_loaded_ollama_models", record_models)
+    monkeypatch.setattr(game_mode, "_terminate_known_local_model_servers", lambda: [])
+    monkeypatch.setattr(game_mode, "_release_local_image_generation_queues", lambda: {"queues": []})
+    monkeypatch.setattr(game_mode, "_gpu_process_memory_snapshot", lambda: {"available": True, "top": []})
+
+    payload = game_mode.release_game_mode_resources()
+
+    assert "http://127.0.0.1:11434" in seen
+    assert all("ollama.com" not in str(base_url).lower() for base_url in seen)
+    assert payload["ollama"]["checked"] == ["http://127.0.0.1:11434"]
+    assert payload["ollama"]["unloaded"] == []
+
+
+def test_game_mode_resource_release_keeps_local_ollama_default_even_with_cloud_host(monkeypatch):
+    from web.api import game_mode
+
+    monkeypatch.setenv("OLLAMA_HOST", "https://ollama.com/v1")
+    monkeypatch.setattr(game_mode.cfg, "get_config", lambda: {})
+
+    seen = []
+
+    def record_models(base_url):
+        seen.append(base_url)
+        return []
+
+    monkeypatch.setattr(game_mode, "_loaded_ollama_models", record_models)
+    monkeypatch.setattr(game_mode, "_unload_ollama_model", lambda _base_url, model: {"ok": True, "model": model})
+    monkeypatch.setattr(game_mode, "_cancel_stream", lambda stream_id: False)
+    monkeypatch.setattr(game_mode, "_terminate_known_local_model_servers", lambda: [])
+    monkeypatch.setattr(game_mode, "_release_local_image_generation_queues", lambda: {"queues": []})
+    monkeypatch.setattr(game_mode, "_gpu_process_memory_snapshot", lambda: {"available": True, "top": []})
+
+    payload = game_mode.release_game_mode_resources()
+
+    assert "http://127.0.0.1:11434" in seen
+    assert "https://ollama.com" not in "\n".join(seen)
+    assert payload["ollama"]["checked"] == ["http://127.0.0.1:11434"]
 
 
 def test_game_mode_release_targets_all_nova_local_model_ports():
@@ -2419,18 +4176,20 @@ def test_game_mode_recognizes_local_image_queue_process():
             return "python.exe"
 
         def cmdline(self):
-            return ["python", "C:/HermesPortable/home/scripts/local_gen_queue.py"]
+            return ["python", "C:/SidekickPortable/home/scripts/local_gen_queue.py"]
 
     assert game_mode._process_looks_like_local_image_generation_queue(Proc()) is True
 
 
 def test_local_gen_queue_rejects_generate_when_game_mode_enabled():
-    source = Path(r"C:\HermesPortable\home\scripts\local_gen_queue.py").read_text(encoding="utf-8")
+    source_path = Path(__import__("os").environ.get("SIDEKICK_LOCAL_GEN_QUEUE_PATH", ""))
+    if not source_path.is_file():
+        pytest.skip("external local image queue requires SIDEKICK_LOCAL_GEN_QUEUE_PATH")
+    source = source_path.read_text(encoding="utf-8")
 
     assert "def _game_mode_enabled()" in source
     assert "def _game_mode_settings_candidates()" in source
     assert '"state", "webui", "settings.json"' in source
-    assert "C:/sidekick/home/state/webui/settings.json" in source
     assert "if _game_mode_enabled():" in source
     assert 'self._json(409, _game_mode_payload())' in source
     assert 'job.error = "game_mode_enabled"' in source
@@ -2445,7 +4204,12 @@ def test_settings_post_runs_game_mode_release_when_enabling(monkeypatch, tmp_pat
     from web.api import game_mode
     from web.api import routes
 
-    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    watchdog_state = tmp_path / "home" / "state" / "gpu_watchdog_state.json"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
     cfg.save_settings({"game_mode_enabled": False})
     monkeypatch.setattr(
         game_mode,
@@ -2492,10 +4256,123 @@ def test_settings_post_runs_game_mode_release_when_enabling(monkeypatch, tmp_pat
     assert handler.status_code == 200
     payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
     assert payload["game_mode_enabled"] is True
+    assert payload["game_mode_sync"]["ok"] is True
     assert "game_mode_release" in payload
     assert "cancelled_local_streams" in payload["game_mode_release"]
     assert "ollama" in payload["game_mode_release"]
     assert "local_model_servers" in payload["game_mode_release"]
+    assert active_lock.exists()
+    assert legacy_lock.exists()
+    assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is True
+
+
+def test_settings_post_clears_game_mode_lock_when_disabling(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from web.api import config as cfg
+    from web.api import routes
+
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    watchdog_state = tmp_path / "home" / "state" / "gpu_watchdog_state.json"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
+    cfg.save_settings({"game_mode_enabled": True})
+    active_lock.parent.mkdir(parents=True, exist_ok=True)
+    legacy_lock.parent.mkdir(parents=True, exist_ok=True)
+    active_lock.write_text("stale", encoding="utf-8")
+    legacy_lock.write_text("stale", encoding="utf-8")
+    watchdog_state.parent.mkdir(parents=True, exist_ok=True)
+    watchdog_state.write_text(
+        json.dumps({"last_game_mode": True, "last_action": "blocked"}),
+        encoding="utf-8",
+    )
+
+    body = json.dumps({"game_mode_enabled": False}).encode("utf-8")
+
+    class _Handler:
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+            "Host": "127.0.0.1",
+        }
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_post(handler, urlparse("/api/settings"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["game_mode_enabled"] is False
+    assert payload["game_mode_sync"]["ok"] is True
+    assert not active_lock.exists()
+    assert not legacy_lock.exists()
+    assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is False
+
+
+def test_game_mode_status_prefers_lock_file_over_disabled_setting(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from web.api import config as cfg
+    from web.api import routes
+
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
+    cfg.save_settings({"game_mode_enabled": False})
+    active_lock.parent.mkdir(parents=True, exist_ok=True)
+    active_lock.write_text("stale", encoding="utf-8")
+
+    assert cfg.is_game_mode_enabled() is True
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(handler, urlparse("/api/game-mode/status"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload == {"ok": True, "game_mode_enabled": True}
 
 
 def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path):
@@ -2535,6 +4412,156 @@ def test_game_mode_status_endpoint_returns_current_setting(monkeypatch, tmp_path
     assert handler.status_code == 200
     payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
     assert payload == {"ok": True, "game_mode_enabled": True}
+
+
+def test_settings_endpoint_exposes_legacy_password_env_var(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_WEBUI_PASSWORD", raising=False)
+    monkeypatch.setenv("SIDEKICK_WEBUI_PASSWORD", "legacy-secret")
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({})
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(handler, urlparse("/api/settings"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["password_env_var"] is True
+
+
+def test_settings_post_rejects_password_change_when_legacy_password_env_var_set(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_WEBUI_PASSWORD", raising=False)
+    monkeypatch.setenv("SIDEKICK_WEBUI_PASSWORD", "legacy-secret")
+    from web.api import config as cfg
+    from web.api import routes
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    cfg.save_settings({})
+    body = json.dumps({"_set_password": "new-password"}).encode("utf-8")
+
+    class _Handler:
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+            "Host": "127.0.0.1",
+        }
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_post(handler, urlparse("/api/settings"))
+
+    assert handled is None
+    assert handler.status_code == 409
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["ok"] is False
+    assert "overrides the settings password" in payload["error"]["message"]
+
+
+def test_onboarding_probe_accepts_legacy_open_env_var(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import urlparse
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("SIDEKICK_WEBUI_ONBOARDING_OPEN", raising=False)
+    monkeypatch.setenv("SIDEKICK_WEBUI_ONBOARDING_OPEN", "1")
+    from web.api import auth
+    from web.api import routes
+
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: False)
+    seen = {}
+
+    def fake_probe(provider, base_url, api_key):
+        seen["args"] = (provider, base_url, api_key)
+        return {"ok": True, "provider": provider, "base_url": base_url, "api_key": api_key}
+
+    monkeypatch.setattr(routes, "probe_provider_endpoint", fake_probe)
+    body = json.dumps({"provider": "ollama", "base_url": "http://example.com", "api_key": "secret"}).encode("utf-8")
+
+    class _Handler:
+        headers = {
+            "Content-Length": str(len(body)),
+            "Content-Type": "application/json",
+            "Host": "127.0.0.1",
+        }
+        client_address = ("203.0.113.10", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO(body)
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_post(handler, urlparse("/api/onboarding/probe"))
+
+    assert handled is None
+    assert handler.status_code == 200
+    payload = json.loads(handler.wfile.getvalue().decode("utf-8"))
+    assert payload["ok"] is True
+    assert seen["args"] == ("ollama", "http://example.com", "secret")
+
+
+def test_session_ttl_accepts_sidekick_env_var(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_WEBUI_SESSION_TTL", "600")
+    from web.api import auth
+
+    monkeypatch.setattr(auth, "load_settings", lambda: {})
+
+    assert auth._resolve_session_ttl() == 600
 
 
 def test_media_endpoint_serves_allowed_local_file(monkeypatch, tmp_path):
@@ -2578,6 +4605,49 @@ def test_media_endpoint_serves_allowed_local_file(monkeypatch, tmp_path):
     assert handler.status_code == 200
     assert handler.wfile.getvalue() == b"hello from media"
     assert handler.response_headers["content-type"] == "application/octet-stream"
+
+
+def test_media_endpoint_falls_back_to_sidekick_home(monkeypatch, tmp_path):
+    import io
+    from urllib.parse import quote, urlparse
+
+    from web.api import routes
+
+    sidekick_home = tmp_path / "sidekick-home"
+    sidekick_home.mkdir()
+    media_file = sidekick_home / "preview.txt"
+    media_file.write_text("hello from sidekick home", encoding="utf-8")
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
+
+    class _Handler:
+        headers = {"Host": "127.0.0.1"}
+        client_address = ("127.0.0.1", 12345)
+
+        def __init__(self):
+            self.status_code = None
+            self.response_headers = {}
+            self.rfile = io.BytesIO()
+            self.wfile = io.BytesIO()
+
+        def send_response(self, status):
+            self.status_code = status
+
+        def send_header(self, name, value):
+            self.response_headers[name.lower()] = value
+
+        def end_headers(self):
+            pass
+
+    handler = _Handler()
+    handled = routes.handle_get(
+        handler,
+        urlparse(f"/api/media?path={quote(str(media_file))}"),
+    )
+
+    assert handled is True
+    assert handler.status_code == 200
+    assert handler.wfile.getvalue() == b"hello from sidekick home"
 
 
 def test_extension_url_list_caps_without_crashing(monkeypatch, tmp_path):
@@ -2646,7 +4716,7 @@ def test_cli_session_messages_stitch_continuation_parent(monkeypatch, tmp_path):
             ("child", "assistant", "from child", 3.1),
         )
 
-    monkeypatch.setattr("web.api.profiles.get_active_hermes_home", lambda: str(home))
+    monkeypatch.setattr("web.api.profiles.get_active_profile_home", lambda: str(home))
 
     messages = models.get_cli_session_messages("child")
 
@@ -2656,9 +4726,14 @@ def test_cli_session_messages_stitch_continuation_parent(monkeypatch, tmp_path):
 def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch, tmp_path):
     from web.api import config as cfg
     from web.api import game_mode
-    from web import server
+    from cli import web_server
 
-    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "settings.json")
+    settings_file = tmp_path / "home" / "state" / "webui" / "settings.json"
+    active_lock = tmp_path / "home" / "state" / "webui" / "game_mode.lock"
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    watchdog_state = tmp_path / "home" / "state" / "gpu_watchdog_state.json"
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", settings_file)
     cfg.save_settings({"game_mode_enabled": True})
 
     calls = []
@@ -2668,27 +4743,39 @@ def test_server_startup_runs_game_mode_release_when_already_enabled(monkeypatch,
         lambda: calls.append("release") or {"local_model_servers": []},
     )
 
-    server._release_game_mode_resources_on_startup()
+    web_server._release_game_mode_resources_on_startup()
 
     assert calls == ["release"]
+    assert active_lock.exists()
+    assert legacy_lock.exists()
+    assert json.loads(watchdog_state.read_text(encoding="utf-8"))["last_game_mode"] is True
 
 
 def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 
-    titlebar_start = index_html.index('id="titlebarActions"')
-    lang_start = index_html.index("titlebarLangSelector", titlebar_start)
-    cast_start = index_html.index("btnCastToggle", lang_start)
-    titlebar_actions = index_html[titlebar_start:cast_start]
+    utility_actions_start = index_html.index('id="titlebarUtilityActions"')
+    titlebar_actions_start = index_html.index(
+        '<div class="titlebar-actions" id="titlebarActions">'
+    )
+    lang_start = index_html.index("titlebarLangSelector", utility_actions_start)
+    game_mode_start = index_html.index('id="btnGameModeToggle"', titlebar_actions_start)
+    utility_actions = index_html[utility_actions_start:titlebar_actions_start]
 
-    assert 'id="btnGameModeToggle"' in titlebar_actions
-    assert "toggleGameMode()" in titlebar_actions
-    assert "game_mode_toggle" in titlebar_actions
+    assert re.search(
+        r'id="btnLangSelector"[^>]+aria-label="Language"[^>]+aria-haspopup="menu"[^>]+aria-expanded="false"[^>]+aria-controls="langDropdown"[^>]+onclick="toggleLangDropdown\(event\)"',
+        utility_actions,
+        re.S,
+    )
+    assert utility_actions_start < lang_start < titlebar_actions_start < game_mode_start
     assert "settingsGameModeEnabled" in index_html
     assert "window._gameModeEnabled=!!s.game_mode_enabled" in boot_js
+    assert "_syncGameModeStateFromServer" in boot_js
+    assert "api('/api/game-mode/status')" in boot_js
     assert "function syncGameModeButton()" in panels_js
     assert "async function toggleGameMode()" in panels_js
     assert "function _gameModeReleaseSummary(release)" in panels_js
@@ -2697,8 +4784,10 @@ def test_game_mode_titlebar_button_and_settings_ui_are_wired():
     assert "No Sidekick local GPU processes found." in panels_js
     assert "Top remaining GPU users:" in panels_js
     assert "Local GPU workload still detected:" in panels_js
-    assert "btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off')" in panels_js
+    assert "btn.removeAttribute('data-i18n-title')" in panels_js
+    assert "btn.removeAttribute('title')" in panels_js
     assert "btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off')" in panels_js
+    assert "browser browser" not in ui_js
     assert "game_mode_enabled" in panels_js
     assert ".game-mode-toggle-btn" in style_css
     assert ".game-mode-toggle-btn.active" in style_css
@@ -2709,11 +4798,12 @@ def test_initial_space_labels_use_url_workspace_before_spaces_js_loads():
 
     titlebar_default = index_html.index('id="titlebarSpaceName">default</span>')
     titlebar_script = index_html.index("function initInitialSpaceLabel()", titlebar_default)
+    titlebar_actions = index_html.index('<div class="titlebar-actions"', titlebar_script)
     sidebar_default = index_html.index('id="sidebarSpaceName">default</span>')
     sidebar_script = index_html.index("function initInitialSidebarSpaceLabel()", sidebar_default)
     spaces_js = index_html.index("static/spaces.js")
 
-    assert titlebar_default < titlebar_script
+    assert titlebar_default < titlebar_script < titlebar_actions
     assert sidebar_default < sidebar_script < spaces_js
     assert index_html.count("new URLSearchParams(window.location.search || '').get('workspace')") >= 2
     assert index_html.count("if (!slug) slug = 'nova';") >= 2
@@ -2737,12 +4827,22 @@ def test_preferences_controls_are_disabled_until_autosave_handlers_are_ready():
     assert bot_name < busy_end
 
 
+def test_provider_key_input_is_wrapped_in_a_form_for_enter_submit_semantics():
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
+
+    assert "const row=document.createElement('form');" in panels_js
+    assert "row.noValidate=true;" in panels_js
+    assert "row.addEventListener('submit',e=>{" in panels_js
+    assert "saveBtn.type='submit';" in panels_js
+
+
 def test_background_stream_requests_keep_owner_workspace():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
     sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
 
     assert "const scopedPath = (typeof _spaceScopedApiPath === 'function')" in sessions_js
-    assert "return await api(scopedPath, {signal: controller.signal})" in sessions_js
+    assert "const apiOptions = Object.assign({signal: controller.signal}, options || {});" in sessions_js
+    assert "return await api(scopedPath, apiOptions);" in sessions_js
     assert "msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}`,\n      _SESSION_MESSAGES_TIMEOUT_MS" in sessions_js
     assert "messages=1&resolve_model=0`,\n      _SESSION_MESSAGES_TIMEOUT_MS" in sessions_js
     assert "workspace_slug:ownerWorkspaceSlug" in messages_js
@@ -2766,13 +4866,26 @@ def test_session_list_loads_projects_in_parallel_with_sessions():
     sessions_promise = body.index("const sessionsPromise = _apiWithTimeout(")
     projects_promise = body.index("const projectsPromise = _apiWithTimeout(")
     await_sessions = body.index("const sessData = await sessionsPromise;")
+    await_projects = body.index("const projData = await projectsPromise;")
     first_render = body.index("renderSessionListFromCache();  // no-ops if rename is in progress")
-    projects_then = body.index("void projectsPromise.then((projData) => {")
+    second_render = body.index("renderSessionListFromCache();", await_projects)
 
     assert sessions_promise < await_sessions
     assert projects_promise < await_sessions
-    assert await_sessions < first_render < projects_then
-    assert "_allProjects = projData.projects || [];" in body
+    assert await_sessions < first_render < await_projects
+    assert await_projects < second_render
+
+
+def test_session_list_projects_abort_falls_back_silently():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    render_start = sessions_js.index("async function renderSessionList()")
+    render_end = sessions_js.index("let _gatewaySSE", render_start)
+    body = sessions_js[render_start:render_end]
+
+    assert "if (listAbortController.signal.aborted || e?._sidekickTimedOut || e?.name === 'AbortError') {" in body
+    assert "return {projects: []};" in body
+    assert "console.warn('renderSessionList projects unavailable, continuing without projects', e);" in body
 
 
 def test_space_deeplink_initializes_active_workspace():
@@ -2814,11 +4927,11 @@ def test_space_dropdown_renders_cached_spaces_before_refresh():
     assert "const cachedSpaces = Array.isArray(_spacesCache) ? _spacesCache.filter(Boolean) : []" in spaces_js
     assert "if (cachedSpaces.length)" in spaces_js
     assert "_renderSpaceDropdownItems(dd, cachedSpaces)" in spaces_js
-    assert "const runSelect = () => {" in spaces_js
-    assert "requestAnimationFrame(runSelect)" in spaces_js
+    assert "if (cachedSpaces.length) setTimeout(refresh, 0)" in spaces_js
     assert "loadSpaces().then(spaces => {" in spaces_js
     assert "if (dd.hidden) return" in spaces_js
     assert "_openSpaceDropdown(dd, btn, 'sidebar-space-dropdown')" in spaces_js
+    assert "requestAnimationFrame(runSelect)" in spaces_js
 
 
 def test_space_switch_does_not_block_on_space_config_load():
@@ -2837,18 +4950,18 @@ def test_session_html_cache_ignores_loading_placeholder():
     assert "!/Loading conversation/i.test(String(_html))" in ui_js
 
 
-def test_launcher_stops_orphan_stdlib_backends():
+def test_launcher_manages_only_declared_sidekick_processes():
     launcher = Path("Sidekick-Launcher.ps1").read_text(encoding="utf-8")
 
-    assert "function Stop-OrphanStdlibBackends" in launcher
-    assert "\\-m\\s+web\\.server" in launcher
-    assert 'Stop-OrphanStdlibBackends "launcher stop"' in launcher
-    assert 'Stop-OrphanStdlibBackends "pre-start cleanup"' in launcher
+    assert "function Stop-OrphanStdlibBackends" not in launcher
+    assert ".".join(("web", "server")) not in launcher
+    assert 'foreach ($name in @("dashboard", "gateway"))' in launcher
 
 
 def test_goal_continuation_auto_starts_after_delivery():
     messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
     goals_py = Path("cli/goals.py").read_text(encoding="utf-8")
+    routes_py = Path("web/api/routes.py").read_text(encoding="utf-8")
 
     assert "function _startGoalContinuation(goalNext, attempt=0)" in messages_js
     assert "api(_ownerScopedApiPath('/api/chat/start')" in messages_js
@@ -2856,85 +4969,8 @@ def test_goal_continuation_auto_starts_after_delivery():
     assert "already has an active stream" in messages_js
     assert "merely reports progress" in goals_py
     assert "If any required work remains" in goals_py
-
-
-def test_proxy_response_keeps_safe_stdlib_headers(monkeypatch):
-    from cli import web_server
-
-    captured = {}
-
-    def fake_proxy(method, path, headers, body):
-        captured["path"] = path
-        return (
-            200,
-            b"{}",
-            {
-                "Content-Type": "application/json; charset=utf-8",
-                "Set-Cookie": "profile=default; Path=/; SameSite=Lax",
-                "Content-Disposition": 'attachment; filename="session.json"',
-                "Cache-Control": "no-store",
-                "X-Accel-Buffering": "no",
-                "Connection": "close",
-            },
-            "application/json; charset=utf-8",
-        )
-
-    monkeypatch.setattr(web_server, "_proxy_sync", fake_proxy)
-
-    client = TestClient(web_server.app)
-    response = client.get(
-        "/api/not-native-route",
-        headers={"X-Hermes-Session-Token": web_server._SESSION_TOKEN},
-    )
-
-    assert response.status_code == 200
-    assert captured["path"] == "/api/not-native-route"
-    assert response.headers["set-cookie"] == "profile=default; Path=/; SameSite=Lax"
-    assert response.headers["content-disposition"] == 'attachment; filename="session.json"'
-    assert response.headers["cache-control"] == "no-store"
-    assert response.headers["x-accel-buffering"] == "no"
-    assert "connection" not in {key.lower() for key in response.headers}
-
-
-def test_proxy_forwards_original_host_for_legacy_csrf():
-    from cli import web_server
-
-    forwarded = web_server._forward_request_headers(
-        {
-            "host": "127.0.0.1:9119",
-            "origin": "http://127.0.0.1:9119",
-            "content-length": "2",
-        }
-    )
-
-    assert "host" not in {key.lower() for key in forwarded}
-    assert forwarded["origin"] == "http://127.0.0.1:9119"
-    assert forwarded["X-Forwarded-Host"] == "127.0.0.1:9119"
-    assert forwarded["X-Real-Host"] == "127.0.0.1:9119"
-    assert "content-length" not in {key.lower() for key in forwarded}
-
-
-def test_proxy_sync_returns_502_on_backend_connection_reset(monkeypatch):
-    from cli import web_server
-
-    def reset_urlopen(req, timeout):
-        raise ConnectionResetError("backend closed connection")
-
-    monkeypatch.setattr(web_server, "_ensure_stdlib_backend", lambda: 9123)
-    monkeypatch.setattr(web_server.urllib.request, "urlopen", reset_urlopen)
-
-    status, body, headers, content_type = web_server._proxy_sync(
-        "GET",
-        "/api/workspaces",
-        {"host": "127.0.0.1:9119"},
-        None,
-    )
-
-    payload = json.loads(body.decode("utf-8"))
-    assert status == 502
-    assert payload["error"].startswith("proxy failed:")
-    assert headers["connection"] == "close"
-    assert content_type == "application/json"
+    assert "goal_related = has_active_goal(" in routes_py
+    assert "goal_related=goal_related" in routes_py
 
 
 def test_asyncio_disconnect_context_is_suppressed():
@@ -2983,6 +5019,21 @@ def test_asyncio_disconnect_exception_filter_delegates_real_errors():
         loop.close()
 
 
+def test_sse_write_disconnect_is_suppressed():
+    from web.api.streaming import _sse
+
+    class FailingWFile:
+        def write(self, data):
+            raise ConnectionResetError("client closed")
+
+        def flush(self):
+            raise AssertionError("flush should not run after a disconnect")
+
+    handler = SimpleNamespace(wfile=FailingWFile())
+
+    _sse(handler, "snapshot", {"ok": True})
+
+
 def test_query_token_only_authenticates_event_streams():
     from cli import web_server
 
@@ -3015,7 +5066,7 @@ def test_query_token_only_authenticates_event_streams():
     assert not web_server._has_valid_session_token(normal_api_request)
 
 
-def test_legacy_sse_paths_are_streamed_not_buffered():
+def test_sse_paths_allow_eventsource_authentication():
     from cli import web_server
 
     streamed_paths = [
@@ -3053,55 +5104,3 @@ def test_browser_frame_image_uses_authenticated_fetch_blob():
     assert "if (!img.getAttribute('src')) img.style.visibility = 'hidden';" in browser_js
     assert "URL.createObjectURL(blob)" in browser_js
     assert "URL.revokeObjectURL(_browserFrameObjectUrl)" in browser_js
-
-
-def test_stdlib_proxy_uses_streaming_proxy_for_legacy_sse(monkeypatch):
-    from cli import web_server
-
-    captured = {}
-
-    def fake_stream(method, path, headers, body):
-        captured["stream_path"] = path
-        return iter([b"event: ping\n", b"data: {}\n", b"\n"])
-
-    def fail_sync(method, path, headers, body):
-        raise AssertionError(f"SSE path must not use buffered proxy: {path}")
-
-    monkeypatch.setattr(web_server, "_proxy_stream", fake_stream)
-    monkeypatch.setattr(web_server, "_proxy_sync", fail_sync)
-
-    client = TestClient(web_server.app)
-    response = client.get(
-        f"/api/approval/stream?session_id=s1&token={web_server._SESSION_TOKEN}",
-    )
-
-    assert response.status_code == 200
-    assert captured["stream_path"] == (
-        f"/api/approval/stream?session_id=s1&token={web_server._SESSION_TOKEN}"
-    )
-    assert "event: ping" in response.text
-
-
-def test_proxy_stream_yields_sse_lines_without_buffering(monkeypatch):
-    from cli import web_server
-
-    class FakeResponse:
-        def __init__(self):
-            self.lines = iter([b"event: heartbeat\n", b"data: {}\n", b"\n", b""])
-
-        def readline(self):
-            return next(self.lines)
-
-    monkeypatch.setattr(web_server, "_ensure_stdlib_backend", lambda: 9123)
-    monkeypatch.setattr(web_server.urllib.request, "urlopen", lambda req, timeout: FakeResponse())
-
-    chunks = list(
-        web_server._proxy_stream(
-            "GET",
-            "/api/chat/stream?stream_id=s1",
-            {"host": "127.0.0.1:9119"},
-            None,
-        )
-    )
-
-    assert chunks == [b"event: heartbeat\n", b"data: {}\n", b"\n"]

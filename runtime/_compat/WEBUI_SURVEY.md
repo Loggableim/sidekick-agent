@@ -1,8 +1,8 @@
 # WebUI Source Structure Survey — Phase 4 Migration Planning
 
 > Generated: 2026-06-07
-> Source: `C:\HermesPortable\cids-hermes-webui` (legacy)
-> Target: `C:\HermesPortable\sidekick/web/` (legacy)
+> Source: `C:\SidekickPortable\cids-sidekick-webui` (legacy)
+> Target: `C:\SidekickPortable\sidekick/web/` (legacy)
 
 ---
 
@@ -16,7 +16,7 @@
 | 4 | `models.py` | 2,297 | In-memory session store + session model | MEDIUM |
 | 5 | `providers.py` | 1,538 | Provider CRUD management endpoints | MEDIUM |
 | 6 | `browser_runtime.py` | 1,504 | Browser automation runtime tools | LOW (optional feature) |
-| 7 | `kanban_bridge.py` | 1,309 | Kanban board CRUD via `hermes_cli.kanban_db` | LOW (Nova-specific) |
+| 7 | `kanban_bridge.py` | 1,309 | Kanban board CRUD via `sidekick_cli.kanban_db` | LOW (Nova-specific) |
 | 8 | `agents.py` | 1,229 | Multi-agent registry (SQLite-backed) | LOW (Nova-specific) |
 | 9 | `gmail_tools.py` | 1,232 | Gmail IMAP/SMTP backend | LOW (plugin) |
 | 10 | `profiles.py` | 1,056 | Profile state management (profile switching) | MEDIUM |
@@ -26,7 +26,7 @@
 | 14 | `space_engine.py` | 767 | Space Engine v2 (spaces abstraction) | MEDIUM |
 | 15 | `agent_sessions.py` | 726 | Nova session reader helpers (`state.db`) | LOW |
 | 16 | `evey_tools.py` | 725 | Evey Tools API | LOW (plugin) |
-| 17 | `goals.py` | 640 | Hermes persistent session goals bridge | MEDIUM |
+| 17 | `goals.py` | 640 | Sidekick persistent session goals bridge | MEDIUM |
 | 18 | `session_recovery.py` | 654 | Session recovery from `.bak` snapshots | MEDIUM |
 | 19 | `updates.py` | 577 | Self-update checker (git) | LOW |
 | 20 | `agent_workspace.py` | 565 | LLM-based intent recognition for agents | LOW |
@@ -67,22 +67,22 @@
 
 ---
 
-## 2. Key Internal Imports (from `hermes_cli` / cids-hermes-agent)
+## 2. Key Internal Imports (from `sidekick_cli` / cids-sidekick-agent)
 
-The WebUI imports from **10 distinct submodules** of `hermes_cli` (all wrapped in lazy `try/except` for graceful degradation):
+The WebUI imports from **10 distinct submodules** of `sidekick_cli` (all wrapped in lazy `try/except` for graceful degradation):
 
-| hermes_cli submodule | Used by | What's imported |
+| sidekick_cli submodule | Used by | What's imported |
 |---------------------|---------|-----------------|
-| `hermes_cli.commands` | `commands.py` | `COMMAND_REGISTRY` |
-| `hermes_cli.plugins` | `commands.py`, `routes.py` | `get_plugin_commands`, `discover_plugins`, `get_plugin_manager` |
-| `hermes_cli.goals` | `goals.py` | `GoalManager`, `GoalState`, `judge_goal`, `save_goal`, `CONTINUATION_PROMPT_TEMPLATE`, `DEFAULT_MAX_TURNS` |
-| `hermes_cli.profiles` | `profiles.py` | `list_profiles`, `create_profile`, `delete_profile` |
-| `hermes_cli.models` | `config.py`, `providers.py`, `routes.py` | `_PROVIDER_ALIASES`, `provider_model_ids`, `list_available_providers` |
-| `hermes_cli.auth` | `config.py`, `onboarding.py`, `providers.py` | `get_auth_status` |
-| `hermes_cli.config` | `onboarding.py`, `kanban_bridge.py` | `reload`, `load_config` |
-| `hermes_cli.tools_config` | `config.py` | `_get_platform_tools` |
-| `hermes_cli.runtime_provider` | `config.py`, `routes.py`, `streaming.py` | `resolve_runtime_provider` |
-| `hermes_cli.kanban_db` | `kanban_bridge.py` | `kanban_db` module (as `kb`) |
+| `sidekick_cli.commands` | `commands.py` | `COMMAND_REGISTRY` |
+| `sidekick_cli.plugins` | `commands.py`, `routes.py` | `get_plugin_commands`, `discover_plugins`, `get_plugin_manager` |
+| `sidekick_cli.goals` | `goals.py` | `GoalManager`, `GoalState`, `judge_goal`, `save_goal`, `CONTINUATION_PROMPT_TEMPLATE`, `DEFAULT_MAX_TURNS` |
+| `sidekick_cli.profiles` | `profiles.py` | `list_profiles`, `create_profile`, `delete_profile` |
+| `sidekick_cli.models` | `config.py`, `providers.py`, `routes.py` | `_PROVIDER_ALIASES`, `provider_model_ids`, `list_available_providers` |
+| `sidekick_cli.auth` | `config.py`, `onboarding.py`, `providers.py` | `get_auth_status` |
+| `sidekick_cli.config` | `onboarding.py`, `kanban_bridge.py` | `reload`, `load_config` |
+| `sidekick_cli.tools_config` | `config.py` | `_get_platform_tools` |
+| `sidekick_cli.runtime_provider` | `config.py`, `routes.py`, `streaming.py` | `resolve_runtime_provider` |
+| `sidekick_cli.kanban_db` | `kanban_bridge.py` | `kanban_db` module (as `kb`) |
 
 **Pattern**: All imports use lazy `try/except ImportError` blocks with graceful fallbacks — the WebUI is designed to run standalone (without the agent package).
 
@@ -150,7 +150,7 @@ pyyaml>=6.0
 **That's it.** Everything else is Python stdlib. The WebUI is designed to have zero external dependencies beyond `pyyaml`.
 
 ### Implied runtime needs (not in requirements.txt):
-- `hermes_cli` (cids-hermes-agent) — optional, lazy-imported
+- `sidekick_cli` (cids-sidekick-agent) — optional, lazy-imported
 - `mcp` package — for `mcp_server.py` only
 - `fcntl`, `termios`, `select` — POSIX-only imports (terminal.py, browser_runtime.py)
 
@@ -214,7 +214,7 @@ The JS/CSS is ~54,000 lines of vanilla JS with no build system. **Complete rewri
 | Server entry points | 2 (`server.py`, `mcp_server.py`) |
 | Static assets | **90+ files** (~54,000 lines JS + ~8,000 lines CSS + 2,242 lines HTML) |
 | External PyPI deps | **1** (`pyyaml>=6.0`) |
-| hermes_cli submodules used | **10** (all lazy-imported) |
+| sidekick_cli submodules used | **10** (all lazy-imported) |
 | Frontend build system | **None** (vanilla JS SPA) |
 | Docker base | `python:3.12-slim` |
 | Python version target | 3.12+ |
@@ -230,5 +230,5 @@ The JS/CSS is ~54,000 lines of vanilla JS with no build system. **Complete rewri
 4. **Split `routes.py`** → API routers by domain (sessions, providers, agents, workspace, kanban, etc.).
 5. **Replace `streaming.py` manual SSE** → FastAPI `StreamingResponse` or Starlette SSE.
 6. **Replace `config.py` module globals** → Pydantic `BaseSettings` with dependency injection.
-7. **Keep `hermes_cli` lazy imports** — strong decoupling already exists.
+7. **Keep `sidekick_cli` lazy imports** — strong decoupling already exists.
 8. **Keep all "tool" modules** (`gmail_tools.py`, `evey_tools.py`, `kanban_bridge.py`, etc.) as-is — they're already clean domain modules.

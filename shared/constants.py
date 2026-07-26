@@ -16,24 +16,15 @@ def get_sidekick_home() -> Path:
 
 def get_default_sidekick_root() -> Path:
     native_sidekick = Path.home() / ".sidekick"
-    native_hermes = Path.home() / ".hermes"  # legacy fallback
 
     env_home = os.environ.get("SIDEKICK_HOME", "")
     if not env_home:
-        if native_sidekick.exists():
-            return native_sidekick
-        return native_hermes
+        return native_sidekick
 
     env_path = Path(env_home)
     try:
         env_path.resolve().relative_to(native_sidekick.resolve())
         return native_sidekick
-    except ValueError:
-        pass
-
-    try:
-        env_path.resolve().relative_to(native_hermes.resolve())
-        return native_hermes
     except ValueError:
         pass
 

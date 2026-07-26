@@ -68,7 +68,7 @@ def _detect_openclaw_processes() -> list[str]:
         try:
             result = subprocess.run(
                 ["systemctl", "--user", "is-active", "openclaw-gateway.service"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
             )
             if result.stdout.strip() == "active":
                 found.append("systemd service: openclaw-gateway.service")
@@ -81,7 +81,7 @@ def _detect_openclaw_processes() -> list[str]:
             for exe in ("openclaw.exe", "clawd.exe"):
                 result = subprocess.run(
                     ["tasklist", "/FI", f"IMAGENAME eq {exe}"],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
                 )
                 if exe in result.stdout.lower():
                     found.append(f"process: {exe}")
@@ -95,7 +95,7 @@ def _detect_openclaw_processes() -> list[str]:
             )
             result = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
             )
             if result.stdout.strip():
                 found.append(f"node.exe process with openclaw in command line (PID {result.stdout.strip()})")
@@ -105,7 +105,7 @@ def _detect_openclaw_processes() -> list[str]:
         try:
             result = subprocess.run(
                 ["pgrep", "-f", "openclaw"],
-                capture_output=True, text=True, timeout=3,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3,
             )
             if result.returncode == 0:
                 pids = result.stdout.strip().split()
@@ -379,12 +379,12 @@ def _cmd_migrate(args):
         return
 
     # Show what we're doing
-    hermes_home = get_sidekick_home()
+    sidekick_home = get_sidekick_home()
     auto_yes = getattr(args, "yes", False)
     print()
     print_header("Migration Settings")
     print_info(f"Source:      {source_dir}")
-    print_info(f"Target:      {hermes_home}")
+    print_info(f"Target:      {sidekick_home}")
     print_info(f"Preset:      {preset}")
     print_info(f"Overwrite:   {'yes' if overwrite else 'no (skip conflicts)'}")
     print_info(f"Secrets:     {'yes (allowlisted only)' if migrate_secrets else 'no'}")
@@ -425,7 +425,7 @@ def _cmd_migrate(args):
     try:
         preview = mod.Migrator(
             source_root=source_dir.resolve(),
-            target_root=hermes_home.resolve(),
+            target_root=sidekick_home.resolve(),
             execute=False,
             workspace_target=ws_target,
             overwrite=overwrite,
@@ -509,7 +509,7 @@ def _cmd_migrate(args):
     if not no_backup:
         try:
             from cli.backup import create_pre_migration_backup, _format_size
-            backup_archive = create_pre_migration_backup(hermes_home=hermes_home)
+            backup_archive = create_pre_migration_backup(sidekick_home=sidekick_home)
             if backup_archive:
                 size_str = _format_size(backup_archive.stat().st_size)
                 print()
@@ -527,7 +527,7 @@ def _cmd_migrate(args):
     try:
         migrator = mod.Migrator(
             source_root=source_dir.resolve(),
-            target_root=hermes_home.resolve(),
+            target_root=sidekick_home.resolve(),
             execute=True,
             workspace_target=ws_target,
             overwrite=overwrite,

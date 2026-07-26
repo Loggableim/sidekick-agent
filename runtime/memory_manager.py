@@ -538,13 +538,13 @@ class MemoryManager:
     def initialize_all(self, session_id: str, **kwargs) -> None:
         """Initialize all providers.
 
-        Automatically injects ``hermes_home`` into *kwargs* so that every
+        Automatically injects ``sidekick_home`` into *kwargs* so that every
         provider can resolve profile-scoped storage paths without importing
         ``get_sidekick_home()`` themselves.
         """
-        if "hermes_home" not in kwargs:
+        if "sidekick_home" not in kwargs:
             from runtime._compat.shim_constants import get_sidekick_home
-            kwargs["hermes_home"] = str(get_sidekick_home())
+            kwargs["sidekick_home"] = str(get_sidekick_home())
         for provider in self._providers:
             try:
                 provider.initialize(session_id=session_id, **kwargs)

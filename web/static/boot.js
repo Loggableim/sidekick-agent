@@ -1,14 +1,14 @@
-// ── localStorage key migration: hermes-* → sidekick-* ──────────────────────
+// ── localStorage key migration: sidekick-* → sidekick-* ──────────────────────
 (function(){
   if(localStorage.getItem('sidekick-migrated-v1')) return;
   var keys=[], i;
   for(i=0;i<localStorage.length;i++){
     var k=localStorage.key(i);
-    if(k && k.startsWith('hermes-')) keys.push(k);
+    if(k && k.startsWith('sidekick-')) keys.push(k);
   }
   for(i=0;i<keys.length;i++){
     var v=localStorage.getItem(keys[i]);
-    if(v!==null) localStorage.setItem(keys[i].replace('hermes-','sidekick-'), v);
+    if(v!==null) localStorage.setItem(keys[i].replace('sidekick-','sidekick-'), v);
   }
   try{localStorage.setItem('sidekick-migrated-v1','1');}catch(_){}
 })();
@@ -336,7 +336,7 @@ function _syncMobileSidebarInlineOffset(sidebar,open){
 const windowControls={
   supported:false,
   _host(){
-    return window.hermesWindowControls || window.HermesWindowControls || null;
+    return window.sidekickWindowControls || window.SidekickWindowControls || null;
   },
   async _call(action){
     const host=this._host();
@@ -413,13 +413,13 @@ function initWindowControls(){
   if(!controls)return;
   const overlay=!!(navigator.windowControlsOverlay && navigator.windowControlsOverlay.visible);
   const host=windowControls._host();
-  const appMode=(()=>{try{return new URLSearchParams(location.search).get('hermes_app')==='1'||window.matchMedia('(display-mode: standalone)').matches||window.matchMedia('(display-mode: window-controls-overlay)').matches;}catch(_){return false;}})();
+  const appMode=(()=>{try{return new URLSearchParams(location.search).get('sidekick_app')==='1'||window.matchMedia('(display-mode: standalone)').matches||window.matchMedia('(display-mode: window-controls-overlay)').matches;}catch(_){return false;}})();
   const hasHost=!!host;
   windowControls.supported=overlay||hasHost||appMode;
   document.documentElement.classList.toggle('window-controls-overlay',overlay);
   document.documentElement.classList.toggle('has-custom-window-controls',windowControls.supported);
   document.documentElement.classList.toggle('has-native-window-bridge',hasHost);
-  document.documentElement.classList.toggle('hermes-app-window',appMode);
+  document.documentElement.classList.toggle('sidekick-app-window',appMode);
   if(!windowControls.supported){
     controls.hidden=true;
     return;
@@ -814,6 +814,7 @@ window._micPendingSend=window._micPendingSend||false;
   window._applyVoiceModePref = _applyVoiceModePref;
 
   let _voiceModeState='idle'; // idle | listening | thinking | speaking
+  let _voiceEntityCycleId=null;
   let _recognition=null;
   let _silenceTimer=null;
   // Capture the session id at thinking-time so the TTS callback won't read
@@ -821,6 +822,15 @@ window._micPendingSend=window._micPendingSend||false;
   // between send and stream completion. (Opus pre-release advisor.)
   let _voiceModeThinkingSid=null;
   const SILENCE_MS=1800; // auto-send after 1.8s silence
+
+  async function _novaVoiceEvent(payload){
+    try{
+      const response=await fetch('/api/nova/voice-event',{
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload||{})
+      });
+      return await response.json();
+    }catch(_){ return {ok:false,reason:'presence_api_unavailable'}; }
+  }
 
   function _setState(state){
     _voiceModeState=state;
@@ -835,6 +845,7 @@ window._micPendingSend=window._micPendingSend||false;
   function _startListening(){
     if(!_voiceModeActive) return;
     _setState('listening');
+    _novaVoiceEvent({phase:'listening',source:'push_to_talk',cycle_id:_voiceEntityCycleId});
 
     _recognition=new SpeechRecognition();
     _recognition.continuous=false;
@@ -903,7 +914,7 @@ window._micPendingSend=window._micPendingSend||false;
     }
   }
 
-  function _voiceModeSend(){
+  async function _voiceModeSend(){
     if(!_voiceModeActive) return;
     const text=(ta.value||'').trim();
     if(!text){
@@ -917,11 +928,15 @@ window._micPendingSend=window._micPendingSend||false;
     _voiceModeThinkingSid=(typeof S!=='undefined'&&S.session)?S.session.session_id:null;
     try{ if(_recognition) _recognition.abort(); }catch(_){}
     _recognition=null;
+    const perceived=await _novaVoiceEvent({
+      phase:'transcript', text, confidence:1.0, source:'push_to_talk', cycle_id:_voiceEntityCycleId
+    });
+    if(perceived&&perceived.ok&&perceived.cycle_id) _voiceEntityCycleId=perceived.cycle_id;
     // send() is global from boot.js
     if(typeof send==='function') send();
   }
 
-  function _speakResponse(){
+  async function _speakResponse(){
     if(!_voiceModeActive) return;
     // Bail out if the user navigated to a different session between send and
     // stream completion. The patched autoReadLastAssistant fires globally;
@@ -960,6 +975,15 @@ window._micPendingSend=window._micPendingSend||false;
     }
     if(!clean){ _startListening(); return; }
 
+    const responseId=last.dataset.messageId||last.dataset.id||null;
+    const gate=await _novaVoiceEvent({
+      phase:'speaking', text:clean, source:'web_tts', cycle_id:_voiceEntityCycleId, response_id:responseId
+    });
+    if(gate&&gate.ok===false){
+      if(gate.reason==='already_spoken') _startListening();
+      return;
+    }
+
     const utter=new SpeechSynthesisUtterance(clean);
 
     // Apply saved voice preferences
@@ -976,9 +1000,13 @@ window._micPendingSend=window._micPendingSend||false;
 
     utter.onend=()=>{
       // After speaking, go back to listening
+      _novaVoiceEvent({phase:'complete',source:'web_tts',cycle_id:_voiceEntityCycleId,continue_listening:true});
+      _voiceEntityCycleId=null;
       if(_voiceModeActive) setTimeout(()=>_startListening(),500);
     };
     utter.onerror=()=>{
+      _novaVoiceEvent({phase:'interrupt',source:'web_tts',cycle_id:_voiceEntityCycleId});
+      _voiceEntityCycleId=null;
       if(_voiceModeActive) setTimeout(()=>_startListening(),1000);
     };
 
@@ -1036,9 +1064,12 @@ window._micPendingSend=window._micPendingSend||false;
   }
 
   function _deactivate(){
+    if(_voiceEntityCycleId) _novaVoiceEvent({phase:'interrupt',source:'user',cycle_id:_voiceEntityCycleId});
+    else _novaVoiceEvent({phase:'available',source:'user'});
     _voiceModeActive=false;
     _voiceModeState='idle';
     _voiceModeThinkingSid=null;
+    _voiceEntityCycleId=null;
     modeBtn.classList.remove('active');
     _setButtonTooltip(modeBtn, t('voice_mode_toggle'));
     bar.style.display='none';
@@ -1245,7 +1276,7 @@ $('msg').addEventListener('keydown',e=>{
     }
   }
 });
-// B14: Cmd/Ctrl+K creates a new chat from anywhere
+// B14: Cmd/Ctrl+K opens the workflow palette; Cmd/Ctrl+N creates a new chat.
 document.addEventListener('keydown',async e=>{
   // Cmd/Ctrl+B toggles desktop sidebar collapse (VS Code convention).
   // Skip when typing in an input/textarea/contenteditable so text-edit
@@ -1271,27 +1302,19 @@ document.addEventListener('keydown',async e=>{
       }
     }
   }
-  if((e.metaKey||e.ctrlKey)&&e.key==='k'){
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
-    // If the current session has no messages AND nothing is in flight, just focus
-    // the composer rather than creating another empty session that will clutter
-    // the sidebar list (#1171). See the matching guard in $('btnNewChat').onclick
-    // and bug #1432 for why the in-flight check is needed.
-    if(S.session
-       && (S.session.message_count||0)===0
-       && !S.busy
-       && !S.session.active_stream_id
-       && !S.session.pending_user_message){
-      $('msg').focus();return;
-    }
-    // Cmd/Ctrl+K should always create a new conversation, even while the current
-    // one is still streaming. The old !S.busy guard meant users had to wait for
-    // a long generation to finish before they could start something new — exactly
-    // the moment they want to switch context. newSession() leaves the in-flight
-    // stream running on its own session; the user just gets a fresh blank one.
-    await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
+    if(typeof workflowToggleHeaderMenu==='function') workflowToggleHeaderMenu(e);
+    return;
   }
-  // Cmd/Ctrl+Shift+K opens the workflow palette from anywhere.
+  if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&(e.key==='n'||e.key==='N')){
+    e.preventDefault();
+    if(typeof sidekickNewChat==='function'){
+      await sidekickNewChat();
+      return;
+    }
+  }
+  // Cmd/Ctrl+Shift+K remains a legacy alias for the workflow palette.
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&!e.altKey&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
     if(typeof workflowToggleHeaderMenu==='function') workflowToggleHeaderMenu(e);
@@ -1536,7 +1559,7 @@ function _normalizeAppearance(theme,skin){
 //   1. Mobile Safari status bar (the prefers-color-scheme media variants in index.html
 //      cover the pre-load case; this updater handles user-toggled changes mid-session).
 //   2. iOS PWA / Add to Home Screen status bar.
-//   3. Native WKWebView wrappers (e.g. hermes-swift-mac) that read this attribute as
+//   3. Native WKWebView wrappers (e.g. sidekick-swift-mac) that read this attribute as
 //      the source of truth for AppKit chrome (tab bar, title bar, traffic-light area)
 //      instead of pixel-sampling — overlay-resistant and IPC-free.
 // Reading getComputedStyle(html).getPropertyValue('--bg') picks up the active skin
@@ -1562,6 +1585,7 @@ function _setResolvedTheme(isDark){
   document.documentElement.classList.toggle('dark',!!isDark);
   _applySyntaxTheme(); // respects user's syntax theme preference, falls back to dark/light
   _syncThemeColorMeta();
+  _syncThemeToggleButton();
 }
 
 // ── Syntax highlighting theme (3 presets) ──
@@ -1625,6 +1649,21 @@ function _applySkin(name){
   if(key==='default') delete document.documentElement.dataset.skin;
   else document.documentElement.dataset.skin=key;
   _syncThemeColorMeta();
+}
+
+function _syncThemeToggleButton(){
+  const btn=$('titlebarThemeToggle');
+  if(!btn) return;
+  const isDark=document.documentElement.classList.contains('dark');
+  btn.setAttribute('aria-label', isDark ? 'Tagmodus aktivieren' : 'Nachtmodus aktivieren');
+  btn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+  btn.innerHTML = isDark
+    ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>'
+    : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8Z"/></svg>';
+}
+
+function toggleThemeMode(){
+  _pickTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark');
 }
 
 function _pickTheme(name){
@@ -1811,11 +1850,27 @@ function _bootTimeout(promise, ms, label) {
   });
 }
 
+async function _syncGameModeStateFromServer() {
+  try {
+    const status = await _bootTimeout(api('/api/game-mode/status'), 10000, 'game mode status');
+    window._gameModeEnabled = !!(status && status.game_mode_enabled);
+    try { localStorage.setItem('sidekick-game-mode-enabled', window._gameModeEnabled ? '1' : '0'); } catch (_err) {}
+    if (typeof syncGameModeButton === 'function') syncGameModeButton();
+    return window._gameModeEnabled;
+  } catch (e) {
+    console.warn('[boot] game mode status sync failed', e);
+    return window._gameModeEnabled === true;
+  }
+}
+
+(window)._syncGameModeStateFromServer = _syncGameModeStateFromServer;
+
 (async()=>{
   // Load send key preference
   let _bootSettings={};
   try{
-    const s=await _bootTimeout(api('/api/settings'),5000,'settings');
+    // Settings can be slow during startup on cold/backlogged instances.
+    const s=await _bootTimeout(api('/api/settings'),20000,'settings');
     _bootSettings=s;
     window._sendKey=s.send_key||'enter';
     window._showTokenUsage=!!s.show_token_usage;
@@ -1853,6 +1908,7 @@ function _bootTimeout(promise, ms, label) {
       setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
+    await _syncGameModeStateFromServer();
     applyBotName();
     if(typeof syncGameModeButton==='function')syncGameModeButton();
     // TTS: apply enabled state on boot so buttons show/hide correctly (#499)
@@ -1903,7 +1959,7 @@ function _bootTimeout(promise, ms, label) {
   // Fetch active profile. This endpoint is useful metadata, but must never
   // block first paint/session rendering if the backend is busy.
   try{
-    const p=await _bootTimeout(api('/api/profile/active'),5000,'active profile');
+    const p=await _bootTimeout(api('/api/profile/active'),20000,'active profile');
     S.activeProfile=p.name||'default';
   }catch(e){
     S.activeProfile='default';
@@ -1978,14 +2034,19 @@ function _bootTimeout(promise, ms, label) {
   let _bootSavedSessionLoadPromise = null;
   let _bootMissingSession = false;
   if (urlSession && saved && !_bootRestoreCanceled()) {
-    // Direct session URLs should start loading immediately instead of waiting
-    // for sidebar/session-list rendering to finish.
-    _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
-      if (!_bootRestoreCanceled()) throw e;
-    });
   }
   await renderSessionList();
   _initResizePanels();
+  const _bootSavedSessionExists = !!(saved && Array.isArray(_allSessions) && _allSessions.some((s) => s && s.session_id === saved));
+  if (urlSession && saved && !_bootRestoreCanceled()) {
+    if (_bootSavedSessionExists) {
+      _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
+        if (!_bootRestoreCanceled()) throw e;
+      });
+    } else {
+      _bootMissingSession = true;
+    }
+  }
   // Workspace panel restore happens AFTER loadSession so we know if
   // the session has a workspace — prevents the snap-open-then-closed flash (#576).
   // Fix #822: clear any browser-restored value before first render. This
@@ -2011,21 +2072,19 @@ function _bootTimeout(promise, ms, label) {
         const _bootLoadResult = await _bootSavedSessionLoadPromise;
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
       }
-      else if(!_bootRestoreCanceled()) {
+      else if(!_bootRestoreCanceled() && !_bootMissingSession) {
         const _bootLoadResult = await loadSession(saved);
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
-      if (saved && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
+      if (saved && !_bootMissingSession && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
         const _bootRetryResult = await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
         _bootMissingSession = _bootMissingSession || !!(_bootRetryResult && _bootRetryResult.missingSession);
       }
       if (_bootMissingSession && urlSession && saved) {
         if (typeof newSession === 'function') {
+          S._bootReady=true;
           await newSession();
-          if (typeof showToast === 'function') {
-            showToast('Previous session was missing. Started a new one.', 3000, 'info');
-          }
           if (typeof renderSessionList === 'function') await renderSessionList();
           if (typeof startGatewaySSE === 'function') startGatewaySSE();
           return;
@@ -2116,14 +2175,15 @@ function _bootTimeout(promise, ms, label) {
       if (_label) {
         const _icon = _label.querySelector('.sandbox-toggle-icon');
         if (_icon) _icon.textContent = window._sandboxDisabled ? '🚫' : '🛡️';
-        _label.title = window._sandboxDisabled
+        _label.setAttribute('aria-label', window._sandboxDisabled
           ? 'Sandbox deaktiviert - Agent kann auf alle Dateien zugreifen'
-          : 'Sandbox-Einschränkung aktiv';
+          : 'Sandbox-Einschränkung aktiv');
+        _label.removeAttribute('title');
       }
     });
   }
 })().catch(e=>{
-  console.error('[hermes] boot failed', e);
+  console.error('[sidekick] boot failed', e);
   try{S._bootReady=true;}catch(_){}
   try{syncTopbar();}catch(_){}
   try{syncWorkspacePanelState();}catch(_){}

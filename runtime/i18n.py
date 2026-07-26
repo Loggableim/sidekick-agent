@@ -21,7 +21,7 @@ Usage::
 
 Language resolution order:
     1. Explicit ``lang=`` argument passed to :func:`t`
-    2. ``HERMES_LANGUAGE`` environment variable (for tests / quick override)
+    2. ``SIDEKICK_LANGUAGE`` environment variable (for tests / quick override)
     3. ``display.language`` from config.yaml
     4. ``"en"`` (baseline)
 
@@ -137,7 +137,7 @@ def _load_catalog(lang: str) -> dict[str, str]:
         return {}
 
     try:
-        import yaml  # PyYAML is already a hermes dependency
+        import yaml  # PyYAML is already a sidekick dependency
         with path.open("r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
     except Exception as exc:
@@ -186,7 +186,7 @@ def _config_language_cached() -> str | None:
 def reset_language_cache() -> None:
     """Invalidate cached language resolution and catalogs.
 
-    Call after :func:`hermes_cli.config.save_config` if a running process
+    Call after :func:`sidekick_cli.config.save_config` if a running process
     needs to pick up a changed ``display.language`` without restart.
     """
     _config_language_cached.cache_clear()

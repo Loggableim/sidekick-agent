@@ -45,7 +45,7 @@ def _ensure_singularity_available() -> str:
     exe = _find_singularity_executable()
     try:
         result = subprocess.run(
-            [exe, "version"], capture_output=True, text=True, timeout=10,
+            [exe, "version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
     except FileNotFoundError as exc:
         raise RuntimeError(
@@ -80,7 +80,7 @@ def _get_scratch_dir() -> Path:
 
     scratch = Path("/scratch")
     if scratch.exists() and os.access(scratch, os.W_OK):
-        user_scratch = scratch / os.getenv("USER", "hermes") / "hermes-agent"
+        user_scratch = scratch / os.getenv("USER", "sidekick") / "sidekick-agent"
         user_scratch.mkdir(parents=True, exist_ok=True)
         logger.info("Using /scratch for sandboxes: %s", user_scratch)
         return user_scratch
@@ -135,7 +135,7 @@ def _get_or_build_sif(image: str, executable: str = "apptainer") -> str:
         try:
             result = subprocess.run(
                 [executable, "build", str(sif_path), image],
-                capture_output=True, text=True, timeout=600, env=env,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600, env=env,
             )
             if result.returncode != 0:
                 logger.warning("SIF build failed, falling back to docker:// URL")
@@ -175,7 +175,7 @@ class SingularityEnvironment(BaseEnvironment):
         super().__init__(cwd=cwd, timeout=timeout)
         self.executable = _ensure_singularity_available()
         self.image = _get_or_build_sif(image, self.executable)
-        self.instance_id = f"hermes_{uuid.uuid4().hex[:12]}"
+        self.instance_id = f"sidekick_{uuid.uuid4().hex[:12]}"
         self._instance_started = False
         self._persistent = persistent_filesystem
         self._task_id = task_id
@@ -184,7 +184,7 @@ class SingularityEnvironment(BaseEnvironment):
         self._memory = memory
 
         if self._persistent:
-            overlay_base = _get_scratch_dir() / "hermes-overlays"
+            overlay_base = _get_scratch_dir() / "sidekick-overlays"
             overlay_base.mkdir(parents=True, exist_ok=True)
             self._overlay_dir = overlay_base / f"overlay-{task_id}"
             self._overlay_dir.mkdir(parents=True, exist_ok=True)
@@ -218,7 +218,7 @@ class SingularityEnvironment(BaseEnvironment):
         cmd.extend([str(self.image), self.instance_id])
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
             if result.returncode != 0:
                 raise RuntimeError(f"Failed to start instance: {result.stderr}")
             self._instance_started = True
@@ -249,7 +249,7 @@ class SingularityEnvironment(BaseEnvironment):
             try:
                 subprocess.run(
                     [self.executable, "instance", "stop", self.instance_id],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
                 )
                 logger.info("Singularity instance %s stopped", self.instance_id)
             except Exception as e:

@@ -4,10 +4,19 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+
+import os
+import pytest
+
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
 from types import SimpleNamespace
 
 
-MODULE_PATH = Path(r"C:\HermesPortable\home\cockpit\dashboard_server.py")
+MODULE_PATH = Path(r"C:\SidekickPortable\home\cockpit\dashboard_server.py")
 COCKPIT_DIR = MODULE_PATH.parent
 DASHBOARD_DIR = COCKPIT_DIR / "dashboard"
 

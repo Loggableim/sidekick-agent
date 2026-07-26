@@ -13,9 +13,20 @@ Provides subcommands for:
 
 import os
 import sys
+from pathlib import Path
+
+
+def _ensure_project_root() -> None:
+    """Make the repo root importable for root-level helper modules."""
+    project_root = str(Path(__file__).resolve().parents[1])
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+
+_ensure_project_root()
 
 from sidekick_cli import __version__ as __version__  # single source of truth
-__release_date__ = "2026.7.7"
+__release_date__ = "2026.7.10"
 __all__ = ["__version__", "__release_date__"]
 
 

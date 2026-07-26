@@ -3,7 +3,7 @@ Sidekick -- Filesystem checkpoint (rollback) API.
 
 Provides endpoints to list, diff, and restore filesystem checkpoints
 created by the Nova agent's CheckpointManager.  Checkpoints live at
-``{hermes_home}/checkpoints/<hash>/`` as shadow git repositories.
+``{sidekick_home}/checkpoints/<hash>/`` as shadow git repositories.
 """
 
 import hashlib
@@ -15,6 +15,8 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from web.api._home import get_webui_home
 
 logger = logging.getLogger(__name__)
 
@@ -38,13 +40,13 @@ def _validate_checkpoint_id(checkpoint: str) -> str:
     return cid
 
 
-def _hermes_home() -> Path:
-    """Return the active Hermes home directory."""
+def _sidekick_home() -> Path:
+    """Return the active Sidekick home directory."""
     try:
-        from web.api.profiles import get_active_hermes_home
-        return Path(get_active_hermes_home())
+        from web.api.profiles import get_active_profile_home
+        return Path(get_active_profile_home())
     except Exception:
-        return Path(os.environ.get("SIDEKICK_HOME")).expanduser()
+        return get_webui_home()
 
 
 def _workspace_hash(workspace: str) -> str:
@@ -61,7 +63,7 @@ def _workspace_hash(workspace: str) -> str:
 
 
 def _checkpoint_root() -> Path:
-    return _hermes_home() / "checkpoints"
+    return _sidekick_home() / "checkpoints"
 
 
 def _resolve_workspace(workspace: str) -> str:
@@ -141,7 +143,7 @@ def _inspect_checkpoint(ckpt_path: Path, git: str) -> dict[str, Any] | None:
     try:
         result = subprocess.run(
             [git, "-C", str(ckpt_path), "log", "--format=%H%n%s%n%aI", "-1"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
@@ -163,7 +165,7 @@ def _inspect_checkpoint(ckpt_path: Path, git: str) -> dict[str, Any] | None:
         # Count files
         files_result = subprocess.run(
             [git, "-C", str(ckpt_path), "ls-files"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         file_count = len(files_result.stdout.strip().split("\n")) if files_result.stdout.strip() else 0
 
@@ -201,7 +203,7 @@ def get_checkpoint_diff(workspace: str, checkpoint: str) -> dict[str, Any]:
     # Get list of files in the checkpoint
     ls_result = subprocess.run(
         [git, "-C", str(ckpt_dir), "ls-files"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     if ls_result.returncode != 0:
         raise ValueError("Failed to list checkpoint files")
@@ -285,7 +287,7 @@ def restore_checkpoint(workspace: str, checkpoint: str) -> dict[str, Any]:
     # Get list of files in the checkpoint
     ls_result = subprocess.run(
         [git, "-C", str(ckpt_dir), "ls-files"],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
     )
     if ls_result.returncode != 0:
         raise ValueError("Failed to list checkpoint files")

@@ -3,12 +3,10 @@ import subprocess
 import sys
 
 
-def test_cli_env_loader_keeps_legacy_load_hermes_alias():
+def test_cli_env_loader_exports_sidekick_loader():
     from cli import env_loader
 
     assert callable(env_loader.load_sidekick_dotenv)
-    assert callable(env_loader.load_hermes_dotenv)
-    assert env_loader.load_hermes_dotenv is env_loader.load_sidekick_dotenv
 
 
 def test_sidekick_cli_main_module_entrypoint_is_available():

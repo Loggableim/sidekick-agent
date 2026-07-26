@@ -20,12 +20,12 @@ Usage:
     response = agent.run_conversation("Tell me about the latest Python updates")
 """
 
-# IMPORTANT: hermes_bootstrap must be the very first import — UTF-8 stdio
-# on Windows.  No-op on POSIX.  See hermes_bootstrap.py for full rationale.
+# IMPORTANT: sidekick_bootstrap must be the very first import — UTF-8 stdio
+# on Windows.  No-op on POSIX.  See sidekick_bootstrap.py for full rationale.
 try:
     import sidekick_bootstrap  # noqa: F401
 except ModuleNotFoundError:
-    # Graceful fallback when hermes_bootstrap isn't registered in the venv
+    # Graceful fallback when sidekick_bootstrap isn't registered in the venv
     # yet — happens during partial ``sidekick update`` where git-reset landed
     # new code but ``uv pip install -e .`` didn't finish.  Missing bootstrap
     # means UTF-8 stdio setup is skipped on Windows; POSIX is unaffected.
@@ -102,7 +102,7 @@ OpenAI = _OpenAIProxy()
 
 # Load .env from ~/.sidekick/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
-from cli.env_loader import load_sidekick_dotenv as load_hermes_dotenv
+from cli.env_loader import load_sidekick_dotenv as load_sidekick_dotenv
 from cli.timeouts import (
     get_provider_request_timeout,
     get_provider_stale_timeout,
@@ -110,7 +110,7 @@ from cli.timeouts import (
 
 _sidekick_home = get_sidekick_home()
 _project_env = Path(__file__).parent / '.env'
-_loaded_env_paths = load_hermes_dotenv(hermes_home=_sidekick_home, project_env=_project_env)
+_loaded_env_paths = load_sidekick_dotenv(sidekick_home=_sidekick_home, project_env=_project_env)
 if _loaded_env_paths:
     for _env_path in _loaded_env_paths:
         logger.info("Loaded environment variables from %s", _env_path)
@@ -145,8 +145,8 @@ from runtime.error_classifier import classify_api_error, FailoverReason
 from runtime.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, PLATFORM_HINTS,
     MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE,
-    HERMES_AGENT_HELP_GUIDANCE,
-    KANBAN_GUIDANCE,
+    SIDEKICK_AGENT_HELP_GUIDANCE,
+    KANBAN_GUIDANCE, WEBUI_KANBAN_ORCHESTRATION_GUIDANCE, CORE_WORK_GUIDANCE,
 )
 from runtime.model_metadata import (
     fetch_model_metadata,
@@ -192,7 +192,7 @@ from cli.config import cfg_get
 class _SafeWriter:
     """Transparent stdio wrapper that catches OSError/ValueError from broken pipes.
 
-    When hermes-agent runs as a systemd service, Docker container, or headless
+    When sidekick-agent runs as a systemd service, Docker container, or headless
     daemon, the stdout/stderr pipe can become unavailable (idle timeout, buffer
     exhaustion, socket reset). Any print() call then raises
     ``OSError: [Errno 5] Input/output error``, which can crash agent setup or
@@ -1033,7 +1033,7 @@ class AIAgent:
     """
 
     _TOOL_CALL_ARGUMENTS_CORRUPTION_MARKER = (
-        "[hermes-agent: tool call arguments were corrupted in this session and "
+        "[sidekick-agent: tool call arguments were corrupted in this session and "
         "have been dropped to keep the conversation alive. See issue #15236.]"
     )
 
@@ -1233,6 +1233,22 @@ class AIAgent:
         else:
             self.api_mode = "chat_completions"
 
+        # Game Mode must never spin up local GPU-backed model endpoints.
+        # Keep this check early so direct AIAgent construction fails before any
+        # transport warmup or provider-specific client initialization.
+        try:
+            from web.api.config import game_mode_blocked_payload, game_mode_blocks_local_model_request
+        except Exception:
+            game_mode_blocked_payload = None
+            game_mode_blocks_local_model_request = None
+        if game_mode_blocks_local_model_request and game_mode_blocks_local_model_request(self.provider, self.base_url):
+            payload = game_mode_blocked_payload() if game_mode_blocked_payload else {}
+            message = str((payload.get("error") or {}).get("message") or "").strip()
+            raise RuntimeError(
+                message
+                or "Game Mode is active. Local model requests are blocked so GPU/VRAM resources stay available for games."
+            )
+
         # Eagerly warm the transport cache so import errors surface at init,
         # not mid-conversation.  Also validates the api_mode is registered.
         try:
@@ -1427,7 +1443,7 @@ class AIAgent:
         # both live under ~/.sidekick/logs/.  Idempotent, so gateway mode
         # (which creates a new AIAgent per message) won't duplicate handlers.
         from runtime._compat.shim_logging import setup_logging, setup_verbose_logging
-        setup_logging(hermes_home=_sidekick_home)
+        setup_logging(sidekick_home=_sidekick_home)
 
         if self.verbose_logging:
             setup_verbose_logging()
@@ -1438,11 +1454,11 @@ class AIAgent:
             # root logger's file handlers (agent.log, errors.log) from
             # ever seeing the records, because Python checks
             # logger.isEnabledFor() before handler propagation. We rely
-            # on the fact that hermes_logging.setup_logging() does not
+            # on the fact that sidekick_logging.setup_logging() does not
             # install a console StreamHandler in quiet mode — so INFO
             # records flow to the file handlers but never reach a
             # console. Any future noise reduction belongs at the
-            # handler level inside hermes_logging.py, not here.
+            # handler level inside sidekick_logging.py, not here.
             pass
         
         # Internal stream callback (set during streaming TTS).
@@ -1836,8 +1852,8 @@ class AIAgent:
             pass  # CLI/test mode — ContextVar not needed
 
         # Session logs go into ~/.sidekick/sessions/ alongside gateway sessions
-        hermes_home = get_sidekick_home()
-        self.logs_dir = hermes_home / "sessions"
+        sidekick_home = get_sidekick_home()
+        self.logs_dir = sidekick_home / "sessions"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.session_log_file = self.logs_dir / f"session_{self.session_id}.json"
         
@@ -1935,7 +1951,7 @@ class AIAgent:
                         _init_kwargs = {
                             "session_id": self.session_id,
                             "platform": platform or "cli",
-                            "hermes_home": str(get_sidekick_home()),
+                            "sidekick_home": str(get_sidekick_home()),
                             "agent_context": "primary",
                         }
                         # Thread session title for memory provider scoping
@@ -1968,7 +1984,7 @@ class AIAgent:
                             from cli.profiles import get_active_profile_name
                             _profile = get_active_profile_name()
                             _init_kwargs["agent_identity"] = _profile
-                            _init_kwargs["agent_workspace"] = "hermes"
+                            _init_kwargs["agent_workspace"] = "sidekick"
                         except Exception:
                             pass
                         self._memory_manager.initialize_all(**_init_kwargs)
@@ -2300,7 +2316,7 @@ class AIAgent:
             try:
                 self.context_compressor.on_session_start(
                     self.session_id,
-                    hermes_home=str(get_sidekick_home()),
+                    sidekick_home=str(get_sidekick_home()),
                     platform=self.platform or "cli",
                     model=self.model,
                     context_length=getattr(self.context_compressor, "context_length", 0),
@@ -3332,12 +3348,12 @@ class AIAgent:
         Priority:
           1. ``providers.<id>.models.<model>.timeout_seconds`` (per-model override)
           2. ``providers.<id>.request_timeout_seconds`` (provider-wide)
-          3. ``HERMES_API_TIMEOUT`` env var (legacy escape hatch)
+          3. ``SIDEKICK_API_TIMEOUT`` env var (legacy escape hatch)
           4. 1800.0s default
 
         Used by OpenAI-wire chat completions (streaming and non-streaming) so
         the per-provider config knob wins over the 1800s default.  Without this
-        helper, the hardcoded ``HERMES_API_TIMEOUT`` fallback would always be
+        helper, the hardcoded ``SIDEKICK_API_TIMEOUT`` fallback would always be
         passed as a per-call ``timeout=`` kwarg, overriding the client-level
         timeout the AIAgent.__init__ path configured.
         """
@@ -3352,7 +3368,7 @@ class AIAgent:
         Priority:
           1. ``providers.<id>.models.<model>.stale_timeout_seconds``
           2. ``providers.<id>.stale_timeout_seconds``
-          3. ``HERMES_API_CALL_STALE_TIMEOUT`` env var
+          3. ``SIDEKICK_API_CALL_STALE_TIMEOUT`` env var
           4. 300.0s default
 
         Returns ``(timeout_seconds, uses_implicit_default)`` so the caller can
@@ -5019,7 +5035,7 @@ class AIAgent:
 
             self._vprint(f"{self.log_prefix}🧾 Request debug dump written to: {dump_file}")
 
-            if env_var_enabled("HERMES_DUMP_REQUEST_STDOUT"):
+            if env_var_enabled("SIDEKICK_DUMP_REQUEST_STDOUT"):
                 print(json.dumps(dump_payload, ensure_ascii=False, indent=2, default=str))
 
             return dump_file
@@ -5662,7 +5678,7 @@ class AIAgent:
         stable_parts: List[str] = []
 
         # Try SOUL.md as primary identity unless the caller explicitly skipped it.
-        # Some execution modes (cron) still want HERMES_HOME persona while keeping
+        # Some execution modes (cron) still want SIDEKICK_HOME persona while keeping
         # cwd project instructions disabled.
         _soul_loaded = False
         if self.load_soul_identity or not self.skip_context_files:
@@ -5675,8 +5691,13 @@ class AIAgent:
             # Fallback to hardcoded identity
             stable_parts.append(DEFAULT_AGENT_IDENTITY)
 
+        # The active SOUL.md is a user-editable persona. Keep the core work
+        # protocol separate so every profile follows the same evidence,
+        # scope, and verification standards without overwriting that persona.
+        stable_parts.append(CORE_WORK_GUIDANCE)
+
         # Pointer to the sidekick-agent skill + docs for user questions about Sidekick itself.
-        stable_parts.append(HERMES_AGENT_HELP_GUIDANCE)
+        stable_parts.append(SIDEKICK_AGENT_HELP_GUIDANCE)
 
         # Tool-aware behavioral guidance: only inject when the tools are loaded
         tool_guidance = []
@@ -5688,10 +5709,23 @@ class AIAgent:
             tool_guidance.append(SKILLS_GUIDANCE)
         # Kanban worker/orchestrator lifecycle — only present when the
         # dispatcher spawned this process (kanban_show check_fn gates on
-        # HERMES_KANBAN_TASK env var). Normal chat sessions never see
+        # SIDEKICK_KANBAN_TASK env var). Normal chat sessions never see
         # this block.
         if "kanban_show" in self.valid_tool_names:
-            tool_guidance.append(KANBAN_GUIDANCE)
+            try:
+                from web.api.kanban_orchestration import is_webui_kanban_orchestrated
+                _webui_kanban_orchestrated = is_webui_kanban_orchestrated()
+            except Exception:
+                _webui_kanban_orchestrated = bool(
+                    os.environ.get("SIDEKICK_KANBAN_ORCHESTRATED")
+                )
+            if (
+                _webui_kanban_orchestrated
+                and not os.environ.get("SIDEKICK_KANBAN_TASK")
+            ):
+                tool_guidance.append(WEBUI_KANBAN_ORCHESTRATION_GUIDANCE)
+            else:
+                tool_guidance.append(KANBAN_GUIDANCE)
         if tool_guidance:
             stable_parts.append(" ".join(tool_guidance))
 
@@ -5796,7 +5830,7 @@ class AIAgent:
 
         if not self.skip_context_files:
             # Use TERMINAL_CWD for context file discovery when set (gateway
-            # mode).  The gateway process runs from the hermes-agent install
+            # mode).  The gateway process runs from the sidekick-agent install
             # dir, so os.getcwd() would pick up the repo's AGENTS.md and
             # other dev files — inflating token usage by ~10k for no benefit.
             _context_cwd = os.getenv("TERMINAL_CWD") or None
@@ -5828,8 +5862,8 @@ class AIAgent:
             except Exception:
                 pass
 
-        from runtime._compat.shim_time import now as _hermes_now
-        now = _hermes_now()
+        from runtime._compat.shim_time import now as _sidekick_now
+        now = _sidekick_now()
         timestamp_line = f"Conversation started: {now.strftime('%A, %B %d, %Y %I:%M %p')}"
         if self.pass_session_id and self.session_id:
             timestamp_line += f"\nSession ID: {self.session_id}"
@@ -7628,7 +7662,7 @@ class AIAgent:
             """Stream a chat completions response."""
             import httpx as _httpx
             # Per-provider / per-model request_timeout_seconds (from config.yaml)
-            # wins over the HERMES_API_TIMEOUT env default if the user set it.
+            # wins over the SIDEKICK_API_TIMEOUT env default if the user set it.
             _provider_timeout_cfg = get_provider_request_timeout(self.provider, self.model)
             _base_timeout = (
                 _provider_timeout_cfg
@@ -7636,7 +7670,7 @@ class AIAgent:
                 else float(os.getenv("SIDEKICK_API_TIMEOUT", 1800.0))
             )
             # Read timeout: config wins here too.  Otherwise use
-            # HERMES_STREAM_READ_TIMEOUT (default 120s) for cloud providers.
+            # SIDEKICK_STREAM_READ_TIMEOUT (default 120s) for cloud providers.
             if _provider_timeout_cfg is not None:
                 _stream_read_timeout = _provider_timeout_cfg
             else:
@@ -7644,7 +7678,7 @@ class AIAgent:
                 # Local providers (Ollama, llama.cpp, vLLM) can take minutes for
                 # prefill on large contexts before producing the first token.
                 # Auto-increase the httpx read timeout unless the user explicitly
-                # overrode HERMES_STREAM_READ_TIMEOUT.
+                # overrode SIDEKICK_STREAM_READ_TIMEOUT.
                 if _stream_read_timeout == 120.0 and self.base_url and is_local_endpoint(self.base_url):
                     _stream_read_timeout = _base_timeout
                     logger.debug(
@@ -8241,7 +8275,7 @@ class AIAgent:
         _stream_stale_timeout_base = float(os.getenv("SIDEKICK_STREAM_STALE_TIMEOUT", 180.0))
         # Local providers (Ollama, oMLX, llama-cpp) can take 300+ seconds
         # for prefill on large contexts.  Disable the stale detector unless
-        # the user explicitly set HERMES_STREAM_STALE_TIMEOUT.
+        # the user explicitly set SIDEKICK_STREAM_STALE_TIMEOUT.
         if _stream_stale_timeout_base == 180.0 and self.base_url and is_local_endpoint(self.base_url):
             _stream_stale_timeout = float("inf")
             logger.debug("Local provider detected (%s) — stale stream timeout disabled", self.base_url)
@@ -8469,7 +8503,7 @@ class AIAgent:
             fb_api_key_hint = (fb.get("api_key") or "").strip() or None
             if not fb_api_key_hint:
                 # key_env and api_key_env are both documented aliases (see
-                # _normalize_custom_provider_entry in hermes_cli/config.py).
+                # _normalize_custom_provider_entry in sidekick_cli/config.py).
                 fb_key_env = (fb.get("key_env") or fb.get("api_key_env") or "").strip()
                 if fb_key_env:
                     fb_api_key_hint = os.getenv(fb_key_env, "").strip() or None
@@ -9082,7 +9116,7 @@ class AIAgent:
                     "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/bmp": ".bmp",
                 }.get(mime, ".jpg")
                 tmp = tempfile.NamedTemporaryFile(
-                    prefix="hermes_shrink_", suffix=suffix, delete=False,
+                    prefix="sidekick_shrink_", suffix=suffix, delete=False,
                 )
                 try:
                     tmp.write(raw)
@@ -9366,7 +9400,7 @@ class AIAgent:
         _qwen_meta = None
         if _is_qwen:
             _qwen_meta = {
-                "sessionId": self.session_id or "hermes",
+                "sessionId": self.session_id or "sidekick",
                 "promptId": str(uuid.uuid4()),
             }
 
@@ -10134,10 +10168,10 @@ class AIAgent:
                 logger.warning("Session DB compression split failed — new session will NOT be indexed: %s", e)
 
         # Notify the context engine that the session_id rotated because of
-        # compression (not a fresh /new). Plugin engines (e.g. hermes-lcm) use
+        # compression (not a fresh /new). Plugin engines (e.g. sidekick-lcm) use
         # boundary_reason="compression" to preserve DAG lineage across the
         # rollover instead of re-initializing fresh per-session state.
-        # See hermes-lcm#68. Built-in ContextCompressor ignores kwargs.
+        # See sidekick-lcm#68. Built-in ContextCompressor ignores kwargs.
         try:
             _old_sid = locals().get("old_session_id")
             if _old_sid and hasattr(self.context_compressor, "on_session_start"):
@@ -12235,7 +12269,7 @@ class AIAgent:
                     except Exception:
                         pass
 
-                    if env_var_enabled("HERMES_DUMP_REQUESTS"):
+                    if env_var_enabled("SIDEKICK_DUMP_REQUESTS"):
                         self._dump_api_request_debug(api_kwargs, reason="preflight")
 
                     # Always prefer the streaming path — even without stream
@@ -13261,8 +13295,8 @@ class AIAgent:
                         print(f"{self.log_prefix}     • Check ANTHROPIC_API_KEY in {_dhh}/.env for API keys or legacy token values")
                         print(f"{self.log_prefix}     • For API keys: verify at https://platform.claude.com/settings/keys")
                         print(f"{self.log_prefix}     • For Claude Code: run 'claude /login' to refresh, then retry")
-                        print(f"{self.log_prefix}     • Legacy cleanup: hermes config set ANTHROPIC_TOKEN \"\"")
-                        print(f"{self.log_prefix}     • Clear stale keys: hermes config set ANTHROPIC_API_KEY \"\"")
+                        print(f"{self.log_prefix}     • Legacy cleanup: sidekick config set ANTHROPIC_TOKEN \"\"")
+                        print(f"{self.log_prefix}     • Clear stale keys: sidekick config set ANTHROPIC_API_KEY \"\"")
 
                     # ── Thinking block signature recovery ─────────────────
                     # Anthropic signs thinking blocks against the full turn
@@ -13777,7 +13811,7 @@ class AIAgent:
                                 self._vprint(f"{self.log_prefix}      2. Then run `sidekick auth` to re-authenticate.", force=True)
                             else:
                                 self._vprint(f"{self.log_prefix}   💡 Your API key was rejected by the provider. Check:", force=True)
-                                self._vprint(f"{self.log_prefix}      • Is the key valid? Run: hermes setup", force=True)
+                                self._vprint(f"{self.log_prefix}      • Is the key valid? Run: sidekick setup", force=True)
                                 self._vprint(f"{self.log_prefix}      • Does your account have access to {_model}?", force=True)
                                 if base_url_host_matches(str(_base), "openrouter.ai"):
                                     self._vprint(f"{self.log_prefix}      • Check credits: https://openrouter.ai/settings/credits", force=True)

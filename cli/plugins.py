@@ -1,16 +1,16 @@
 """
-Hermes Plugin System
+Sidekick Plugin System
 ====================
 
 Discovers, loads, and manages plugins from four sources:
 
-1. **Bundled plugins** – ``<repo>/plugins/<name>/`` (shipped with hermes-agent;
+1. **Bundled plugins** – ``<repo>/plugins/<name>/`` (shipped with sidekick-agent;
    ``memory/`` and ``context_engine/`` subdirs are excluded — they have their
    own discovery paths)
 2. **User plugins**   – ``~/.sidekick/plugins/<name>/``
-3. **Project plugins** – ``./.hermes/plugins/<name>/`` (opt-in via
-   ``HERMES_ENABLE_PROJECT_PLUGINS``)
-4. **Pip plugins**     – packages that expose the ``hermes_agent.plugins``
+3. **Project plugins** – ``./.sidekick/plugins/<name>/`` (opt-in via
+   ``SIDEKICK_ENABLE_PROJECT_PLUGINS``)
+4. **Pip plugins**     – packages that expose the ``sidekick_agent.plugins``
    entry-point group.
 
 Later sources override earlier ones on name collision, so a user or project
@@ -55,7 +55,7 @@ from cli.config import cfg_get
 def get_bundled_plugins_dir() -> Path:
     """Locate the bundled ``plugins/`` directory.
 
-    Honours ``HERMES_BUNDLED_PLUGINS`` (set by the Nix wrapper / packaged
+    Honours ``SIDEKICK_BUNDLED_PLUGINS`` (set by the Nix wrapper / packaged
     installs) so read-only store paths are consulted first.  Falls back to
     the in-repo path used during development.
     """
@@ -76,7 +76,7 @@ logger = logging.getLogger(__name__)
 # Plugin developer debug logging
 # ---------------------------------------------------------------------------
 #
-# Set ``HERMES_PLUGINS_DEBUG=1`` to surface verbose plugin-discovery logs to
+# Set ``SIDEKICK_PLUGINS_DEBUG=1`` to surface verbose plugin-discovery logs to
 # stderr in addition to ~/.sidekick/logs/agent.log. Aimed at plugin authors
 # trying to figure out why their plugin isn't showing up: which directories
 # were scanned, which manifests parsed, which plugins were skipped (and why),
@@ -93,10 +93,10 @@ _DEBUG_HANDLER_INSTALLED = False
 
 
 def _install_plugin_debug_handler(force: bool = False) -> None:
-    """When HERMES_PLUGINS_DEBUG is on, tee plugin logs to stderr at DEBUG.
+    """When SIDEKICK_PLUGINS_DEBUG is on, tee plugin logs to stderr at DEBUG.
 
     Idempotent: only attaches the handler once per process unless ``force``
-    is passed. Does not touch the root logger or other Hermes loggers.
+    is passed. Does not touch the root logger or other Sidekick loggers.
     """
     global _DEBUG_HANDLER_INSTALLED, _PLUGINS_DEBUG
     if force:
@@ -115,7 +115,7 @@ def _install_plugin_debug_handler(force: bool = False) -> None:
     logger.propagate = True
     _DEBUG_HANDLER_INSTALLED = True
     logger.debug(
-        "HERMES_PLUGINS_DEBUG=1 — verbose plugin discovery logging enabled"
+        "SIDEKICK_PLUGINS_DEBUG=1 — verbose plugin discovery logging enabled"
     )
 
 
@@ -167,9 +167,9 @@ VALID_HOOKS: Set[str] = {
     "post_approval_response",
 }
 
-ENTRY_POINTS_GROUP = "hermes_agent.plugins"
+ENTRY_POINTS_GROUP = "sidekick_agent.plugins"
 
-_NS_PARENT = "hermes_plugins"
+_NS_PARENT = "sidekick_plugins"
 
 
 def _env_enabled(name: str) -> bool:
@@ -745,16 +745,16 @@ class PluginManager:
         logger.debug("  user: %d manifest(s)", len(user_manifests))
         manifests.extend(user_manifests)
 
-        # 3. Project plugins (./.hermes/plugins/)
-        if _env_enabled("HERMES_ENABLE_PROJECT_PLUGINS"):
-            project_dir = Path.cwd() / ".hermes" / "plugins"
+        # 3. Project plugins (./.sidekick/plugins/)
+        if _env_enabled("SIDEKICK_ENABLE_PROJECT_PLUGINS"):
+            project_dir = Path.cwd() / ".sidekick" / "plugins"
             logger.debug("Scanning project plugins: %s", project_dir)
             project_manifests = self._scan_directory(project_dir, source="project")
             logger.debug("  project: %d manifest(s)", len(project_manifests))
             manifests.extend(project_manifests)
         else:
             logger.debug(
-                "Project plugins disabled (set HERMES_ENABLE_PROJECT_PLUGINS=1 to enable)"
+                "Project plugins disabled (set SIDEKICK_ENABLE_PROJECT_PLUGINS=1 to enable)"
             )
 
         # 4. Pip / entry-point plugins
@@ -822,7 +822,7 @@ class PluginManager:
             # enforced by the tool wrapper.
             #
             # Bundled platform plugins (gateway adapters like IRC) auto-load
-            # for the same reason: every platform Hermes ships must be
+            # for the same reason: every platform Sidekick ships must be
             # available out of the box without the user having to opt in.
             if manifest.source == "bundled" and manifest.kind in {"backend", "platform"}:
                 self._load_plugin(manifest)
@@ -1136,11 +1136,11 @@ class PluginManager:
         self._plugins[manifest.key or manifest.name] = loaded
 
     def _load_directory_module(self, manifest: PluginManifest) -> types.ModuleType:
-        """Import a directory-based plugin as ``hermes_plugins.<slug>``.
+        """Import a directory-based plugin as ``sidekick_plugins.<slug>``.
 
         The module slug is derived from ``manifest.key`` so category-namespaced
         plugins (``image_gen/openai``) import as
-        ``hermes_plugins.image_gen__openai`` without colliding with any
+        ``sidekick_plugins.image_gen__openai`` without colliding with any
         future ``tts/openai``.
         """
         plugin_dir = Path(manifest.path)  # type: ignore[arg-type]
@@ -1407,7 +1407,7 @@ def resolve_plugin_command_result(result: Any) -> Any:
 
     thread = threading.Thread(
         target=_runner,
-        name="hermes-plugin-command-await",
+        name="sidekick-plugin-command-await",
         daemon=True,
     )
     thread.start()

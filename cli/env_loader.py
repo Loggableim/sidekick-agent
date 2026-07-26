@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from shared.paths import sidekick_home
+from shared.paths import sidekick_home as get_sidekick_home
 from shared.utils import atomic_replace
 
 
@@ -18,7 +18,7 @@ from shared.utils import atomic_replace
 _CREDENTIAL_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_KEY")
 
 # Names we've already warned about during this process, so repeated
-# load_hermes_dotenv() calls (user env + project env, gateway hot-reload,
+# load_sidekick_dotenv() calls (user env + project env, gateway hot-reload,
 # tests) don't spam the same warning multiple times.
 _WARNED_KEYS: set[str] = set()
 
@@ -142,7 +142,7 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
 
 def load_sidekick_dotenv(
     *,
-    hermes_home: str | os.PathLike | None = None,
+    sidekick_home: str | os.PathLike | None = None,
     project_env: str | os.PathLike | None = None,
 ) -> list[Path]:
     """Load Sidekick environment files with user config taking precedence.
@@ -155,7 +155,7 @@ def load_sidekick_dotenv(
     """
     loaded: list[Path] = []
 
-    home_path = Path(sidekick_home() or os.getenv("SIDEKICK_HOME", str(Path.home() / ".sidekick")))
+    home_path = Path(sidekick_home or get_sidekick_home())
     user_env = home_path / ".env"
     project_env_path = Path(project_env) if project_env else None
 
@@ -174,7 +174,3 @@ def load_sidekick_dotenv(
         loaded.append(project_env_path)
 
     return loaded
-
-
-# Legacy public API kept for installed entrypoints and older integrations.
-load_hermes_dotenv = load_sidekick_dotenv

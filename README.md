@@ -93,12 +93,6 @@ sidekick --tui               # Terminal UI mode
 sidekick dashboard           # WebUI at http://127.0.0.1:9119
 ```
 
-### Legacy alias
-
-```bash
-hermes --help                # Same binary as sidekick
-```
-
 ## Screenshots
 
 ### WebUI Chat / Dashboard
@@ -148,7 +142,7 @@ sidekick/
 ├── shared/      Config, paths, sessions, logging, utility functions
 ├── tools/       ~100 tool implementations (registry, file ops, browser...)
 ├── docs/        Releases, roadmaps, audits, troubleshooting
-├── tests/       Smoke tests (18 tests) and HTTP smoke (7 tests)
+├── tests/       Smoke tests and HTTP smoke checks
 ├── sidekick_app/  Package entrypoint with legacy-import bootstrap
 └── sidekick_cli/  Legacy package forwarder (transition layer)
 ```
@@ -180,12 +174,12 @@ sidekick/
 | **Runtime** | ✅ AIAgent (15K LOC), 76 registered tools, provider integrations |
 | **Cron** | ✅ Scheduler + job management |
 | **Gateway** | ✅ Messaging platform runner (0 import warnings) |
-| **Smoke** | ✅ 18 CLI tests + 7 WebUI HTTP tests, all green |
-| **CI** | ✅ Linux (full) + macOS (subset), Python 3.11 + 3.12 |
+| **Smoke** | ✅ full smoke suite plus WebUI HTTP smoke, all green |
+| **CI** | ✅ Linux full + macOS/Windows smoke, Python 3.12-3.14 on Linux |
 
 ## Configuration
 
-Config lives under `~/.sidekick/` (or `$SIDEKICK_HOME` / `$HERMES_HOME`):
+Config lives under `~/.sidekick/` (or `$SIDEKICK_HOME`):
 
 - `~/.sidekick/config.yaml` — Settings
 - `~/.sidekick/.env` — API keys
@@ -194,9 +188,22 @@ Config lives under `~/.sidekick/` (or `$SIDEKICK_HOME` / `$HERMES_HOME`):
 - `~/.sidekick/logs/` — Log files (agent.log, errors.log, gateway.log)
 
 Home directory resolution:
-1. `$SIDEKICK_HOME` → `~/.sidekick/` (canonical)
-2. `$HERMES_HOME` → `~/.hermes/` (legacy fallback)
-3. Default → `~/.sidekick/`
+1. `$SIDEKICK_HOME`
+2. Default → `~/.sidekick/`
+
+To import an existing local state directory, preview it first and then apply
+the copy explicitly. The target is backed up and existing files are never
+overwritten:
+
+```bash
+sidekick repair local-state --from <previous-home>
+sidekick repair local-state --from <previous-home> --apply
+```
+
+Reference docs:
+- `docs/architecture.md` - repo and runtime architecture
+- `docs/config-reference.md` - config tree and env-var summary
+- `docs/consolidation.md` - current monorepo boundaries
 
 ## Graceful degradation without API key
 
@@ -210,12 +217,6 @@ All entry points work without any API key configured:
 | `sidekick doctor -p` | ⚠ Skips provider checks | ✅ Connectivity test |
 | `sidekick dashboard` | ✅ Server starts, UI loads | ✅ + chat works |
 | `sidekick` | ⚠ Shows setup instructions | ✅ Interactive chat |
-
-## Legacy env vars preserved
-
-`HERMES_HOME`, `HERMES_STATE_DIR`, `HERMES_WEBUI_HOST`, `HERMES_WEBUI_PORT`,
-`HERMES_OPTIONAL_SKILLS`, `HERMES_LANGUAGE`, `HERMES_ACCEPT_HOOKS`,
-`HERMES_YOLO_MODE`, `HERMES_QUIET`
 
 ## Install from source
 
@@ -236,9 +237,8 @@ See `docs/known-issues.md` for the full list.
 
 Key items:
 - Gateway warnings (2 non-blocking, `print_config_warnings`/`warn_deprecated_cwd_env_vars`)
-- Session layer: `shared.sessions` and `web.api.models.Session` use different data models
-- CLI help text still references `HERMES_*` env vars (legacy compat — intentional)
-- No Windows CI (currently Linux + macOS only)
+- Session layer: `shared.sessions` and `web.api.models.Session` still use different data models, but round-tripping now preserves WebUI-only metadata
+- Windows CI active (Linux full + macOS/Windows smoke)
 
 ## Release history
 
@@ -251,7 +251,7 @@ Key items:
 | v0.5.0 | `v0.5.0` | Doctor --check-providers, macOS CI, streaming stability |
 | v0.8.2 | `v0.8.2` | Windows installer portable mode finalization |
 | v0.8.4 | `v0.8.4` | WebUI first-run onboarding fix: FastAPI routes, path detection, frontend field name |
-| v0.8.5 | `v0.8.5` | WebUI API proxy: auto-start stdlib backend, proxy all missing /api/* routes |
+| v0.8.5 | `v0.8.5` | WebUI API bridge: FastAPI routes invoke established handlers in-process |
 
 ## Troubleshooting
 
@@ -261,7 +261,5 @@ See `docs/troubleshooting.md` for:
 - Provider/Credentials
 - WebUI doesn't start
 - Sessions/State paths
-- Legacy `HERMES_*` aliases
-- Migration from `~/.hermes` to `~/.sidekick`
 - Logs and diagnostics
 - Smoke tests

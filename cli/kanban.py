@@ -1,7 +1,7 @@
-"""CLI for the Hermes Kanban board — ``sidekick kanban …`` subcommand.
+"""CLI for the Sidekick Kanban board — ``sidekick kanban …`` subcommand.
 
 Exposes the full 15-verb surface documented in the design spec
-(``docs/hermes-kanban-v1-spec.pdf``).  All DB work is delegated to
+(``docs/sidekick-kanban-v1-spec.pdf``).  All DB work is delegated to
 ``kanban_db``.  This module adds:
 
   * Argparse subcommand construction (``build_parser``).
@@ -96,10 +96,25 @@ def _parse_workspace_flag(value: str) -> tuple[str, Optional[str]]:
     )
 
 
+def _effective_dispatch_cap(requested: Optional[int]) -> int:
+    """Return the configured hard cap, optionally lowered by ``--max``."""
+    try:
+        from cli.config import load_config
+
+        configured = kb.effective_max_spawn(
+            (load_config().get("kanban", {}) or {}).get("max_spawn")
+        )
+    except Exception:
+        configured = kb.DEFAULT_MAX_SPAWN
+    if requested is None:
+        return configured
+    return min(configured, kb.effective_max_spawn(requested))
+
+
 def _check_dispatcher_presence() -> tuple[bool, str]:
     """Return ``(running, message)``.
 
-    - ``running=True``: a gateway is alive for this HERMES_HOME and its
+    - ``running=True``: a gateway is alive for this SIDEKICK_HOME and its
       config has ``kanban.dispatch_in_gateway`` on (default). Message
       is a short status line.
     - ``running=False``: either no gateway is running, or the gateway
@@ -163,17 +178,17 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "kanban",
         help="Multi-profile collaboration board (tasks, links, comments)",
         description=(
-            "Durable SQLite-backed task board shared across Hermes profiles. "
+            "Durable SQLite-backed task board shared across Sidekick profiles. "
             "Tasks are claimed atomically, can depend on other tasks, and "
             "are executed by a named profile in an isolated workspace. "
             "See https://sidekick-agent.sh/docs/user-guide/features/kanban "
-            "or docs/hermes-kanban-v1-spec.pdf for the full design."
+            "or docs/sidekick-kanban-v1-spec.pdf for the full design."
         ),
     )
     # --- global --board flag ---
     # Applies to every subcommand below. When set, scopes all reads and
     # writes to that board's DB. When omitted, resolves via the
-    # HERMES_KANBAN_BOARD env var, then the persisted current-board
+    # SIDEKICK_KANBAN_BOARD env var, then the persisted current-board
     # file, then "default". See kanban_db.get_current_board().
     kanban_parser.add_argument(
         "--board",
@@ -182,7 +197,7 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         help=(
             "Board slug to operate on. Defaults to the current board "
             "(set via `sidekick kanban boards switch <slug>` or the "
-            "HERMES_KANBAN_BOARD env var). Use `sidekick kanban boards list` "
+            "SIDEKICK_KANBAN_BOARD env var). Use `sidekick kanban boards list` "
             "to see all boards."
         ),
     )
@@ -299,7 +314,7 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     # --- list ---
     p_list = sub.add_parser("list", aliases=["ls"], help="List tasks")
     p_list.add_argument("--mine", action="store_true",
-                        help="Filter by $HERMES_PROFILE as assignee")
+                        help="Filter by $SIDEKICK_PROFILE as assignee")
     p_list.add_argument("--assignee", default=None)
     p_list.add_argument("--status", default=None,
                         choices=sorted(kb.VALID_STATUSES))
@@ -391,7 +406,7 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     p_comment.add_argument("task_id")
     p_comment.add_argument("text", nargs="+", help="Comment body")
     p_comment.add_argument("--author", default=None,
-                           help="Author name (default: $HERMES_PROFILE or 'user')")
+                           help="Author name (default: $SIDEKICK_PROFILE or 'user')")
 
     p_complete = sub.add_parser("complete", help="Mark one or more tasks done")
     p_complete.add_argument("task_ids", nargs="+",
@@ -602,7 +617,7 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
         "--author",
         default=None,
         help="Author name recorded on the audit comment "
-             "(default: $HERMES_PROFILE or 'specifier')",
+             "(default: $SIDEKICK_PROFILE or 'specifier')",
     )
     p_specify.add_argument(
         "--json",
@@ -647,21 +662,26 @@ def kanban_command(args: argparse.Namespace) -> int:
         return 0
 
     # `--board <slug>` applies to every subcommand below by way of an
-    # env-var pin for the duration of this call. Using HERMES_KANBAN_BOARD
+    # env-var pin for the duration of this call. Using SIDEKICK_KANBAN_BOARD
     # (rather than threading `board=` through 50+ kb.connect() sites)
     # keeps the patch small and inherits the exact same resolution the
     # dispatcher uses for workers — consistency is a feature here.
     board_override = getattr(args, "board", None)
-    prev_board_env = os.environ.get("SIDEKICK_KANBAN_BOARD")
+    prev_sidekick_board_env = os.environ.get("SIDEKICK_KANBAN_BOARD")
+    prev_sidekick_board_env = os.environ.get("SIDEKICK_KANBAN_BOARD")
     restore_board_env = False
 
     def _restore_board_env() -> None:
         if not restore_board_env:
             return
-        if prev_board_env is None:
-            os.environ.pop("HERMES_KANBAN_BOARD", None)
+        if prev_sidekick_board_env is None:
+            os.environ.pop("SIDEKICK_KANBAN_BOARD", None)
         else:
-            os.environ["SIDEKICK_KANBAN_BOARD"] = prev_board_env
+            os.environ["SIDEKICK_KANBAN_BOARD"] = prev_sidekick_board_env
+        if prev_sidekick_board_env is None:
+            os.environ.pop("SIDEKICK_KANBAN_BOARD", None)
+        else:
+            os.environ["SIDEKICK_KANBAN_BOARD"] = prev_sidekick_board_env
     if board_override:
         try:
             normed = kb._normalize_board_slug(board_override)
@@ -681,6 +701,7 @@ def kanban_command(args: argparse.Namespace) -> int:
             )
             return 1
         os.environ["SIDEKICK_KANBAN_BOARD"] = normed
+        os.environ["SIDEKICK_KANBAN_BOARD"] = normed
         restore_board_env = True
 
     # Boards management doesn't touch the DB at all — dispatch early so
@@ -696,7 +717,7 @@ def kanban_command(args: argparse.Namespace) -> int:
     # is idempotent, so running it every invocation is cheap (one
     # SELECT against sqlite_master when tables already exist) and
     # prevents "no such table: tasks" on first use from a fresh
-    # HERMES_HOME. Previously only `init` and `daemon` triggered
+    # SIDEKICK_HOME. Previously only `init` and `daemon` triggered
     # schema creation; `create` / `list` / every other command would
     # error out on a fresh install.
     try:
@@ -763,7 +784,7 @@ def kanban_command(args: argparse.Namespace) -> int:
 
 def _profile_author() -> str:
     """Best-effort author name for an interactive CLI call."""
-    for env in ("HERMES_PROFILE_NAME", "HERMES_PROFILE"):
+    for env in ("SIDEKICK_PROFILE_NAME", "SIDEKICK_PROFILE"):
         v = os.environ.get(env)
         if v:
             return v
@@ -775,7 +796,7 @@ def _profile_author() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Boards management (hermes kanban boards …)
+# Boards management (sidekick kanban boards …)
 # ---------------------------------------------------------------------------
 
 def _dispatch_boards(args: argparse.Namespace) -> int:
@@ -784,7 +805,7 @@ def _dispatch_boards(args: argparse.Namespace) -> int:
     Boards management is deliberately separate from the task-level
     commands: it operates on the filesystem (board directories,
     ``current`` pointer, ``board.json``), not on the per-board SQLite
-    DB, so a fresh HERMES_HOME that has never called ``kanban init``
+    DB, so a fresh SIDEKICK_HOME that has never called ``kanban init``
     can still run ``boards create`` / ``boards list``.
     """
     sub = getattr(args, "boards_action", None) or "list"
@@ -1681,7 +1702,7 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
         res = kb.dispatch_once(
             conn,
             dry_run=args.dry_run,
-            max_spawn=args.max,
+            max_spawn=_effective_dispatch_cap(args.max),
             failure_limit=getattr(args, "failure_limit", kb.DEFAULT_SPAWN_FAILURE_LIMIT),
         )
     if getattr(args, "json", False):
@@ -1834,7 +1855,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
 
     def _ready_queue_nonempty() -> bool:
         """Cheap probe — is there at least one ready+assigned+unclaimed
-        task whose assignee maps to a real Hermes profile (i.e. one the
+        task whose assignee maps to a real Sidekick profile (i.e. one the
         dispatcher would actually try to spawn for)?
 
         Filters out tasks assigned to control-plane lanes
@@ -1851,7 +1872,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
     try:
         kb.run_daemon(
             interval=args.interval,
-            max_spawn=args.max,
+            max_spawn=_effective_dispatch_cap(args.max),
             failure_limit=getattr(args, "failure_limit", kb.DEFAULT_SPAWN_FAILURE_LIMIT),
             on_tick=_on_tick,
         )

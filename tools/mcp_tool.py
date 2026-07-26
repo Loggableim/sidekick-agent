@@ -3,7 +3,7 @@
 MCP (Model Context Protocol) Client Support
 
 Connects to external MCP servers via stdio, HTTP/StreamableHTTP, or SSE
-transport, discovers their tools, and registers them into the hermes-agent
+transport, discovers their tools, and registers them into the sidekick-agent
 tool registry so the agent can call them like any built-in tool.
 
 Configuration is read from ~/.sidekick/config.yaml under the ``mcp_servers`` key.
@@ -87,6 +87,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -355,7 +356,13 @@ _MCP_INJECTION_PATTERNS = [
 ]
 
 
-def _scan_mcp_description(server_name: str, tool_name: str, description: str) -> List[str]:
+def _scan_mcp_description(
+    server_name: str,
+    tool_name: str,
+    description: str,
+    *,
+    allowlisted: bool = False,
+) -> List[str]:
     """Scan an MCP tool description for prompt injection patterns.
 
     Returns a list of finding strings (empty = clean).
@@ -366,6 +373,12 @@ def _scan_mcp_description(server_name: str, tool_name: str, description: str) ->
     for pattern, reason in _MCP_INJECTION_PATTERNS:
         if pattern.search(description):
             findings.append(reason)
+    if findings and allowlisted:
+        logger.info(
+            "MCP server '%s' tool '%s': known description findings allowed by config — %s",
+            server_name, tool_name, "; ".join(findings),
+        )
+        return []
     if findings:
         logger.warning(
             "MCP server '%s' tool '%s': suspicious description content — %s. "
@@ -405,14 +418,14 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
         if which_hit:
             resolved_command = which_hit
         elif resolved_command in {"npx", "npm", "node"}:
-            hermes_home = os.path.expanduser(
+            sidekick_home = os.path.expanduser(
                 os.getenv("SIDEKICK_HOME")
                 or os.getenv(
-                    "HERMES_HOME", os.path.join(os.path.expanduser("~"), ".hermes")
+                    "SIDEKICK_HOME", os.path.join(os.path.expanduser("~"), ".sidekick")
                 )
             )
             candidates = [
-                os.path.join(hermes_home, "node", "bin", resolved_command),
+                os.path.join(sidekick_home, "node", "bin", resolved_command),
                 os.path.join(os.path.expanduser("~"), ".local", "bin", resolved_command),
             ]
             for candidate in candidates:
@@ -425,6 +438,19 @@ def _resolve_stdio_command(command: str, env: dict) -> tuple[str, dict]:
         resolved_env = _prepend_path(resolved_env, command_dir)
 
     return resolved_command, resolved_env
+
+
+def _wrap_stdio_command(command: str, args: list[str]) -> tuple[str, list[str]]:
+    """Wrap a stdio MCP command in the JSON-RPC stdout filter proxy.
+
+    MCP stdio servers are expected to reserve stdout for JSON-RPC only.
+    Some third-party servers still leak banners or token refresh messages
+    onto stdout. The proxy preserves protocol traffic and diverts stray
+    stdout noise to stderr so the MCP SDK never sees it as malformed JSON.
+    """
+    proxy_script = Path(__file__).resolve().with_name("mcp_stdio_proxy.py")
+    proxy_args = [str(proxy_script), str(command), *[str(arg) for arg in (args or [])]]
+    return sys.executable, proxy_args
 
 
 # ---------------------------------------------------------------------------
@@ -1191,6 +1217,9 @@ class MCPServerTask:
 
         safe_env = _build_safe_env(user_env)
         command, safe_env = _resolve_stdio_command(command, safe_env)
+        # Wrap stdio servers so protocol-violating stdout banners don't reach
+        # the MCP SDK and poison the JSON-RPC reader.
+        command, args = _wrap_stdio_command(command, list(args or []))
 
         # Check package against OSV malware database before spawning
         from tools.osv_check import check_package_for_malware
@@ -2103,6 +2132,35 @@ def _interpolate_env_vars(value):
     return value
 
 
+def _normalize_firecrawl_mcp_config(name: str, cfg: dict) -> dict:
+    """Upgrade the legacy Firecrawl stdio config to the hosted HTTP endpoint."""
+    if name != "firecrawl" or not isinstance(cfg, dict) or "url" in cfg:
+        return cfg
+
+    command = str(cfg.get("command") or "").strip().lower()
+    args = cfg.get("args") or []
+    if "firecrawl-mcp" not in command and not any(
+        "firecrawl-mcp" in str(arg).lower() for arg in args
+    ):
+        return cfg
+
+    api_key = str(os.environ.get("FIRECRAWL_API_KEY") or "").strip()
+    if api_key:
+        from urllib.parse import quote
+
+        url = f"https://mcp.firecrawl.dev/{quote(api_key, safe='')}/v2/mcp"
+    else:
+        url = "https://mcp.firecrawl.dev/v2/mcp"
+
+    normalized = dict(cfg)
+    normalized["url"] = url
+    normalized.pop("command", None)
+    normalized.pop("args", None)
+    normalized.pop("env", None)
+    normalized.pop("transport", None)
+    return normalized
+
+
 def _load_mcp_config() -> Dict[str, dict]:
     """Read ``mcp_servers`` from the Sidekick config file.
 
@@ -2115,18 +2173,30 @@ def _load_mcp_config() -> Dict[str, dict]:
     ``os.environ`` (which includes ``~/.sidekick/.env`` loaded at startup).
     """
     try:
-        from cli.config import load_config
+        from cli.config import load_config, _collect_unresolved_env_refs
         config = load_config()
         servers = config.get("mcp_servers")
         if not servers or not isinstance(servers, dict):
             return {}
         # Ensure .env vars are available for interpolation
         try:
-            from cli.env_loader import load_hermes_dotenv
-            load_hermes_dotenv()
+            from cli.env_loader import load_sidekick_dotenv
+            load_sidekick_dotenv()
         except Exception:
             pass
-        return {name: _interpolate_env_vars(cfg) for name, cfg in servers.items()}
+        resolved: Dict[str, dict] = {}
+        for name, cfg in servers.items():
+            interpolated = _interpolate_env_vars(cfg)
+            unresolved = _collect_unresolved_env_refs(interpolated)
+            if unresolved:
+                logger.warning(
+                    "MCP server '%s' skipped: unresolved config placeholder(s): %s",
+                    name, ", ".join(unresolved),
+                )
+                continue
+            interpolated = _normalize_firecrawl_mcp_config(name, interpolated)
+            resolved[name] = interpolated
+        return resolved
     except Exception as exc:
         logger.debug("Failed to load MCP config: %s", exc)
         return {}
@@ -2216,13 +2286,13 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float):
             # Collect text from content blocks. MCP tool results can also
             # include ImageContent blocks (screenshot / Blockbench / Playwright
             # etc.); cache those via the gateway's image-cache helper so they
-            # flow through Hermes' MEDIA: tag convention and out to messaging
+            # flow through Sidekick' MEDIA: tag convention and out to messaging
             # adapters that render images natively. Without this, image blocks
             # were silently dropped and the agent got an empty response.
             #
             # Distilled from #17915 (c3115644151) and #10848 (gnanirahulnutakki),
             # both too stale to cherry-pick. #10848's approach (integrate with
-            # Hermes' MEDIA tag + cache_image_from_bytes) was the cleaner of
+            # Sidekick' MEDIA tag + cache_image_from_bytes) was the cleaner of
             # the two — plugs into existing infrastructure.
             parts: List[str] = []
             for block in (result.content or []):
@@ -2678,7 +2748,7 @@ def _normalize_mcp_input_schema(schema: dict | None) -> dict:
 def sanitize_mcp_name_component(value: str) -> str:
     """Return an MCP name component safe for tool and prefix generation.
 
-    Preserves Hermes's historical behavior of converting hyphens to
+    Preserves Sidekick's historical behavior of converting hyphens to
     underscores, and also replaces any other character outside
     ``[A-Za-z0-9_]`` with ``_`` so generated tool names are compatible with
     provider validation rules.
@@ -2929,6 +2999,11 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
     tools_filter = config.get("tools") or {}
     include_set = _normalize_name_filter(tools_filter.get("include"), f"mcp_servers.{name}.tools.include")
     exclude_set = _normalize_name_filter(tools_filter.get("exclude"), f"mcp_servers.{name}.tools.exclude")
+    security_config = config.get("security") or {}
+    description_allowlist = _normalize_name_filter(
+        security_config.get("allow_suspicious_tool_descriptions"),
+        f"mcp_servers.{name}.security.allow_suspicious_tool_descriptions",
+    )
 
     def _should_register(tool_name: str) -> bool:
         if include_set:
@@ -2943,7 +3018,12 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
             continue
 
         # Scan tool description for prompt injection patterns
-        _scan_mcp_description(name, mcp_tool.name, mcp_tool.description or "")
+        _scan_mcp_description(
+            name,
+            mcp_tool.name,
+            mcp_tool.description or "",
+            allowlisted=mcp_tool.name in description_allowlist,
+        )
 
         schema = _convert_mcp_schema(name, mcp_tool)
         tool_name_prefixed = schema["name"]
@@ -3334,7 +3414,7 @@ def _kill_orphaned_mcp_children(include_active: bool = False) -> None:
     sessions are not disrupted.
 
     Sends SIGTERM, waits 2 seconds, then escalates to SIGKILL for any
-    survivors, avoiding shared-resource collisions when multiple hermes
+    survivors, avoiding shared-resource collisions when multiple sidekick
     processes run on the same host (each has its own ``_stdio_pids`` dict).
 
     With ``include_active=True`` also kills every PID in ``_stdio_pids`` —

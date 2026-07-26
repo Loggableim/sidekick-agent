@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from web.api._home import get_active_webui_home, get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # ── Pfade ──────────────────────────────────────────────────────────────────
@@ -35,7 +37,7 @@ logger = logging.getLogger(__name__)
 _agents_db_path: Path = None
 _agents_data_dir: Path = None
 _WEBUI_SESSION_DIR: Path = None
-_HERMES_SESSION_DIR: Path = None
+_SIDEKICK_SESSION_DIR: Path = None
 
 # ── DB Lock ─────────────────────────────────────────────────────────────────
 _db_lock = threading.Lock()
@@ -57,7 +59,7 @@ AGENT_TEMPLATES = {
         ),
         "color": "#3B82F6",
         "tools": ["terminal", "file", "web", "delegation", "kanban"],
-        "workdir_suggestion": "C:\\Users\\logga\\hermes-webui",
+        "workdir_suggestion": "C:\\Users\\logga\\sidekick-webui",
     },
     "project-manager": {
         "name": "Projektmanager",
@@ -222,15 +224,15 @@ AGENT_TEMPLATES = {
 
 # ── Datenbank-Initialisierung ───────────────────────────────────────────────
 
-def init_agents_db(data_dir: Path, webui_session_dir: Path, hermes_session_dir: Optional[Path] = None):
+def init_agents_db(data_dir: Path, webui_session_dir: Path, sidekick_session_dir: Optional[Path] = None):
     """Initialisiere die Agents-Datenbank. Muss beim Serverstart aufgerufen werden."""
-    global _agents_db_path, _agents_data_dir, _WEBUI_SESSION_DIR, _HERMES_SESSION_DIR
+    global _agents_db_path, _agents_data_dir, _WEBUI_SESSION_DIR, _SIDEKICK_SESSION_DIR
 
     _agents_data_dir = data_dir / "agents"
     _agents_data_dir.mkdir(parents=True, exist_ok=True)
     _agents_db_path = data_dir / "agents.db"
     _WEBUI_SESSION_DIR = webui_session_dir
-    _HERMES_SESSION_DIR = hermes_session_dir
+    _SIDEKICK_SESSION_DIR = sidekick_session_dir
 
     with _db_lock, closing(_get_conn()) as conn:
         _ensure_schema(conn)
@@ -816,9 +818,18 @@ def mark_splash_completed(activated_slugs: list[str]) -> dict:
 
 _LLM_CACHE = {}  # Cache für geladene Config
 
+
+def _active_home() -> Path:
+    """Return the active home for the current request when available."""
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return Path(get_webui_home()).expanduser().resolve()
+
 def _load_llm_config():
     """Load LLM config from active provider context + credential_pool fallback."""
-    if _LLM_CACHE.get("config"):
+    home = _active_home()
+    if _LLM_CACHE.get("config") and _LLM_CACHE.get("home") == str(home):
         return _LLM_CACHE["config"]
 
     try:
@@ -836,7 +847,7 @@ def _load_llm_config():
             if not api_key or len(api_key) < 8:
                 try:
                     import json as _j
-                    auth_path = Path(os.environ.get("SIDEKICK_HOME")) / "auth.json"
+                    auth_path = home / "auth.json"
                     if auth_path.exists():
                         auth_data = _j.loads(auth_path.read_text(encoding="utf-8"))
                         pool = auth_data.get("credential_pool", {}) if isinstance(auth_data, dict) else {}
@@ -859,14 +870,14 @@ def _load_llm_config():
                 "model": model,
                 "base_url": base_url,
             }
+            _LLM_CACHE["home"] = str(home)
             _LLM_CACHE["config"] = config
             return config
     except Exception:
         logger.debug("Shared provider context unavailable for agent chat", exc_info=True)
 
     import re
-    hermes_home = Path(os.environ.get("SIDEKICK_HOME"))
-    env_path = hermes_home / ".env"
+    env_path = home / ".env"
 
     api_key = ""
     model = "openai/gpt-oss-20b:free"
@@ -888,7 +899,7 @@ def _load_llm_config():
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
     # Try to read model from config
-    config_path = hermes_home / "config.yaml"
+    config_path = home / "config.yaml"
     if config_path.exists():
         cfg_text = config_path.read_text(encoding="utf-8")
         mm = re.search(r'default:\s*["\']?(.+?)["\']?\s*$', cfg_text, re.MULTILINE)
@@ -896,6 +907,7 @@ def _load_llm_config():
             model = mm.group(1).strip()
 
     config = {"api_key": api_key, "model": model, "base_url": base_url}
+    _LLM_CACHE["home"] = str(home)
     _LLM_CACHE["config"] = config
     return config
 
@@ -938,6 +950,26 @@ def _call_llm(messages: list, timeout: int = 15) -> Optional[str]:
     config = _load_llm_config()
     api_key = config.get("api_key", "")
     base_url = config.get("base_url") or "https://openrouter.ai/api/v1"
+
+    try:
+        from web.api.config import game_mode_blocks_local_model_request
+
+        if game_mode_blocks_local_model_request(config.get("provider"), base_url):
+            from runtime.auxiliary_client import call_llm
+
+            response = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024,
+                timeout=timeout,
+            )
+            text = (response.choices[0].message.content or "").strip()
+            return text or None
+    except Exception:
+        logger.debug("Agent LLM Game Mode remote fallback failed", exc_info=True)
+        return None
 
     if not api_key or len(api_key) < 10:
         logger.warning("No valid OpenRouter API key found")

@@ -126,7 +126,7 @@ class ContextEngine(ABC):
         """Called when a new conversation session begins.
 
         Use this to load persisted state (DAG, store) for the session.
-        kwargs may include hermes_home, platform, model, etc.
+        kwargs may include sidekick_home, platform, model, etc.
         """
         return None
 

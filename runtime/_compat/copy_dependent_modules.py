@@ -12,8 +12,8 @@ function bodies.
 import os
 import re
 
-SRC_BASE = r"C:\HermesPortable\cids-hermes-agent"
-DST_BASE = r"C:\HermesPortable\sidekick"
+SRC_BASE = r"C:\SidekickPortable\cids-sidekick-agent"
+DST_BASE = r"C:\SidekickPortable\sidekick"
 
 SRC_AGENT = os.path.join(SRC_BASE, "agent")
 DST_RUNTIME = os.path.join(DST_BASE, "runtime")
@@ -51,8 +51,8 @@ REWRITE_RULES = [
     (r'^[ \t]*import agent$', 'import runtime'),
     # 'from sidekick_constants import' → 'from runtime._compat.shim_constants import'
     (r'from sidekick_constants import', 'from runtime._compat.shim_constants import'),
-    # 'from hermes_constants import' → 'from runtime._compat.shim_constants import'
-    (r'from hermes_constants import', 'from runtime._compat.shim_constants import'),
+    # 'from sidekick_constants import' → 'from runtime._compat.shim_constants import'
+    (r'from sidekick_constants import', 'from runtime._compat.shim_constants import'),
     # 'from utils import' → 'from shared.utils import'
     (r'from utils import', 'from shared.utils import'),
     # 'import utils' → 'from shared import utils'

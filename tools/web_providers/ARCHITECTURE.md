@@ -64,7 +64,7 @@ class MyExtractProvider(WebExtractProvider):
 Search-only providers (like SearXNG) don't need to implement `WebExtractProvider`.
 Extract-only providers don't need to implement `WebSearchProvider`.
 
-## hermes tools UX
+## sidekick tools UX
 
 The provider picker uses **progressive disclosure**:
 - **Default path** (90% of users): Pick one provider → sets `web.backend` for both. One selection, done.

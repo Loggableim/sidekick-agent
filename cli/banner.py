@@ -77,8 +77,8 @@ SIDEKICK_LOGO = (
     "[#FFBF00]               \u2727  powered by [bold #87CEEB]NOVA[/]  \u2727[/]"
 )
 # Backward-compat alias
-HERMES_AGENT_LOGO = SIDEKICK_LOGO
-HERMES_CADUCEUS = """[#FFD700]         ✧   ★   ✧[/]
+SIDEKICK_AGENT_LOGO = SIDEKICK_LOGO
+SIDEKICK_CADUCEUS = """[#FFD700]         ✧   ★   ✧[/]
 [#FFD700]       ╔═══════════╗[/]
 [#FFD700]      ╔╝           ╚╗[/]
 [#FFBF00]     ╔╝     ★     ╚╗[/]
@@ -140,7 +140,7 @@ def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> st
         result = subprocess.run(
             ["git", "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -157,7 +157,7 @@ def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> st
         result = subprocess.run(
             ["git", "remote", "show", remote],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -176,7 +176,7 @@ def _resolve_remote_default_branch(repo_dir: Path, remote: str = "origin") -> st
             result = subprocess.run(
                 ["git", "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}"],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=5,
                 cwd=str(repo_dir),
             )
@@ -197,7 +197,7 @@ def _check_via_rev(local_rev: str) -> Optional[int]:
     try:
         result = subprocess.run(
             ["git", "ls-remote", _UPSTREAM_REPO_URL, "refs/heads/master"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
         )
     except Exception:
         return None
@@ -226,7 +226,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
     try:
         result = subprocess.run(
             ["git", "rev-list", "--count", f"HEAD..{compare_ref}"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
             cwd=str(repo_dir),
         )
         if result.returncode == 0:
@@ -239,7 +239,7 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
 def check_for_updates() -> Optional[int]:
     """Check whether a Sidekick update is available.
 
-    Two paths: if ``HERMES_REVISION`` is set (nix builds embed it), compare
+    Two paths: if ``SIDEKICK_REVISION`` is set (nix builds embed it), compare
     it to upstream master via ``git ls-remote``. Otherwise look for a local
     git checkout and count commits behind the origin default branch.
 
@@ -247,8 +247,8 @@ def check_for_updates() -> Optional[int]:
     if behind but the count is unknown, ``0`` if up-to-date, or ``None`` if
     the check failed or doesn't apply. Cached for 6 hours.
     """
-    hermes_home = get_sidekick_home()
-    cache_file = hermes_home / ".update_check"
+    sidekick_home = get_sidekick_home()
+    cache_file = sidekick_home / ".update_check"
     embedded_rev = os.environ.get("SIDEKICK_REVISION") or None
 
     # Read cache — invalidate if the embedded rev has changed since last check
@@ -268,11 +268,11 @@ def check_for_updates() -> Optional[int]:
         behind = _check_via_rev(embedded_rev)
     else:
         # Prefer the running code's location over the profile-scoped path.
-        # $HERMES_HOME/hermes-agent/ may be a stale copy from --clone-all;
+        # $SIDEKICK_HOME/sidekick-agent/ may be a stale copy from --clone-all;
         # Path(__file__) always resolves to the actual installed checkout.
         repo_dir = Path(__file__).parent.parent.resolve()
         if not (repo_dir / ".git").exists():
-            repo_dir = hermes_home / "hermes-agent"
+            repo_dir = sidekick_home / "sidekick-agent"
         if not (repo_dir / ".git").exists():
             return None
         behind = _check_via_local_git(repo_dir)
@@ -289,13 +289,13 @@ def _resolve_repo_dir() -> Optional[Path]:
     """Return the active Sidekick git checkout, or None if this isn't a git install.
 
     Prefers the running code's location over the profile-scoped path
-    because ``$HERMES_HOME/hermes-agent/`` may be a stale copy carried
+    because ``$SIDEKICK_HOME/sidekick-agent/`` may be a stale copy carried
     over by ``--clone-all``.
     """
     repo_dir = Path(__file__).parent.parent.resolve()
     if not (repo_dir / ".git").exists():
-        hermes_home = get_sidekick_home()
-        repo_dir = hermes_home / "hermes-agent"
+        sidekick_home = get_sidekick_home()
+        repo_dir = sidekick_home / "sidekick-agent"
     return repo_dir if (repo_dir / ".git").exists() else None
 
 
@@ -305,7 +305,7 @@ def _git_short_hash(repo_dir: Path, rev: str) -> Optional[str]:
         result = subprocess.run(
             ["git", "rev-parse", "--short=8", rev],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -335,7 +335,7 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
         result = subprocess.run(
             ["git", "rev-list", "--count", f"{upstream_ref}..HEAD"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             cwd=str(repo_dir),
         )
@@ -371,7 +371,7 @@ def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
         result = subprocess.run(
             ["git", "describe", "--tags", "--abbrev=0"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=3,
             cwd=str(repo_dir),
         )
@@ -521,10 +521,10 @@ def build_welcome_banner(console: Console, model: str, cwd: str,
     try:
         from cli.skin_engine import get_active_skin
         _bskin = get_active_skin()
-        _hero = _bskin.banner_hero if hasattr(_bskin, 'banner_hero') and _bskin.banner_hero else HERMES_CADUCEUS
+        _hero = _bskin.banner_hero if hasattr(_bskin, 'banner_hero') and _bskin.banner_hero else SIDEKICK_CADUCEUS
     except Exception:
         _bskin = None
-        _hero = HERMES_CADUCEUS
+        _hero = SIDEKICK_CADUCEUS
     left_lines = ["", _hero, ""]
     model_short = model.split("/")[-1] if "/" in model else model
     if model_short.endswith(".gguf"):
@@ -700,7 +700,7 @@ def build_welcome_banner(console: Console, model: str, cwd: str,
     console.print()
     term_width = shutil.get_terminal_size().columns
     if term_width >= 95:
-        _logo = _bskin.banner_logo if _bskin and hasattr(_bskin, 'banner_logo') and _bskin.banner_logo else HERMES_AGENT_LOGO
+        _logo = _bskin.banner_logo if _bskin and hasattr(_bskin, 'banner_logo') and _bskin.banner_logo else SIDEKICK_AGENT_LOGO
         console.print(_logo)
         console.print()
     console.print(outer_panel)

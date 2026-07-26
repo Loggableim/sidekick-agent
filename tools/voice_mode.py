@@ -6,7 +6,7 @@ sounddevice or system audio players.
 
 Dependencies (optional):
     pip install sounddevice numpy
-    or: pip install hermes-agent[voice]
+    or: pip install sidekick-agent[voice]
 """
 
 import logging
@@ -72,7 +72,7 @@ def _termux_api_app_installed() -> bool:
         result = subprocess.run(
             ["pm", "list", "packages", "com.termux.api"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=5,
             check=False,
         )
@@ -192,7 +192,7 @@ SILENCE_RMS_THRESHOLD = 200  # RMS below this = silence (int16 range 0-32767)
 SILENCE_DURATION_SECONDS = 3.0  # Seconds of continuous silence before auto-stop
 
 # Temp directory for voice recordings
-_TEMP_DIR = os.path.join(tempfile.gettempdir(), "hermes_voice")
+_TEMP_DIR = os.path.join(tempfile.gettempdir(), "sidekick_voice")
 
 
 # ============================================================================
@@ -299,7 +299,7 @@ class TermuxAudioRecorder:
             "-c", str(CHANNELS),
         ]
         try:
-            subprocess.run(command, capture_output=True, text=True, timeout=15, check=True)
+            subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, check=True)
         except subprocess.CalledProcessError as e:
             details = (e.stderr or e.stdout or str(e)).strip()
             raise RuntimeError(f"Termux microphone start failed: {details}") from e
@@ -316,7 +316,7 @@ class TermuxAudioRecorder:
         mic_cmd = _termux_microphone_command()
         if not mic_cmd:
             return
-        subprocess.run([mic_cmd, "-q"], capture_output=True, text=True, timeout=15, check=False)
+        subprocess.run([mic_cmd, "-q"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, check=False)
 
     def stop(self) -> Optional[str]:
         with self._lock:

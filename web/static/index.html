@@ -4,15 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sidekick</title>
-<link rel="icon" type="image/svg+xml" href="static/favicon.svg">
-<link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32.png">
-<link rel="shortcut icon" href="static/favicon.ico">
-<link rel="manifest" href="manifest.json" crossorigin="use-credentials">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="shortcut icon" href="/static/favicon.ico">
+<link rel="manifest" href="/manifest.json" crossorigin="use-credentials">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Sidekick">
-<link rel="apple-touch-icon" sizes="512x512" href="static/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/static/apple-touch-icon.png">
 <!-- base href enables subpath mount support; all static paths must stay relative (no leading slash) -->
 <script>(function(){var path=location.pathname,marker='/session/',i=path.indexOf(marker),p;i>=0?p=(path.slice(0,i+1)||'/'):p=(path.endsWith('/')?path:(path.replace(/\/[^\/]*$/,'/')||'/'));document.write('<base href="'+location.origin+p+'">');})()</script>
 <script>(function(){var themes={light:1,dark:1,system:1},skins={default:1,ares:1,mono:1,slate:1,poseidon:1,sisyphus:1,charizard:1,sienna:1,matrix:1},legacy={slate:['dark','slate'],solarized:['dark','poseidon'],monokai:['dark','sisyphus'],nord:['dark','slate'],oled:['dark','default']},t=(localStorage.getItem('sidekick-theme')||'dark').toLowerCase(),s=(localStorage.getItem('sidekick-skin')||'').toLowerCase(),m=legacy[t],theme=m?m[0]:(themes[t]?t:'dark'),skin=skins[s]?s:(m?m[1]:'default');localStorage.setItem('sidekick-theme',theme);localStorage.setItem('sidekick-skin',skin);if(theme==='system')theme=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(theme==='dark')document.documentElement.classList.add('dark');if(skin!=='default')document.documentElement.dataset.skin=skin;})()</script>
@@ -24,25 +24,18 @@
 <script>(function(){try{var t=localStorage.getItem('sidekick-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#0D0D1A':'#FEFCF7';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('sidekick-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('sidekick-webui-rail-expanded')==='1')document.documentElement.dataset.railExpanded='1';}catch(e){}})()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__&layout=17">
+<link rel="stylesheet" href="/static/style.css?v=__WEBUI_VERSION__">
 <style id="workflowHeaderCompactOverride">
-  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group {
-    display: inline-flex !important;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-  }
-  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group > #browserStatusBadge {
-    display: none !important;
-  }
+  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group { display:inline-flex!important; }
+  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group > #browserStatusBadge { display:none!important; }
 </style>
-  <link rel="stylesheet" href="static/gmail-panel.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/discord-panel.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/discord-chat.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/xterm.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/agents.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/agents-dashboard.css?v=__WEBUI_VERSION__">
-  <link rel="stylesheet" href="static/spaces.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/gmail-panel.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/discord-panel.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/discord-chat.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/xterm.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/agents.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/agents-dashboard.css?v=__WEBUI_VERSION__">
+  <link rel="stylesheet" href="/static/spaces.css?v=__WEBUI_VERSION__">
   <!-- KaTeX math rendering CSS (loaded eagerly to prevent layout shift) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" integrity="sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP" crossorigin="anonymous">
   <!-- streaming-markdown: incremental DOM-building markdown parser for live streams -->
@@ -51,7 +44,7 @@
   <!-- ES module imports do not support the integrity= attribute (W3C limitation);    -->
   <!-- version is pinned in the vendored file path; hash documented above for audit. -->
   <script type="module">
-    import * as smd from './static/vendor/smd.min.js';
+    import * as smd from '/static/vendor/smd.min.js';
     // SRI verification happens at the ES module level via importmap or SW; pinning version in URL.
     // sha384 of smd.min.js @0.2.15: sha384-T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa
     window.smd = smd;
@@ -66,12 +59,14 @@
   <!-- Prism line-numbers plugin (loaded after autoloader) -->
   <link id="prism-line-numbers-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.css" crossorigin="anonymous">
   <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.js" integrity="sha384-6QJu8apxMmB9TiPVWzYKF5pRgKcz7snO0/QU+MrWmgBLECQjoa6erxX2VQ5t41Jd" crossorigin="anonymous" defer></script>
-  <!-- xterm.js is lazy-loaded by terminal.js only when the terminal opens. -->
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js" integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc" crossorigin="anonymous" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js" integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL" crossorigin="anonymous" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js" integrity="sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl" crossorigin="anonymous" defer></script>
   <!-- PWA service worker registration -->
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__').catch(function(err) {
+        navigator.serviceWorker.register('/sw.js?v=__WEBUI_VERSION__').catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });
@@ -84,18 +79,40 @@
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
   </button>
   <div class="app-titlebar-inner">
-    <span class="app-titlebar-icon" aria-hidden="true"><img src="static/favicon.svg" width="16" height="16" alt=""></span>
+    <span class="app-titlebar-icon" aria-hidden="true"><img src="/static/favicon.svg" width="16" height="16" alt=""></span>
     <span class="app-titlebar-title" id="appTitlebarTitle">Sidekick</span>
     <span class="app-titlebar-sub" id="appTitlebarSub" hidden></span>
+  </div>
+  <div class="titlebar-utility-actions" id="titlebarUtilityActions" aria-label="Global actions">
+    <div class="titlebar-lang-selector" id="titlebarLangSelector">
+      <button class="titlebar-action-btn lang-selector-btn" id="btnLangSelector" type="button" aria-label="Language" aria-haspopup="menu" aria-expanded="false" aria-controls="langDropdown" onclick="toggleLangDropdown(event)">
+        <span id="currentLangFlag">🇬🇧</span>
+      </button>
+      <div class="lang-dropdown" id="langDropdown" role="menu" hidden>
+        <button class="lang-option" data-lang="en" role="menuitem" aria-label="English" onclick="switchLang('en')">🇬🇧</button>
+        <button class="lang-option" data-lang="de" role="menuitem" aria-label="Deutsch" onclick="switchLang('de')">🇩🇪</button>
+        <button class="lang-option" data-lang="es" role="menuitem" aria-label="Español" onclick="switchLang('es')">🇪🇸</button>
+        <button class="lang-option" data-lang="it" role="menuitem" aria-label="Italiano" onclick="switchLang('it')">🇮🇹</button>
+        <button class="lang-option" data-lang="pt" role="menuitem" aria-label="Português" onclick="switchLang('pt')">🇵🇹</button>
+        <button class="lang-option" data-lang="ru" role="menuitem" aria-label="Русский" onclick="switchLang('ru')">🇷🇺</button>
+        <button class="lang-option" data-lang="ja" role="menuitem" aria-label="日本語" onclick="switchLang('ja')">🇯🇵</button>
+        <button class="lang-option" data-lang="ko" role="menuitem" aria-label="한국어" onclick="switchLang('ko')">🇰🇷</button>
+        <button class="lang-option" data-lang="zh" role="menuitem" aria-label="中文" onclick="switchLang('zh')">🇨🇳</button>
+      </div>
+    </div>
+    <button class="titlebar-action-btn cast-status-btn cast-unavailable" id="btnCastToggle" type="button" aria-label="Hub Cast" onclick="toggleHubCast()">
+      <span id="castStatusIcon">📺</span>
+    </button>
+    <button class="titlebar-action-btn nova-yolo-toggle-btn" id="btnNovaYoloToggle" type="button" aria-label="Nova YOLO autonomy" aria-pressed="false" onclick="toggleNovaYoloMode()">
+      <span aria-hidden="true">⚡</span>
+      <span class="sr-only">Nova YOLO</span>
+    </button>
   </div>
   <div class="app-titlebar-center" id="appTitlebarCenter">
   <div class="mode-toggle" id="modeToggle" role="radiogroup" aria-label="Composer mode">
     <button class="mode-btn active" data-mode="action" data-i18n="mode_action" type="button" aria-pressed="true">Action</button>
     <button class="mode-btn" data-mode="plan" data-i18n="mode_plan" type="button" aria-pressed="false">&#129504; Plan</button>
   </div>
-  <button class="compact-toggle-btn has-tooltip has-tooltip--bottom" id="compactToggleBtn" onclick="toggleCompactLayout()" type="button" data-tooltip="Compact layout" data-i18n-title="compact_layout" aria-label="Compact layout" aria-pressed="false">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="14" x2="20" y2="14" /><line x1="4" y1="20" x2="20" y2="20" /><line x1="4" y1="4" x2="4" y2="20" /><line x1="10" y1="4" x2="10" y2="20" /><line x1="16" y1="4" x2="16" y2="20" /></svg>
-  </button>
   </div>
   <div class="app-titlebar-spacer"></div>
   <script>
@@ -145,48 +162,6 @@
     function toggleReasoningDropdown() { return _toggleChipDropdown('composerReasoningDropdown', 'composerReasoningChip', 'reasoningModeBadge'); }
     function closeReasoningDropdown() { return _closeChipDropdown('composerReasoningDropdown', 'composerReasoningChip', 'reasoningModeBadge'); }
 
-    function browserToggleDrawer() {
-      document.body.classList.toggle('browser-drawer-open');
-      var open = document.body.classList.contains('browser-drawer-open');
-      var badge = $('browserStatusBadge');
-      if (badge) {
-        badge.classList.toggle('browser-state-open', open);
-        badge.classList.toggle('browser-state-closed', !open);
-      }
-      return false;
-    }
-
-    function browserToggleHeaderMenu(event) {
-      if (event && typeof event.preventDefault === 'function') event.preventDefault();
-      if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-      return _toggleChipDropdown('browserStatusMenu', 'browserStatusMenuBtn', 'browserStatusBadge');
-    }
-
-    function browserRunHeaderAction(action) {
-      if (String(action || '') === 'drawer-toggle') return browserToggleDrawer();
-      if (String(action || '') === 'permission') return false;
-      if (String(action || '') === 'explore') return false;
-      if (String(action || '') === 'split') {
-        if (typeof browserToggleSplit === 'function') return browserToggleSplit();
-        return false;
-      }
-      if (String(action || '') === 'fix-findings' || String(action || '') === 'fix') {
-        if (window.browserQaFixFindingsDisabled) return false;
-        if (typeof browserFixFindingsToChat === 'function') return browserFixFindingsToChat();
-        return false;
-      }
-      if (String(action || '') === 'repro' || String(action || '') === 'qa-repro') {
-        if (window.browserQaReproDisabled) return false;
-        if (typeof browserQaReproToChat === 'function') return browserQaReproToChat();
-        return false;
-      }
-      if (String(action || '') === 'fullscreen') return false;
-      if (String(action || '') === 'back' && typeof history.back === 'function') history.back();
-      if (String(action || '') === 'forward' && typeof history.forward === 'function') history.forward();
-      if (String(action || '') === 'reload') location.reload();
-      return false;
-    }
-
     function syncWorkflowChip() {
       var value = $('workflowStatusValue');
       if (!value) return '';
@@ -196,27 +171,13 @@
     function workflowToggleHeaderMenu(event) {
       if (event && typeof event.preventDefault === 'function') event.preventDefault();
       if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-      return _toggleChipDropdown('workflowStatusMenu', 'workflowStatusMenuBtn', 'workflowStatusBadge');
+      return _toggleChipDropdown('workflowStatusMenu', 'workflowStatusBadge', 'workflowStatusBadge');
     }
 
     function workflowRunHeaderAction(action) {
       if (String(action || '') === 'model') return toggleModelDropdown();
       if (String(action || '') === 'reasoning') return toggleReasoningDropdown();
       if (String(action || '') === 'browser-toggle') return browserToggleDrawer();
-      if (String(action || '') === 'browser-webui-smoke') {
-        if (typeof browserRunHeaderAction === 'function') return browserRunHeaderAction('webui-smoke');
-        return false;
-      }
-      if (String(action || '') === 'browser-fix-findings') {
-        if (window.browserQaFixFindingsDisabled) return false;
-        if (typeof browserRunHeaderAction === 'function') return browserRunHeaderAction('fix-findings');
-        return false;
-      }
-      if (String(action || '') === 'browser-repro') {
-        if (window.browserQaReproDisabled) return false;
-        if (typeof browserRunHeaderAction === 'function') return browserRunHeaderAction('repro');
-        return false;
-      }
       return false;
     }
 
@@ -276,14 +237,11 @@
         if (badge) {
           badge.classList.remove('approval-mode-manual', 'approval-mode-smart', 'approval-mode-off');
           badge.classList.add('approval-mode-' + normalized);
-          badge.setAttribute('title', 'Approval mode: ' + normalized + '. Click to cycle.');
           badge.setAttribute('aria-label', 'Approval mode ' + normalized + '. Click to cycle.');
         }
         if (value) value.textContent = normalized;
         window._approvalMode = normalized;
         if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
-        if (typeof _browserUpdateHeaderBadge === 'function') _browserUpdateHeaderBadge();
-        if (typeof browserRefreshAgentContext === 'function') browserRefreshAgentContext();
         return normalized;
       }
 
@@ -360,123 +318,85 @@
       }
     })();
   </script>
+  <div class="titlebar-space" id="titlebarSpace">
+    <button class="titlebar-space-btn" id="titlebarSpaceBtn" type="button" aria-label="Switch space" aria-haspopup="menu" aria-expanded="false">
+      <span class="titlebar-space-emoji" id="titlebarSpaceEmoji">&#128193;</span>
+      <span class="titlebar-space-name" id="titlebarSpaceName">default</span>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+    </button>
+    <div class="titlebar-space-dropdown" id="titlebarSpaceDropdown" hidden></div>
+  </div>
+  <script>
+    (function initInitialSpaceLabel(){
+      var slug = '';
+      try { slug = (new URLSearchParams(window.location.search || '').get('workspace') || '').trim().toLowerCase(); } catch (_) {}
+      if (!slug) {
+        try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
+      }
+      if (!slug) slug = 'nova';
+      if (!slug) return;
+      var name = document.getElementById('titlebarSpaceName');
+      var btn = document.getElementById('titlebarSpaceBtn');
+      if (name) name.textContent = slug;
+      if (btn) btn.setAttribute('aria-label', 'Switch space (' + slug + ')');
+    })();
+  </script>
+  <!-- Legacy selector contract: <div class="titlebar-actions" id="titlebarActions"> -->
   <div class="titlebar-actions titlebar-actions--workflow-compact" id="titlebarActions">
-    <div class="titlebar-space" id="titlebarSpace">
-      <button class="titlebar-space-btn" id="titlebarSpaceBtn" type="button" title="Switch space" aria-haspopup="menu" aria-expanded="false" data-testid="titlebar-space-button">
-        <span class="titlebar-space-emoji" id="titlebarSpaceEmoji">&#128193;</span>
-        <span class="titlebar-space-name" id="titlebarSpaceName">default</span>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
-      </button>
-      <div class="titlebar-space-dropdown" id="titlebarSpaceDropdown" hidden></div>
-    </div>
-    <div class="titlebar-lang-selector" id="titlebarLangSelector">
-      <button class="titlebar-action-btn lang-selector-btn has-tooltip has-tooltip--bottom" id="btnLangSelector" type="button" data-tooltip="Language" aria-label="Language" onclick="toggleLangDropdown(event)">
-        <span id="currentLangFlag">🇬🇧</span>
-      </button>
-      <div class="lang-dropdown" id="langDropdown" role="menu" hidden>
-        <button class="lang-option" data-lang="en" role="menuitem" aria-label="English" onclick="switchLang('en')">🇬🇧</button>
-        <button class="lang-option" data-lang="de" role="menuitem" aria-label="Deutsch" onclick="switchLang('de')">🇩🇪</button>
-        <button class="lang-option" data-lang="es" role="menuitem" aria-label="Español" onclick="switchLang('es')">🇪🇸</button>
-        <button class="lang-option" data-lang="it" role="menuitem" aria-label="Italiano" onclick="switchLang('it')">🇮🇹</button>
-        <button class="lang-option" data-lang="pt" role="menuitem" aria-label="Português" onclick="switchLang('pt')">🇵🇹</button>
-        <button class="lang-option" data-lang="ru" role="menuitem" aria-label="Русский" onclick="switchLang('ru')">🇷🇺</button>
-        <button class="lang-option" data-lang="ja" role="menuitem" aria-label="日本語" onclick="switchLang('ja')">🇯🇵</button>
-        <button class="lang-option" data-lang="ko" role="menuitem" aria-label="한국어" onclick="switchLang('ko')">🇰🇷</button>
-        <button class="lang-option" data-lang="zh" role="menuitem" aria-label="中文" onclick="switchLang('zh')">🇨🇳</button>
-      </div>
-    </div>
     <div class="titlebar-status-cluster titlebar-status-cluster--compact">
-      <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle." title="Approval mode: manual. Click to cycle.">
+      <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle.">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
       </button>
-      <div class="titlebar-browser-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-        <button class="titlebar-approval-badge titlebar-browser-badge browser-state-closed browser-state-locked" id="browserStatusBadge" type="button" aria-live="polite" aria-label="Browser drawer closed, agent locked. Click to toggle." title="Browser drawer closed, agent locked. Click to toggle." onclick="browserToggleDrawer()" data-testid="browser-status-badge">
-          <span class="titlebar-approval-dot" aria-hidden="true"></span>
-          <span class="titlebar-approval-value" id="browserStatusValue">browser closed · locked</span>
-        </button>
-        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="browserStatusMenuBtn" type="button" data-tooltip="Browser actions" aria-label="Browser actions" aria-haspopup="menu" aria-controls="browserStatusMenu" aria-expanded="false" onclick="browserToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;" data-testid="browser-actions-button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
-        </button>
-        <div class="browser-header-menu" id="browserStatusMenu" role="menu" aria-label="Browser actions" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:240px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
-          <div style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Browser actions</div>
-          <button class="titlebar-action-btn" id="browserHeaderDrawerAction" type="button" role="menuitem" onclick="browserRunHeaderAction('drawer-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="browser-header-drawer-action">Toggle drawer</button>
-          <button class="titlebar-action-btn" id="browserHeaderPermissionAction" type="button" role="menuitem" onclick="browserRunHeaderAction('permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="browser-header-permission-action">Enable browser watch</button>
-          <button class="titlebar-action-btn" id="browserHeaderExploreAction" type="button" role="menuitem" onclick="browserRunHeaderAction('explore')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Switch to Explore mode</button>
-          <button class="titlebar-action-btn" id="browserHeaderSplitAction" type="button" role="menuitem" onclick="browserRunHeaderAction('split')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Split browser and chat</button>
-          <button class="titlebar-action-btn" id="browserHeaderFullscreenAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullscreen')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Maximize browser</button>
-          <div role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-          <button class="titlebar-action-btn" id="browserHeaderBackAction" type="button" role="menuitem" onclick="browserRunHeaderAction('back')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go back</button>
-          <button class="titlebar-action-btn" id="browserHeaderForwardAction" type="button" role="menuitem" onclick="browserRunHeaderAction('forward')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Go forward</button>
-          <button class="titlebar-action-btn" id="browserHeaderReloadAction" type="button" role="menuitem" onclick="browserRunHeaderAction('reload')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Reload page</button>
-          <button class="titlebar-action-btn" id="browserHeaderStopAction" type="button" role="menuitem" onclick="browserRunHeaderAction('stop')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Stop loading</button>
-          <button class="titlebar-action-btn" id="browserHeaderNavigateAction" type="button" role="menuitem" onclick="browserRunHeaderAction('navigate')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Navigate to URL...</button>
-          <button class="titlebar-action-btn" id="browserHeaderNewTabAction" type="button" role="menuitem" onclick="browserRunHeaderAction('newtab')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open current in new tab</button>
-          <button class="titlebar-action-btn" id="browserHeaderCopyUrlAction" type="button" role="menuitem" onclick="browserRunHeaderAction('copyurl')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy current URL</button>
-          <button class="titlebar-action-btn" id="browserHeaderQaAction" type="button" role="menuitem" onclick="browserRunHeaderAction('qa')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Run browser QA</button>
-          <button class="titlebar-action-btn" id="browserHeaderWebuiSmokeAction" type="button" role="menuitem" onclick="browserRunHeaderAction('webui-smoke')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="browser-header-webui-smoke-action">Run WebUI smoke</button>
-          <button class="titlebar-action-btn" id="browserHeaderTestPageAction" type="button" role="menuitem" onclick="browserRunHeaderAction('test-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Test current page</button>
-          <button class="titlebar-action-btn" id="browserHeaderRetestPageAction" type="button" role="menuitem" onclick="browserRunHeaderAction('retest-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Retest current page</button>
-          <button class="titlebar-action-btn" id="browserHeaderFixFindingsAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fix-findings')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Fix browser findings</button>
-          <button class="titlebar-action-btn" id="browserHeaderReproAction" type="button" role="menuitem" onclick="browserRunHeaderAction('repro')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Create browser repro</button>
-          <button class="titlebar-action-btn" id="browserHeaderPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
-          <button class="titlebar-action-btn" id="browserHeaderFullPageContextAction" type="button" role="menuitem" onclick="browserRunHeaderAction('fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
-          <button class="titlebar-action-btn" id="browserHeaderScreenshotAction" type="button" role="menuitem" onclick="browserRunHeaderAction('screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
-        </div>
-      </div>
-      <button class="titlebar-approval-badge titlebar-research-badge research-mode-quick" id="researchModeBadge" type="button" aria-live="polite" aria-label="Research mode quick. Click to switch to deep research." title="Research mode: quick. Click to switch to deep research." onclick="workflowToggleResearchMode(event)">
+      <button class="titlebar-approval-badge titlebar-research-badge research-mode-quick" id="researchModeBadge" type="button" hidden data-titlebar-secondary="1" aria-live="polite" aria-label="Research mode quick. Click to switch to deep research." onclick="workflowToggleResearchMode(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="researchModeValue">quick</span>
       </button>
-      <button class="titlebar-approval-badge titlebar-mcp-badge mcp-state-loading" id="mcpStatusBadge" type="button" aria-live="polite" aria-label="MCP loading. Click to open MCP settings." title="MCP loading. Click to open MCP settings." onclick="workflowOpenMcpPanel(event)">
+      <button class="titlebar-approval-badge titlebar-mcp-badge mcp-state-loading" id="mcpStatusBadge" type="button" hidden data-titlebar-secondary="1" aria-live="polite" aria-label="MCP loading. Click to open MCP settings." onclick="workflowOpenMcpPanel(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="mcpStatusValue">mcp loading</span>
       </button>
-      <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." title="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
+      <button class="titlebar-approval-badge" id="modelStatusBadge" type="button" aria-live="polite" aria-label="Conversation model. Click to open the model picker." onclick="toggleModelDropdown()">
+        <span class="titlebar-approval-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
         <span id="modelStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">model</span>
       </button>
-      <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." title="Reasoning effort: default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
+      <button class="titlebar-approval-badge" id="reasoningModeBadge" type="button" aria-live="polite" aria-label="Reasoning effort default. Click to open the reasoning picker." onclick="toggleReasoningDropdown()">
+        <span class="titlebar-approval-icon" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span>
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="reasoningModeValue">default</span>
       </button>
-      <button class="titlebar-approval-badge titlebar-workspace-badge workspace-state-loading" id="workspaceStatusBadge" type="button" aria-live="polite" aria-label="Workspace loading. Click to open workspaces." title="Workspace loading. Click to open workspaces." onclick="workflowOpenWorkspacePanel(event)">
+      <button class="titlebar-approval-badge titlebar-workspace-badge workspace-state-loading" id="workspaceStatusBadge" type="button" aria-live="polite" aria-label="Workspace loading. Click to open workspaces." onclick="workflowOpenWorkspacePanel(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="workspaceStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">workspace</span>
       </button>
-      <button class="titlebar-approval-badge titlebar-subagents-badge subagents-state-loading" id="subagentsStatusBadge" type="button" aria-live="polite" aria-label="Subagents loading. Click to open subagents." title="Subagents loading. Click to open subagents." onclick="workflowOpenSubagentsPanel(event)">
+      <button class="titlebar-approval-badge titlebar-subagents-badge subagents-state-loading" id="subagentsStatusBadge" type="button" hidden data-titlebar-secondary="1" aria-live="polite" aria-label="Subagents loading. Click to open subagents." onclick="workflowOpenSubagentsPanel(event)">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="subagentsStatusValue" style="display:inline-block;text-transform:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">subagents loading</span>
       </button>
       <div class="titlebar-workflow-group" style="position:relative;display:inline-flex;align-items:center;gap:4px;">
-        <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status." title="Workflow summary. Click to show workflow status." onclick="if(typeof executeCommand==='function') executeCommand('/workflow status')">
+        <button class="titlebar-approval-badge titlebar-workflow-badge" id="workflowStatusBadge" type="button" aria-live="polite" aria-label="Workflow summary. Click to show workflow status. Cmd/Ctrl+K opens the palette." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)">
           <span class="titlebar-approval-dot" aria-hidden="true"></span>
-          <span class="titlebar-approval-value" id="workflowStatusValue" style="display:inline-block;text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
+          <span class="titlebar-approval-value titlebar-workflow-value" id="workflowStatusValue" style="text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
         </button>
-        <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="workflowStatusMenuBtn" type="button" data-tooltip="Status menu (Cmd/Ctrl+Shift+K)" aria-label="Status menu. Shortcut Cmd/Ctrl+Shift+K." aria-haspopup="menu" aria-controls="workflowStatusMenu" aria-expanded="false" onclick="workflowToggleHeaderMenu(event)" style="width:28px;height:28px;flex:0 0 auto;" data-testid="workflow-status-menu-button">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
-        </button>
-        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Status menu" hidden style="position:absolute;top:calc(100% + 6px);right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
-          <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Status menu</div>
-          <div id="workflowHeaderMenuSummary" class="workflow-header-menu-summary" role="img" aria-label="Workflow status overview" title="Workflow status overview" data-tooltip="Workflow status overview">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <rect x="3.5" y="3.5" width="7" height="7" rx="1.8"></rect>
-              <rect x="13.5" y="3.5" width="7" height="7" rx="1.8"></rect>
-              <rect x="3.5" y="13.5" width="7" height="7" rx="1.8"></rect>
-              <rect x="13.5" y="13.5" width="7" height="7" rx="1.8"></rect>
-            </svg>
-          </div>
+        <button class="titlebar-action-btn" id="workflowStatusMenuBtn" type="button" data-testid="workflow-status-menu-button" aria-label="Status menu. Shortcut Cmd/Ctrl+Shift+K." onclick="workflowToggleHeaderMenu(event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>
+        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;bottom:calc(100% + 6px);top:auto;right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));overflow:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+          <div id="workflowHeaderMenuSummary" class="workflow-header-menu-summary" aria-label="Workflow status overview" data-tooltip="Workflow status overview"></div>
+          <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
           <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
             <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="approval" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('approval')">Approval</button>
-          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="model" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('model')">Model</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="reasoning" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('reasoning')">Reasoning</button>
           <button class="workflow-header-preset-chip" type="button" data-workflow-preset="browser" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('browser')">Browser</button>
-          <button class="workflow-header-preset-chip" type="button" data-workflow-preset="subagents" aria-pressed="false" onclick="workflowApplyHeaderMenuPreset('subagents')">Subagents</button>
-        </div>
+          </div>
         <input id="workflowHeaderMenuSearch" class="model-search-input" type="search" placeholder="Search workflow actions…" autocomplete="off" spellcheck="false" oninput="workflowFilterHeaderMenu(this.value)" onkeydown="workflowHeaderMenuSearchKeydown(event)" style="width:100%;margin:0 0 2px 0;box-sizing:border-box;">
         <div id="workflowHeaderMenuEmpty" hidden style="padding:6px 10px;font-size:12px;color:var(--muted);">No matching actions</div>
         <button class="titlebar-action-btn" id="workflowHeaderPrimarySubagentAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagent-primary')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open first subagent</button>
         <button class="titlebar-action-btn" id="workflowHeaderStatusAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('status')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Show status</button>
+        <button class="titlebar-action-btn" id="compactToggleBtn" type="button" role="menuitem" aria-label="Compact layout" aria-pressed="false" onclick="workflowRunHeaderAction('compact-layout')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="14" x2="20" y2="14" /><line x1="4" y1="20" x2="20" y2="20" /><line x1="4" y1="4" x2="4" y2="20" /><line x1="10" y1="4" x2="10" y2="20" /><line x1="16" y1="4" x2="16" y2="20" /></svg>
+          Compact layout
+        </button>
+        <button class="titlebar-action-btn" id="workflowHeaderCopyConversationAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('copy-conversation')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Copy conversation</button>
         <button class="titlebar-action-btn" id="workflowHeaderExecAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('exec')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Run exec prompt</button>
         <button class="titlebar-action-btn" id="workflowHeaderReviewAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('review')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open local review</button>
         <button class="titlebar-action-btn" id="workflowHeaderImageAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('image')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Generate image</button>
@@ -485,54 +405,50 @@
         <button class="titlebar-action-btn" id="workflowHeaderApprovalSmartAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('approval-smart')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Approval: smart</button>
         <button class="titlebar-action-btn" id="workflowHeaderApprovalOffAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('approval-off')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Approval: off</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-        <button class="titlebar-action-btn" id="workflowHeaderModelAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('model')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open model picker</button>
+        <button class="titlebar-action-btn" id="workflowHeaderModelAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('model')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open model picker</button>
         <button class="titlebar-action-btn" id="workflowHeaderReasoningAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('reasoning')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open reasoning picker</button>
-        <button class="titlebar-action-btn" id="workflowHeaderThinkingAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('thinking')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open thinking models</button>
+        <button class="titlebar-action-btn" id="workflowHeaderThinkingAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('thinking')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open thinking models</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserToggleAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-toggle')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle browser drawer</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserPermissionAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Enable browser watch</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserMenuAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-menu')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open browser actions</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserQaAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-qa')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Run browser QA</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserWebuiSmokeAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-webui-smoke')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;" data-testid="workflow-browser-webui-smoke-action">Run WebUI smoke</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserTestPageAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-test-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Test current page</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserRetestPageAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-retest-page')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Retest current page</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserFixFindingsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-fix-findings')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Fix browser findings</button>
-        <button class="titlebar-action-btn" id="workflowHeaderBrowserReproAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-repro')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Create browser repro</button>
+        <button class="titlebar-action-btn" id="workflowHeaderBrowserPermissionAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-permission')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle browser control</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserScreenshotAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-screenshot')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send screenshot to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-pagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send readable page text to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderBrowserFullPageContextAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('browser-fullpagecontext')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Send full page context to chat</button>
         <button class="titlebar-action-btn" id="workflowHeaderWebBackendAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('web-backend')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Toggle web backend</button>
-        <button class="titlebar-action-btn" id="workflowHeaderMcpAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('mcp')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open MCP settings</button>
+        <button class="titlebar-action-btn" id="workflowHeaderMcpAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('mcp')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open MCP settings</button>
         <button class="titlebar-action-btn" id="workflowHeaderResearchAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('research')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open research panel</button>
         <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
-        <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>
+        <button class="titlebar-action-btn" id="workflowHeaderSubagentsAction" data-workflow-sticky-hidden="1" type="button" role="menuitem" onclick="workflowRunHeaderAction('subagents')" style="width:100%;height:auto;justify-content:flex-start;padding:7px 10px;font-size:12px;">Open subagents</button>
+        <div data-workflow-separator="1" role="separator" style="height:1px;background:var(--border2);margin:4px 4px;"></div>
+        <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Language</div>
+        <div class="workflow-header-lang-row" role="toolbar" aria-label="Language selection" style="display:flex;flex-wrap:wrap;gap:4px;padding:0 4px 2px;">
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="English" onclick="switchLang('en')">EN</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Deutsch" onclick="switchLang('de')">DE</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Español" onclick="switchLang('es')">ES</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Italiano" onclick="switchLang('it')">IT</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Português" onclick="switchLang('pt')">PT</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="Русский" onclick="switchLang('ru')">RU</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="日本語" onclick="switchLang('ja')">JP</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="한국어" onclick="switchLang('ko')">KR</button>
+          <button class="workflow-header-preset-chip" type="button" role="menuitem" aria-label="中文" onclick="switchLang('zh')">ZH</button>
+        </div>
         <div id="workflowHeaderMenuFooter" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px 2px;margin-top:2px;font-size:11px;color:var(--muted);border-top:1px solid var(--border2);">
           <span id="workflowHeaderMenuSelection">Enter to run</span>
-          <span id="workflowHeaderMenuShortcuts">Esc to close · ?? to move</span>
+          <span id="workflowHeaderMenuShortcuts">Enter to run · Esc to close · ↑↓ to move</span>
         </div>
       </div>
+      </div>
     </div>
-    </div>
-    <button class="titlebar-action-btn game-mode-toggle-btn has-tooltip has-tooltip--bottom" id="btnGameModeToggle" onclick="toggleGameMode()" type="button" data-tooltip="Game Mode" data-i18n-title="game_mode_toggle" data-i18n-aria-label="game_mode_toggle" aria-label="Game Mode" aria-pressed="false">
+    <button class="titlebar-action-btn game-mode-toggle-btn" id="btnGameModeToggle" onclick="toggleGameMode()" type="button" data-i18n-aria-label="game_mode_toggle" aria-label="Game Mode" aria-pressed="false">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 18v2"/><path d="M18 18v2"/></svg>
     </button>
-    <button class="titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable" id="btnCastToggle" type="button" data-tooltip="Hub Cast" aria-label="Hub Cast" onclick="toggleHubCast()">
-      <span id="castStatusIcon" aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="2.2"/>
-          <circle cx="5.5" cy="6.5" r="1.4"/>
-          <circle cx="18.5" cy="6.5" r="1.4"/>
-          <circle cx="12" cy="18.5" r="1.4"/>
-          <path d="M6.8 7.6 10.1 10.4"/>
-          <path d="M17.2 7.6 13.9 10.4"/>
-          <path d="M12 14.4v2.1"/>
-        </svg>
-      </span>
-    </button>
-    <button class="titlebar-action-btn has-tooltip has-tooltip--bottom" id="btnRebootSidekick" onclick="confirmReboot()" type="button" data-tooltip="Neustarten (Browser+Caches+Server)" aria-label="Neustarten">
+    <button class="titlebar-action-btn" id="btnRebootSidekick" onclick="confirmReboot()" type="button" aria-label="Neustarten">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
     </button>
-    <button class="titlebar-action-btn titlebar-action-btn-danger has-tooltip has-tooltip--bottom" id="btnShutdownSidekick" onclick="confirmShutdown()" type="button" data-tooltip="Herunterfahren (Browser+Server schliessen)" aria-label="Herunterfahren">
+    <button class="titlebar-action-btn" id="titlebarThemeToggle" onclick="toggleThemeMode()" type="button" aria-label="Tag-/Nachtmodus umschalten" aria-pressed="false">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a7 7 0 1 0 9.8 9.8Z"/></svg>
+    </button>
+    <button class="titlebar-action-btn titlebar-action-btn-danger" id="btnShutdownSidekick" onclick="confirmShutdown()" type="button" aria-label="Herunterfahren">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
     </button>
   </div>
@@ -547,21 +463,6 @@
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
     </button>
   </div>
-  <script>
-    (function initInitialSpaceLabel(){
-      var slug = '';
-      try { slug = (new URLSearchParams(window.location.search || '').get('workspace') || '').trim().toLowerCase(); } catch (_) {}
-      if (!slug) {
-        try { slug = (localStorage.getItem('sidekick-active-workspace') || '').trim().toLowerCase(); } catch (_) {}
-      }
-      if (!slug) slug = 'nova';
-      if (!slug) return;
-      var name = document.getElementById('titlebarSpaceName');
-      var btn = document.getElementById('titlebarSpaceBtn');
-      if (name) name.textContent = slug;
-      if (btn) btn.setAttribute('title', 'Switch space (' + slug + ')');
-    })();
-  </script>
 </header>
 <div class="layout">
   <nav class="rail" aria-label="Primary navigation">
@@ -586,7 +487,7 @@
 
     <div class="rail-spacer"></div>
     <button class="rail-btn has-tooltip" id="railSidebarToggle" onclick="toggleSidebar()" data-tooltip="Sidebar ein-/ausklappen" aria-label="Sidebar ein-/ausklappen"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg></button>
-    <button class="rail-btn nav-tab has-tooltip" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+    <button class="rail-btn nav-tab has-tooltip" data-panel="settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" data-i18n-aria-label="tab_settings" aria-label="Settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
   </nav>
   <div class="codex-split-layout">
   <div class="codex-split-pane">
@@ -611,10 +512,10 @@
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="discord" data-label="Discord" onclick="switchPanel('discord',{fromRailClick:true})" data-tooltip="Discord" data-i18n-title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.66V19a3 3 0 0 1 3-3h4a3 3 0 0 1 3 3v1.66"/></svg></button>
       <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="appstore" data-label="Appstore" onclick="switchPanel('appstore',{fromRailClick:true})" data-tooltip="Appstore" aria-label="Appstore"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.3 2.1 7L12 16.2 5.4 20.3l2.1-7L2 9h7z"/><circle cx="12" cy="12" r="2" fill="currentColor" opacity=".4"/></svg></button>
       <!-- Settings button mirrored here for mobile (rail is desktop-only via @media >=768px). Keep in sync with rail entry. -->
-      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" data-label="Settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+      <button class="nav-tab has-tooltip has-tooltip--bottom" data-panel="settings" data-label="Settings" onclick="switchPanel('settings',{fromRailClick:true})" data-tooltip="Settings" data-i18n-title="tab_settings" data-i18n-aria-label="tab_settings" aria-label="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
       <!-- Sidebar Space Selector -->
       <button class="nav-tab nav-tab-space has-tooltip has-tooltip--bottom" id="sidebarSpaceBtn" type="button" onclick="openSidebarSpaceSelector()" data-tooltip="Switch space" aria-label="Switch space">
-        <span class="nav-tab-space-emoji" id="sidebarSpaceEmoji">??</span>
+        <span class="nav-tab-space-emoji" id="sidebarSpaceEmoji">📁</span>
         <span class="nav-tab-space-name" id="sidebarSpaceName">default</span>
       </button>
       <div class="sidebar-space-dropdown" id="sidebarSpaceDropdown" hidden></div>
@@ -639,7 +540,7 @@
       <div class="panel-head">
         <span data-i18n="tab_chat">Chat</span>
         <div class="panel-head-actions">
-          <button class="panel-head-btn has-tooltip has-tooltip--bottom-right" id="btnNewChat" data-tooltip="New conversation (Cmd+K)" data-i18n-title="new_conversation" aria-label="New conversation">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom-right" id="btnNewChat" data-tooltip="New conversation (Cmd/Ctrl+N)" data-i18n-title="new_conversation" aria-label="New conversation">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
         </div>
@@ -720,16 +621,16 @@
         <div class="agents-wizard hidden" id="agentsWizard">
           <!-- Step 1: Welcome -->
           <div class="agents-wizard-step" id="wizardStep1">
-            <div class="agents-wizard-icon">??</div>
+            <div class="agents-wizard-icon">🤖</div>
             <h1 class="agents-wizard-title">Willkommen bei deinen KI-Agenten</h1>
             <p class="agents-wizard-desc">Deine persönlichen Assistenten für jede Aufgabe. Wähle aus vorgefertigten Spezialisten oder erstelle eigene Agenten – ganz nach deinem Bedarf.</p>
             <div class="agents-wizard-features">
-              <div class="agents-wizard-feature"><span>??</span> Chatte mit jedem Agenten wie mit einem Freund</div>
-              <div class="agents-wizard-feature"><span>??</span> Jeder Agent hat eigene Persönlichkeit & Erinnerungen</div>
-              <div class="agents-wizard-feature"><span>?</span> Agenten arbeiten autonom im Terminal & Workspace</div>
-              <div class="agents-wizard-feature"><span>??</span> Spezialisiert auf Code, Social Media, Recherche & mehr</div>
+              <div class="agents-wizard-feature"><span>💬</span> Chatte mit jedem Agenten wie mit einem Freund</div>
+              <div class="agents-wizard-feature"><span>🧠</span> Jeder Agent hat eigene Persönlichkeit & Erinnerungen</div>
+              <div class="agents-wizard-feature"><span>⚙️</span> Agenten arbeiten autonom im Terminal & Workspace</div>
+              <div class="agents-wizard-feature"><span>🔧</span> Spezialisiert auf Code, Social Media, Recherche & mehr</div>
             </div>
-            <button class="agents-wizard-btn primary" onclick="wizardNext()">Los geht's ?</button>
+            <button class="agents-wizard-btn primary" onclick="wizardNext()">Los geht's →</button>
           </div>
           <!-- Step 2: Agent Selection -->
           <div class="agents-wizard-step hidden" id="wizardStep2">
@@ -763,7 +664,7 @@
               <button class="agents-chat-back" onclick="closeAgentChat()" title="Back" style="border:none;background:none;color:var(--muted);cursor:pointer;padding:4px;margin-right:4px">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
               </button>
-              <span class="agents-chat-avatar" id="agentsChatAvatar" style="font-size:20px;margin-right:6px">??</span>
+              <span class="agents-chat-avatar" id="agentsChatAvatar" style="font-size:20px;margin-right:6px">🤖</span>
               <div style="flex:1">
                 <div class="agents-chat-name" id="agentsChatName" style="font-size:13px;font-weight:600">Agent</div>
                 <div class="agents-chat-sub" id="agentsChatSub" style="font-size:11px;color:var(--muted)">0 messages</div>
@@ -783,7 +684,7 @@
           <div class="agents-workspace-view hidden" id="agentsWorkspaceView" style="flex:1;display:flex;flex-direction:column;min-width:400px;background:var(--bg);border-left:1px solid var(--border)">
             <!-- Workspace Toolbar -->
             <div class="agents-workspace-toolbar">
-              <span class="agents-chat-avatar" id="agentsWsAvatar" style="font-size:18px">??</span>
+              <span class="agents-chat-avatar" id="agentsWsAvatar" style="font-size:18px">🤖</span>
               <span style="font-size:12px;font-weight:600" id="agentsWsName">Agent</span>
               <span style="font-size:11px;color:var(--muted);margin:0 4px">·</span>
               <span style="font-size:11px;color:var(--muted)" id="agentsWsWorkdir">~</span>
@@ -924,7 +825,7 @@
                   style="width:100%;font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);cursor:pointer;"></select>
         </div>
         <!-- Gmail-style compose button (red pill) -->
-        <button class="gmail-compose-btn" onclick="gmailOpenCompose()" style="margin:8px 12px;padding:10px 16px;background:#c62828;color:#fff;border:none;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:box-shadow .2s,transform .15s;">?? Verfassen</button>
+        <button class="gmail-compose-btn" onclick="gmailOpenCompose()" style="margin:8px 12px;padding:10px 16px;background:#c62828;color:#fff;border:none;border-radius:16px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:box-shadow .2s,transform .15s;">✉️ Verfassen</button>
         <!-- Mailbox navigation -->
         <nav class="gmail-nav" id="gmailNav" style="display:flex;flex-direction:column;gap:0;padding:4px 0;">
           <div class="gmail-nav-item active" data-folder="INBOX" onclick="gmailNavSelect('INBOX')" style="display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:13px;border-radius:0 24px 24px 0;margin-right:12px;transition:background .12s;">
@@ -938,12 +839,12 @@
             <span class="gmail-nav-count" id="gmailNavCountSent" style="margin-left:auto;font-size:11px;background:var(--border);padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;display:none;"></span>
           </div>
           <div class="gmail-nav-item" data-folder="[Gmail]/Entwürfe" onclick="gmailNavSelect('[Gmail]/Entwürfe')" style="display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:13px;border-radius:0 24px 24px 0;margin-right:12px;transition:background .12s;">
-            <span style="width:20px;text-align:center;">??</span>
+            <span style="width:20px;text-align:center;">📝</span>
             <span>Entwürfe</span>
             <span class="gmail-nav-count" id="gmailNavCountDrafts" style="margin-left:auto;font-size:11px;background:var(--border);padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;display:none;"></span>
           </div>
           <div class="gmail-nav-item" data-folder="[Gmail]/Spam" onclick="gmailNavSelect('[Gmail]/Spam')" style="display:flex;align-items:center;gap:8px;padding:7px 16px;cursor:pointer;font-size:13px;border-radius:0 24px 24px 0;margin-right:12px;transition:background .12s;">
-            <span style="width:20px;text-align:center;">??</span>
+            <span style="width:20px;text-align:center;">🚫</span>
             <span>Spam</span>
             <span class="gmail-nav-count" id="gmailNavCountSpam" style="margin-left:auto;font-size:11px;background:var(--border);padding:1px 7px;border-radius:10px;min-width:18px;text-align:center;display:none;"></span>
           </div>
@@ -1019,15 +920,15 @@
       <div class="side-menu" id="settingsMenu">
         <button type="button" class="side-menu-item active" data-settings-section="conversation" onclick="switchSettingsSection('conversation')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span>Conversation</span>
+          <span data-i18n="settings_section_switcher_conversation">Conversation</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="appearance" onclick="switchSettingsSection('appearance')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          <span>Appearance</span>
+          <span data-i18n="settings_section_switcher_appearance">Appearance</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="preferences" onclick="switchSettingsSection('preferences')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
-          <span>Preferences</span>
+          <span data-i18n="settings_section_switcher_preferences">Preferences</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="providers" onclick="switchSettingsSection('providers')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
@@ -1035,11 +936,11 @@
         </button>
         <button type="button" class="side-menu-item" data-settings-section="plugins" onclick="switchSettingsSection('plugins')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l3 7h7l-5.5 4.3 2.1 7L12 16.2 5.4 20.3l2.1-7L2 9h7z"/></svg>
-          <span>Plugins</span>
+          <span data-i18n="plugins_tab_title">Plugins</span>
         </button>
         <button type="button" class="side-menu-item" data-settings-section="system" onclick="switchSettingsSection('system')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><line x1="6" y1="7" x2="6.01" y2="7"/><line x1="6" y1="17" x2="6.01" y2="17"/></svg>
-          <span>System</span>
+          <span data-i18n="settings_section_switcher_system">System</span>
         </button>
       </div>
     </div>
@@ -1102,7 +1003,7 @@
       <button id="jumpToSessionStartBtn" style="display:none"></button>
       <button id="scrollToBottomBtn" class="scroll-to-bottom-btn" style="display:none" onclick="scrollToBottom()" aria-label="Scroll to bottom" data-i18n-aria-label="session_jump_end_label" data-i18n-title="session_jump_end_label">▶</button>
       <div class="empty-state" id="emptyState">
-        <div class="empty-logo"><img src="static/favicon.svg" width="80" height="80" alt="Sidekick logo"></div>
+        <div class="empty-logo"><img src="/static/favicon.svg" width="80" height="80" alt="Sidekick logo"></div>
         <h2 data-i18n="empty_title">What can I help with?</h2>
         <p data-i18n="empty_subtitle">Ask anything, run commands, explore files, or manage your scheduled tasks.</p>
         <div class="suggestion-grid">
@@ -1210,13 +1111,13 @@
       </div>
       <!-- -- Goal Banner -- -->
       <div id="goalBanner" class="goal-banner" style="display:none" role="status" aria-live="polite">
-        <span class="goal-banner-icon" id="goalBannerIcon">?</span>
+        <span class="goal-banner-icon" id="goalBannerIcon">⊙</span>
         <span class="goal-banner-text" id="goalBannerText"></span>
         <span class="goal-banner-turns" id="goalBannerTurns"></span>
         <span class="goal-banner-actions" id="goalBannerActions">
-          <button type="button" class="goal-banner-btn goal-btn-pause" id="goalBtnPause" onclick="cmdGoal('pause')" title="Pause goal" aria-label="Pause goal">?</button>
-          <button type="button" class="goal-banner-btn goal-btn-resume" id="goalBtnResume" onclick="cmdGoal('resume')" title="Resume goal" aria-label="Resume goal" style="display:none">?</button>
-          <button type="button" class="goal-banner-btn goal-btn-clear" id="goalBtnClear" onclick="cmdGoal('clear')" title="Clear goal" aria-label="Clear goal">?</button>
+          <button type="button" class="goal-banner-btn goal-btn-pause" id="goalBtnPause" onclick="cmdGoal('pause')" title="Pause goal" aria-label="Pause goal">⏸</button>
+          <button type="button" class="goal-banner-btn goal-btn-resume" id="goalBtnResume" onclick="cmdGoal('resume')" title="Resume goal" aria-label="Resume goal" style="display:none">▶</button>
+          <button type="button" class="goal-banner-btn goal-btn-clear" id="goalBtnClear" onclick="cmdGoal('clear')" title="Clear goal" aria-label="Clear goal">🗑️</button>
         </span>
       </div>
       <!-- Queue pill outer: same positioning wrapper as .queue-card (max-width + padding) -->
@@ -1235,25 +1136,30 @@
           <span class="voice-mode-indicator" id="voiceModeIndicator"></span>
           <span class="voice-mode-label" id="voiceModeLabel"></span>
         </div>
+        <div id="composerStatusStrip" class="composer-status-strip"></div>
         <div class="action-chips" id="actionChips">
-          <button type="button" class="action-chip" data-cmd="/review" onclick="actionChipClick('/review')" title="Review current state" data-tooltip="Review current state" aria-label="Review current state">Review</button>
-          <button type="button" class="action-chip" data-cmd="/test" onclick="actionChipClick('/test')" title="Run tests" data-tooltip="Run tests" aria-label="Run tests">Test</button>
-          <button type="button" class="action-chip" data-cmd="/install" onclick="actionChipClick('/install')" title="Install packages" data-tooltip="Install packages" aria-label="Install packages">Install</button>
-          <button type="button" class="action-chip" data-cmd="/deploy" onclick="actionChipClick('/deploy')" title="Deploy to production" data-tooltip="Deploy to production" aria-label="Deploy to production">Deploy</button>
-<button type="button" class="action-chip plan-mode-toggle" data-cmd="/plan" onclick="_togglePlanMode()" title="Toggle Plan Mode (prepends /plan)" data-tooltip="Toggle Plan Mode (prepends /plan)" aria-label="Toggle Plan Mode">&#129504; Plan</button>
+          <button type="button" class="action-chip" data-cmd="/review" onclick="actionChipClick('/review')" aria-label="Review current state">Review</button>
+          <button type="button" class="action-chip" data-cmd="/test" onclick="actionChipClick('/test')" aria-label="Run tests">Test</button>
+          <button type="button" class="action-chip" data-cmd="/install" onclick="actionChipClick('/install')" aria-label="Install packages">Install</button>
+          <button type="button" class="action-chip" data-cmd="/deploy" onclick="actionChipClick('/deploy')" aria-label="Deploy to production">Deploy</button>
         </div>
         <!-- -- Plan Mode Banner -- -->
         <div class="plan-banner" id="planBanner" style="display:none">
           <span class="plan-banner-icon">&#129504;</span>
           <span class="plan-banner-label">Plan Mode &mdash; Nur Planung, keine Ausf&uuml;hrung. Schalte zur&uuml;ck f&uuml;r Action Mode.</span>
-          <button type="button" class="goal-exit-btn plan-banner-exit" onclick="_togglePlanMode()" title="Exit Plan Mode" aria-label="Exit Plan Mode">?</button>
+          <button type="button" class="goal-exit-btn plan-banner-exit" onclick="_togglePlanMode()" title="Exit Plan Mode" aria-label="Exit Plan Mode">✕</button>
         </div>
         <!-- -- Goal Input Row (visible in goal-mode) -- -->
         <div class="goal-input-row" id="goalInputRow">
-          <span class="goal-input-icon">??</span>
+          <span class="goal-input-icon">🎯</span>
           <textarea class="goal-input-field" id="goalInputField" rows="1" placeholder="Define a goal for Nova…" data-i18n-placeholder="goal_input_placeholder"></textarea>
-          <button type="button" class="goal-send-btn" id="goalSendBtn" onclick="_submitGoal()" title="Set goal and start" aria-label="Set goal and start">? Set Goal</button>
-          <button type="button" class="goal-exit-btn" id="goalExitBtn" onclick="_exitGoalMode()" title="Cancel goal mode" aria-label="Cancel goal mode">?</button>
+          <div class="goal-budget-control" id="goalBudgetControl" role="group" aria-label="Persistent goal runs">
+            <span class="goal-budget-label">Runs</span>
+            <input class="goal-budget-input" id="goalTurnBudgetInput" type="number" min="1" step="1" value="20" aria-label="Persistent goal runs">
+            <button type="button" class="goal-budget-unlimited-btn" id="goalUnlimitedBtn" onclick="_toggleGoalBudgetUnlimited()" title="Unlimited goal runs" aria-label="Unlimited goal runs" aria-pressed="false">∞</button>
+          </div>
+          <button type="button" class="goal-send-btn" id="goalSendBtn" onclick="_submitGoal()" title="Set goal and start" aria-label="Set goal and start">🎯 Set Goal</button>
+          <button type="button" class="goal-exit-btn" id="goalExitBtn" onclick="_exitGoalMode()" title="Cancel goal mode" aria-label="Cancel goal mode">✕</button>
         </div>
         <textarea id="msg" rows="1" placeholder="Message Nova…"></textarea>
         <div class="msg-expand-bar is-collapsed" id="msgExpandBar">
@@ -1266,10 +1172,10 @@
         <div class="composer-footer">
           <div class="composer-left">
             <input type="file" id="fileInput" class="file-input-visually-hidden" multiple accept="image/*,text/*,application/pdf,application/json,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.md,.py,.js,.ts,.yaml,.yml,.toml,.csv,.sh,.txt,.log,.env,.xls,.xlsx,.doc,.docx,.zip,.tar,.gz,.tgz,.bz2,.xz">
-            <button type="button" class="icon-btn has-tooltip" id="btnAttach" data-tooltip="Attach files" aria-label="Attach files">
+            <button type="button" class="icon-btn" id="btnAttach" aria-label="Attach files">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
             </button>
-            <button class="icon-btn mic-btn has-tooltip" id="btnMic" title="Dictate" data-tooltip="Dictate" data-i18n-title="voice_dictate" aria-label="Dictate" style="display:none">
+            <button class="icon-btn mic-btn" id="btnMic" aria-label="Dictate" style="display:none">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="9" y="1" width="6" height="12" rx="3"/>
                 <path d="M5 10a7 7 0 0 0 14 0"/>
@@ -1277,7 +1183,7 @@
                 <line x1="8" y1="23" x2="16" y2="23"/>
               </svg>
             </button>
-            <button class="icon-btn voice-mode-btn has-tooltip" id="btnVoiceMode" title="Voice mode" data-tooltip="Voice mode" data-i18n-title="voice_mode_toggle" aria-label="Voice mode" style="display:none">
+            <button class="icon-btn voice-mode-btn" id="btnVoiceMode" aria-label="Voice mode" style="display:none">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <!-- Lucide audio-lines: signals two-way voice conversation, matches ChatGPT/Gemini convention. -->
                 <path d="M2 10v4"/>
@@ -1288,11 +1194,11 @@
                 <path d="M22 10v4"/>
               </svg>
 </button>
-            <button type="button" class="icon-btn has-tooltip goal-mode-toggle" id="btnGoalModeToggle" onclick="_toggleGoalMode()" title="Set a persistent goal" data-tooltip="Set a persistent goal" aria-label="Set a persistent goal">
+            <button type="button" class="icon-btn goal-mode-toggle" id="btnGoalModeToggle" onclick="_toggleGoalMode()" aria-label="Set a persistent goal">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
             </button>
             <div class="composer-divider" aria-hidden="true"></div>
-            <button type="button" class="icon-btn has-tooltip browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" data-tooltip="Browser drawer" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer" data-testid="composer-browser-drawer-button">
+            <button type="button" class="icon-btn browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="4" width="18" height="16" rx="2"/>
                 <path d="M3 8h18"/>
@@ -1300,12 +1206,12 @@
                 <path d="M14 12h2v2"/>
               </svg>
             </button>
-            <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" title="YOLO mode — click to disable" data-i18n-title="yolo_pill_title_active">
-              <span class="yolo-pill-icon" aria-hidden="true">?</span>
+            <button class="yolo-pill" id="yoloPill" type="button" onclick="cmdYolo()" style="display:none" aria-label="YOLO mode active. Click to disable.">
+              <span class="yolo-pill-icon" aria-hidden="true">⚡</span>
               <span class="yolo-pill-label" data-i18n="yolo_pill_label">YOLO</span>
             </button>
             <div id="profileChipWrap" class="composer-profile-wrap">
-              <button class="composer-profile-chip profile-chip" id="profileChip" type="button" onclick="toggleProfileDropdown()" title="Switch profile">
+              <button class="composer-profile-chip profile-chip" id="profileChip" type="button" onclick="toggleProfileDropdown()" aria-label="Switch profile">
                 <span class="composer-profile-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
                 <span class="composer-profile-label" id="profileChipLabel">default</span>
                 <span class="composer-profile-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
@@ -1313,28 +1219,29 @@
             </div>
             <div class="composer-ws-wrap">
               <div class="composer-workspace-group ws-chip" id="composerWorkspaceGroup" role="group" aria-label="Workspace controls">
-                <button class="composer-workspace-files-btn" id="btnWorkspacePanelToggle" type="button" onclick="toggleFileTreePanel()" title="Show file tree panel" aria-pressed="false" aria-label="Toggle file tree panel">
+                <button class="composer-workspace-files-btn" id="btnWorkspacePanelToggle" type="button" onclick="toggleFileTreePanel()" aria-pressed="false" aria-label="Toggle file tree panel">
                   <span class="composer-workspace-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
                 </button>
-                <button class="composer-workspace-chip" id="composerWorkspaceChip" type="button" onclick="toggleComposerWsDropdown()" title="Switch space" disabled>
+                <button class="composer-workspace-chip" id="composerWorkspaceChip" type="button" onclick="toggleComposerWsDropdown()" aria-label="Switch space" disabled>
                   <span class="composer-workspace-label" id="composerWorkspaceLabel"></span>
                   <span class="composer-workspace-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
                 </button>
+                <span class="git-badge" id="composerGitBadge" style="display:none"></span>
             </div>
             </div>
-            <label class="sandbox-toggle has-tooltip" id="sandboxToggleLabel" data-tooltip="Sandbox-Einschränkung aktiv" title="Sandbox-Einschränkung aktiv">
+            <label class="sandbox-toggle" id="sandboxToggleLabel" aria-label="Sandbox restriction active">
               <input type="checkbox" id="sandboxToggle" checked>
               <span class="sandbox-toggle-icon">🧪</span>
             </label>
-            <button class="icon-btn has-tooltip" id="btnTerminalToggle" type="button" onclick="toggleComposerTerminal()" title="Open workspace terminal" data-tooltip="Open workspace terminal" aria-pressed="false" disabled>
+            <button class="icon-btn" id="btnTerminalToggle" type="button" onclick="toggleComposerTerminal()" aria-label="Open workspace terminal" aria-pressed="false" disabled>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
             </button>
-            <button class="icon-btn composer-mobile-config-btn" id="composerMobileConfigBtn" type="button" onclick="toggleMobileComposerConfig()" title="Workspace, model, reasoning, and context settings" aria-label="Workspace, model, reasoning, and context settings" aria-haspopup="true" aria-expanded="false" aria-controls="composerMobileConfigPanel">
+            <button class="icon-btn composer-mobile-config-btn" id="composerMobileConfigBtn" type="button" onclick="toggleMobileComposerConfig()" aria-label="Workspace and context settings" aria-haspopup="true" aria-expanded="false" aria-controls="composerMobileConfigPanel">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
               <span class="composer-mobile-ctx-badge" id="composerMobileCtxBadge" aria-hidden="true" style="display:none">0</span>
             </button>
             <div class="composer-model-wrap">
-              <button class="composer-model-chip" id="composerModelChip" type="button" onclick="toggleModelDropdown()" title="Conversation model">
+              <button class="composer-model-chip" id="composerModelChip" type="button" onclick="toggleModelDropdown()" aria-label="Conversation model">
                 <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
                 <span class="composer-model-body">
                   <span class="composer-model-name">
@@ -1345,7 +1252,7 @@
                 </span>
                 <span class="composer-model-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
               </button>
-              <select id="modelSelect" class="composer-model-select" title="Conversation model" aria-hidden="true" tabindex="-1">
+              <select id="modelSelect" class="composer-model-select" aria-hidden="true" tabindex="-1">
               <optgroup label="OpenAI">
                 <option value="openai/gpt-5.4-mini">GPT-5.4 Mini</option>
                 <option value="openai/gpt-4o">GPT-4o</option>
@@ -1368,29 +1275,29 @@
             </select>
             </div>
             <div class="composer-reasoning-wrap" id="composerReasoningWrap" style="display:none">
-              <button class="composer-reasoning-chip" id="composerReasoningChip" type="button" onclick="toggleReasoningDropdown()" title="Reasoning effort level">
+              <button class="composer-reasoning-chip" id="composerReasoningChip" type="button" onclick="toggleReasoningDropdown()" aria-label="Reasoning effort level">
                 <span class="composer-reasoning-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span>
                 <span class="composer-reasoning-label" id="composerReasoningLabel"></span>
                 <span class="composer-reasoning-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
               </button>
             </div>
             <div class="composer-toolsets-wrap" id="composerToolsetsWrap">
-              <button class="composer-toolsets-chip" id="composerToolsetsChip" type="button" onclick="toggleToolsetsDropdown()" title="Session toolsets">
+              <button class="composer-toolsets-chip" id="composerToolsetsChip" type="button" onclick="toggleToolsetsDropdown()" aria-label="Session toolsets">
                 <span class="composer-toolsets-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                 <span class="composer-toolsets-label" id="composerToolsetsLabel">Global</span>
                 <span class="composer-toolsets-chevron" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
               </button>
             </div>
             <div class="composer-mode-wrap" id="composerModeWrap">
-              <button class="composer-mode-chip active" data-mode="queue" type="button" onclick="setComposerBusyMode('queue')" title="Queue: messages wait until the agent is free" aria-label="Queue mode">
+              <button class="composer-mode-chip active" data-mode="queue" type="button" onclick="setComposerBusyMode('queue')" aria-label="Queue mode">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 5H3"/><path d="M16 12H3"/><path d="M9 19H3"/><path d="m16 16-3 3 3 3"/><path d="M21 5v12a2 2 0 0 1-2 2h-6"/></svg>
                 <span>Queue</span>
               </button>
-              <button class="composer-mode-chip" data-mode="steer" type="button" onclick="setComposerBusyMode('steer')" title="Steer: inject a mid-turn correction without interrupting" aria-label="Steer mode">
+              <button class="composer-mode-chip" data-mode="steer" type="button" onclick="setComposerBusyMode('steer')" aria-label="Steer mode">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-1.804 5.411a2 2 0 0 1-1.265 1.265L7.76 16.24l1.804-5.411a2 2 0 0 1 1.265-1.265z"/></svg>
                 <span>Steer</span>
               </button>
-              <button class="composer-mode-chip" data-mode="bg" type="button" onclick="toggleBgMode()" title="Background: run a task in the background without blocking the chat" aria-label="Background mode">
+              <button class="composer-mode-chip" data-mode="bg" type="button" onclick="toggleBgMode()" aria-label="Background mode">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
                 <span>BG</span>
               </button>
@@ -1419,7 +1326,7 @@
                 </div>
               </div>
             </div>
-            <span class="bg-badge" id="bgBadge" style="display:none" title="Background tasks running">0</span>
+            <span class="bg-badge" id="bgBadge" style="display:none" aria-label="Background tasks running">0</span>
             <button class="ctx-info-btn has-tooltip has-tooltip--left" id="btnContextInfo" type="button" onclick="toggleContextInfoPanel()" data-tooltip="What's in context?" aria-label="Show context info" title="Context breakdown">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
             </button>
@@ -1435,18 +1342,10 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
             </button>
           </div>
-          <div class="composer-mobile-config-panel" id="composerMobileConfigPanel" aria-label="Workspace, model, reasoning, and context settings">
-            <button class="composer-mobile-config-action" id="composerMobileWorkspaceAction" type="button" onclick="toggleComposerWsDropdown()" title="Switch space">
+          <div class="composer-mobile-config-panel" id="composerMobileConfigPanel" aria-label="Workspace and context settings">
+            <button class="composer-mobile-config-action" id="composerMobileWorkspaceAction" type="button" onclick="toggleComposerWsDropdown()" aria-label="Switch space">
               <span class="composer-workspace-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
               <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_workspace">Workspace</span><span class="composer-mobile-config-value" id="composerMobileWorkspaceLabel"></span></span>
-            </button>
-            <button class="composer-mobile-config-action" id="composerMobileModelAction" type="button" onclick="toggleModelDropdown()" title="Conversation model">
-              <span class="composer-model-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
-              <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_model">Model</span><span class="composer-mobile-config-value" id="composerMobileModelLabel"></span></span>
-            </button>
-            <button class="composer-mobile-config-action" id="composerMobileReasoningAction" type="button" onclick="toggleReasoningDropdown()" title="Reasoning effort level" style="display:none">
-              <span class="composer-reasoning-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.46 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.46 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg></span>
-              <span class="composer-mobile-config-copy"><span class="composer-mobile-config-kicker" data-i18n="composer_mobile_reasoning">Reasoning</span><span class="composer-mobile-config-value" id="composerMobileReasoningLabel"></span></span>
             </button>
             <div class="composer-mobile-config-action composer-mobile-context-action" id="composerMobileContextAction" role="group" aria-label="Context window" style="display:none">
               <span class="composer-mobile-config-copy composer-mobile-context-copy">
@@ -1457,28 +1356,6 @@
                 <span class="composer-mobile-context-detail" id="composerMobileContextCost" style="display:none"></span>
               </span>
               <button class="ctx-compress-btn composer-mobile-context-compress" id="composerMobileCtxCompressBtn" type="button" style="display:none"></button>
-            </div>
-            <div class="composer-advanced-panel" id="composerAdvancedPanel" aria-label="Advanced composer options">
-              <button class="composer-mobile-config-action" type="button" onclick="setComposerBusyMode('queue')" title="Queue messages while Nova is busy">
-                <span aria-hidden="true">?</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Queue</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="setComposerBusyMode('steer')" title="Steer the active response">
-                <span aria-hidden="true">?</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Steer</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="toggleBgMode()" title="Run next task in background">
-                <span aria-hidden="true">?</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Background</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="toggleComposerTerminal()" title="Open workspace terminal">
-                <span aria-hidden="true">&gt;_</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Terminal</span></span>
-              </button>
-              <button class="composer-mobile-config-action" type="button" onclick="const s=document.getElementById('sandboxToggle'); if(s){s.checked=!s.checked; s.dispatchEvent(new Event('change',{bubbles:true}));}" title="Toggle sandbox restrictions">
-                <span aria-hidden="true">??</span>
-                <span class="composer-mobile-config-copy"><span class="composer-mobile-config-value">Sandbox</span></span>
-              </button>
             </div>
           </div>
           <div class="profile-dropdown" id="profileDropdown"></div>
@@ -1507,6 +1384,40 @@
         <div class="upload-bar-wrap" id="uploadBarWrap"><div class="upload-bar" id="uploadBar"></div></div>
         <div class="browser-chat-context-bar" id="browserChatContextBar" onclick="browserToggleDrawer()" role="button" tabindex="0" aria-label="Open browser drawer"></div>
       </div>  <!-- /composer-box -->
+      <script>
+        (function relocateHeaderControlsToComposer(){
+          var strip = document.getElementById('composerStatusStrip');
+          if (!strip) return;
+
+          var cluster = document.getElementById('composerStatusStripCluster');
+          if (!cluster) {
+            cluster = document.createElement('div');
+            cluster.id = 'composerStatusStripCluster';
+            cluster.className = 'titlebar-status-cluster';
+            strip.appendChild(cluster);
+          }
+
+          function move(node) {
+            if (!node) return;
+            if (node.parentElement === cluster) return;
+            cluster.appendChild(node);
+          }
+
+          move(document.getElementById('btnBrowserDrawerToggle'));
+          move(document.querySelector('.titlebar-workflow-group'));
+          var actionChips = document.getElementById('actionChips');
+          if (actionChips && actionChips.parentElement !== strip) {
+            strip.insertBefore(actionChips, cluster);
+          }
+          var topbarCluster = document.querySelector('.app-titlebar .titlebar-status-cluster');
+          if (topbarCluster) {
+            topbarCluster.hidden = true;
+          }
+
+          if (typeof syncModelChip === 'function') syncModelChip();
+          if (typeof syncWorkflowChip === 'function') syncWorkflowChip();
+        })();
+      </script>
       <div class="browser-drawer" id="browserDrawer" aria-label="Live websearch drawer">
         <div class="browser-drawer-shell">
           <div class="panel-header browser-drawer-header">
@@ -1515,7 +1426,7 @@
             <button type="button" class="browser-backend-status" id="browserBackendStatus" data-tooltip="Toggle web backend" aria-label="Toggle web backend" onclick="browserToggleWebBackend()">Web auto</button>
             <span class="browser-permission-status" id="browserPermissionStatus">Agent locked</span>
             <div class="panel-actions">
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserPermissionBtn" data-tooltip="Allow Nova agent to watch and run browser QA" aria-label="Allow Nova agent to watch and run browser QA" aria-pressed="false" onclick="browserTogglePermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.5-2.2"/></svg></button>
+              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserPermissionBtn" data-tooltip="Allow Nova agent browser control" aria-label="Allow Nova agent browser control" aria-pressed="false" onclick="browserTogglePermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.5-2.2"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserExploreBtn" data-tooltip="Switch to Explore mode" aria-label="Switch to Explore mode" aria-pressed="false" onclick="browserToggleExploreMode()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserAgentStopBtn" data-tooltip="Stop Nova agent browser handoff" aria-label="Stop Nova agent browser handoff" onclick="browserStopPermission()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6"/><path d="M15 9l-6 6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnBack" data-tooltip="Back" aria-label="Back" onclick="browserGoBack()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></button>
@@ -1526,11 +1437,6 @@
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserBtnOpenTab" data-tooltip="Maximize browser" aria-label="Maximize browser" aria-pressed="false" onclick="browserToggleFullscreen()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendPageContextBtn" data-tooltip="Send readable page text to chat" aria-label="Send readable page text to chat" onclick="browserSendPageContextToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/><path d="M9 13h6"/><path d="M9 17h6"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendFullPageContextBtn" data-tooltip="Send full page context to chat" aria-label="Send full page context to chat" onclick="browserSendFullPageContextToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h5"/><path d="M8 11h8"/><path d="M8 15h8"/></svg></button>
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserQaBtn" data-tooltip="Run browser QA" aria-label="Run browser QA" onclick="browserRunBrowserQaToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 4v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V7l7-4z"/><path d="M9 12l2 2 4-5"/></svg></button>
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserWebuiSmokeBtn" data-tooltip="Run WebUI smoke" aria-label="Run WebUI smoke" onclick="browserRunWebuiSmokeToChat()" data-testid="browser-drawer-webui-smoke-button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 20h10"/><path d="M10 18v2"/><path d="M14 18v2"/><path d="M8 11l2 2 5-5"/></svg></button>
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserTestPageBtn" data-tooltip="Test current page" aria-label="Test current page" onclick="browserTestCurrentPageToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l2 2 4-4"/><path d="M20 6L9 17l-5-5"/><path d="M4 20h16"/></svg></button>
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserRetestPageBtn" data-tooltip="Retest current page" aria-label="Retest current page" onclick="browserRetestCurrentPageToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg></button>
-              <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserFixFindingsBtn" data-tooltip="Fix browser findings" aria-label="Fix browser findings" onclick="browserFixFindingsToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5l-2.2 2.2-3-3 2.2-2.2z"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom" id="browserSendToChatBtn" data-tooltip="Send screenshot to chat" aria-label="Send screenshot to chat" onclick="browserSendScreenshotToChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg></button>
               <button class="panel-icon-btn has-tooltip has-tooltip--bottom browser-drawer-close-btn" id="browserBtnCloseDrawer" data-tooltip="Close browser drawer" aria-label="Close browser drawer" onclick="browserPanelDeactivated()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
@@ -1548,22 +1454,6 @@
           </div>
           <div class="browser-status-detail" id="browserActionSummary" aria-live="polite"></div>
           <div class="browser-action-trace" id="browserActionTrace" aria-label="Browser action trace" aria-live="polite"></div>
-          <div class="browser-qa-card" id="browserQaCard" hidden aria-live="polite">
-            <div class="browser-qa-main">
-              <span class="browser-qa-status" id="browserQaCardStatus">QA</span>
-              <span class="browser-qa-url" id="browserQaCardUrl">No browser QA report yet</span>
-            </div>
-            <div class="browser-qa-metrics" id="browserQaCardMetrics"></div>
-            <div class="browser-qa-actions">
-              <button type="button" class="browser-qa-action-btn" id="browserQaFixBtn" onclick="browserFixFindingsToChat()">Fix</button>
-              <button type="button" class="browser-qa-action-btn" id="browserQaRetestBtn" onclick="browserRetestCurrentPageToChat()">Retest</button>
-              <button type="button" class="browser-qa-action-btn" id="browserQaReproBtn" onclick="browserQaReproToChat()">Repro</button>
-              <button type="button" class="browser-qa-action-btn" id="browserQaCopyBtn" onclick="browserCopyQaReport()">Copy</button>
-              <button type="button" class="browser-qa-action-btn" id="browserQaDetailsBtn" aria-expanded="false" onclick="browserToggleQaDetails()">Details</button>
-              <button type="button" class="browser-qa-action-btn browser-qa-clear-btn" id="browserQaClearBtn" onclick="browserClearQaReports()">Clear</button>
-            </div>
-            <div class="browser-qa-details" id="browserQaDetails" hidden></div>
-          </div>
           <div class="browser-stage-wrap" id="browserStageWrap">
             <div class="browser-stage" id="browserStage" aria-label="Browser viewport" role="application">
               <img id="browserFrameImage" class="browser-frame-image" alt="Browser screenshot" src="" draggable="false">
@@ -1575,9 +1465,9 @@
                 <div class="browser-diff-overlay" id="browserDiffOverlay" aria-hidden="true">Change detected</div>
               </div>
             </div>
-            <div class="browser-empty-state" id="browserEmptyState" aria-hidden="true">
-              <div class="browser-empty-title">Browser not attached</div>
-              <div class="browser-empty-text">Open a chat session to attach the browser runtime.</div>
+            <div class="browser-empty-state" id="browserEmptyState">
+              <div class="browser-empty-title" id="browserEmptyStateTitle">Browser not attached</div>
+              <div class="browser-empty-text" id="browserEmptyStateText">Open a chat session to attach the browser runtime.</div>
             </div>
           </div>
         </div>
@@ -1847,11 +1737,11 @@
     <!-- Gmail main view -->
     <div id="mainMail" class="mail-main" style="display:none">
       <div class="mail-header">
-        <span>?? Mail</span>
+        <span>📧 Mail</span>
         <select id="mailInboxSelector" onchange="_mailSwitchInbox(this.value)">
           <option value="">— Keine Inbox ausgewählt —</option>
         </select>
-        <button onclick="_mailOpenConfig()" title="Mail-Konfiguration">??</button>
+        <button onclick="_mailOpenConfig()" title="Mail-Konfiguration">⚙️</button>
       </div>
       <div class="mail-content" id="mailContent">
         <div class="mail-loading">Lade Posteingang…</div>
@@ -1987,14 +1877,14 @@
     <div id="mainSettings" class="main-view">
       <div class="settings-main">
         <div class="settings-section-switcher">
-          <label for="settingsSectionDropdown">Settings section</label>
+          <label for="settingsSectionDropdown" data-i18n="settings_section_switcher_label">Settings section</label>
           <select id="settingsSectionDropdown" onchange="switchSettingsSection(this.value)">
-            <option value="conversation">Conversation</option>
-            <option value="appearance">Appearance</option>
-            <option value="preferences">Preferences</option>
-            <option value="providers">Providers</option>
-            <option value="plugins">Plugins</option>
-            <option value="system">System</option>
+            <option value="conversation" data-i18n="settings_section_switcher_conversation">Conversation</option>
+            <option value="appearance" data-i18n="settings_section_switcher_appearance">Appearance</option>
+            <option value="preferences" data-i18n="settings_section_switcher_preferences">Preferences</option>
+            <option value="providers" data-i18n="settings_section_switcher_providers">Providers</option>
+            <option value="plugins" data-i18n="settings_section_switcher_plugins">Plugins</option>
+            <option value="system" data-i18n="settings_section_switcher_system">System</option>
           </select>
         </div>
         <div class="settings-pane active" id="settingsPaneConversation">
@@ -2315,35 +2205,35 @@
           <div class="settings-pane" id="settingsPanePlugins">
             <div class="settings-section-head">
               <div>
-                <div class="settings-section-title">Plugins</div>
-                <div class="settings-section-meta">Installed Apps und Plugin-Settings. Gmail kann hier pro Space verbunden werden.</div>
+                <div class="settings-section-title" data-i18n="plugins_section_title">Plugins</div>
+                <div class="settings-section-meta" data-i18n="plugins_section_meta">Installed apps and plugin settings. Gmail can be connected per space here.</div>
               </div>
             </div>
             <div class="settings-field" style="margin-bottom:12px;">
-              <label>Gmail App</label>
+              <label data-i18n="plugins_gmail_app_label">Gmail App</label>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface);">
                 <div>
-                  <div style="font-weight:700;color:var(--text);">?? Gmail</div>
-                  <div style="font-size:12px;color:var(--muted);">App-Passwörter speichern und Space-Zugriff verwalten.</div>
+                  <div style="font-weight:700;color:var(--text);">📧 Gmail</div>
+                  <div style="font-size:12px;color:var(--muted);" data-i18n="plugins_gmail_app_desc">Store app passwords and manage space access.</div>
                 </div>
-                <button class="settings-action-btn" type="button" onclick="_appstoreOpenGmailSettings()">App Settings</button>
+                <button class="settings-action-btn" type="button" onclick="_appstoreOpenGmailSettings()" data-i18n="plugins_app_settings">App Settings</button>
               </div>
             </div>
             <div class="settings-field" style="margin-bottom:12px;">
-              <label>Discord App</label>
+              <label data-i18n="plugins_discord_app_label">Discord App</label>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface);">
                 <div>
-                  <div style="font-weight:700;color:var(--text);">?? Discord</div>
-                  <div style="font-size:12px;color:var(--muted);">Bot-Zugang speichern und Space-Zugriff verwalten.</div>
+                  <div style="font-weight:700;color:var(--text);">💬 Discord</div>
+                  <div style="font-size:12px;color:var(--muted);" data-i18n="plugins_discord_app_desc">Store bot credentials and manage space access.</div>
                 </div>
-                <button class="settings-action-btn" type="button" onclick="_appstoreOpenDiscordSettings()">App Settings</button>
+                <button class="settings-action-btn" type="button" onclick="_appstoreOpenDiscordSettings()" data-i18n="plugins_app_settings">App Settings</button>
               </div>
             </div>
             <div id="pluginsList" style="display:flex;flex-direction:column;margin-top:4px">
               <!-- Populated dynamically by loadPluginsPanel() -->
             </div>
             <div id="pluginsEmpty" style="display:none;text-align:center;padding:32px 0;color:var(--muted);font-size:13px">
-              No Sidekick plugins are currently visible. Install or enable plugins from the Sidekick CLI/config to see them here.
+              <span data-i18n="plugins_empty">No Sidekick plugins are currently visible. Install or enable plugins from the Sidekick CLI/config to see them here.</span>
             </div>
           </div>
           <div class="settings-pane" id="settingsPaneSystem">
@@ -2368,28 +2258,48 @@
             <button class="sm-btn" id="btnDisableAuth" onclick="disableAuth()" style="margin-top:6px;width:100%;padding:8px;font-weight:600;color:#e8a030;border-color:rgba(232,160,48,.3);display:none" data-i18n="disable_auth">Disable Auth</button>
             <button class="sm-btn" id="btnSignOut" onclick="signOut()" style="margin-top:6px;width:100%;padding:8px;font-weight:600;color:var(--accent);border-color:rgba(233,69,96,.3);display:none" data-i18n="sign_out">Sign Out</button>
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-              <label for="settingsDashboardMode">Official Nova Dashboard</label>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Show a nav-rail link when the official <code>sidekick dashboard</code> is reachable. Overrides are restricted to loopback URLs.</div>
+              <label for="settingsDashboardMode" data-i18n="settings_dashboard_mode_label">Official Nova Dashboard</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="settings_dashboard_mode_desc">Show a nav-rail link when the official sidekick dashboard is reachable. Overrides are restricted to loopback URLs.</div>
               <select id="settingsDashboardMode" style="width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px">
-                <option value="auto">Auto-detect</option>
-                <option value="always">Always show</option>
-                <option value="never">Never show</option>
+                <option value="auto" data-i18n="settings_dashboard_mode_auto">Auto-detect</option>
+                <option value="always" data-i18n="settings_dashboard_mode_always">Always show</option>
+                <option value="never" data-i18n="settings_dashboard_mode_never">Never show</option>
               </select>
               <input type="text" id="settingsDashboardUrl" placeholder="http://127.0.0.1:9119" style="margin-top:8px;width:100%;padding:8px;background:var(--code-bg);color:var(--text);border:1px solid var(--border2);border-radius:6px;font-size:13px">
-              <button class="sm-btn" onclick="saveDashboardSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600">Save dashboard link settings</button>
+              <button class="sm-btn" onclick="saveDashboardSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600" data-i18n="settings_dashboard_link_save">Save dashboard link settings</button>
               <div id="settingsDashboardStatus" class="settings-autosave-status" aria-live="polite"></div>
+            </div>
+            <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+              <label style="display:block;font-weight:600;margin-bottom:6px" for="settingsWorktreeEnabled">Worktree defaults</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Control whether new worktree-backed conversations are enabled by default and whether they are removed on exit.</div>
+              <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer">
+                <input type="checkbox" id="settingsWorktreeEnabled" style="margin-top:2px">
+                <span>
+                  <span style="display:block;font-weight:600">Enable worktree mode</span>
+                  <span style="display:block;font-size:11px;color:var(--muted);line-height:1.4">Use a git worktree for new conversations when available.</span>
+                </span>
+              </label>
+              <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsWorktreeCleanupOnExit" style="margin-top:2px">
+                <span>
+                  <span style="display:block;font-weight:600">Cleanup on exit</span>
+                  <span style="display:block;font-size:11px;color:var(--muted);line-height:1.4">Remove worktrees automatically when Sidekick exits.</span>
+                </span>
+              </label>
+              <button class="sm-btn" type="button" onclick="saveWorktreeSettings()" style="margin-top:8px;width:100%;padding:7px;font-weight:600">Save worktree settings</button>
+              <div id="settingsWorktreeStatus" class="settings-autosave-status" aria-live="polite"></div>
             </div>
             <!-- Gateway Status Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-              <label>Gateway Status</label>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Status of the Nova gateway (Telegram, Discord, Slack, etc.)</div>
-              <div id="gatewayStatusCard"><span style="color:var(--muted);font-size:12px">Loading…</span></div>
+              <label data-i18n="settings_gateway_status_label">Gateway Status</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="settings_gateway_status_desc">Status of the Nova gateway (Telegram, Discord, Slack, etc.)</div>
+              <div id="gatewayStatusCard"><span style="color:var(--muted);font-size:12px" data-i18n="loading">Loading…</span></div>
             </div>
             <!-- Subagent Status Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
-              <label>Subagents</label>
-              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Active delegate_task workers and the spawn pause switch.</div>
-              <div id="subagentStatusCard"><span style="color:var(--muted);font-size:12px">Loading…</span></div>
+              <label data-i18n="settings_subagents_label">Subagents</label>
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px" data-i18n="settings_subagents_desc">Active delegate_task workers and the spawn pause switch.</div>
+              <div id="subagentStatusCard"><span style="color:var(--muted);font-size:12px" data-i18n="loading">Loading…</span></div>
             </div>
             <!-- MCP Servers Section -->
             <div class="settings-field" style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
@@ -2484,41 +2394,41 @@
             <!-- AI Summary Card -->
             <div class="gmail-ai-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
                 <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;">
-                    <span>?? Zusammenfassung</span>
+                    <span>🤖 Zusammenfassung</span>
                 </div>
                 <div class="gmail-ai-card-body" id="gmailAISummaryBody" style="padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">
                     <div style="text-align:center;padding:12px 0;">
-                        <span style="font-size:36px;display:block;margin-bottom:8px;">??</span>
+                        <span style="font-size:36px;display:block;margin-bottom:8px;">🤖</span>
                         <span style="color:var(--muted);">Wähle eine E-Mail aus</span>
                     </div>
                 </div>
             </div>
             <!-- Smart Actions Card -->
             <div class="gmail-ai-card" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
-                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">?? Smart Actions</div>
+                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">🤖 Smart Actions</div>
                 <div class="gmail-ai-card-body" style="padding:4px;">
-                    <button class="gmail-ai-action" onclick="gmailCreateTask()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">?? Task erstellen</button>
-                    <button class="gmail-ai-action" onclick="gmailToast('Zusammenfassung gespeichert','success')" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">?? Zusammenfassung speichern</button>
-                    <button class="gmail-ai-action" onclick="gmailAISetReminder()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">?? Follow-up in 3 Tagen</button>
+                    <button class="gmail-ai-action" onclick="gmailCreateTask()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">📋 Task erstellen</button>
+                    <button class="gmail-ai-action" onclick="gmailToast('Zusammenfassung gespeichert','success')" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">💾 Zusammenfassung speichern</button>
+                    <button class="gmail-ai-action" onclick="gmailAISetReminder()" style="width:100%;text-align:left;padding:7px 10px;border:none;background:transparent;color:var(--text);font-size:12px;cursor:pointer;border-radius:6px;display:flex;align-items:center;gap:8px;">🔄 Follow-up in 3 Tagen</button>
                 </div>
             </div>
             <!-- AI Reply Draft Card -->
             <div class="gmail-ai-card" id="gmailAIReply" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
                 <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;">
-                    <span>?? Antwortentwurf</span>
-                    <button class="gmail-ai-refresh" onclick="gmailAIRegenerate()" title="Neu generieren" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;">??</button>
+                    <span>✉️ Antwortentwurf</span>
+                    <button class="gmail-ai-refresh" onclick="gmailAIRegenerate()" title="Neu generieren" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;">🔄</button>
                 </div>
                 <div class="gmail-ai-card-body" id="gmailAIReplyBody" style="padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">
                     <div style="color:var(--muted);font-size:11px;">Wähle eine E-Mail aus...</div>
                 </div>
                 <div class="gmail-ai-card-actions" id="gmailAIReplyActions" style="display:none;gap:4px;padding:6px 12px;border-top:1px solid var(--border2);">
-                    <button class="gmail-ai-use" onclick="gmailAIUseDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:11px;">?? Übernehmen</button>
-                    <button class="gmail-ai-edit" onclick="gmailAIEditDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:11px;">?? Bearbeiten</button>
+                    <button class="gmail-ai-use" onclick="gmailAIUseDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-text);cursor:pointer;font-size:11px;">📋 Übernehmen</button>
+                    <button class="gmail-ai-edit" onclick="gmailAIEditDraft()" style="padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;font-size:11px;">✏️ Bearbeiten</button>
                 </div>
             </div>
             <!-- Related Emails Card -->
             <div class="gmail-ai-card" id="gmailAIRelated" style="background:var(--bg);border:1px solid var(--border2);border-radius:8px;overflow:hidden;flex-shrink:0;">
-                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">?? Verwandt</div>
+                <div class="gmail-ai-card-header" style="padding:7px 12px;font-size:12px;font-weight:600;background:var(--surface-alt);border-bottom:1px solid var(--border2);">🔗 Verwandt</div>
                 <div class="gmail-ai-card-body" id="gmailAIRelatedBody" style="padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">
                     <div style="color:var(--muted);font-size:11px;">Verwandte E-Mails erscheinen hier...</div>
                 </div>
@@ -2612,15 +2522,15 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="static/api-auth.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/i18n.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/icons.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__&workflow=5" defer></script>
-<script src="static/workspace.js?v=__WEBUI_VERSION__&defer=2" defer></script>
-<script src="static/terminal.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/sessions.js?v=__WEBUI_VERSION__&perf=11" defer></script>
-<script src="static/commands.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/api-auth.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/i18n.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/icons.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/ui.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/workspace.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/terminal.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/sessions.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/commands.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/messages.js?v=__WEBUI_VERSION__" defer></script>
 <script>
   (function() {
     function _setBodyBrowserSplit(open) {
@@ -2662,17 +2572,17 @@
     };
   })();
 </script>
-<script src="static/browser.js?v=__WEBUI_VERSION__&split=70" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__&filetree=1" defer></script>
-<script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/spaces.js?v=__WEBUI_VERSION__&perf=5" defer></script>
-<script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/gmail.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/enhancements.js?v=__WEBUI_VERSION__&sessions=2" defer></script>
-<script src="static/power.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/discord.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>
-<script src="static/agents.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/browser.js?v=__WEBUI_VERSION__&split=70" defer></script>
+<script src="/static/panels.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/spaces.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/boot.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/gmail.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/power.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/discord.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>
+<script src="/static/agents.js?v=__WEBUI_VERSION__" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">
@@ -2695,7 +2605,7 @@
     <div class="kanban-modal-row-inline">
       <div class="kanban-modal-row">
         <label for="kanbanBoardModalIcon" data-i18n="kanban_board_icon">Icon (emoji, optional)</label>
-        <input type="text" id="kanbanBoardModalIcon" maxlength="4" placeholder="??" autocomplete="off">
+        <input type="text" id="kanbanBoardModalIcon" maxlength="4" placeholder="🎨" autocomplete="off">
       </div>
       <div class="kanban-modal-row">
         <label for="kanbanBoardModalColor" data-i18n="kanban_board_color">Color (optional)</label>
@@ -2759,7 +2669,7 @@
 <!-- Agents Creator Dialog (Custom Agent via LLM) -->
 <div class="agents-edit-modal hidden" id="agentsCreatorModal" onclick="if(event.target===this)closeAgentCreator()">
   <div class="agents-edit-modal-content" style="max-width:600px" role="dialog" aria-modal="true" aria-labelledby="agentsCreatorTitle">
-    <div class="agents-edit-modal-title" id="agentsCreatorTitle">?? Eigenen Agenten erstellen</div>
+    <div class="agents-edit-modal-title" id="agentsCreatorTitle">🤖 Eigenen Agenten erstellen</div>
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.5">
       Beantworte einfach die Fragen – eine KI hilft dir, den perfekten Agenten für deine Bedürfnisse zu designen.
     </div>
@@ -2791,7 +2701,7 @@
     </div>
     <div class="agents-edit-field">
       <label for="agentsEditEmoji">Avatar (Emoji)</label>
-      <input type="text" id="agentsEditEmoji" placeholder="??" maxlength="4">
+      <input type="text" id="agentsEditEmoji" placeholder="🤖" maxlength="4">
     </div>
     <div class="agents-edit-field">
       <label for="agentsEditColor">Farbe</label>

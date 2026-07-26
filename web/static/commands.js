@@ -318,7 +318,7 @@ function _compressionAnchorMessageKey(m){
 function cmdHelp(){
   const lines=COMMANDS.map(c=>{
     const usage=c.arg ? (String(c.arg).startsWith('[') ? ` ${c.arg}` : ` <${c.arg}>`) : '';
-    return `  /${c.name}${usage} ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ${c.desc}`;
+    return `  /${c.name}${usage} — ${c.desc}`;
   });
   const msg={role:'assistant',content:t('available_commands')+'\n'+lines.join('\n')};
   S.messages.push(msg);
@@ -780,7 +780,7 @@ async function cmdSkills(args){
     for(const [cat, items] of Object.entries(byCategory).sort()){
       lines.push(`**${cat}**`);
       items.forEach(s => {
-        const desc = s.description ? ` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
+        const desc = s.description ? ` · ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
         lines.push(`  \`${s.name}\`${desc}`);
       });
       lines.push('');
@@ -806,7 +806,7 @@ async function cmdPersonality(args){
         showToast(t('no_personalities'));
         return;
       }
-      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â '+p.description:''}`).join('\n');
+      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' · '+p.description:''}`).join('\n');
       S.messages.push({role:'assistant',content:t('available_personalities')+'\n\n'+list+t('personality_switch_hint')});
       renderMessages();
     }catch(e){showToast(t('personalities_load_failed'));}
@@ -835,19 +835,31 @@ async function cmdStop(){
   else showToast(t('cancel_unavailable'));
 }
 
+function _goalCommandRequestBody(args){
+  const isObject=args&&typeof args==='object'&&!Array.isArray(args);
+  const goalText=isObject
+    ? String(args.text??args.goal??args.args??'').trim()
+    : String(args||'').trim();
+  return {
+    session_id: S.session.session_id,
+    args: goalText,
+    workspace: S.session.workspace,
+    workspace_slug: S.session.workspace_slug || S.session.space_slug || S.session.space || null,
+    space: S.session.space || S.session.space_slug || S.session.workspace_slug || null,
+    model: S.session.model || ($('modelSelect') && $('modelSelect').value) || '',
+    model_provider: S.session.model_provider || null,
+    profile: S.activeProfile || S.session.profile || 'default',
+    ...(isObject&&Object.prototype.hasOwnProperty.call(args,'max_turns') ? { max_turns: args.max_turns } : {}),
+    ...(isObject&&Object.prototype.hasOwnProperty.call(args,'unlimited') ? { unlimited: !!args.unlimited } : {}),
+  };
+}
+
 async function cmdGoal(args){
   if(!S.session){await newSession();await renderSessionList();}
   if(!S.session||!S.session.session_id){showToast(t('no_active_session'));return;}
   const activeSid=S.session.session_id;
   try{
-    const r=await api('/api/goal',{method:'POST',body:JSON.stringify({
-      session_id:activeSid,
-      args:args||'',
-      workspace:S.session.workspace,
-      model:S.session.model||($('modelSelect')&&$('modelSelect').value)||'',
-      model_provider:S.session.model_provider||null,
-      profile:S.activeProfile||S.session.profile||'default',
-    })});
+    const r=await api('/api/goal',{method:'POST',body:JSON.stringify(_goalCommandRequestBody(args))});
     const msg = (() => {
       const raw = String((r && r.message) || '').trim();
       const key = String((r && r.message_key) || '').trim();
@@ -1022,7 +1034,10 @@ async function cmdTitle(args){
   if(!S.session){showToast(t('no_active_session'));return;}
   const name=(args||'').trim();
   if(!name){
-    S.messages.push({role:'assistant',content:`${t('title_current')}: **${S.session.title||t('untitled')}**\n\n${t('title_change_hint')}`});
+    const currentTitle = (S.session.title && S.session.title !== 'Untitled')
+      ? S.session.title
+      : (typeof t === 'function' ? t('new_chat') : 'New chat');
+    S.messages.push({role:'assistant',content:`${t('title_current')}: **${currentTitle}**\n\n${t('title_change_hint')}`});
     renderMessages();return;
   }
   try{
@@ -1059,7 +1074,7 @@ async function cmdUndo(){
     if(!S.session||S.session.session_id!==activeSid)return;
     const data=await api('/api/session?session_id='+encodeURIComponent(activeSid));
     if(data&&data.session){S.messages=data.session.messages||[];S.toolCalls=[];if(typeof clearLiveToolCards==='function')clearLiveToolCards();if(typeof _messagesTruncated!=='undefined')_messagesTruncated=false;renderMessages();}
-    showToast(`ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â© ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
+    showToast(`↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
   }catch(e){showToast(t('undo_failed')+e.message);}
 }
 async function undoLastExchange(){await cmdUndo();}
@@ -1106,9 +1121,8 @@ function _formatExecuteCodeMessage(result, code){
       : '**`/exec` result**';
   const parts=[heading];
   const meta=[];
-  if(Number.isFinite(toolCalls)) meta.push(`${toolCalls} tool call${toolCalls===1?'':'s'}`);
+  if(meta.length) parts.push(`_${meta.join(' · ')}_`);
   if(Number.isFinite(duration)) meta.push(`${duration.toFixed(duration>=10?1:2)}s`);
-  if(meta.length) parts.push(`_${meta.join(' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ')}_`);
   if(code) parts.push('```python\n'+code.replace(/\s+$/,'')+'\n```');
   if(output) parts.push('**Output**\n```text\n'+output+'\n```');
   if(error && error!==output) parts.push(`**Error:** ${error}`);
@@ -1121,7 +1135,7 @@ async function cmdExec(args){
   const activeSid=S.session.session_id;
   const code=String(args||'');
   if(!code.trim()){showToast('Use /exec <python code>');return;}
-  showToast('Running execute_codeÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦');
+  showToast('Running execute_code…');
   try{
     const r=await api('/api/execute_code',{
       method:'POST',
@@ -1175,7 +1189,7 @@ async function cmdImage(args){
   const aspectRatio=aspectMatch ? String(aspectMatch[1]).toLowerCase() : '';
   const prompt=aspectMatch ? String(aspectMatch[2]||'').trim() : raw;
   if(!prompt){showToast('Use /image <prompt>');return;}
-  showToast('Generating imageÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦');
+  showToast('Generating image…');
   try{
     const r=await api('/api/image_generate',{
       method:'POST',
@@ -1229,7 +1243,7 @@ function _statusCardFromSession(s){
   const workspace=s.workspace||S.currentDir||t('status_unknown');
   const rows=[
     {label:t('status_session_id'), value:s.session_id||t('status_unknown')},
-    {label:t('status_title'), value:s.title||t('untitled')},
+    {label:t('status_title'), value:(s.title && s.title !== 'Untitled') ? s.title : (typeof t === 'function' ? t('new_chat') : 'New chat')},
     {label:t('status_model'), value:model},
     {label:t('status_provider'), value:provider||t('status_unknown')},
     {label:t('status_profile'), value:profile},
@@ -1295,7 +1309,7 @@ function _reasoningCommandContext(){
 function cmdReasoning(args){
   const arg=(args||'').trim().toLowerCase();
   const normalizedArg=(arg==='max')?'xhigh':arg;
-  const BRAIN='??';
+  const BRAIN='🧠';
   const EFFORTS=['none','minimal','low','medium','high','xhigh'];
   function _fmtStatus(st){
     const vis=(st && st.show_reasoning===false)?'off':'on';
@@ -1305,12 +1319,12 @@ function cmdReasoning(args){
       : [];
     const fullAllowed=['none','minimal','low','medium','high','xhigh'];
     const allowedText=allowed.length&&allowed.join('|')!==fullAllowed.join('|')
-      ? ' ? allowed: '+allowed.join('|')
+      ? ' · allowed: '+allowed.join('|')
       : '';
     const supportText=(st && st.reasoning_effort_supported===false)
       ? ' (not supported by the selected model)'
       : '';
-    return BRAIN+' Reasoning effort: '+eff+' ? display: '+vis
+    return BRAIN+' Reasoning effort: '+eff+' · display: '+vis
       +allowedText
       +supportText
       +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
@@ -1322,7 +1336,7 @@ function cmdReasoning(args){
       showToast(_fmtStatus(st));
       if(typeof _applyReasoningChip==='function') _applyReasoningChip((st && st.reasoning_effort)||'', st||{});
     })
-      .catch(function(){showToast(BRAIN+' /reasoning ? status unavailable');});
+      .catch(function(){showToast(BRAIN+' /reasoning · status unavailable');});
     return true;
   }
   if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){
@@ -2299,7 +2313,7 @@ function _reviewParseAssistantResponse(text){
       if(current) current.details.push(line);
       continue;
     }
-    const bullet=trimmed.match(/^(?:[-*ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢]|\d+\.)\s+(.*)$/);
+    const bullet=trimmed.match(/^(?:[-*•]|\\d+\\.)\\s+(.*)$/);
     if(bullet){
       flushCurrent();
       current=startFinding(bullet[1]);
@@ -3022,7 +3036,7 @@ async function cmdSkills(args){
     for(const [cat, items] of Object.entries(byCategory).sort()){
       lines.push(`**${cat}**`);
       items.forEach(s => {
-        const desc = s.description ? ` ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
+        const desc = s.description ? ` · ${s.description.slice(0,80)}${s.description.length>80?'...':''}` : '';
         lines.push(`  \`${s.name}\`${desc}`);
       });
       lines.push('');
@@ -3048,7 +3062,7 @@ async function cmdPersonality(args){
         showToast(t('no_personalities'));
         return;
       }
-      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â '+p.description:''}`).join('\n');
+      const list=data.personalities.map(p=>`  **${p.name}**${p.description?' · '+p.description:''}`).join('\n');
       S.messages.push({role:'assistant',content:t('available_personalities')+'\n\n'+list+t('personality_switch_hint')});
       renderMessages();
     }catch(e){showToast(t('personalities_load_failed'));}
@@ -3082,14 +3096,7 @@ async function cmdGoal(args){
   if(!S.session||!S.session.session_id){showToast(t('no_active_session'));return;}
   const activeSid=S.session.session_id;
   try{
-    const r=await api('/api/goal',{method:'POST',body:JSON.stringify({
-      session_id:activeSid,
-      args:args||'',
-      workspace:S.session.workspace,
-      model:S.session.model||($('modelSelect')&&$('modelSelect').value)||'',
-      model_provider:S.session.model_provider||null,
-      profile:S.activeProfile||S.session.profile||'default',
-    })});
+    const r=await api('/api/goal',{method:'POST',body:JSON.stringify(_goalCommandRequestBody(args))});
     const msg = (() => {
       const raw = String((r && r.message) || '').trim();
       const key = String((r && r.message_key) || '').trim();
@@ -3264,7 +3271,10 @@ async function cmdTitle(args){
   if(!S.session){showToast(t('no_active_session'));return;}
   const name=(args||'').trim();
   if(!name){
-    S.messages.push({role:'assistant',content:`${t('title_current')}: **${S.session.title||t('untitled')}**\n\n${t('title_change_hint')}`});
+    const currentTitle = (S.session.title && S.session.title !== 'Untitled')
+      ? S.session.title
+      : (typeof t === 'function' ? t('new_chat') : 'New chat');
+    S.messages.push({role:'assistant',content:`${t('title_current')}: **${currentTitle}**\n\n${t('title_change_hint')}`});
     renderMessages();return;
   }
   try{
@@ -3301,7 +3311,7 @@ async function cmdUndo(){
     if(!S.session||S.session.session_id!==activeSid)return;
     const data=await api('/api/session?session_id='+encodeURIComponent(activeSid));
     if(data&&data.session){S.messages=data.session.messages||[];S.toolCalls=[];if(typeof clearLiveToolCards==='function')clearLiveToolCards();if(typeof _messagesTruncated!=='undefined')_messagesTruncated=false;renderMessages();}
-    showToast(`ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â Ãƒâ€šÃ‚Â© ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
+    showToast(`↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}`);
   }catch(e){showToast(t('undo_failed')+e.message);}
 }
 async function undoLastExchange(){await cmdUndo();}
@@ -3348,9 +3358,8 @@ function _formatExecuteCodeMessage(result, code){
       : '**`/exec` result**';
   const parts=[heading];
   const meta=[];
-  if(Number.isFinite(toolCalls)) meta.push(`${toolCalls} tool call${toolCalls===1?'':'s'}`);
+  if(meta.length) parts.push(`_${meta.join(' · ')}_`);
   if(Number.isFinite(duration)) meta.push(`${duration.toFixed(duration>=10?1:2)}s`);
-  if(meta.length) parts.push(`_${meta.join(' ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· ')}_`);
   if(code) parts.push('```python\n'+code.replace(/\s+$/,'')+'\n```');
   if(output) parts.push('**Output**\n```text\n'+output+'\n```');
   if(error && error!==output) parts.push(`**Error:** ${error}`);
@@ -3363,7 +3372,7 @@ async function cmdExec(args){
   const activeSid=S.session.session_id;
   const code=String(args||'');
   if(!code.trim()){showToast('Use /exec <python code>');return;}
-  showToast('Running execute_codeÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦');
+  showToast('Running execute_code…');
   try{
     const r=await api('/api/execute_code',{
       method:'POST',
@@ -3417,7 +3426,7 @@ async function cmdImage(args){
   const aspectRatio=aspectMatch ? String(aspectMatch[1]).toLowerCase() : '';
   const prompt=aspectMatch ? String(aspectMatch[2]||'').trim() : raw;
   if(!prompt){showToast('Use /image <prompt>');return;}
-  showToast('Generating imageÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦');
+  showToast('Generating image…');
   try{
     const r=await api('/api/image_generate',{
       method:'POST',
@@ -3471,7 +3480,7 @@ function _statusCardFromSession(s){
   const workspace=s.workspace||S.currentDir||t('status_unknown');
   const rows=[
     {label:t('status_session_id'), value:s.session_id||t('status_unknown')},
-    {label:t('status_title'), value:s.title||t('untitled')},
+    {label:t('status_title'), value:(s.title && s.title !== 'Untitled') ? s.title : (typeof t === 'function' ? t('new_chat') : 'New chat')},
     {label:t('status_model'), value:model},
     {label:t('status_provider'), value:provider||t('status_unknown')},
     {label:t('status_profile'), value:profile},
@@ -3537,7 +3546,7 @@ function _reasoningCommandContext(){
 function cmdReasoning(args){
   const arg=(args||'').trim().toLowerCase();
   const normalizedArg=(arg==='max')?'xhigh':arg;
-  const BRAIN='??';
+  const BRAIN='🧠';
   const EFFORTS=['none','minimal','low','medium','high','xhigh'];
   function _fmtStatus(st){
     const vis=(st && st.show_reasoning===false)?'off':'on';
@@ -3547,12 +3556,12 @@ function cmdReasoning(args){
       : [];
     const fullAllowed=['none','minimal','low','medium','high','xhigh'];
     const allowedText=allowed.length&&allowed.join('|')!==fullAllowed.join('|')
-      ? ' ? allowed: '+allowed.join('|')
+      ? ' · allowed: '+allowed.join('|')
       : '';
     const supportText=(st && st.reasoning_effort_supported===false)
       ? ' (not supported by the selected model)'
       : '';
-    return BRAIN+' Reasoning effort: '+eff+' ? display: '+vis
+    return BRAIN+' Reasoning effort: '+eff+' · display: '+vis
       +allowedText
       +supportText
       +'  |  /reasoning show|hide|none|minimal|low|medium|high|xhigh|max';
@@ -3564,7 +3573,7 @@ function cmdReasoning(args){
       showToast(_fmtStatus(st));
       if(typeof _applyReasoningChip==='function') _applyReasoningChip((st && st.reasoning_effort)||'', st||{});
     })
-      .catch(function(){showToast(BRAIN+' /reasoning ? status unavailable');});
+      .catch(function(){showToast(BRAIN+' /reasoning · status unavailable');});
     return true;
   }
   if(arg==='show'||arg==='on'||arg==='hide'||arg==='off'){

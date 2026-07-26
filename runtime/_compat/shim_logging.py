@@ -10,7 +10,7 @@ Agent modules expect:
 
 The first two are re-exported from ``shared.logging_setup``.
 The session-context helpers are implemented here via thread-local storage,
-mimicking the behaviour in the original ``hermes_logging.py``.
+mimicking the behaviour in the original ``sidekick_logging.py``.
 """
 
 from __future__ import annotations
@@ -25,12 +25,12 @@ from shared.logging_setup import get_logs_dir
 from shared.logging_setup import setup_logging as _real_setup_logging
 
 
-def setup_logging(force: bool = False, hermes_home: Optional[str] = None) -> Path:
-    """Wrapper that accepts deprecated ``hermes_home`` kwarg (silently ignored)."""
+def setup_logging(force: bool = False, sidekick_home: Optional[str] = None) -> Path:
+    """Wrapper that accepts deprecated ``sidekick_home`` kwarg (silently ignored)."""
     return _real_setup_logging(force=force)
 
 # ── Verbose logging (for AIAgent --verbose mode) ────────────────────────────
-# Matches the original hermes_logging.setup_verbose_logging()
+# Matches the original sidekick_logging.setup_verbose_logging()
 _LOG_FORMAT_VERBOSE = "%(asctime)s - %(name)s - %(levelname)s%(session_tag)s - %(message)s"
 
 _NOISY_LOGGERS = (
@@ -63,7 +63,7 @@ def setup_verbose_logging() -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-# ── Thread-local session context (matches original hermes_logging.py) ────────
+# ── Thread-local session context (matches original sidekick_logging.py) ────────
 
 _session_context = threading.local()
 

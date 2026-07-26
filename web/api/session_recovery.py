@@ -656,7 +656,7 @@ def _main() -> int:
     parser = argparse.ArgumentParser(description="Audit Sidekick session recovery state")
     parser.add_argument("--audit", action="store_true", help="run a read-only recovery audit")
     parser.add_argument("--session-dir", type=Path, required=True, help="path to WebUI sessions directory")
-    parser.add_argument("--state-db", type=Path, default=None, help="optional Hermes state.db path")
+    parser.add_argument("--state-db", type=Path, default=None, help="optional Sidekick state.db path")
     parser.add_argument("--repair-safe", action="store_true", help="run safe deterministic repairs after auditing")
     args = parser.parse_args()
     if args.repair_safe:

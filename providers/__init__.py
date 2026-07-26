@@ -2,7 +2,7 @@
 
 Provider profiles can live in two places:
 
-1. Bundled plugins: ``plugins/model-providers/<name>/`` (shipped with sidekick)
+1. Bundled plugins: ``providers/bundled/<name>/`` (shipped with Sidekick)
 2. User plugins: ``$SIDEKICK_HOME/plugins/model-providers/<name>/``
 
 Each plugin directory contains:
@@ -32,10 +32,11 @@ _REGISTRY: dict[str, ProviderProfile] = {}
 _ALIASES: dict[str, str] = {}
 _discovered = False
 
-# Repo-root ``plugins/model-providers/`` — populated at discovery time.
-_BUNDLED_PLUGINS_DIR = (
-    Path(__file__).resolve().parent.parent / "plugins" / "model-providers"
-)
+# Bundled profiles live inside the ``providers`` package so normal wheel and
+# source distributions contain them.  They are loaded from disk rather than
+# imported as conventional packages because provider directory names may
+# contain hyphens.
+_BUNDLED_PLUGINS_DIR = Path(__file__).resolve().parent / "bundled"
 
 
 def register_provider(profile: ProviderProfile) -> None:
@@ -80,7 +81,7 @@ def _import_plugin_dir(plugin_dir: Path, source: str) -> None:
 
     safe_name = plugin_dir.name.replace("-", "_")
     if source == "bundled":
-        module_name = f"plugins.model_providers.{safe_name}"
+        module_name = f"providers._bundled.{safe_name}"
     else:
         module_name = f"_sidekick_user_provider_{safe_name}"
 

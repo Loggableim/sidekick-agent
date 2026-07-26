@@ -2,7 +2,7 @@
 
 A goal is a free-form user objective that stays active across turns. After
 each turn completes, a small judge call asks an auxiliary model "is this
-goal satisfied by the assistant's last response?". If not, Hermes feeds a
+goal satisfied by the assistant's last response?". If not, Sidekick feeds a
 continuation prompt back into the same session and keeps working until the
 goal is done, turn budget is exhausted, the user pauses/clears it, or the
 user sends a new message (which takes priority and pauses the goal loop).
@@ -104,7 +104,7 @@ class GoalState:
     goal: str
     status: str = "active"          # active | paused | done | cleared
     turns_used: int = 0
-    max_turns: int = DEFAULT_MAX_TURNS
+    max_turns: Optional[int] = DEFAULT_MAX_TURNS
     created_at: float = 0.0
     last_turn_at: float = 0.0
     last_verdict: Optional[str] = None        # "done" | "continue" | "skipped"
@@ -118,11 +118,21 @@ class GoalState:
     @classmethod
     def from_json(cls, raw: str) -> "GoalState":
         data = json.loads(raw)
+        raw_max_turns = data.get("max_turns", DEFAULT_MAX_TURNS)
+        max_turns: Optional[int]
+        if raw_max_turns in (None, ""):
+            max_turns = None if "max_turns" in data else DEFAULT_MAX_TURNS
+        else:
+            try:
+                parsed_max_turns = int(raw_max_turns)
+            except (TypeError, ValueError):
+                parsed_max_turns = DEFAULT_MAX_TURNS
+            max_turns = None if parsed_max_turns <= 0 else parsed_max_turns
         return cls(
             goal=data.get("goal", ""),
             status=data.get("status", "active"),
             turns_used=int(data.get("turns_used", 0) or 0),
-            max_turns=int(data.get("max_turns", DEFAULT_MAX_TURNS) or DEFAULT_MAX_TURNS),
+            max_turns=max_turns,
             created_at=float(data.get("created_at", 0.0) or 0.0),
             last_turn_at=float(data.get("last_turn_at", 0.0) or 0.0),
             last_verdict=data.get("last_verdict"),
@@ -130,6 +140,39 @@ class GoalState:
             paused_reason=data.get("paused_reason"),
             consecutive_parse_failures=int(data.get("consecutive_parse_failures", 0) or 0),
         )
+
+
+def format_goal_turn_budget(max_turns: Optional[int]) -> str:
+    """Return a human-friendly label for the goal turn budget."""
+    try:
+        value = int(max_turns) if max_turns is not None else None
+    except (TypeError, ValueError):
+        value = None
+    if value is None or value <= 0:
+        return "∞"
+    return str(value)
+
+
+def normalize_goal_turn_budget(
+    max_turns: Optional[int],
+    *,
+    default: int = DEFAULT_MAX_TURNS,
+    unlimited: bool = False,
+) -> Optional[int]:
+    """Normalize a requested goal budget.
+
+    ``None`` means "use the default budget" unless ``unlimited`` is true,
+    in which case the goal runs until it is satisfied or explicitly paused.
+    """
+    if unlimited:
+        return None
+    if max_turns is None:
+        return int(default or DEFAULT_MAX_TURNS)
+    try:
+        value = int(max_turns)
+    except (TypeError, ValueError):
+        return int(default or DEFAULT_MAX_TURNS)
+    return None if value <= 0 else value
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -145,11 +188,11 @@ _DB_CACHE: Dict[str, Any] = {}
 
 
 def _get_session_db() -> Optional[Any]:
-    """Return a SessionDB instance for the current HERMES_HOME.
+    """Return a SessionDB instance for the current SIDEKICK_HOME.
 
     SessionDB has no built-in singleton, but opening a new connection per
     /goal call would thrash the file. We cache one instance per
-    ``hermes_home`` path so profile switches still pick up the right DB.
+    ``sidekick_home`` path so profile switches still pick up the right DB.
     Defensive against import/instantiation failures so tests and
     non-standard launchers can still use the GoalManager.
     """
@@ -309,6 +352,53 @@ def judge_goal(
         # No substantive reply this turn — almost certainly not done yet.
         return "continue", "empty response (nothing to evaluate)", False
 
+    prompt = JUDGE_USER_PROMPT_TEMPLATE.format(
+        goal=_truncate(goal, 2000),
+        response=_truncate(last_response, _JUDGE_RESPONSE_SNIPPET_CHARS),
+    )
+
+    try:
+        from web.api.config import is_game_mode_enabled
+    except Exception:
+        is_game_mode_enabled = lambda: False  # type: ignore[assignment]
+
+    # In Game Mode, keep the judge off local GPUs and use the same remote
+    # DeepSeek path Nova already uses for chat/title/fact extraction.
+    if is_game_mode_enabled():
+        try:
+            from runtime.auxiliary_client import call_llm
+        except Exception as exc:
+            logger.debug("goal judge: remote fallback import failed: %s", exc)
+            return "continue", "auxiliary client unavailable", False
+
+        try:
+            resp = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=[
+                    {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                max_tokens=200,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            logger.info(
+                "goal judge: Game Mode remote call failed (%s) — falling through to continue",
+                exc,
+            )
+            return "continue", f"judge error: {type(exc).__name__}", False
+        raw = ""
+        try:
+            raw = resp.choices[0].message.content or ""
+        except Exception:
+            raw = ""
+        done, reason, parse_failed = _parse_judge_response(raw)
+        verdict = "done" if done else "continue"
+        logger.info("goal judge: verdict=%s reason=%s", verdict, _truncate(reason, 120))
+        return verdict, reason, parse_failed
+
     try:
         from runtime.auxiliary_client import get_text_auxiliary_client
     except Exception as exc:
@@ -323,11 +413,6 @@ def judge_goal(
 
     if client is None or not model:
         return "continue", "no auxiliary client configured", False
-
-    prompt = JUDGE_USER_PROMPT_TEMPLATE.format(
-        goal=_truncate(goal, 2000),
-        response=_truncate(last_response, _JUDGE_RESPONSE_SNIPPET_CHARS),
-    )
 
     try:
         resp = client.chat.completions.create(
@@ -398,7 +483,7 @@ class GoalManager:
         s = self._state
         if s is None or s.status in {"cleared",}:
             return "No active goal. Set one with /goal <text>."
-        turns = f"{s.turns_used}/{s.max_turns} turns"
+        turns = f"{s.turns_used}/{format_goal_turn_budget(s.max_turns)} turns"
         if s.status == "active":
             return f"⊙ Goal (active, {turns}): {s.goal}"
         if s.status == "paused":
@@ -410,7 +495,13 @@ class GoalManager:
 
     # --- mutation -----------------------------------------------------
 
-    def set(self, goal: str, *, max_turns: Optional[int] = None) -> GoalState:
+    def set(
+        self,
+        goal: str,
+        *,
+        max_turns: Optional[int] = None,
+        unlimited: bool = False,
+    ) -> GoalState:
         goal = (goal or "").strip()
         if not goal:
             raise ValueError("goal text is empty")
@@ -418,7 +509,11 @@ class GoalManager:
             goal=goal,
             status="active",
             turns_used=0,
-            max_turns=int(max_turns) if max_turns else self.default_max_turns,
+            max_turns=normalize_goal_turn_budget(
+                max_turns,
+                default=self.default_max_turns,
+                unlimited=unlimited,
+            ),
             created_at=time.time(),
             last_turn_at=0.0,
         )
@@ -434,13 +529,20 @@ class GoalManager:
         save_goal(self.session_id, self._state)
         return self._state
 
-    def resume(self, *, reset_budget: bool = True) -> Optional[GoalState]:
+    def resume(self, *, reset_budget: bool = False) -> Optional[GoalState]:
         if not self._state:
             return None
+        exhausted = (
+            self._state.max_turns is not None
+            and int(self._state.turns_used or 0) >= int(self._state.max_turns or 0)
+        )
+        if exhausted and not reset_budget:
+            return self._state
         self._state.status = "active"
         self._state.paused_reason = None
         if reset_budget:
             self._state.turns_used = 0
+        self._state.consecutive_parse_failures = 0
         save_goal(self.session_id, self._state)
         return self._state
 
@@ -550,9 +652,11 @@ class GoalManager:
                 ),
             }
 
-        if state.turns_used >= state.max_turns:
+        if state.max_turns is not None and state.turns_used >= state.max_turns:
             state.status = "paused"
-            state.paused_reason = f"turn budget exhausted ({state.turns_used}/{state.max_turns})"
+            state.paused_reason = (
+                f"turn budget exhausted ({state.turns_used}/{format_goal_turn_budget(state.max_turns)})"
+            )
             save_goal(self.session_id, state)
             return {
                 "status": "paused",
@@ -561,7 +665,7 @@ class GoalManager:
                 "verdict": "continue",
                 "reason": reason,
                 "message": (
-                    f"⏸ Goal paused — {state.turns_used}/{state.max_turns} turns used. "
+                    f"⏸ Goal paused — {state.turns_used}/{format_goal_turn_budget(state.max_turns)} turns used. "
                     "Use /goal resume to keep going, or /goal clear to stop."
                 ),
             }
@@ -573,9 +677,7 @@ class GoalManager:
             "continuation_prompt": self.next_continuation_prompt(),
             "verdict": "continue",
             "reason": reason,
-            "message": (
-                f"↻ Continuing toward goal ({state.turns_used}/{state.max_turns}): {reason}"
-            ),
+            "message": f"↻ Continuing toward goal ({state.turns_used}/{format_goal_turn_budget(state.max_turns)}): {reason}",
         }
 
     def next_continuation_prompt(self) -> Optional[str]:
@@ -593,4 +695,6 @@ __all__ = [
     "save_goal",
     "clear_goal",
     "judge_goal",
+    "format_goal_turn_budget",
+    "normalize_goal_turn_budget",
 ]

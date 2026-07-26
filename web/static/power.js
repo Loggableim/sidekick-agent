@@ -80,7 +80,7 @@
   }
 
   // ─── Public Functions ──────────────────────────────────────
-  window.hermesPowerOff = async function () {
+  window.sidekickPowerOff = async function () {
     const confirmed = await showConfirm(
       'Ausschalten',
       'Möchtest du den Sidekick-Server wirklich herunterfahren? Alle laufenden Vorgänge werden beendet.',
@@ -93,7 +93,7 @@
     // The server is shutting down — splash stays visible
   };
 
-  window.hermesRelaunch = async function () {
+  window.sidekickRelaunch = async function () {
     const confirmed = await showConfirm(
       'Neustarten',
       'Möchtest du den Sidekick-Server wirklich neu starten?',

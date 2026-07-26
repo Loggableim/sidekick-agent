@@ -23,12 +23,12 @@ from __future__ import annotations
 import datetime
 import email
 import json
-import os
 
 from tools.mail_imap import (
     get_inbox_config,
     get_imap,
     parse_mail_summary,
+    resolve_space_slug,
     release_imap,
 )
 from tools.registry import registry
@@ -53,7 +53,7 @@ def _handler(args: dict, **kw) -> str:
     Parameters are validated against :data:`SCHEMA` by the tool framework.
     """
     # Resolve the active space slug.
-    space_slug = kw.get("user_task") or os.environ.get("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "default")
+    space_slug = resolve_space_slug(kw)
 
     inbox_id = args.get("inbox_id")
     folder = args.get("folder", "INBOX")

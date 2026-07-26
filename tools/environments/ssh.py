@@ -50,7 +50,7 @@ class SSHEnvironment(BaseEnvironment):
         self.port = port
         self.key_path = key_path
 
-        self.control_dir = Path(tempfile.gettempdir()) / "hermes-ssh"
+        self.control_dir = Path(tempfile.gettempdir()) / "sidekick-ssh"
         self.control_dir.mkdir(parents=True, exist_ok=True)
         # Keep the socket filename short and deterministic so the full path
         # stays under the 104-byte sun_path limit that macOS enforces on
@@ -70,7 +70,7 @@ class SSHEnvironment(BaseEnvironment):
 
         self._ensure_remote_dirs()
         self._sync_manager = FileSyncManager(
-            get_files_fn=lambda: iter_sync_files(f"{self._remote_home}/.hermes"),
+            get_files_fn=lambda: iter_sync_files(f"{self._remote_home}/.sidekick"),
             upload_fn=self._scp_upload,
             delete_fn=self._ssh_delete,
             bulk_upload_fn=self._ssh_bulk_upload,
@@ -101,7 +101,7 @@ class SSHEnvironment(BaseEnvironment):
         cmd = self._build_ssh_command()
         cmd.append("echo 'SSH connection established'")
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
             if result.returncode != 0:
                 error_msg = result.stderr.strip() or result.stdout.strip()
                 raise RuntimeError(f"SSH connection failed: {error_msg}")
@@ -113,7 +113,7 @@ class SSHEnvironment(BaseEnvironment):
         try:
             cmd = self._build_ssh_command()
             cmd.append("echo $HOME")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
             home = result.stdout.strip()
             if home and result.returncode == 0:
                 logger.debug("SSH: remote home = %s", home)
@@ -130,11 +130,11 @@ class SSHEnvironment(BaseEnvironment):
 
     def _ensure_remote_dirs(self) -> None:
         """Create base ~/.sidekick directory tree on remote in one SSH call."""
-        base = f"{self._remote_home}/.hermes"
+        base = f"{self._remote_home}/.sidekick"
         dirs = [base, f"{base}/skills", f"{base}/credentials", f"{base}/cache"]
         cmd = self._build_ssh_command()
         cmd.append(quoted_mkdir_command(dirs))
-        subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
 
     # _get_sync_files provided via iter_sync_files in FileSyncManager init
 
@@ -143,7 +143,7 @@ class SSHEnvironment(BaseEnvironment):
         parent = str(Path(remote_path).parent)
         mkdir_cmd = self._build_ssh_command()
         mkdir_cmd.append(f"mkdir -p {shlex.quote(parent)}")
-        subprocess.run(mkdir_cmd, capture_output=True, text=True, timeout=10)
+        subprocess.run(mkdir_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
 
         scp_cmd = ["scp", "-o", f"ControlPath={self.control_socket}"]
         if self.port != 22:
@@ -151,7 +151,7 @@ class SSHEnvironment(BaseEnvironment):
         if self.key_path:
             scp_cmd.extend(["-i", self.key_path])
         scp_cmd.extend([host_path, f"{self.user}@{self.host}:{remote_path}"])
-        result = subprocess.run(scp_cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(scp_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         if result.returncode != 0:
             raise RuntimeError(f"scp failed: {result.stderr.strip()}")
 
@@ -173,12 +173,12 @@ class SSHEnvironment(BaseEnvironment):
         if parents:
             cmd = self._build_ssh_command()
             cmd.append(quoted_mkdir_command(parents))
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
             if result.returncode != 0:
                 raise RuntimeError(f"remote mkdir failed: {result.stderr.strip()}")
 
         # Symlink staging avoids fragile GNU tar --transform rules.
-        with tempfile.TemporaryDirectory(prefix="hermes-ssh-bulk-") as staging:
+        with tempfile.TemporaryDirectory(prefix="sidekick-ssh-bulk-") as staging:
             for host_path, remote_path in files:
                 staged = os.path.join(staging, remote_path.lstrip("/"))
                 os.makedirs(os.path.dirname(staged), exist_ok=True)
@@ -238,10 +238,10 @@ class SSHEnvironment(BaseEnvironment):
         logger.debug("SSH: bulk-uploaded %d file(s) via tar pipe", len(files))
 
     def _ssh_bulk_download(self, dest: Path) -> None:
-        """Download remote .hermes/ as a tar archive."""
+        """Download remote .sidekick/ as a tar archive."""
         # Tar from / with the full path so archive entries preserve absolute
-        # paths (e.g. home/user/.hermes/skills/f.py), matching _pushed_hashes keys.
-        rel_base = f"{self._remote_home}/.hermes".lstrip("/")
+        # paths (e.g. home/user/.sidekick/skills/f.py), matching _pushed_hashes keys.
+        rel_base = f"{self._remote_home}/.sidekick".lstrip("/")
         ssh_cmd = self._build_ssh_command()
         ssh_cmd.append(f"tar cf - -C / {shlex.quote(rel_base)}")
         with open(dest, "wb") as f:
@@ -253,7 +253,7 @@ class SSHEnvironment(BaseEnvironment):
         """Batch-delete remote files in one SSH call."""
         cmd = self._build_ssh_command()
         cmd.append(quoted_rm_command(remote_paths))
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
         if result.returncode != 0:
             raise RuntimeError(f"remote rm failed: {result.stderr.strip()}")
 

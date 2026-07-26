@@ -21,13 +21,21 @@ from __future__ import annotations
 
 import imaplib
 import json
+import hashlib
 import logging
 import os
+import re
 import smtplib
 import ssl
+import socket
 import time
 from pathlib import Path
 from typing import Any
+
+import yaml
+
+from shared.paths import sidekick_home
+from web.api._home import get_active_webui_home
 
 logger = logging.getLogger(__name__)
 
@@ -35,40 +43,313 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_SIDEKICK_HOME = Path(
-    os.environ.get("SIDEKICK_HOME")
-   
-    or Path.home() / ".sidekick"
-)
-
 _IMAP_CONNECT_TIMEOUT = 10  # seconds
 _IMAP_READ_TIMEOUT = 30     # seconds
 _SMTP_TIMEOUT = 15          # seconds
 _MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB
+
+_MAIL_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "Gmail",
+        "domains": {"gmail.com", "googlemail.com"},
+        "imap_host": "imap.gmail.com",
+        "imap_port": 993,
+        "use_ssl": True,
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 587,
+        "smtp_use_tls": True,
+        "note": "Gmail braucht meist ein App-Passwort, wenn 2FA aktiv ist.",
+    },
+    {
+        "name": "Outlook / Microsoft",
+        "domains": {"outlook.com", "hotmail.com", "live.com", "msn.com", "office365.com"},
+        "imap_host": "outlook.office365.com",
+        "imap_port": 993,
+        "use_ssl": True,
+        "smtp_host": "smtp.office365.com",
+        "smtp_port": 587,
+        "smtp_use_tls": True,
+        "note": "Microsoft-Konten brauchen oft IMAP im Webmail aktiviert.",
+    },
+    {
+        "name": "iCloud",
+        "domains": {"icloud.com", "me.com", "mac.com"},
+        "imap_host": "imap.mail.me.com",
+        "imap_port": 993,
+        "use_ssl": True,
+        "smtp_host": "smtp.mail.me.com",
+        "smtp_port": 587,
+        "smtp_use_tls": True,
+        "note": "iCloud Mail benötigt oft ein App-spezifisches Passwort.",
+    },
+    {
+        "name": "Yahoo",
+        "domains": {"yahoo.com", "ymail.com", "rocketmail.com"},
+        "imap_host": "imap.mail.yahoo.com",
+        "imap_port": 993,
+        "use_ssl": True,
+        "smtp_host": "smtp.mail.yahoo.com",
+        "smtp_port": 587,
+        "smtp_use_tls": True,
+        "note": "Yahoo benötigt meist ein App-Passwort.",
+    },
+    {
+        "name": "Proton Mail",
+        "domains": {"proton.me", "protonmail.com"},
+        "imap_host": "127.0.0.1",
+        "imap_port": 1143,
+        "use_ssl": False,
+        "smtp_host": "127.0.0.1",
+        "smtp_port": 1025,
+        "smtp_use_tls": True,
+        "note": "Proton Mail benötigt den Proton Mail Bridge Dienst. Die lokalen IMAP/SMTP-Ports werden über eine gesicherte Bridge-Verbindung genutzt.",
+    },
+)
 
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
 
 
-def get_space_config(space_slug: str) -> dict | None:
-    """Load ``mail.json`` from the given space directory.
+def _slugify_mail_account_id(email: str, fallback: str = "mail") -> str:
+    local_part = str(email or "").split("@", 1)[0].strip().lower()
+    local_part = re.sub(r"[^a-z0-9_-]+", "-", local_part)
+    local_part = re.sub(r"-+", "-", local_part).strip("-")
+    return local_part or fallback
 
-    Returns the parsed JSON dict (with an ``inboxes`` list) or ``None``
-    if the file does not exist or is invalid.
-    """
-    path = _SIDEKICK_HOME / "spaces" / space_slug / "mail.json"
-    if not path.exists():
+
+def _mail_provider_for_domain(domain: str) -> dict[str, Any] | None:
+    normalized = str(domain or "").strip().lower()
+    if not normalized:
+        return None
+    for preset in _MAIL_PROVIDER_PRESETS:
+        if normalized in preset["domains"]:
+            return preset
+    return None
+
+
+def _build_inbox_from_email(
+    email: str,
+    password: str,
+    *,
+    account_id: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any] | None:
+    normalized_email = str(email or "").strip()
+    if "@" not in normalized_email:
+        return None
+    local_part, domain = normalized_email.rsplit("@", 1)
+    provider = _mail_provider_for_domain(domain)
+    account_name = str(account_id or "").strip() or _slugify_mail_account_id(normalized_email)
+    inbox_label = str(label or "").strip() or normalized_email
+
+    if provider:
+        imap_host = provider["imap_host"]
+        imap_port = int(provider.get("imap_port", 993))
+        use_ssl = bool(provider.get("use_ssl", True))
+        smtp_host = provider["smtp_host"]
+        smtp_port = int(provider.get("smtp_port", 587))
+        smtp_use_tls = bool(provider.get("smtp_use_tls", True))
+        provider_name = str(provider.get("name", "Mail"))
+        note = str(provider.get("note", "")).strip()
+        confidence = "high"
+    else:
+        imap_host = f"imap.{domain}"
+        smtp_host = f"smtp.{domain}"
+        imap_port = 993
+        use_ssl = True
+        smtp_port = 587
+        smtp_use_tls = True
+        provider_name = "IMAP/SMTP"
+        note = "Für unbekannte Domains verwendet Sidekick generische IMAP/SMTP-Hostnamen. Falls der Login fehlschlägt, nutze die erweiterten Serverfelder."
+        confidence = "fallback"
+
+    inbox = {
+        "id": account_name,
+        "label": inbox_label,
+        "default": True,
+        "imap_host": imap_host,
+        "imap_port": imap_port,
+        "use_ssl": use_ssl,
+        "imap_user": normalized_email,
+        "imap_pass": password,
+        "smtp_host": smtp_host,
+        "smtp_port": smtp_port,
+        "smtp_use_tls": smtp_use_tls,
+        "smtp_user": normalized_email,
+        "smtp_pass": password,
+        "provider": provider_name,
+        "confidence": confidence,
+    }
+    if note:
+        inbox["note"] = note
+    return inbox
+
+
+def _load_legacy_mail_config_from_space_yaml(space_slug: str, home: Path | None = None) -> dict | None:
+    base_home = Path(home).expanduser().resolve() if home else sidekick_home()
+    space_yaml = base_home / "spaces" / space_slug / "space.yaml"
+    if not space_yaml.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("inboxes"), list):
-            return data
-        logger.warning("mail.json in %s has no 'inboxes' list", space_slug)
+        raw = yaml.safe_load(space_yaml.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        logger.debug("Failed to read space.yaml for %s: %s", space_slug, exc)
         return None
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("Failed to read mail.json for %s: %s", space_slug, exc)
+    if not isinstance(raw, dict):
         return None
+
+    gmail_cfg = raw.get("gmail")
+    if not isinstance(gmail_cfg, dict):
+        return None
+    accounts = gmail_cfg.get("accounts", {})
+    if not isinstance(accounts, dict) or not accounts:
+        return None
+
+    inboxes: list[dict[str, Any]] = []
+    for idx, (account_id, account_cfg) in enumerate(accounts.items()):
+        if not isinstance(account_cfg, dict):
+            continue
+        email = str(account_cfg.get("email", "")).strip()
+        password = str(account_cfg.get("password", "")).strip()
+        if not email or not password:
+            continue
+        inbox = _build_inbox_from_email(
+            email,
+            password,
+            account_id=str(account_id or "").strip() or None,
+            label=str(account_cfg.get("label", "")).strip() or None,
+        )
+        if inbox:
+            inbox["default"] = bool(account_cfg.get("default", idx == 0))
+            inboxes.append(inbox)
+    if not inboxes:
+        return None
+    return {"inboxes": inboxes, "source": "legacy_space_yaml"}
+
+
+def _load_mail_config_from_env() -> dict | None:
+    email = os.getenv("EMAIL_ADDRESS", "").strip()
+    password = os.getenv("EMAIL_PASSWORD", "").strip()
+    if not email or not password:
+        return None
+
+    imap_host = os.getenv("EMAIL_IMAP_HOST", "").strip()
+    smtp_host = os.getenv("EMAIL_SMTP_HOST", "").strip()
+    inbox = _build_inbox_from_email(email, password)
+    if not inbox:
+        return None
+    if imap_host:
+        inbox["imap_host"] = imap_host
+    if smtp_host:
+        inbox["smtp_host"] = smtp_host
+    inbox["label"] = os.getenv("EMAIL_HOME_ADDRESS_NAME", "") or inbox["label"]
+    inbox["source"] = "env"
+    return {"inboxes": [inbox], "source": "env"}
+
+
+def resolve_space_slug(kw: dict[str, Any] | None = None, *, default: str = "default") -> str:
+    """Resolve the active workspace slug for mail tools.
+
+    Resolution order:
+    1. ``kw['user_task']`` from the tool framework
+    2. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE``
+    3. ``SIDEKICK_WEBUI_ACTIVE_WORKSPACE`` for legacy compatibility
+    4. ``default`` (usually ``"default"``)
+    """
+    kw = kw or {}
+    slug = str(kw.get("user_task", "") or "").strip().lower()
+    if slug:
+        return slug
+    slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    if slug:
+        return slug
+    slug = os.getenv("SIDEKICK_WEBUI_ACTIVE_WORKSPACE", "").strip().lower()
+    if slug:
+        return slug
+    return default
+
+
+def _resolve_mail_home(home: Path | None = None) -> Path:
+    """Return the mail home directory for the current request context.
+
+    When *home* is provided, use it directly. Otherwise prefer the active
+    WebUI home so mail tools follow the same profile/space resolution as the
+    rest of the runtime.
+    """
+    if home is not None:
+        return Path(home).expanduser().resolve()
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return sidekick_home()
+
+
+def suggest_mail_config(
+    email: str,
+    password: str,
+    *,
+    account_id: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Build a one-inbox ``mail.json`` config from an email address.
+
+    The caller provides the human inputs; this helper infers IMAP/SMTP hosts
+    for common providers and falls back to generic ``imap.<domain>`` /
+    ``smtp.<domain>`` hostnames otherwise.
+    """
+    inbox = _build_inbox_from_email(email, password, account_id=account_id, label=label)
+    if not inbox:
+        return {
+            "success": False,
+            "error": "Invalid email address",
+            "config": {"inboxes": []},
+        }
+
+    warnings: list[str] = []
+    if inbox.get("confidence") == "fallback":
+        warnings.append(
+            "Für diese Domain wurden generische IMAP/SMTP-Hostnamen verwendet. "
+            "Falls der Login fehlschlägt, öffne die erweiterten Serverfelder."
+        )
+
+    return {
+        "success": True,
+        "provider": inbox.get("provider", "Mail"),
+        "domain": str(email).strip().split("@", 1)[-1].lower(),
+        "warnings": warnings,
+        "config": {"inboxes": [inbox]},
+    }
+
+
+def get_space_config(space_slug: str, home: Path | None = None) -> dict | None:
+    """Load ``mail.json`` from the given space directory.
+
+    Returns the parsed JSON dict (with an ``inboxes`` list) or a synthesized
+    config from legacy Gmail config / email env vars.  ``None`` is returned
+    only when no usable config can be found.
+    """
+    base_home = _resolve_mail_home(home)
+    path = base_home / "spaces" / space_slug / "mail.json"
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("inboxes"), list):
+                return data
+            logger.warning("mail.json in %s has no 'inboxes' list", space_slug)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read mail.json for %s: %s", space_slug, exc)
+
+    legacy = _load_legacy_mail_config_from_space_yaml(space_slug, base_home)
+    if legacy:
+        return legacy
+
+    env_cfg = _load_mail_config_from_env()
+    if env_cfg:
+        return env_cfg
+
+    logger.warning("No mail config found for space %s", space_slug)
+    return None
 
 
 def get_inbox_config(space_slug: str, inbox_id: str | None = None) -> dict | None:
@@ -118,8 +399,8 @@ def list_inboxes(space_slug: str) -> list[dict]:
 # IMAP connection helpers
 # ---------------------------------------------------------------------------
 
-# Simple connection cache: { (host, user) -> (conn, timestamp) }
-_imap_cache: dict[tuple[str, str], tuple[imaplib.IMAP4, float]] = {}
+# Simple connection cache: { (host, port, user, use_ssl, pw_hash) -> (conn, timestamp) }
+_imap_cache: dict[tuple[str, int, str, bool, str], tuple[imaplib.IMAP4, float]] = {}
 _imap_cache_ttl = 300  # 5 minutes
 
 
@@ -136,8 +417,9 @@ def get_imap(inbox: dict) -> imaplib.IMAP4:
     user = inbox["imap_user"]
     password = inbox["imap_pass"]
     use_ssl = inbox.get("use_ssl", True)
+    password_hash = hashlib.sha256(str(password).encode("utf-8")).hexdigest()
 
-    cache_key = (host, user)
+    cache_key = (host, port, user, bool(use_ssl), password_hash)
 
     # Check cache
     cached = _imap_cache.get(cache_key)
@@ -182,7 +464,7 @@ def release_imap(conn: imaplib.IMAP4 | None) -> None:
 
 def flush_imap_cache() -> None:
     """Close and clear all cached IMAP connections."""
-    for (host, user), (conn, _) in list(_imap_cache.items()):
+    for (_host, _port, _user, _use_ssl, _pw_hash), (conn, _) in list(_imap_cache.items()):
         try:
             conn.close()
             conn.logout()
@@ -222,7 +504,7 @@ def send_mail(inbox: dict, to_addrs: list[str], message: str) -> dict:
                 server.login(user, password)
                 server.sendmail(user, to_addrs, message)
         else:
-            with smtplib.SMTP_SSL(host, port, timeout=_SMTP_TIMEOUT) as server:
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
                 server.login(user, password)
                 server.sendmail(user, to_addrs, message)
 
@@ -231,6 +513,35 @@ def send_mail(inbox: dict, to_addrs: list[str], message: str) -> dict:
     except Exception as exc:
         logger.exception("SMTP send failed for %s", user)
         return {"success": False, "error": str(exc)}
+
+
+def validate_smtp(inbox: dict) -> None:
+    """Open and authenticate SMTP for the given inbox config.
+
+    This performs the same network/authentication checks as :func:`send_mail`
+    without actually sending a message. It raises on failure.
+    """
+    host = inbox.get("smtp_host")
+    port = int(inbox.get("smtp_port", 587))
+    user = inbox.get("smtp_user", inbox.get("imap_user", ""))
+    password = inbox.get("smtp_pass", inbox.get("imap_pass", ""))
+    use_tls = inbox.get("smtp_use_tls", True)
+
+    if not host:
+        raise ValueError("SMTP not configured for this inbox")
+
+    try:
+        if use_tls:
+            context = ssl.create_default_context()
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
+                server.starttls(context=context)
+                server.login(user, password)
+        else:
+            with smtplib.SMTP(host, port, timeout=_SMTP_TIMEOUT) as server:
+                server.login(user, password)
+    except Exception:
+        logger.exception("SMTP validation failed for %s", user)
+        raise
 
 
 # ---------------------------------------------------------------------------

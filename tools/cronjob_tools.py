@@ -96,10 +96,10 @@ def _scan_cron_prompt(prompt: str) -> str:
 
 def _origin_from_env() -> Optional[Dict[str, str]]:
     from gateway.session_context import get_session_env
-    origin_platform = get_session_env("HERMES_SESSION_PLATFORM")
-    origin_chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
+    origin_platform = get_session_env("SIDEKICK_SESSION_PLATFORM")
+    origin_chat_id = get_session_env("SIDEKICK_SESSION_CHAT_ID")
     if origin_platform and origin_chat_id:
-        thread_id = get_session_env("HERMES_SESSION_THREAD_ID") or None
+        thread_id = get_session_env("SIDEKICK_SESSION_THREAD_ID") or None
         if thread_id:
             logger.debug(
                 "Cron origin captured thread_id=%s for %s:%s",
@@ -108,7 +108,7 @@ def _origin_from_env() -> Optional[Dict[str, str]]:
         return {
             "platform": origin_platform,
             "chat_id": origin_chat_id,
-            "chat_name": get_session_env("HERMES_SESSION_CHAT_NAME") or None,
+            "chat_name": get_session_env("SIDEKICK_SESSION_CHAT_NAME") or None,
             "thread_id": thread_id,
         }
     return None
@@ -209,7 +209,7 @@ def _normalize_deliver_param(value: Any) -> Optional[str]:
 def _validate_cron_script_path(script: Optional[str]) -> Optional[str]:
     """Validate a cron job script path at the API boundary.
 
-    Scripts must be relative paths that resolve within HERMES_HOME/scripts/.
+    Scripts must be relative paths that resolve within SIDEKICK_HOME/scripts/.
     Absolute paths and ~ expansion are rejected to prevent arbitrary script
     execution via prompt injection.
 

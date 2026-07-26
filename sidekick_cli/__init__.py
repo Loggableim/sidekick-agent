@@ -11,7 +11,7 @@ import sys
 import types
 
 __version__ = "0.8.83"
-__release_date__ = "2026.7.7"
+__release_date__ = "2026.7.10"
 
 _ROUTE_MAP: dict[str, str] = {
     "config": "cli.config",

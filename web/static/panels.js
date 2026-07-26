@@ -125,10 +125,15 @@ function syncAppTitlebar() {
   let subText = '';
   let sourceLabel = '';
   if (panel === 'chat' && typeof S !== 'undefined' && S && S.session) {
-    mainText = S.session.title || (typeof t === 'function' ? t('untitled') : 'Untitled');
+    const rawTitle = (S.session.title || '').trim();
+    mainText = rawTitle && rawTitle !== 'Untitled'
+      ? rawTitle
+      : (typeof t === 'function' ? t('new_chat') : 'New chat');
     const vis = Array.isArray(S.messages) ? S.messages.filter(m => m && m.role && m.role !== 'tool') : [];
-    if (typeof t === 'function') subText = t('n_messages', vis.length);
+    if (vis.length && typeof t === 'function') subText = t('n_messages', vis.length);
     if (S.session.is_cli_session) sourceLabel = S.session.source_label || S.session.source_tag || S.session.raw_source || '';
+  } else if (panel === 'chat') {
+    mainText = typeof t === 'function' ? t('new_chat') : 'New chat';
   } else {
     const key = APP_TITLEBAR_KEYS[panel];
     mainText = key && typeof t === 'function' ? t(key) : (panel.charAt(0).toUpperCase() + panel.slice(1));
@@ -169,7 +174,7 @@ function syncAppTitlebar() {
       const inp = document.createElement('input');
       inp.type = 'text';
       inp.className = 'app-titlebar-rename-input';
-      inp.value = S.session.title || (typeof t === 'function' ? t('untitled') : 'Untitled');
+      inp.value = (S.session.title && S.session.title !== 'Untitled') ? S.session.title : '';
 
       // Prevent click/dblclick on the input from bubbling — we don't want
       // panel switches, session switches, or any other handler firing.
@@ -180,7 +185,7 @@ function syncAppTitlebar() {
       const finish = async (save) => {
         _renamingAppTitlebar = false;
         if (save) {
-          const newTitle = inp.value.trim() || (typeof t === 'function' ? t('untitled') : 'Untitled');
+          const newTitle = inp.value.trim() || (typeof t === 'function' ? t('new_chat') : 'New chat');
           S.session.title = newTitle;
           syncTopbar();   // update #topbarTitle in the chat header
           syncAppTitlebar();
@@ -408,7 +413,7 @@ async function switchPanel(name, opts = {}) {
   }
   if (typeof resetAppShellScroll === 'function') resetAppShellScroll();
   if (typeof syncWorkspacePanelForActivePanel === 'function') syncWorkspacePanelForActivePanel(nextPanel);
-  // Titlebar mode-toggle + compact-btn only visible on chat panel
+  // Chat-panel controls: mode toggle stays visible, compact toggle is only relevant there.
   const isChat = nextPanel === 'chat' || !nextPanel;
   const modeToggle = document.getElementById('modeToggle');
   if (modeToggle) modeToggle.style.display = isChat ? '' : 'none';
@@ -1417,7 +1422,7 @@ function _kanbanRenderMarkdownInline(escaped){
 
 function _kanbanRenderMarkdown(source){
   if (!source) return '';
-  return `<div class="hermes-kanban-md">${esc(source).split(/\r?\n/).map(line => line.trim() ? `<p>${_kanbanRenderMarkdownInline(line)}</p>` : '').join('')}</div>`;
+  return `<div class="sidekick-kanban-md">${esc(source).split(/\r?\n/).map(line => line.trim() ? `<p>${_kanbanRenderMarkdownInline(line)}</p>` : '').join('')}</div>`;
 }
 
 function _kanbanFormatDuration(seconds){
@@ -1646,9 +1651,9 @@ async function loadKanban(animate){
     // requests fire. The previous tail-of-function refresh has been removed
     // to avoid doubling /api/kanban/boards traffic during SSE-driven
     // refreshes (debounced at 250ms via _scheduleKanbanRefresh). The
-    // 30-second poll started by _kanbanStartPolling() picks up any board
-    // state changes that arrive after this render.
-    _kanbanStartPolling();
+    // Keep live updates active without reopening an already healthy stream
+    // on every render refresh.
+    _kanbanEnsurePollingActive();
     _kanbanRenderBoard();
   } catch(e) {
     if (!stillCurrentSpace()) return;
@@ -1698,6 +1703,11 @@ function _kanbanStartPolling(){
     return;
   }
   _kanbanStartEventStream();
+}
+
+function _kanbanEnsurePollingActive(){
+  if (_kanbanPollTimer || _kanbanEventSource) return;
+  _kanbanStartPolling();
 }
 
 function _kanbanStopPolling(){
@@ -1820,7 +1830,7 @@ async function nudgeKanbanDispatcher(){
 async function runKanbanDispatcher(){
   if (_kanbanIsDispatching) return;
   // Real dispatch: claims Ready tasks and spawns worker subprocesses
-  // (one `hermes -p <assignee>` per claimed row, up to max=8 per call).
+  // (one `sidekick -p <assignee>` per claimed row, up to max=8 per call).
   // Confirmation dialog first because this actually consumes API budget on
   // each spawned worker.  Result toast surfaces what happened so users see
   // the dispatcher actually doing work.
@@ -2725,17 +2735,24 @@ async function loadKanbanBoards(spaceLoadKey){
   if (!stillCurrentSpace()) return false;
   const boards = (data && data.boards) || [];
   const serverCurrent = (data && data.current) || 'default';
+  const currentSource = (data && data.current_source) || 'explicit';
   _kanbanBoardsList = boards;
   // Resolution chain for the active board:
-  //   localStorage hint → server's `current` → 'default'.
-  // The localStorage hint is honoured ONLY if it points at a board that
-  // still exists; otherwise we fall back to the server's pointer.
+  //   server's `current` → localStorage hint only when the API reports a
+  //   fallback current (stale/archived pointer fell back to default).
+  // The on-disk/current-board pointer stays the source of truth; the
+  // browser cache only keeps the last viewed board alive when the server
+  // could not preserve an explicit non-default pointer.
   const saved = _kanbanGetSavedBoard();
+  const savedExists = !!(saved && boards.some(b => b.slug === saved));
   let active = serverCurrent;
-  if (saved && boards.some(b => b.slug === saved)) {
+  if (currentSource === 'fallback' && savedExists) {
     active = saved;
-  } else if (saved) {
-    _kanbanSetSavedBoard('default');
+  }
+  if (active === 'default') {
+    if (saved) _kanbanSetSavedBoard('default');
+  } else if (saved !== active) {
+    _kanbanSetSavedBoard(active);
   }
   _kanbanCurrentBoard = (active === 'default') ? null : active;
   // The switcher is visible whenever ≥1 non-default board exists OR the
@@ -2853,9 +2870,6 @@ async function switchKanbanBoard(slug){
     if (menu) menu.hidden = true;
     return;
   }
-  _kanbanCurrentBoard = newBoard;
-  _kanbanSetSavedBoard(slug);
-  _kanbanLatestEventId = 0;  // reset cursor — new board has its own event sequence
   _kanbanBoardMenuOpen = false;
   const menu = document.getElementById('kanbanBoardSwitcherMenu');
   if (menu) menu.hidden = true;
@@ -2863,14 +2877,21 @@ async function switchKanbanBoard(slug){
   try {
     await api('/api/kanban/boards/' + encodeURIComponent(slug) + '/switch' + _kanbanBoardQuery(), {method: 'POST'});
   } catch(e) {
-    // Local UI switch still happens — the on-disk pointer is for cross-process
-    // consistency, not for our own rendering.
+    // Keep the current board pinned to the server's last confirmed state.
+    // A failed switch should not make the UI render a board that the shared
+    // on-disk pointer never accepted.
+    await loadKanbanBoards();
+    showToast((t('kanban_unavailable') || 'Kanban unavailable') + ': ' + (e.message || e), 'error');
+    return;
   }
+  _kanbanCurrentBoard = newBoard;
+  _kanbanSetSavedBoard(slug);
+  _kanbanLatestEventId = 0;  // reset cursor — new board has its own event sequence
   // Re-open the SSE stream on the new board.
   _kanbanStopPolling();
   await loadKanban(true);
   await loadKanbanBoards();
-  _kanbanStartPolling();
+  _kanbanEnsurePollingActive();
 }
 
 // ── Create / rename / archive board modals ──────────────────────────────────
@@ -2991,7 +3012,7 @@ async function submitKanbanBoardModal(){
       _kanbanStopPolling();
       await loadKanban(true);
       await loadKanbanBoards();
-      _kanbanStartPolling();
+      _kanbanEnsurePollingActive();
     } catch(e) {
       errEl.textContent = (e && (e.message || e.error)) || String(e);
     } finally {
@@ -3043,7 +3064,7 @@ async function archiveKanbanBoard(){
     _kanbanLatestEventId = 0;
     await loadKanban(true);
     await loadKanbanBoards();
-    _kanbanStartPolling();
+    _kanbanEnsurePollingActive();
     showToast(t('kanban_board_archived') || 'Board archived');
   } catch(e) {
     // Restart the stream on failure so the UI doesn't go stale.
@@ -4431,7 +4452,7 @@ function getWorkspaceFriendlyName(path){
     const match=_workspaceList.find(w=>w.path===path);
     if(match && match.name) return match.name;
   }
-  return path.split('/').filter(Boolean).pop()||path;
+  return String(path||'').replace(/\\/g,'/').split('/').filter(Boolean).pop()||path;
 }
 
 function syncWorkspaceDisplays(){
@@ -4468,11 +4489,9 @@ function syncWorkspaceDisplays(){
   if(mobileLabel) mobileLabel.textContent=S._bootReady?displayLabel:'';
   if(composerChip){
     composerChip.disabled=!canChooseWorkspace;
-    composerChip.title=hasWorkspace ? ws : ((S._bootReady && canChooseWorkspace) ? 'Choose workspace' : t('no_workspace'));
     composerChip.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
   }
   if(mobileAction){
-    mobileAction.title=hasWorkspace?ws:t('no_workspace');
     mobileAction.classList.toggle('active',!!(composerDropdown&&composerDropdown.classList.contains('open')));
   }
   if(headerBadge){
@@ -4481,7 +4500,6 @@ function syncWorkspaceDisplays(){
     headerBadge.classList.add(headerState);
     headerBadge.hidden=false;
     headerBadge.disabled=false;
-    headerBadge.title=headerTitle;
     headerBadge.setAttribute('aria-label',headerTitle);
   }
   if(headerValue){
@@ -5721,12 +5739,15 @@ function switchSettingsSection(name){
   // Lazy-load integration panels when their tabs are opened
   if(section==='providers') loadProvidersPanel();
   if(section==='plugins') loadPluginsPanel();
+  if(section==='system'){loadMcpServers();loadMcpTools();loadGatewayStatus();loadSubagentStatus();}
 }
 
 function _syncSidekickPanelSessionActions(){
   const hasSession=!!S.session;
   const visibleMessages=hasSession?(S.messages||[]).filter(m=>m&&m.role&&m.role!=='tool').length:0;
-  const title=hasSession?(S.session.title||t('untitled')):t('active_conversation_none');
+  const title=hasSession
+    ? ((S.session.title && S.session.title !== 'Untitled') ? S.session.title : (typeof t === 'function' ? t('new_chat') : 'New chat'))
+    : t('active_conversation_none');
   const meta=$('sidekickSessionMeta');
   if(meta){
     meta.textContent=hasSession
@@ -5908,10 +5929,14 @@ function syncGameModeButton(){
   if(btn){
     btn.classList.toggle('active',enabled);
     btn.setAttribute('aria-pressed',String(enabled));
-    const label=t(enabled?'game_mode_on':'game_mode_off');
-    btn.setAttribute('data-i18n-title',enabled?'game_mode_on':'game_mode_off');
+    const label=typeof t==='function'
+      ? t(enabled?'game_mode_on':'game_mode_off')
+      : (enabled ? 'Game mode on' : 'Game mode off');
     btn.setAttribute('data-i18n-aria-label',enabled?'game_mode_on':'game_mode_off');
-    btn.setAttribute('data-tooltip',label);
+    // Keep Game Mode silent in the titlebar: the top bar should not spawn
+    // native hover tooltips, only expose an accessible label.
+    btn.removeAttribute('data-i18n-title');
+    btn.removeAttribute('title');
     btn.setAttribute('aria-label',label);
   }
   const cb=$('settingsGameModeEnabled');
@@ -5968,9 +5993,13 @@ async function toggleGameMode(){
   syncGameModeButton();
   try{
     const saved=await api('/api/settings',{method:'POST',body:JSON.stringify({game_mode_enabled:next})});
-    window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
-    _persistGameModeUiState(window._gameModeEnabled);
-    syncGameModeButton();
+    if(typeof window._syncGameModeStateFromServer==='function'){
+      await window._syncGameModeStateFromServer();
+    }else{
+      window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
+      _persistGameModeUiState(window._gameModeEnabled);
+      syncGameModeButton();
+    }
     if(typeof showToast==='function'){
       let message=t(window._gameModeEnabled?'game_mode_enabled_toast':'game_mode_disabled_toast');
       if(window._gameModeEnabled) message+=_gameModeReleaseSummary(saved&&saved.game_mode_release);
@@ -6073,8 +6102,12 @@ async function _autosavePreferencesSettings(payload){
       if(typeof renderMessages==='function') renderMessages();
     }
     if(payload&&payload.game_mode_enabled!==undefined){
-      window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
-      syncGameModeButton();
+      if(typeof window._syncGameModeStateFromServer==='function'){
+        await window._syncGameModeStateFromServer();
+      }else{
+        window._gameModeEnabled=!!(saved&&saved.game_mode_enabled);
+        syncGameModeButton();
+      }
     }
     _settingsPreferencesAutosaveRetryPayload=null;
     _setPreferencesAutosaveStatus('saved');
@@ -6231,7 +6264,7 @@ async function loadSettingsPanel(){
       }catch(e){}
       _settingsSidekickDefaultModelOnOpen=(models&&models.default_model)||'';
       // Use the smart matcher so a saved bare form like "anthropic/claude-opus-4.6"
-      // (what the CLI's `hermes model` command writes) still selects the matching
+      // (what the CLI's `sidekick model` command writes) still selects the matching
       // `@nous:anthropic/claude-opus-4.6` option on a Nous setup. Without this, the
       // picker renders blank for any user whose default was persisted without the
       // @-prefix — CLI-first users, legacy installs, etc.
@@ -6270,6 +6303,9 @@ async function loadSettingsPanel(){
         syncGameModeButton();
         _schedulePreferencesAutosave();
       },{once:false});
+    }
+    if(typeof window._syncGameModeStateFromServer==='function'){
+      await window._syncGameModeStateFromServer();
     }
     const showUsageCb=$('settingsShowTokenUsage');
     if(showUsageCb){showUsageCb.checked=!!settings.show_token_usage;showUsageCb.addEventListener('change',_schedulePreferencesAutosave,{once:false});}
@@ -6380,7 +6416,7 @@ async function loadSettingsPanel(){
     // Password field: always blank (we don't send hash back)
     const pwField=$('settingsPassword');
     if(pwField){pwField.value='';pwField.addEventListener('input',_markSettingsDirty,{once:false});}
-    // #1560: when HERMES_WEBUI_PASSWORD env var is set, the settings password
+    // #1560: when SIDEKICK_WEBUI_PASSWORD env var is set, the settings password
     // field silently no-ops. Disable it + reveal the lock banner so the UI
     // tells the truth before a user tries (and the backend now also returns
     // 409 as defense-in-depth).
@@ -6409,6 +6445,7 @@ async function loadSettingsPanel(){
     }
     _syncSidekickPanelSessionActions();
     if(typeof loadDashboardSettings==='function') loadDashboardSettings();
+    if(typeof loadWorktreeSettings==='function') loadWorktreeSettings();
     loadProvidersPanel(); // load provider cards in background
     loadPluginsPanel(); // load plugin/hook visibility in background
     switchSettingsSection(_settingsSection);
@@ -6531,6 +6568,13 @@ const _APPSTORE_FALLBACK_APPS = [
     fullDesc: 'Integriere dein Gmail-Konto mit Sidekick. Lies ungelesene E-Mails, durchsuche dein Postfach, sende Nachrichten und verwalte Labels – alles aus dem Chat.',
     status: 'available', tags: ['email', 'google', 'productivity'],
     screenshots: ['Inbox-Ansicht', 'E-Mail-Detail', 'Compose'],
+    setup_steps: [], config_changes: [], env_writes: {}, gateway_restart: false, tools_enable: [] },
+  { key: 'imap-mail', name: 'Mail', icon: '📧', cat: 'Productivity', catIcon: '⚡',
+    dev: 'Sidekick Team', version: '1.0.0', size: '0.7 MB',
+    desc: 'IMAP/SMTP-Mail automatisch einrichten und im Space aktivieren.',
+    fullDesc: 'Verbinde dein Mail-Konto mit Sidekick. Die App erkennt bekannte Anbieter automatisch, schreibt die IMAP/SMTP-Konfiguration in den aktiven Space und aktiviert den Mail-Zugriff im Hintergrund.',
+    status: 'available', tags: ['email', 'imap', 'smtp', 'auto-setup'],
+    screenshots: ['Automatische Einrichtung', 'Inbox-Übersicht', 'Verbindungsstatus'],
     setup_steps: [], config_changes: [], env_writes: {}, gateway_restart: false, tools_enable: [] },
   { key: 'calendar', name: 'Google Calendar', icon: '📅', cat: 'Productivity', catIcon: '⚡',
     dev: 'Community', version: '0.7.0', size: '0.5 MB',
@@ -6921,6 +6965,7 @@ function _renderAppstoreCategory(container, catKey) {
   for (const app of apps) {
     const isInstalled = app.status && app.status.installed;
     const isActuallyPlanned = app.availability === 'planned';
+    const isMailApp = app.key === 'imap-mail';
     let btnClass, btnLabel, btnAction;
 
     if (isInstalled) {
@@ -6931,6 +6976,10 @@ function _renderAppstoreCategory(container, catKey) {
       btnClass = 'appstore-card-btn appstore-card-btn-disabled';
       btnLabel = 'Demnächst';
       btnAction = 'disabled';
+    } else if (isMailApp) {
+      btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+      btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+      btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
     } else {
       btnClass = 'appstore-card-btn appstore-card-btn-primary';
       btnLabel = 'Installieren';
@@ -6986,9 +7035,15 @@ function _renderAppstoreAppPage(container, app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
   const isSpaceActive = app.space_active === true;
+  const isMailApp = app.key === 'imap-mail';
   let installLabel, installDisabled, installAction, uninstallAction;
 
-  if (isInstalled) {
+  if (isMailApp) {
+    installLabel = isSpaceActive ? 'Mail verwalten' : 'Mail einrichten';
+    installDisabled = '';
+    installAction = 'onclick="_appstoreOpenMailSettings()"';
+    uninstallAction = '';
+  } else if (isInstalled) {
     installLabel = '✓ Installiert · v' + esc(app.status.version_installed || app.version || '?');
     installDisabled = 'disabled';
     installAction = '';
@@ -7027,7 +7082,7 @@ function _renderAppstoreAppPage(container, app) {
             (isSpaceActive ? '✓ Aktiv' : 'Aktivieren') +
           '</button>' +
         '</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px;">Nur in diesem Space sichtbar. Jeder Space kann Apps unabhängig aktivieren.</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px;">Sidekick schreibt die Mail-Konfiguration in diesen Space und schaltet den Mail-Zugriff hier an oder aus.</div>' +
       '</div>'
     : '';
 
@@ -7051,7 +7106,9 @@ function _renderAppstoreAppPage(container, app) {
           '<button class="appstore-card-btn ' + (isInstalled ? 'appstore-card-btn-success' : (isPlanned ? 'appstore-card-btn-disabled' : 'appstore-card-btn-primary')) + '" style="padding:10px 24px;font-size:14px;width:auto;"' +
             (installDisabled ? ' disabled' : '') + ' ' + installAction + '>' + installLabel +
           '</button>' +
-          (app.key === 'gmail'
+          (app.key === 'imap-mail'
+            ? '<button class="appstore-card-btn appstore-card-btn-outline" style="padding:10px 16px;width:auto;font-size:13px;" onclick="_appstoreOpenMailSettings()">Mail einrichten</button>'
+            : app.key === 'gmail'
             ? '<button class="appstore-card-btn appstore-card-btn-outline" style="padding:10px 16px;width:auto;font-size:13px;" onclick="_appstoreOpenGmailSettings()">App Settings</button>'
             : app.key === 'discord'
               ? '<button class="appstore-card-btn appstore-card-btn-outline" style="padding:10px 16px;width:auto;font-size:13px;" onclick="_appstoreOpenDiscordSettings()">App Settings</button>'
@@ -7179,7 +7236,9 @@ function _renderAppstoreRight(app) {
         ? '<button class="appstore-detail-uninstall-btn" style="border-color:var(--accent);color:var(--accent);" onclick="_appstoreOpenGmailSettings()">App Settings</button>'
         : app.key === 'discord'
           ? '<button class="appstore-detail-uninstall-btn" style="border-color:var(--accent);color:var(--accent);" onclick="_appstoreOpenDiscordSettings()">App Settings</button>'
-        : (app.settings_url
+        : app.key === 'imap-mail'
+          ? ''
+          : (app.settings_url
           ? '<button class="appstore-detail-uninstall-btn" style="border-color:var(--accent);color:var(--accent);" onclick="_appstoreOpenAppSettings(\'' + esc(app.key) + '\',\'' + esc(app.settings_url) + '\')">⚙️ Einstellungen</button>'
           : '')) +
 
@@ -7208,21 +7267,26 @@ function _renderAppstoreRight(app) {
 function _buildAppstoreCardHtml(app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
+  const isMailApp = app.key === 'imap-mail';
   let btnClass, btnLabel, btnAction;
 
-  if (isInstalled) {
-    btnClass = 'appstore-card-btn appstore-card-btn-success';
-    btnLabel = '✓ Installiert';
-    btnAction = 'onclick="event.stopPropagation();_appstoreUninstall(\'' + esc(app.key) + '\')"';
-  } else if (isPlanned) {
-    btnClass = 'appstore-card-btn appstore-card-btn-disabled';
-    btnLabel = 'Demnächst';
-    btnAction = 'disabled';
-  } else {
-    btnClass = 'appstore-card-btn appstore-card-btn-primary';
-    btnLabel = 'Installieren';
-    btnAction = 'onclick="event.stopPropagation();_appstoreStartInstall(\'' + esc(app.key) + '\')"';
-  }
+    if (isMailApp) {
+      btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+      btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+      btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
+    } else if (isInstalled) {
+      btnClass = 'appstore-card-btn appstore-card-btn-success';
+      btnLabel = '✓ Installiert';
+      btnAction = 'onclick="event.stopPropagation();_appstoreUninstall(\'' + esc(app.key) + '\')"';
+    } else if (isPlanned) {
+      btnClass = 'appstore-card-btn appstore-card-btn-disabled';
+      btnLabel = 'Demnächst';
+      btnAction = 'disabled';
+    } else {
+      btnClass = 'appstore-card-btn appstore-card-btn-primary';
+      btnLabel = 'Installieren';
+      btnAction = 'onclick="event.stopPropagation();_appstoreStartInstall(\'' + esc(app.key) + '\')"';
+    }
   return '<div class="appstore-card" onclick="_appstoreNavigate(\'app:' + esc(app.key) + '\')">' +
     '<div class="appstore-card-icon-wrap">' + app.icon + '</div>' +
     '<div class="appstore-card-body">' +
@@ -7246,8 +7310,13 @@ function _buildAppstoreCardHtml(app) {
 function _buildAppstoreGridCardHtml(app) {
   const isInstalled = app.status && app.status.installed;
   const isPlanned = app.availability === 'planned';
+  const isMailApp = app.key === 'imap-mail';
   let btnClass, btnLabel, btnAction;
-  if (isInstalled) {
+  if (isMailApp) {
+    btnClass = 'appstore-card-btn ' + (app.space_active ? 'appstore-card-btn-success' : 'appstore-card-btn-primary');
+    btnLabel = app.space_active ? 'Mail verwalten' : 'Mail einrichten';
+    btnAction = 'onclick="event.stopPropagation();_appstoreOpenMailSettings()"';
+  } else if (isInstalled) {
     btnClass = 'appstore-card-btn appstore-card-btn-success';
     btnLabel = (typeof t === 'function' ? t('appstore_installed') : '✓ Installiert');
     btnAction = 'onclick="event.stopPropagation();_appstoreUninstall(\'' + esc(app.key) + '\')"';
@@ -7463,6 +7532,10 @@ let _appstoreSetupInstalling = false;  // true while POST is in flight
 function _appstoreStartInstall(appKey) {
   const app = _appstoreAppsCache.find(a => a.key === appKey);
   if (!app) return;
+  if (app.key === 'imap-mail') {
+    _appstoreOpenMailSettings();
+    return;
+  }
   if (app.status && app.status.installed) {
     alert('Diese App ist bereits installiert.');
     return;
@@ -7823,7 +7896,7 @@ async function _appstoreRestartGateway(btn) {
     btn.textContent = 'Starte neu...';
   }
   try {
-    // Use the hermes CLI through the gateway restart endpoint
+    // Use the sidekick CLI through the gateway restart endpoint
     const result = await api('/api/gateway/restart', { method: 'POST' });
     if (btn) {
       btn.textContent = '✓ Gateway wird neu gestartet';
@@ -7925,6 +7998,104 @@ async function _appstoreSaveGmailSettings(btn) {
     if (status) status.textContent = e.message || String(e);
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+async function _appstoreOpenMailSettings() {
+  _appstoreCloseOverlay('mailAppSettingsOverlay');
+
+  let currentConfig = { inboxes: [] };
+  try {
+    const res = await api('/api/mail/config');
+    if (res && res.success && res.config && Array.isArray(res.config.inboxes)) {
+      currentConfig = res.config;
+    }
+  } catch (err) {
+    console.warn('[appstore] failed to load current mail config:', err);
+  }
+
+  const inbox = Array.isArray(currentConfig.inboxes) && currentConfig.inboxes.length > 0
+    ? (currentConfig.inboxes.find(inbox => inbox && inbox.default) || currentConfig.inboxes[0] || {})
+    : {};
+  const overlay = document.createElement('div');
+  overlay.className = 'appstore-setup-overlay';
+  overlay.id = 'mailAppSettingsOverlay';
+  overlay.innerHTML =
+    '<div class="appstore-setup-modal" style="max-width:760px;">' +
+      '<div class="appstore-setup-header">' +
+        '<div><div class="appstore-setup-title">📧 Mail einrichten</div>' +
+        '<div class="appstore-setup-subtitle">E-Mail und Passwort eingeben. Sidekick erkennt den Anbieter automatisch, richtet den Space ein und aktiviert Mail im Hintergrund.</div></div>' +
+        '<button class="appstore-modal-close" onclick="var e=document.getElementById(\'mailAppSettingsOverlay\');if(e)e.style.display=\'none\'">✕</button>' +
+      '</div>' +
+      '<div class="appstore-setup-body" style="display:grid;gap:14px;">' +
+        '<div class="appstore-step-hint">Bekannte Anbieter werden automatisch erkannt. Bei unbekannten Domains versucht Sidekick generische IMAP/SMTP-Hostnamen. Du musst nur E-Mail und Passwort eingeben.</div>' +
+        '<label class="appstore-step-field"><span>E-Mail-Adresse</span><input id="mailAppEmail" class="appstore-step-input" type="email" value="' + esc(inbox.imap_user || inbox.smtp_user || '') + '" placeholder="name@example.com"></label>' +
+        '<label class="appstore-step-field"><span>Passwort</span><input id="mailAppPassword" class="appstore-step-input" type="password" placeholder="App-Passwort oder normales Passwort"></label>' +
+        '<div id="mailAppSettingsStatus" style="font-size:12px;color:var(--muted);line-height:1.5;"></div>' +
+      '</div>' +
+      '<div class="appstore-setup-footer">' +
+        '<button class="appstore-step-btn appstore-step-btn-outline" onclick="var e=document.getElementById(\'mailAppSettingsOverlay\');if(e)e.style.display=\'none\'">Abbrechen</button>' +
+        '<button class="appstore-step-btn appstore-step-btn-primary" onclick="_appstoreSaveMailSettings(this)" style="margin-left:auto;">Mail einrichten</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  overlay.querySelectorAll('.appstore-modal-close,.appstore-step-btn-outline').forEach(btn => {
+    btn.onclick = function(ev) {
+      ev.preventDefault();
+      _appstoreCloseOverlay('mailAppSettingsOverlay');
+    };
+  });
+}
+
+async function _appstoreSaveMailSettings(btn) {
+  const status = document.getElementById('mailAppSettingsStatus');
+  const email = (document.getElementById('mailAppEmail')?.value || '').trim();
+  const password = document.getElementById('mailAppPassword')?.value || '';
+
+  if (!email || !password) {
+    if (status) status.textContent = 'Bitte E-Mail-Adresse und Passwort ausfüllen.';
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Einrichten...';
+  }
+  if (status) status.textContent = 'Erkenne Anbieter und schreibe Mail-Konfiguration...';
+
+  try {
+    const result = await api('/api/mail/setup', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email,
+        password: password,
+        activate: true,
+      }),
+    });
+
+    if (!result || !result.success) {
+      throw new Error((result && result.error) || 'Unbekannter Fehler');
+    }
+
+    if (status) {
+      const warnings = Array.isArray(result.warnings) && result.warnings.length > 0 ? ' ' + result.warnings.join(' ') : '';
+      status.textContent = 'Mail erfolgreich eingerichtet: ' + (result.provider || 'Mail') + '.' + warnings;
+    }
+    if (typeof showToast === 'function') showToast('Mail eingerichtet', 'success');
+    loadAppstorePanel();
+    if (typeof loadMailPanel === 'function') loadMailPanel();
+    setTimeout(function() {
+      _appstoreCloseOverlay('mailAppSettingsOverlay');
+    }, 350);
+  } catch (err) {
+    if (status) status.textContent = 'Mail-Setup fehlgeschlagen: ' + (err && err.message ? err.message : String(err));
+    if (typeof showToast === 'function') showToast('Mail-Setup fehlgeschlagen', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Mail einrichten';
+    }
   }
 }
 
@@ -8031,6 +8202,8 @@ function _appstoreCloseOverlay(idOrElement) {
 
 window._appstoreOpenGmailSettings = _appstoreOpenGmailSettings;
 window._appstoreSaveGmailSettings = _appstoreSaveGmailSettings;
+window._appstoreOpenMailSettings = _appstoreOpenMailSettings;
+window._appstoreSaveMailSettings = _appstoreSaveMailSettings;
 window._appstoreOpenDiscordSettings = _appstoreOpenDiscordSettings;
 window._appstoreSaveDiscordSettings = _appstoreSaveDiscordSettings;
 window._appstoreCloseOverlay = _appstoreCloseOverlay;
@@ -8158,6 +8331,16 @@ async function _appstoreUninstall(appKey) {
 
 const _providerCardEls = new Map(); // providerId → {card, statusDot, input, saveBtn, removeBtn}
 
+function _providerText(key, fallback, ...args){
+  try{
+    if(typeof t === 'function'){
+      const value = t(key, ...args);
+      if(value && value !== key) return value;
+    }
+  }catch(_){}
+  return typeof fallback === 'function' ? fallback(...args) : fallback;
+}
+
 async function loadProvidersPanel(){
   const list=$('providersList');
   const empty=$('providersEmpty');
@@ -8283,7 +8466,7 @@ function _buildProviderCard(p){
   card.className='provider-card';
   card.dataset.provider=p.id;
   // Use the is_oauth flag from the backend — it reflects _OAUTH_PROVIDERS in providers.py.
-  // key_source can be 'oauth' (hermes auth), 'config_yaml' (token in config.yaml), or 'none'.
+  // key_source can be 'oauth' (sidekick auth), 'config_yaml' (token in config.yaml), or 'none'.
   const isOauth=p.is_oauth===true;
   // models_total reflects the complete catalog (e.g. 396 for a large-tier
   // Nous Portal account). The "models" array may be trimmed to a featured
@@ -8293,10 +8476,10 @@ function _buildProviderCard(p){
     ? p.models_total
     : (Array.isArray(p.models) ? p.models.length : 0);
   const sourceLabel=p.key_source==='oauth'
-    ? t('providers_status_oauth')
+    ? _providerText('providers_status_oauth', 'OAuth')
     : p.key_source==='config_yaml'
-      ? t('providers_status_configured')||'Configured'
-      : (p.has_key ? t('providers_status_api_key') : t('providers_status_not_configured_label'));
+      ? _providerText('providers_status_configured', 'Configured')
+      : (p.has_key ? _providerText('providers_status_api_key', 'API key') : _providerText('providers_status_not_configured_label', 'Not configured'));
   const metaParts=[];
   if(modelCount>0) metaParts.push(modelCount+(modelCount===1?' model':' models'));
   metaParts.push(sourceLabel);
@@ -8311,7 +8494,7 @@ function _buildProviderCard(p){
       <div class="provider-card-name">${esc(p.display_name)}</div>
       <div class="provider-card-meta">${esc(metaText)}</div>
     </div>
-    ${p.has_key?`<span class="provider-card-badge">${esc(t('providers_status_configured'))}</span>`:''}
+    ${p.has_key?`<span class="provider-card-badge">${esc(_providerText('providers_status_configured', 'Configured'))}</span>`:''}
     <svg class="provider-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16"><path d="M6 9l6 6 6-6"/></svg>
   `;
   card.appendChild(header);
@@ -8323,14 +8506,14 @@ function _buildProviderCard(p){
     const hint=document.createElement('div');
     hint.className='provider-card-hint';
     if(p.key_source==='config_yaml'){
-      hint.textContent=t('providers_oauth_config_yaml_hint')||'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run sidekick auth.';
+      hint.textContent=_providerText('providers_oauth_config_yaml_hint', 'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run sidekick auth.');
     } else if(p.auth_error){
       hint.textContent=p.auth_error;
       hint.style.color='var(--accent)';
     } else if(p.has_key){
-      hint.textContent=t('providers_oauth_hint');
+      hint.textContent=_providerText('providers_oauth_hint', 'Authenticated via OAuth. No API key needed.');
     } else {
-      hint.textContent=t('providers_oauth_not_configured_hint')||'Not authenticated. Run sidekick auth in the terminal to configure this provider.';
+      hint.textContent=_providerText('providers_oauth_not_configured_hint', 'Not authenticated. Run sidekick auth in the terminal to configure this provider.');
       hint.style.color='var(--muted)';
     }
     body.appendChild(hint);
@@ -8343,15 +8526,22 @@ function _buildProviderCard(p){
   field.className='provider-card-field';
   const label=document.createElement('label');
   label.className='provider-card-label';
-  label.textContent=t('providers_status_api_key');
+  label.textContent=_providerText('providers_status_api_key', 'API key');
   field.appendChild(label);
 
-  const row=document.createElement('div');
+  const row=document.createElement('form');
   row.className='provider-card-row';
+  row.noValidate=true;
+  row.addEventListener('submit',e=>{
+    e.preventDefault();
+    _saveProviderKey(p.id);
+  });
   const input=document.createElement('input');
   input.type='password';
   input.className='provider-card-input';
-  input.placeholder=p.has_key?t('providers_key_placeholder_replace'):t('providers_key_placeholder_new');
+  input.placeholder=p.has_key
+    ? _providerText('providers_key_placeholder_replace', 'Enter new key to replace…')
+    : _providerText('providers_key_placeholder_new', 'sk-...');
   input.autocomplete='off';
   const toggleBtn=document.createElement('button');
   toggleBtn.type='button';
@@ -8363,10 +8553,9 @@ function _buildProviderCard(p){
     toggleBtn.textContent=revealed?'Show':'Hide';
   };
   const saveBtn=document.createElement('button');
-  saveBtn.type='button';
+  saveBtn.type='submit';
   saveBtn.className='provider-card-btn provider-card-btn-primary';
-  saveBtn.textContent=t('providers_save');
-  saveBtn.onclick=()=>_saveProviderKey(p.id);
+  saveBtn.textContent=_providerText('providers_save', 'Save');
   saveBtn.disabled=true;
   row.appendChild(input);
   row.appendChild(toggleBtn);
@@ -8375,7 +8564,7 @@ function _buildProviderCard(p){
     const removeBtn=document.createElement('button');
     removeBtn.type='button';
     removeBtn.className='provider-card-btn provider-card-btn-danger';
-    removeBtn.textContent=t('providers_remove');
+    removeBtn.textContent=_providerText('providers_remove', 'Remove');
     removeBtn.onclick=()=>_removeProviderKey(p.id);
     row.appendChild(removeBtn);
   }
@@ -8428,7 +8617,7 @@ function _buildProviderCard(p){
   refreshBtn.style.display='flex';
   refreshBtn.style.alignItems='center';
   refreshBtn.style.gap='5px';
-  refreshBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${t('providers_refresh_models')||'Refresh Models'}`;
+  refreshBtn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${_providerText('providers_refresh_models', 'Refresh models')}`;
   refreshBtn.onclick=()=>_refreshProviderModels(p.id, refreshBtn);
   refreshRow.appendChild(refreshBtn);
   body.appendChild(refreshRow);
@@ -8450,11 +8639,11 @@ async function _saveProviderKey(providerId){
   if(!els) return;
   const key=els.input.value.trim();
   if(!key){
-    showToast(t('providers_enter_key'));
+    showToast(_providerText('providers_enter_key', 'Please enter an API key'));
     return;
   }
   els.saveBtn.disabled=true;
-  els.saveBtn.textContent=t('providers_saving');
+  els.saveBtn.textContent=_providerText('providers_saving', 'Saving…');
   try{
     const res=await api('/api/providers',{method:'POST',body:JSON.stringify({provider:providerId,api_key:key})});
     if(res.ok){
@@ -8469,23 +8658,23 @@ async function _saveProviderKey(providerId){
     }else{
       showToast(res.error||'Failed to save key');
       els.saveBtn.disabled=false;
-      els.saveBtn.textContent=t('providers_save');
+      els.saveBtn.textContent=_providerText('providers_save', 'Save');
     }
   }catch(e){
     showToast('Error: '+e.message);
     els.saveBtn.disabled=false;
-    els.saveBtn.textContent=t('providers_save');
+    els.saveBtn.textContent=_providerText('providers_save', 'Save');
   }
 }
 
 async function _removeProviderKey(providerId){
   const els=_providerCardEls.get(providerId);
   if(!els) return;
-  if(els.saveBtn){els.saveBtn.disabled=true;els.saveBtn.textContent=t('providers_removing');}
+  if(els.saveBtn){els.saveBtn.disabled=true;els.saveBtn.textContent=_providerText('providers_removing', 'Removing…');}
   try{
     const res=await api('/api/providers/delete',{method:'POST',body:JSON.stringify({provider:providerId})});
     if(res.ok){
-      showToast(res.provider+' key '+t('providers_key_removed').toLowerCase());
+      showToast(res.provider+' key '+_providerText('providers_key_removed', 'API key removed').toLowerCase());
       // Drop the removed provider from every cached dropdown surface so it
       // disappears immediately — composer picker, /model slash command,
       // Settings → Default Model, configured-model badges (#1539).
@@ -8495,11 +8684,11 @@ async function _removeProviderKey(providerId){
       await loadProvidersPanel(); // refresh list
     }else{
       showToast(res.error||'Failed to remove key');
-      if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=t('providers_save');}
+      if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=_providerText('providers_save', 'Save');}
     }
   }catch(e){
     showToast('Error: '+e.message);
-    if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=t('providers_save');}
+    if(els.saveBtn){els.saveBtn.disabled=false;els.saveBtn.textContent=_providerText('providers_save', 'Save');}
   }
 }
 
@@ -8528,11 +8717,11 @@ function _refreshModelDropdownsAfterProviderChange(){
 async function _refreshProviderModels(providerId, btn){
   btn.disabled=true;
   const orig=btn.innerHTML;
-  btn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${t('providers_refreshing')||'Refreshing...'}`;
+  btn.innerHTML=`<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg> ${_providerText('providers_refreshing', 'Refreshing...')}`;
   try{
     const res=await api('/api/models/refresh',{method:'POST',body:JSON.stringify({provider:providerId})});
     if(res.ok){
-      showToast(t('providers_models_refreshed')||('Models refreshed for '+res.provider));
+      showToast(_providerText('providers_models_refreshed', 'Models refreshed for ' + res.provider));
     }else{
       showToast(res.error||'Failed to refresh models');
     }
@@ -8696,6 +8885,9 @@ async function saveSettings(andClose){
         }
       }
       _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showTps,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
+      if(typeof window._syncGameModeStateFromServer==='function'){
+        await window._syncGameModeStateFromServer();
+      }
       showToast(t(saved.auth_just_enabled?'settings_saved_pw':'settings_saved_pw_updated'));
       _settingsDirty=false;
       _resetSettingsPanelState();
@@ -8715,6 +8907,9 @@ async function saveSettings(andClose){
       }
     }
     _applySavedSettingsUi(saved, body, {sendKey,showTokenUsage,showTps,showCliSessions,theme,skin,language,sidebarDensity,fontSize});
+    if(typeof window._syncGameModeStateFromServer==='function'){
+      await window._syncGameModeStateFromServer();
+    }
     showToast(t('settings_saved'));
     _settingsDirty=false;
     _resetSettingsPanelState();
@@ -8761,7 +8956,7 @@ const _cronNewJobIds=new Set();  // track which job IDs had new completions (unr
 
 // Auto-refresh the cron list when a job is created from chat or any external source.
 // The chat path dispatches this event when the agent response mentions cron creation.
-window.addEventListener('hermes:cron_created', () => {
+window.addEventListener('sidekick:cron_created', () => {
   if ($('cronList')) loadCrons();
 });
 
@@ -8832,7 +9027,12 @@ const _backgroundErrors=[];  // {session_id, title, message, ts}
 function trackBackgroundError(sessionId, title, message){
   // Only track if user is NOT currently viewing this session
   if(S.session&&S.session.session_id===sessionId) return;
-  _backgroundErrors.push({session_id:sessionId, title:title||t('untitled'), message, ts:Date.now()});
+  _backgroundErrors.push({
+    session_id:sessionId,
+    title:(title && title !== 'Untitled') ? title : (typeof t === 'function' ? t('new_chat') : 'New chat'),
+    message,
+    ts:Date.now()
+  });
   showErrorBanner();
 }
 
@@ -9029,7 +9229,10 @@ function loadMcpTools(){
 function loadGatewayStatus(){
   const card=$('gatewayStatusCard');
   if(!card) return;
-  api('/api/gateway/status').then(r=>{
+  const request=typeof window._workspaceApiWithTimeout==='function'
+    ? window._workspaceApiWithTimeout('/api/gateway/status', 6000)
+    : api('/api/gateway/status');
+  request.then(r=>{
     if(!r) return;
     if(!r.configured){
       card.innerHTML=`<div style="color:var(--muted);font-size:12px;display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block"></span>Gateway not configured</div>`;
@@ -9088,7 +9291,7 @@ function _renderSubagentStatus(active, paused, targetId='subagentStatusCard'){
   </div>` + entries.map(item=>{
     const sid=String(item&&item.subagent_id||'').trim();
     const sessionId=String(item&&item.session_id||'').trim();
-    const goal=String(item&&item.goal||'').trim()||'Untitled task';
+    const goal=String(item&&item.goal||'').trim()||(typeof t === 'function' ? t('kanban_new_task') : 'New task');
     const model=String(item&&item.model||'').trim();
     const depth=typeof item?.depth==='number'?item.depth:null;
     const toolCount=typeof item?.tool_count==='number'?item.tool_count:null;
@@ -9135,7 +9338,10 @@ function loadSubagentStatus(targetId='subagentStatusCard'){
   const card=$(targetId);
   if(!card) return;
   card.innerHTML=`<div style="color:var(--muted);font-size:12px;padding:6px 0">${esc(t('loading'))}</div>`;
-  api('/api/subagents').then(r=>{
+  const request=typeof window._workspaceApiWithTimeout==='function'
+    ? window._workspaceApiWithTimeout('/api/subagents', 6000)
+    : api('/api/subagents');
+  request.then(r=>{
     const active=(r&&r.active)||[];
     const paused=!!(r&&r.spawn_paused);
     _renderSubagentStatus(active, paused, targetId);
@@ -10016,8 +10222,13 @@ async function loadMailPanel() {
     const data = await _mailApi('/api/mail/folders');
     const inboxes = data.inboxes || [];
     inboxSelector.innerHTML = inboxes.map(i=>`<option value="${i.id}">${i.label}</option>`).join('');
-    if (inboxes.length>0) {
-      _mailSwitchInbox(inboxes[0].id);
+    const selectedInbox = inboxes.find(i => i.id === _currentMailInboxId)
+      || inboxes.find(i=>i.default)
+      || inboxes[0]
+      || null;
+    if (selectedInbox) {
+      inboxSelector.value = selectedInbox.id;
+      _mailSwitchInbox(selectedInbox.id);
     }
   } catch(e) {
     console.warn('Mail load error', e);

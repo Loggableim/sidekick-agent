@@ -103,13 +103,13 @@
 | Keine Credentials im Code | ✅ | Keine hartcodierten Zugangsdaten |
 | Keine hartcodierten Secrets | ✅ | Keine Tokens, Passwörter o.Ä. |
 
-### 11. Hermes / LastBrowser
+### 11. Sidekick / LastBrowser
 
 | Prüfpunkt | Status | Anmerkung |
 |-----------|--------|-----------|
-| Kein user-facing Hermes | ✅ | Alle Texte/Logos auf Sidekick umgestellt |
+| Kein user-facing Sidekick | ✅ | Alle Texte/Logos auf Sidekick umgestellt |
 | Kein LastBrowser | ✅ | Entfernt |
-| Alle Env-Vars auf `SIDEKICK_*` | ✅ | Keine veralteten `HERMES_*`-Variablen |
+| Alle Env-Vars auf `SIDEKICK_*` | ✅ | Keine veralteten `SIDEKICK_*`-Variablen |
 | Repo-URL | ✅ | `Loggableim/sidekick-agent` |
 
 ---
@@ -128,7 +128,7 @@
 | Pfade mit Leerzeichen | ✅ |
 | Exit Codes | ⚠️ |
 | Secrets / API-Keys | ✅ |
-| Hermes / LastBrowser entfernt | ✅ |
+| Sidekick / LastBrowser entfernt | ✅ |
 
 ### Risikomatrix
 

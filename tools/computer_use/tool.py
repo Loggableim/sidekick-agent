@@ -78,7 +78,7 @@ _DESTRUCTIVE_ACTIONS = frozenset({
 })
 
 # Hard-blocked key combinations. Mirrored from #4562 — these are destructive
-# regardless of approval level (e.g. logout kills the session Hermes runs in).
+# regardless of approval level (e.g. logout kills the session Sidekick runs in).
 _BLOCKED_KEY_COMBOS = {
     frozenset({"cmd", "shift", "backspace"}),   # empty trash
     frozenset({"cmd", "option", "backspace"}),   # force delete
@@ -137,7 +137,7 @@ def _get_backend() -> ComputerUseBackend:
             elif backend_name == "noop":  # pragma: no cover
                 _backend = _NoopBackend()
             else:
-                raise RuntimeError(f"Unknown HERMES_COMPUTER_USE_BACKEND={backend_name!r}")
+                raise RuntimeError(f"Unknown SIDEKICK_COMPUTER_USE_BACKEND={backend_name!r}")
             _backend.start()
         return _backend
 

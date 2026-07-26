@@ -22,8 +22,8 @@ def _detect_legacy_sidekick() -> str | None:
 def _bridge_env() -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
-    env.setdefault("HERMES_YOLO_MODE", "1")
-    env.setdefault("HERMES_ACCEPT_HOOKS", "1")
+    env.setdefault("SIDEKICK_YOLO_MODE", "1")
+    env.setdefault("SIDEKICK_ACCEPT_HOOKS", "1")
     return env
 
 
@@ -41,7 +41,7 @@ def run_assistant_once(prompt: str, timeout_seconds: int = 45) -> BridgeResult:
         result = subprocess.run(
             [command, "-z", prompt, "--ignore-user-config", "--ignore-rules"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=timeout_seconds,
             cwd=str(Path.cwd()),
             env=_bridge_env(),

@@ -96,7 +96,7 @@ def _make_stub(sub_name: str) -> types.ModuleType:
     mod.__path__ = []
     mod.__file__ = __file__
 
-    original_path = f"C:\\HermesPortable\\cids-hermes-agent\\sidekick_cli\\{sub_name}.py"
+    original_path = f"C:\\SidekickPortable\\cids-sidekick-agent\\sidekick_cli\\{sub_name}.py"
 
     def _getattr(name: str, sub=sub_name, orig=original_path) -> None:
         raise ImportError(

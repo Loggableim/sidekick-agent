@@ -1,4 +1,4 @@
-﻿var S=window.S||{session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',showHiddenWorkspaceFiles:false,mode:'chat'};
+var S=window.S||{session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',showHiddenWorkspaceFiles:false,mode:'chat'};
 window.S=S;
 var INFLIGHT=window.INFLIGHT||{};  // keyed by session_id while request in-flight
 window.INFLIGHT=INFLIGHT;
@@ -6,12 +6,12 @@ var SESSION_QUEUES=window.SESSION_QUEUES||{};  // keyed by session_id for queued
 window.SESSION_QUEUES=SESSION_QUEUES;
 const MAX_UPLOAD_BYTES=20*1024*1024;
 const MAX_UPLOAD_MB=Math.round(MAX_UPLOAD_BYTES/1024/1024);
-function hermesApiUrl(path){
+function sidekickApiUrl(path){
   const rel=String(path||'').replace(/^\/+/,'');
   return new URL(rel,document.baseURI||location.href);
 }
 async function fetchJson(path,opts={}){
-  const url=hermesApiUrl(path);
+  const url=sidekickApiUrl(path);
   const headers=new Headers(opts.headers||{});
   if(opts.body!=null&&!headers.has('Content-Type')) headers.set('Content-Type','application/json');
   const res=await fetch(url.href,{credentials:'include',...opts,headers});
@@ -30,7 +30,7 @@ async function fetchJson(path,opts={}){
   }
   return data;
 }
-window.hermesApiUrl=hermesApiUrl;
+window.sidekickApiUrl=sidekickApiUrl;
 window.fetchJson=fetchJson;
 
 let _appShellScrollResetPending=false;
@@ -67,7 +67,7 @@ window.addEventListener('resize', _queueAppShellScrollReset, {passive:true});
 document.addEventListener('focusin', _queueAppShellScrollReset, true);
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_queueAppShellScrollReset,{once:true});
 else _queueAppShellScrollReset();
-// â”€â”€ Prompt History (Arrow-Up/Down) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Prompt History (Arrow-Up/Down) ──────────────────────────────────────────
 const _promptHistoryKey='sidekick-webui-prompt-history';
 const _promptHistoryMax=50;
 let _promptHistory=(()=>{try{const d=localStorage.getItem(_promptHistoryKey);return d?JSON.parse(d):[];}catch(_){return [];}})();
@@ -131,7 +131,7 @@ function _navigatePromptHistory(direction){
 window._pushPromptHistory=_pushPromptHistory;
 window._resetPromptHistoryIndex=_resetPromptHistoryIndex;
 window._navigatePromptHistory=_navigatePromptHistory;
-// â”€â”€ end Prompt History â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── end Prompt History ──────────────────────────────────────────────────────
 // Tracks which session's queue to drain in setBusy(false).
 // Set to activeSid just before setBusy(false) in done/error handlers so the
 // queue drains the session that *finished*, not the one currently viewed.
@@ -244,7 +244,7 @@ function initOfflineMonitor(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',initOfflineMonitor,{once:true});
 else initOfflineMonitor();
 // Redirect to login when the server responds with 401 (auth session expired).
-// Handles iOS PWA standalone mode and keeps subpath mounts like /hermes/ from
+// Handles iOS PWA standalone mode and keeps subpath mounts like /sidekick/ from
 // escaping to the personal site root /login.
 function _redirectIfUnauth(res){if(res&&res.status===401){window.location.href='login?next='+encodeURIComponent(window.location.pathname+window.location.search);return true;}return false;}
 function _getSessionQueue(sid, create=false){
@@ -315,7 +315,7 @@ function _isBacktickFenceClose(line,minLen){
 }
 /**
  * Render fenced code blocks inside user messages.
- * Extracts ```â€¦``` fences, replaces them with placeholders,
+ * Extracts ```…``` fences, replaces them with placeholders,
  * escapes remaining text as plain HTML, then restores code blocks
  * with the same <pre><code> pipeline used by renderMd().
  * All non-fenced text stays escaped (no bold/italic/link interpretation).
@@ -347,7 +347,7 @@ function _renderUserFencedBlocks(text){
   // content. If math were stashed first, a user-typed code block containing
   // \[..\] / \(..\) / $$..$$ would be rendered as a KaTeX block inside
   // <pre><code> instead of as literal source. Mirrors renderMd()'s ordering.
-  // CommonMark Â§4.5 line-anchored fence: the closing run must use at least
+  // CommonMark §4.5 line-anchored fence: the closing run must use at least
   // as many backticks as the opener, so inner triple-backtick fences remain content.
   s=s.replace(/(^|\n)[ ]{0,3}(`{3,})([^\n`]*)\n(?:([\s\S]*?)\n)?[ ]{0,3}\2`*[ \t]*(?=\n|$)/g,(_,lead,_fence,info,code)=>{
     const langInfo=(info||'').trim();
@@ -388,7 +388,7 @@ function _statusCardHtml(card){
   card=card||{};
   const rows=Array.isArray(card.rows)?card.rows:[];
   const sessionId=String(card.sessionId||'');
-  const shortSessionId=sessionId.length>22?`${sessionId.slice(0,10)}â€¦${sessionId.slice(-8)}`:sessionId;
+  const shortSessionId=sessionId.length>22?`${sessionId.slice(0,10)}…${sessionId.slice(-8)}`:sessionId;
   const copyIcon=(typeof li==='function')?li('copy',13):'Copy';
   const copyBtn=sessionId
     ? `<button class="status-card-session-copy" type="button" data-copy-status-session="${esc(card.sessionId||'')}" title="${esc(t('copy'))}" onclick="copyStatusSessionId(this);event.stopPropagation()"><span>${esc(shortSessionId)}</span>${copyIcon}</button>`
@@ -570,6 +570,16 @@ async function loadDashboardSettings(){
     if(urlEl) urlEl.value=cfg.url||'';
   }catch(_){/* leave defaults visible */}
 }
+async function loadWorktreeSettings(){
+  const enabledEl=$('settingsWorktreeEnabled');
+  const cleanupEl=$('settingsWorktreeCleanupOnExit');
+  if(!enabledEl&&!cleanupEl) return;
+  try{
+    const cfg=await api('/api/worktree/settings');
+    if(enabledEl) enabledEl.checked=!!(cfg&&cfg.enabled);
+    if(cleanupEl) cleanupEl.checked=(cfg&&cfg.cleanup_on_exit)!==false;
+  }catch(_){/* leave defaults visible */}
+}
 async function saveDashboardSettings(){
   const modeEl=$('settingsDashboardMode');
   const urlEl=$('settingsDashboardUrl');
@@ -586,6 +596,24 @@ async function saveDashboardSettings(){
     else if(typeof showToast==='function') showToast('Dashboard link settings failed to save.');
   }
 }
+async function saveWorktreeSettings(){
+  const enabledEl=$('settingsWorktreeEnabled');
+  const cleanupEl=$('settingsWorktreeCleanupOnExit');
+  const statusEl=$('settingsWorktreeStatus');
+  const payload={
+    enabled: !!(enabledEl&&enabledEl.checked),
+    cleanup_on_exit: !!(cleanupEl&&cleanupEl.checked),
+  };
+  try{
+    const saved=await api('/api/worktree/settings',{method:'POST',body:JSON.stringify(payload)});
+    if(enabledEl) enabledEl.checked=!!(saved&&saved.enabled);
+    if(cleanupEl) cleanupEl.checked=(saved&&saved.cleanup_on_exit)!==false;
+    if(statusEl) statusEl.textContent='Worktree settings saved.';
+  }catch(err){
+    if(statusEl) statusEl.textContent='Worktree settings failed to save.';
+    else if(typeof showToast==='function') showToast('Worktree settings failed to save.');
+  }
+}
 function openNovaDashboard(event){
   if(event){event.preventDefault();event.stopPropagation();}
   const btn=event&&event.currentTarget?event.currentTarget:document.querySelector('[data-dashboard-link]');
@@ -595,25 +623,24 @@ function openNovaDashboard(event){
   return false;
 }
 
-/* â”€â”€ Hub Cast Toggle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Hub Cast Toggle ─────────────────────────────────── */
 let _castActive=false;
 let _castLoading=false;
 let _castAvailable=false;
 let _castStatusTimer=null;
 let _castConnectPromise=null;
+let _castStatusPromise=null;
 let _castInteractiveRequested=false;
 let _castLastError='';
 let _castConfigured=true;
 let _castHost='';
 let _castDashboardUrl='';
 const CAST_RECONNECT_INTERVAL_MS=15000;
-const CAST_STATUS_ICON_HTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.2"/><circle cx="5.5" cy="6.5" r="1.4"/><circle cx="18.5" cy="6.5" r="1.4"/><circle cx="12" cy="18.5" r="1.4"/><path d="M6.8 7.6 10.1 10.4"/><path d="M17.2 7.6 13.9 10.4"/><path d="M12 14.4v2.1"/></svg>';
-const CAST_STATUS_LOADING_ICON_HTML=typeof li==='function'?li('loader',16):CAST_STATUS_ICON_HTML;
 
 function _castFetch(path,opts,timeoutMs=3500){
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
-  return fetch(hermesApiUrl(path).href,{credentials:'same-origin',signal:ctrl.signal,...(opts||{})}).finally(()=>clearTimeout(timer));
+  return fetch(sidekickApiUrl(path).href,{credentials:'same-origin',signal:ctrl.signal,...(opts||{})}).finally(()=>clearTimeout(timer));
 }
 
 function _cleanupCastTimers(){
@@ -621,11 +648,6 @@ function _cleanupCastTimers(){
 }
 window.addEventListener('pagehide', _cleanupCastTimers, {once:true});
 window.addEventListener('beforeunload', _cleanupCastTimers, {once:true});
-
-function _setCastStatusIcon(icon, loading){
-  if(!icon)return;
-  icon.innerHTML=loading?CAST_STATUS_LOADING_ICON_HTML:CAST_STATUS_ICON_HTML;
-}
 
 function _applyCastResponse(r,s){
   _castConfigured=s.configured!==false;
@@ -641,22 +663,34 @@ function _applyCastUI(){
   if(!icon)return;
   const btn=icon.closest('.titlebar-action-btn');
   if(btn)btn.style.display='';
+  if(btn){
+    btn.removeAttribute('data-tooltip');
+    btn.removeAttribute('title');
+  }
   if(_castLoading){
-    _setCastStatusIcon(icon,true);
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-off';
-    icon.parentElement?.setAttribute('data-tooltip',_castActive?'Cast wird gestopptâ€¦':'Cast wird gestartetâ€¦');
+    icon.textContent='⏳';
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-off';
+      btn.setAttribute('aria-label',_castActive?'Hub Cast wird gestoppt…':'Hub Cast wird gestartet…');
+    }
   }else if(_castActive){
-    _setCastStatusIcon(icon,false);
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-on';
-    icon.parentElement?.setAttribute('data-tooltip','Hub Dashboard oeffnen');
+    icon.textContent='📺';
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-on';
+      btn.setAttribute('aria-label','Hub Dashboard öffnen');
+    }
   }else if(!_castAvailable){
-    _setCastStatusIcon(icon,false);
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-unavailable';
-    icon.parentElement?.setAttribute('data-tooltip',_castLastError||'Hub nicht erreichbar');
+    icon.textContent='📺';
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-unavailable';
+      btn.setAttribute('aria-label',_castLastError||'Hub nicht erreichbar');
+    }
   }else{
-    _setCastStatusIcon(icon,false);
-    if(btn)btn.className='titlebar-action-btn has-tooltip has-tooltip--bottom cast-status-btn cast-off';
-    icon.parentElement?.setAttribute('data-tooltip','Cast inaktiv â€“ klicken zum starten');
+    icon.textContent='📺';
+    if(btn){
+      btn.className='titlebar-action-btn cast-status-btn cast-off';
+      btn.setAttribute('aria-label','Cast inaktiv – klicken zum starten');
+    }
   }
 }
 
@@ -683,25 +717,8 @@ async function toggleHubCast(){
 window.openHubCastDashboard=openHubCastDashboard;
 window.toggleHubCast=toggleHubCast;
 
-async function _refreshHubCastStatus(){
-  try{
-    const r=await _castFetch('/api/cast/status',{method:'GET'},2500);
-    const s=await r.json().catch(()=>({}));
-    _applyCastResponse(r,s);
-  }catch(e){
-    _castAvailable=false;
-    _castActive=false;
-    _castLastError=e&&e.name==='AbortError'?'Hub Status Timeout':'Hub nicht erreichbar';
-  }finally{
-    _castLoading=false;
-    _applyCastUI();
-  }
-  return _castActive;
-}
-
 function _ensureHubCastConnected({interactive=false}={}){
   if(interactive)_castInteractiveRequested=true;
-  if(!interactive)return _refreshHubCastStatus();
   if(_castConnectPromise)return _castConnectPromise;
   _castLoading=true;
   _applyCastUI();
@@ -711,7 +728,7 @@ function _ensureHubCastConnected({interactive=false}={}){
       const s=await r.json().catch(()=>({}));
       _applyCastResponse(r,s);
       if(!_castActive&&_castInteractiveRequested&&typeof showToast==='function'){
-        showToast(_castLastError||'Hub Cast nicht erreichbar. PrÃ¼fe SIDEKICK_CAST_API_HOST.','error');
+        showToast(_castLastError||'Hub Cast nicht erreichbar. Prüfe SIDEKICK_CAST_API_HOST.','error');
       }
       return _castActive;
     }catch(e){
@@ -730,18 +747,41 @@ function _ensureHubCastConnected({interactive=false}={}){
   return _castConnectPromise;
 }
 
+function _refreshHubCastStatus(){
+  if(_castConnectPromise)return _castConnectPromise;
+  if(_castStatusPromise)return _castStatusPromise;
+  _castStatusPromise=(async()=>{
+    try{
+      const r=await _castFetch('/api/cast/status');
+      const s=await r.json().catch(()=>({}));
+      _applyCastResponse(r,s);
+      return _castActive;
+    }catch(e){
+      _castAvailable=false;
+      _castActive=false;
+      _castLastError=e&&e.name==='AbortError'?'Hub Timeout':'Hub nicht erreichbar';
+      return false;
+    }finally{
+      _castStatusPromise=null;
+      _applyCastUI();
+    }
+  })();
+  return _castStatusPromise;
+}
+
 function _startHubCastMonitor(){
   const btn=document.getElementById('btnCastToggle');
   if(btn)btn.style.display='';
-  void _ensureHubCastConnected({interactive:false});
+  _refreshHubCastStatus();
   if(_castStatusTimer)clearInterval(_castStatusTimer);
-  _castStatusTimer=setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS);
+  _castStatusTimer=setInterval(_refreshHubCastStatus,CAST_RECONNECT_INTERVAL_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_startHubCastMonitor,{once:true});
 else _startHubCastMonitor();
 
 function _initDashboardLinkProbe(){
   loadDashboardSettings();
+  loadWorktreeSettings();
   refreshDashboardStatus(true);
   setInterval(refreshDashboardStatus,DASHBOARD_STATUS_TTL_MS);
 }
@@ -751,7 +791,7 @@ if(document.readyState==='complete'){
   document.addEventListener('DOMContentLoaded',_initDashboardLinkProbe,{once:true});
 }
 
-/* â”€â”€ Image lightbox â€” click any .msg-media-img to enlarge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Image lightbox — click any .msg-media-img to enlarge ─────────────────── */
 function _openImgLightbox(src, alt) {
   const lb = document.createElement('div');
   lb.className = 'img-lightbox';
@@ -764,7 +804,7 @@ function _openImgLightbox(src, alt) {
   const cls = document.createElement('button');
   cls.className = 'img-lightbox-close';
   cls.setAttribute('aria-label', 'Close');
-  cls.textContent = 'Ã—';
+  cls.textContent = '×';
   cls.onclick = () => _closeImgLightbox(lb);
   lb.appendChild(img);
   lb.appendChild(cls);
@@ -786,7 +826,7 @@ document.addEventListener('click', e => {
   // Message-attached images (already wired since v0.50.x).
   let img = e.target.closest('.msg-media-img');
   if(img){ _openImgLightbox(img.src, img.alt); return; }
-  // Composer attach-tray image thumbnails â€” click any pasted/dropped image
+  // Composer attach-tray image thumbnails — click any pasted/dropped image
   // chip to lightbox-zoom it before sending. Excludes audio/video chips,
   // which keep their inline media controls. SVG thumbnails (.attach-thumb--svg)
   // are still images visually, so they qualify.
@@ -806,7 +846,7 @@ const _AUDIO_EXTS=/\.(mp3|ogg|wav|m4a|aac|flac|wma|opus|webm|oga)$/i;
 const _VIDEO_EXTS=/\.(mp4|webm|mkv|mov|avi|ogv|m4v)$/i;
 const _CSV_EXTS=/\.csv$/i;
 const _EXCALIDRAW_EXTS=/\.excalidraw$/i;
-// â”€â”€ Media playback speed controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Media playback speed controls ─────────────────────────────────────────
 const MEDIA_PLAYBACK_RATES=[0.5,0.75,1,1.25,1.5,2];
 const MEDIA_PLAYBACK_STORAGE_KEY='sidekick-media-playback-rate';
 function _getStoredMediaPlaybackRate(){
@@ -843,7 +883,7 @@ function _mediaKindForName(name=''){
 function _mediaSpeedControlsHtml(kind, label){
   const safeLabel=esc(label||kind||'media');
   const current=_getStoredMediaPlaybackRate();
-  return `<div class="media-speed-controls" role="group" aria-label="Playback speed for ${safeLabel}">${MEDIA_PLAYBACK_RATES.map(rate=>`<button type="button" class="media-speed-btn${rate===current?' active':''}" data-rate="${rate}" aria-pressed="${rate===current?'true':'false'}">${rate}Ã—</button>`).join('')}</div>`;
+  return `<div class="media-speed-controls" role="group" aria-label="Playback speed for ${safeLabel}">${MEDIA_PLAYBACK_RATES.map(rate=>`<button type="button" class="media-speed-btn${rate===current?' active':''}" data-rate="${rate}" aria-pressed="${rate===current?'true':'false'}">${rate}×</button>`).join('')}</div>`;
 }
 function _mediaPlayerHtml(kind, src, name, extra=''){
   const safeName=esc(name||'media');
@@ -904,7 +944,7 @@ let _dynamicModelLabels={};
 window._configuredModelBadges=window._configuredModelBadges||{};
 const MODEL_STATE_KEY='sidekick-webui-model-state';
 
-// â”€â”€ Smart model resolver â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Smart model resolver ────────────────────────────────────────────────────
 // Finds the best matching option value in a <select> for a given model ID.
 // Handles mismatches like 'claude-sonnet-4-6' vs 'anthropic/claude-sonnet-4.6'.
 // When a preferred provider is supplied, duplicate normalized IDs prefer that
@@ -975,7 +1015,7 @@ function _findModelInDropdown(modelId, sel, preferredProviderId){
   if(!modelId||!sel) return null;
   const options=Array.from(sel.options);
   const opts=options.map(o=>o.value);
-  // 1. Normalize: lowercase, strip namespace prefix, replace hyphensâ†’dots.
+  // 1. Normalize: lowercase, strip namespace prefix, replace hyphens→dots.
   // Also strip @provider: prefix from deduplicated model IDs (#1228, #1313).
   const norm=s=>s.toLowerCase().replace(/^[^/]+\//,'').replace(/^@([^:]+:)+/,'').replace(/-/g,'.');
   const target=norm(modelId);
@@ -994,11 +1034,11 @@ function _findModelInDropdown(modelId, sel, preferredProviderId){
   const exact=opts.find(o=>norm(o)===target);
   if(exact) return exact;
   // 3. Prefix/substring: require the candidate to start with the FULL normalized target
-  // (not a truncated base). This avoids false matches like gpt.5.5 â†’ gpt.5.4.mini (#1188).
+  // (not a truncated base). This avoids false matches like gpt.5.5 → gpt.5.4.mini (#1188).
   // Only fall back to the shorter base form if target itself is very short (a bare root
   // like "gpt" or "claude") where stripping would be a no-op anyway.
   const base=target.replace(/\.\d+$/,'');  // strip trailing version number
-  const useBase=base.length<=4||base===target; // bare root â€” stripping changed nothing meaningful
+  const useBase=base.length<=4||base===target; // bare root — stripping changed nothing meaningful
   const prefixTarget=useBase?base:target;
   const partial=opts.find(o=>norm(o).startsWith(prefixTarget));
   return partial||null;
@@ -1071,7 +1111,7 @@ async function populateModelDropdown(){
     // Store active provider globally so the send path can warn on mismatch
     window._activeProvider=data.active_provider||null;
     // Store default model so newSession() can apply it (#872).
-    // Per-page-load â€” not synced across browser tabs.
+    // Per-page-load — not synced across browser tabs.
     window._defaultModel=data.default_model||null;
     window._configuredModelBadges=data.configured_model_badges||{};
     // Clear existing options
@@ -1089,7 +1129,7 @@ async function populateModelDropdown(){
         _dynamicModelLabels[m.id]=m.label;
       }
       // Hydrate the label map from extra_models too (the catalog tail that
-      // doesn't render as <option> entries when the picker is capped â€” see
+      // doesn't render as <option> entries when the picker is capped — see
       // _build_nous_featured_set in api/config.py for the rationale). This
       // keeps a model selected from the slash-command autocomplete or a
       // persisted-localStorage value renderable with its proper label
@@ -1149,7 +1189,7 @@ function _addLiveModelsToSelect(provider, models, sel){
   const existingIds=new Set([...sel.options].map(o=>o.value));
   // Normalized dedup: strip @provider: prefix and unify separators so
   // 'minimax/minimax-m2.7' matches '@nous:minimax/minimax-m2.7' (#907).
-  // Strip ONLY the first colon â€” Ollama tag IDs are multi-colon
+  // Strip ONLY the first colon — Ollama tag IDs are multi-colon
   // (e.g. '@ollama-cloud:qwen3-vl:235b-instruct') and split(':',2) would
   // truncate the tag suffix in JS (the limit arg discards extras, unlike Python).
   const _normId=id=>{
@@ -1172,7 +1212,7 @@ function _addLiveModelsToSelect(provider, models, sel){
     const opt=document.createElement('option');
     opt.value=mid;
     opt.textContent=m.label||m.id;
-    opt.title='Live model â€” fetched from provider';
+    opt.title='Live model — fetched from provider';
     providerGroup.appendChild(opt);
     _dynamicModelLabels[mid]=m.label||m.id;
     added++;
@@ -1192,7 +1232,7 @@ function _addLiveModelsToSelect(provider, models, sel){
 
 async function _fetchLiveModels(provider, sel){
   if(!provider||!sel) return;
-  // Already fetched â€” apply cached models to this select element (#872)
+  // Already fetched — apply cached models to this select element (#872)
   if(_liveModelCache[provider]){
     const added=_addLiveModelsToSelect(provider,_liveModelCache[provider],sel);
     if(added>0 && typeof syncModelChip==='function') syncModelChip();
@@ -1210,10 +1250,10 @@ async function _fetchLiveModels(provider, sel){
     const added=_addLiveModelsToSelect(provider,data.models,sel);
     if(added>0){
       if(typeof syncModelChip==='function') syncModelChip();
-      console.debug('[hermes] Live models loaded for',provider+':',added,'new models added');
+      console.debug('[sidekick] Live models loaded for',provider+':',added,'new models added');
     }
   }catch(e){
-    console.debug('[hermes] Live model fetch failed for',provider,e.message);
+    console.debug('[sidekick] Live model fetch failed for',provider,e.message);
   }finally{
     _liveModelFetchPending.delete(provider);
   }
@@ -1224,7 +1264,7 @@ async function _fetchLiveModels(provider, sel){
  * currently configured in Sidekick. Returns a warning string if mismatched,
  * or null if the selection looks compatible.
  *
- * Provider detection is intentionally loose â€” we compare the model's slash
+ * Provider detection is intentionally loose — we compare the model's slash
  * prefix (e.g. "openai/" from "openai/gpt-4o") against the active provider
  * name. Custom/local endpoints report active_provider='custom' or the
  * base_url hostname and we skip the check to avoid false positives.
@@ -1232,7 +1272,7 @@ async function _fetchLiveModels(provider, sel){
 function _checkProviderMismatch(modelId){
   const ap=(window._activeProvider||'').toLowerCase();
   if(!ap||ap==='custom'||ap==='openrouter') return null; // can't reliably check
-  // @provider: prefixed IDs came from that provider's live model list â€” no mismatch possible
+  // @provider: prefixed IDs came from that provider's live model list — no mismatch possible
   if(modelId.startsWith('@')) return null;
   const slash=modelId.indexOf('/');
   if(slash<0) return null; // bare model name, no provider prefix
@@ -1283,7 +1323,7 @@ function _getConfiguredModelBadge(modelId,badgeMap,providerId){
   return matches[0];
 }
 
-// â”€â”€ Prominent model-switcher helpers: provider name + speed class â”€â”€â”€â”€
+// ── Prominent model-switcher helpers: provider name + speed class ────
 function _getModelProviderName(modelId){
   if(!modelId) return '';
   // Handle @provider:model format
@@ -1346,8 +1386,6 @@ function syncModelChip(){
   const label=$('composerModelLabel');
   const providerEl=$('composerModelProvider');
   const speedDot=$('modelSpeedDot');
-  const mobileLabel=$('composerMobileModelLabel');
-  const mobileAction=$('composerMobileModelAction');
   const headerBadge=$('modelStatusBadge');
   const headerValue=$('modelStatusValue');
   const dd=$('composerModelDropdown');
@@ -1356,13 +1394,10 @@ function syncModelChip(){
     label.textContent='';
     if(providerEl) providerEl.textContent='';
     if(speedDot) speedDot.className='model-speed-dot';
-    if(mobileLabel) mobileLabel.textContent='';
     if(headerValue) headerValue.textContent='model';
     if(headerBadge){
-      headerBadge.title='Conversation model';
       headerBadge.setAttribute('aria-label','Conversation model. Click to open the model picker.');
     }
-    chip.title='Conversation model';
     return;
   }
   const opt=_selectedModelOption();
@@ -1375,17 +1410,14 @@ function syncModelChip(){
   const _thinkingKey=s=>String(s||'').trim().toLowerCase().replace(/^@[^:]+:/,'').replace(/^[^/]+\//,'').replace(/[^a-z0-9]+/g,'');
   const isThinking=!!thinkingIds.length && thinkingIds.some(id=>_thinkingKey(id)===_thinkingKey(sel.value||''));
   label.textContent=isThinking ? `${displayText} (thinking)` : displayText;
-  if(mobileLabel) mobileLabel.textContent=isThinking ? `${displayText} (thinking)` : displayText;
   const badgeTitle=gatewayRouting?`${sel.value||'Conversation model'} ${_gatewayRoutingLabel(gatewayRouting)}`:(sel.value||'Conversation model');
-  chip.title=badgeTitle;
   chip.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
-  if(headerValue) headerValue.textContent=isThinking ? `${displayText} (thinking)` : displayText;
+  if(headerValue) headerValue.textContent=displayText;
   if(headerBadge){
-    headerBadge.title=badgeTitle+'. Click to open the model picker.';
-    headerBadge.setAttribute('aria-label',badgeTitle+'. Click to open the model picker.');
+    const headerTitle=badgeTitle+(isThinking ? ' · thinking' : '');
+    headerBadge.setAttribute('aria-label',headerTitle+'. Click to open the model picker.');
     headerBadge.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   }
-  if(mobileAction) mobileAction.classList.toggle('active',!!(dd&&dd.classList.contains('open')));
   // Update provider label
   if(providerEl){
     const providerName=_getModelProviderName(sel.value||'');
@@ -1478,12 +1510,10 @@ function _positionFixedDropdownWithinViewport(dd,anchor){
 function _positionModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
-  const mobileAction=$('composerMobileModelAction');
   const headerBadge=$('modelStatusBadge');
   const footer=document.querySelector('.composer-footer');
   if(!dd||!footer) return;
-  const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:mobileAction));
+  const anchor=_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:null);
   if(!anchor) return;
   if(anchor===headerBadge) _positionFixedDropdownWithinViewport(dd,anchor);
   else _positionComposerDropdownWithinViewport(dd,anchor,footer);
@@ -1525,7 +1555,7 @@ function renderModelDropdown(){
   _scopeNote.textContent=t('model_scope_advisory')||'Applies to this conversation from your next message.';
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
-  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search modelsâ€¦')}" spellcheck="false" autocomplete="off"><button class="model-search-thinking-toggle" type="button" title="Show only Ollama thinking models" aria-pressed="false">Thinking</button><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
+  _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-thinking-toggle" type="button" title="Show only Ollama thinking models" aria-pressed="false">Thinking</button><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
   const _si=_searchRow.querySelector('.model-search-input');
   const _tf=_searchRow.querySelector('.model-search-thinking-toggle');
   const _sc=_searchRow.querySelector('.model-search-clear');
@@ -1641,15 +1671,15 @@ function renderModelDropdown(){
         const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(badgeLabel)}</span>`:'';
         row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${m.name}</span>${badgeHtml}</div><span class="model-opt-id">${m.id}</span>`;
         row.onclick=()=>selectModelFromDropdown(m.value);
-        // â”€â”€ Space-Default Pin-Button â”€â”€
+        // ── Space-Default Pin-Button ──
         const isSpaceDefault1 = window._activeSpaceConfig && 
           window._activeSpaceConfig.model && 
           window._activeSpaceConfig.model.default === m.value;
         row.classList.toggle('is-space-default', !!isSpaceDefault1);
         const pinBtn1 = document.createElement('button');
         pinBtn1.className = 'model-pin-btn';
-        pinBtn1.innerHTML = isSpaceDefault1 ? 'âœ…' : 'ðŸ“Œ';
-        pinBtn1.title = isSpaceDefault1 ? 'Space-Standard entfernen' : 'Als Standard fÃ¼r diesen Space';
+        pinBtn1.innerHTML = isSpaceDefault1 ? '✅' : '📌';
+        pinBtn1.title = isSpaceDefault1 ? 'Space-Standard entfernen' : 'Als Standard für diesen Space';
         pinBtn1.onclick = async (e) => {
           e.stopPropagation();
           const slug = typeof _activeSpace !== 'undefined' ? _activeSpace : '';
@@ -1665,7 +1695,7 @@ function renderModelDropdown(){
           window._activeSpaceConfig.model = { default: newDefault, provider: newProvider };
           const dd = document.getElementById('composerModelDropdown');
           if (dd && dd.classList.contains('open')) renderModelDropdown();
-          showToast(newDefault ? 'âœ… Model als Space-Standard gesetzt' : 'Space-Standard entfernt');
+          showToast(newDefault ? '✅ Model als Space-Standard gesetzt' : 'Space-Standard entfernt');
         };
         row.insertBefore(pinBtn1, row.firstChild);
         dd.appendChild(row);
@@ -1695,15 +1725,15 @@ function renderModelDropdown(){
       const providerChip=m.group?`<span class="model-opt-provider">${esc(m.group)}</span>`:'';
       row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${m.name}</span>${badgeHtml}${providerChip}</div><span class="model-opt-id">${m.id}</span>`;
       row.onclick=()=>selectModelFromDropdown(m.value);
-        // â”€â”€ Space-Default Pin-Button â”€â”€
+        // ── Space-Default Pin-Button ──
         const isSpaceDefault2 = window._activeSpaceConfig && 
           window._activeSpaceConfig.model && 
           window._activeSpaceConfig.model.default === m.value;
         row.classList.toggle('is-space-default', !!isSpaceDefault2);
         const pinBtn2 = document.createElement('button');
         pinBtn2.className = 'model-pin-btn';
-        pinBtn2.innerHTML = isSpaceDefault2 ? 'âœ…' : 'ðŸ“Œ';
-        pinBtn2.title = isSpaceDefault2 ? 'Space-Standard entfernen' : 'Als Standard fÃ¼r diesen Space';
+        pinBtn2.innerHTML = isSpaceDefault2 ? '✅' : '📌';
+        pinBtn2.title = isSpaceDefault2 ? 'Space-Standard entfernen' : 'Als Standard für diesen Space';
         pinBtn2.onclick = async (e) => {
           e.stopPropagation();
           const slug = typeof _activeSpace !== 'undefined' ? _activeSpace : '';
@@ -1719,7 +1749,7 @@ function renderModelDropdown(){
           window._activeSpaceConfig.model = { default: newDefault, provider: newProvider };
           const dd = document.getElementById('composerModelDropdown');
           if (dd && dd.classList.contains('open')) renderModelDropdown();
-          showToast(newDefault ? 'âœ… Model als Space-Standard gesetzt' : 'Space-Standard entfernt');
+          showToast(newDefault ? '✅ Model als Space-Standard gesetzt' : 'Space-Standard entfernt');
         };
         row.insertBefore(pinBtn2, row.firstChild);
       dd.appendChild(row);
@@ -1799,31 +1829,106 @@ async function toggleModelDropdown(){
   if(typeof closeToolsetsDropdown==='function') closeToolsetsDropdown();
   const ready=window._modelDropdownReady;
   if(ready&&typeof ready.then==='function'){
-    try{await ready;}catch(_){}
+    ready.catch(()=>{}).then(()=>{
+      const dd=$('composerModelDropdown');
+      if(dd&&dd.classList.contains('open')){
+        renderModelDropdown();
+        _positionModelDropdown();
+      }
+    });
   }
   if(dd.classList.contains('open')) return;
   renderModelDropdown();
   dd.classList.add('open');
   _positionModelDropdown();
   chip.classList.add('active');
-  const mobileAction=$('composerMobileModelAction');
-  if(mobileAction) mobileAction.classList.add('active');
 }
 
 function closeModelDropdown(){
   const dd=$('composerModelDropdown');
   const chip=$('composerModelChip');
-  const mobileAction=$('composerMobileModelAction');
   if(dd) dd.classList.remove('open');
   if(chip) chip.classList.remove('active');
-  if(mobileAction) mobileAction.classList.remove('active');
+}
+if(typeof window!=='undefined'){
+  window.toggleModelDropdown=toggleModelDropdown;
+  window.closeModelDropdown=closeModelDropdown;
+}
+
+// Some browser surfaces do not activate inline onclick handlers. Attach a
+// fallback listener so the topbar badges and palette actions keep working.
+function _bindInlineClickFallbacks(root){
+  const scope=root&&typeof root.querySelectorAll==='function' ? root : document;
+  if(!scope||typeof scope.querySelectorAll!=='function') return;
+  for(const el of Array.from(scope.querySelectorAll('[onclick]'))){
+    if(!el||el.dataset.inlineClickFallbackBound==='1') continue;
+    if(
+      el.id==='modelStatusBadge' ||
+      el.id==='composerModelChip' ||
+      el.id==='reasoningModeBadge' ||
+      el.id==='composerReasoningChip'
+    ) continue;
+    if(typeof el.onclick==='function') continue;
+    const code=el.getAttribute('onclick');
+    if(!code) continue;
+    el.dataset.inlineClickFallbackBound='1';
+    try{
+      const fallback=new Function('event', code);
+      el.addEventListener('click',function(event){
+        try{
+          const result=fallback.call(this,event);
+          if(result===false&&event){
+            if(typeof event.preventDefault==='function') event.preventDefault();
+            if(typeof event.stopPropagation==='function') event.stopPropagation();
+          }
+        }catch(err){
+          console.error('[ui] inline click fallback failed for', el.id||el.className||el.tagName, err);
+        }
+      });
+    }catch(err){
+      console.error('[ui] inline click fallback could not compile for', el.id||el.className||el.tagName, err);
+    }
+  }
+}
+
+function _initInlineClickFallbacks(){
+  _bindInlineClickFallbacks(document);
+}
+
+function _bindModelAndReasoningTriggers(){
+  const bindings=[
+    ['modelStatusBadge', toggleModelDropdown],
+    ['composerModelChip', toggleModelDropdown],
+    ['reasoningModeBadge', toggleReasoningDropdown],
+    ['composerReasoningChip', toggleReasoningDropdown],
+  ];
+  for(const [id, handler] of bindings){
+    const el=$(id);
+    if(!el || typeof handler!=='function' || el.dataset.inlineClickFallbackBound==='1') continue;
+    if(typeof el.onclick==='function') continue;
+    el.dataset.inlineClickFallbackBound='1';
+    el.addEventListener('click', function(event){
+      const result=handler.call(this, event);
+      if(result===false&&event){
+        if(typeof event.preventDefault==='function') event.preventDefault();
+        if(typeof event.stopPropagation==='function') event.stopPropagation();
+      }
+    });
+  }
+}
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',_initInlineClickFallbacks,{once:true});
+  document.addEventListener('DOMContentLoaded',_bindModelAndReasoningTriggers,{once:true});
+}else{
+  _initInlineClickFallbacks();
+  _bindModelAndReasoningTriggers();
 }
 
 document.addEventListener('click',e=>{
   if(
     !e.target.closest('#modelStatusBadge') &&
     !e.target.closest('#composerModelChip') &&
-    !e.target.closest('#composerMobileModelAction') &&
     !e.target.closest('#composerModelDropdown')
   ) closeModelDropdown();
 });
@@ -1831,14 +1936,14 @@ window.addEventListener('resize',()=>{
   const dd=$('composerModelDropdown');
   if(dd&&dd.classList.contains('open')) _positionModelDropdown();
   // Keep the reasoning dropdown aligned under its chip when the window
-  // resizes while open â€” same pattern as the model dropdown above.
+  // resizes while open — same pattern as the model dropdown above.
   const rdd=$('composerReasoningDropdown');
   if(rdd&&rdd.classList.contains('open')&&typeof _positionReasoningDropdown==='function'){
     _positionReasoningDropdown();
   }
 });
 
-// â”€â”€ Reasoning effort chip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Reasoning effort chip ────────────────────────────────────────────────────
 let _currentReasoningEffort=null;
 let _currentReasoningAllowedEfforts=null;
 let _currentReasoningContextKey='';
@@ -1894,39 +1999,27 @@ function _applyReasoningChip(eff, status){
   const chip=$('composerReasoningChip');
   const headerBadge=$('reasoningModeBadge');
   const headerValue=$('reasoningModeValue');
-  const mobileLabel=$('composerMobileReasoningLabel');
-  const mobileAction=$('composerMobileReasoningAction');
   if(!wrap||!label) return;
   wrap.style.display='';
-  if(mobileAction) mobileAction.style.display='';
   const text=_formatReasoningEffortLabel(effort);
   const allowedSet=allowed?new Set(allowed):null;
   const supported=!allowedSet||!effort||effort==='none'||allowedSet.has(effort);
-  const allowedText=allowed&&allowed.length?' ? allowed: '+allowed.join(' | '):'';
+  const allowedText=allowed&&allowed.length?' · allowed: '+allowed.join(' | '):'';
   const title='Reasoning effort: '+text+allowedText+(supported ? '' : ' (not supported by the selected model)');
   label.textContent=text;
-  if(mobileLabel) mobileLabel.textContent=text;
   if(chip){
     const inactive=!effort||effort==='none';
     chip.classList.toggle('inactive',inactive);
     chip.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
-    chip.title=title;
   }
   if(headerBadge){
     const inactive=!effort||effort==='none';
     headerBadge.classList.toggle('inactive',inactive);
     headerBadge.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
     headerBadge.classList.toggle('active',!!($('composerReasoningDropdown')&&$('composerReasoningDropdown').classList.contains('open')));
-    headerBadge.title=title+'. Click to open the reasoning picker.';
     headerBadge.setAttribute('aria-label',title+'. Click to open the reasoning picker.');
   }
   if(headerValue) headerValue.textContent=text;
-  if(mobileAction){
-    const inactive=!effort||effort==='none';
-    mobileAction.classList.toggle('inactive',inactive);
-    mobileAction.classList.toggle('unsupported',!supported&&!!effort&&effort!=='none');
-    mobileAction.title=title;
-  }
   const options=document.querySelectorAll('.reasoning-option');
   options.forEach(function(opt){
     const optEff=_normalizeReasoningEffort(opt&&opt.dataset&&opt.dataset.effort);
@@ -1983,7 +2076,7 @@ function _workflowSubagentSummaryState(){
 function _workflowSubagentPreviewLabel(state){
   const preview=String(state&&((state.preview||state.goal||state.subagentId)||'')).trim();
   if(!preview) return '';
-  return preview.length>42 ? preview.slice(0,42)+'â€¦' : preview;
+  return preview.length>42 ? preview.slice(0,42)+'…' : preview;
 }
 
 function _workflowSubagentChipLabel(){
@@ -1993,7 +2086,7 @@ function _workflowSubagentChipLabel(){
   if(state.paused) parts.push('paused');
   const preview=_workflowSubagentPreviewLabel(state);
   if(preview) parts.push(preview);
-  return parts.join(' Â· ');
+  return parts.join(' · ');
 }
 
 function _workflowSubagentMenuLabel(){
@@ -2043,6 +2136,10 @@ function _workflowReviewLabel(){
   return 'Run local review chain';
 }
 
+function _workflowTitlebarIsSecondaryChip(el){
+  return !!(el && el.dataset && el.dataset.titlebarSecondary==='1');
+}
+
 function _workflowWebBackendState(){
   const btn=$('browserBackendStatus');
   const backend=String(btn&&btn.dataset&&btn.dataset.backend||'').trim().toLowerCase();
@@ -2074,6 +2171,11 @@ function workflowRefreshResearchBadge(){
   const badge=$('researchModeBadge');
   const value=$('researchModeValue');
   if(!badge && !value) return;
+  if(_workflowTitlebarIsSecondaryChip(badge)){
+    if(badge) badge.hidden=true;
+    if(value) value.hidden=true;
+    return;
+  }
   const state=_workflowResearchModeState();
   const mode=state.mode==='deep'?'deep':'quick';
   if(badge){
@@ -2084,7 +2186,6 @@ function workflowRefreshResearchBadge(){
     badge.setAttribute('aria-pressed',mode==='deep'?'true':'false');
     const nextMode=mode==='deep'?'quick':'deep';
     const label='Research mode '+mode+'. Click to switch to '+(nextMode==='deep'?'deep research':'quick search')+'.';
-    badge.title=label;
     badge.setAttribute('aria-label',label);
   }
   if(value){
@@ -2143,7 +2244,7 @@ function _workflowMcpLabel(state){
   const parts=['mcp '+state.connected+'/'+state.total];
   if(state.tools) parts.push(state.tools+' tools');
   if(state.offline) parts.push(state.offline+' offline');
-  return parts.join(' Â· ');
+  return parts.join(' · ');
 }
 
 function _workflowMcpStateClass(state){
@@ -2159,21 +2260,24 @@ function workflowRefreshMcpBadge(force){
   const badge=$('mcpStatusBadge');
   const value=$('mcpStatusValue');
   const state=_workflowMcpSummaryState();
+  const secondary=_workflowTitlebarIsSecondaryChip(badge);
   if(badge){
     ['mcp-state-loading','mcp-state-connected','mcp-state-partial','mcp-state-offline'].forEach(cls=>badge.classList.remove(cls));
     badge.classList.add(_workflowMcpStateClass(state));
-    badge.hidden=false;
+    badge.hidden=secondary;
     badge.disabled=false;
     const label=state.error
       ? 'MCP unavailable. Click to open MCP settings.'
       : (state.available
         ? ('MCP '+state.connected+'/'+state.total+(state.tools ? ', '+state.tools+' tools' : '')+'. Click to open MCP settings.')
         : 'MCP loading. Click to open MCP settings.');
-    badge.title=label;
-    badge.setAttribute('aria-label',label);
+    if(!secondary){
+      badge.setAttribute('aria-label',label);
+    }
   }
   if(value){
     value.textContent=_workflowMcpLabel(state);
+    value.hidden=secondary;
   }
   if((force || (!state.available && !state.error)) && !window._workflowMcpSummaryPromise && typeof api==='function'){
     window._workflowMcpSummaryPromise=api('/api/mcp/servers').then(data=>{
@@ -2232,6 +2336,7 @@ function workflowRefreshSubagentBadge(force){
   const badge=$('subagentsStatusBadge');
   const value=$('subagentsStatusValue');
   if(!badge && !value) return;
+  const secondary=_workflowTitlebarIsSecondaryChip(badge);
   const state=_workflowSubagentSummaryState();
   const shouldFetch=!!force || (!state.available && !state.loading && !state.error);
   if(shouldFetch && typeof api==='function' && !window._workflowSubagentSummaryPromise){
@@ -2259,16 +2364,18 @@ function workflowRefreshSubagentBadge(force){
   const stateClass=_workflowSubagentStateClass(renderState);
   const title=label.slice(0,1).toUpperCase()+label.slice(1)+(label.endsWith('.')?'':'.')+' Click to open subagents.';
   if(badge){
-    badge.hidden=false;
+    badge.hidden=secondary;
     badge.disabled=false;
     badge.classList.remove('subagents-state-loading','subagents-state-active','subagents-state-paused','subagents-state-empty','subagents-state-offline');
     badge.classList.add(stateClass);
     badge.setAttribute('aria-busy',renderState.loading ? 'true' : 'false');
-    badge.title=title;
-    badge.setAttribute('aria-label',title);
+    if(!secondary){
+      badge.setAttribute('aria-label',title);
+    }
   }
   if(value){
     value.textContent=label;
+    value.hidden=secondary;
   }
 }
 
@@ -2350,8 +2457,12 @@ function _workflowHeaderMenuActionButtons(){
   return Array.from(menu.querySelectorAll('[role="menuitem"]'));
 }
 
+function _workflowHeaderMenuIsStickyHidden(btn){
+  return !!(btn && btn.dataset && btn.dataset.workflowStickyHidden==='1');
+}
+
 function _workflowHeaderMenuVisibleButtons(){
-  return _workflowHeaderMenuActionButtons().filter(btn=>btn && !btn.hidden && !btn.disabled);
+  return _workflowHeaderMenuActionButtons().filter(btn=>btn && !btn.hidden);
 }
 
 function _workflowHeaderMenuFirstVisibleButton(){
@@ -2422,13 +2533,13 @@ function workflowRefreshHeaderMenuFooter(){
       selection.textContent='No matching actions';
     }else{
       const label=String((active&&active.textContent)||'').trim()||'First action';
-      selection.textContent=visible.length+' actions Â· '+label;
+      selection.textContent=visible.length+' actions · '+label;
     }
   }
   if(shortcuts){
     shortcuts.textContent=visible.length>1
-      ? 'Enter to run Â· Esc to close Â· â†‘â†“ to move'
-      : 'Enter to run Â· Esc to close';
+      ? 'Enter to run · Esc to close · ↑↓ to move'
+      : 'Enter to run · Esc to close';
   }
 }
 
@@ -2443,12 +2554,18 @@ function workflowFilterHeaderMenu(query){
   const buttons=_workflowHeaderMenuActionButtons();
   let visibleCount=0;
   buttons.forEach(btn=>{
+    if(_workflowHeaderMenuIsStickyHidden(btn)){
+      btn.hidden=true;
+      btn.setAttribute('aria-hidden','true');
+      btn.tabIndex=-1;
+      return;
+    }
     const text=(btn.textContent||'').trim().toLowerCase();
     const titleText=(btn.title||'').trim().toLowerCase();
     const hit=!q || text.includes(q) || titleText.includes(q);
     btn.hidden=!hit;
     btn.setAttribute('aria-hidden',hit?'false':'true');
-    btn.tabIndex=(hit && !btn.disabled)?0:-1;
+    btn.tabIndex=hit?0:-1;
     if(hit) visibleCount++;
   });
   const filtered=!!q;
@@ -2456,7 +2573,7 @@ function workflowFilterHeaderMenu(query){
   if(empty) empty.hidden=!(filtered && visibleCount===0);
   separators.forEach(sep=>{ sep.hidden=filtered || visibleCount===0; });
   if(!filtered){
-    buttons.forEach(btn=>{ if(btn) btn.hidden=false; });
+    buttons.forEach(btn=>{ if(btn && !_workflowHeaderMenuIsStickyHidden(btn)) btn.hidden=false; });
     separators.forEach(sep=>{ sep.hidden=false; });
     if(title) title.hidden=false;
     if(empty) empty.hidden=true;
@@ -2515,32 +2632,18 @@ function workflowHeaderMenuSearchKeydown(event){
 }
 
 function _workflowHeaderStatusSummaryText(){
-  const normalizeApproval=(mode)=>{
-    const text=String(mode||'').trim().toLowerCase();
-    if(text==='ask') return 'manual';
-    if(text==='deny') return 'smart';
-    if(text==='yolo') return 'off';
-    if(text==='manual'||text==='smart'||text==='off') return text;
-    return text||'manual';
-  };
-  const approval=normalizeApproval(window._approvalMode || ($('approvalModeValue')&&$('approvalModeValue').textContent) || 'manual');
-  const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
-  const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
-  const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
-  const research=String(($('researchModeValue')&&$('researchModeValue').textContent) || 'quick').trim().toLowerCase() || 'quick';
-  const mcp=String(($('mcpStatusValue')&&$('mcpStatusValue').textContent) || 'mcp loading').trim() || 'mcp loading';
-  const browserState=browser.replace(/^browser\s+/i,'') || 'closed';
-  return 'Approval ' + approval + ' · Browser ' + browserState + ' · Research ' + research + ' · MCP ' + mcp + ' · Model ' + model + ' · Reasoning ' + reasoning;
+  const badge=$('workflowStatusBadge');
+  return String((badge&&badge.getAttribute('aria-label'))||'Workflow status overview').trim();
 }
 
 function _workflowSetHeaderMenuSummary(summaryText){
   const summary=$('workflowHeaderMenuSummary');
   if(!summary) return;
-  const label=String(summaryText||'').trim() || 'Workflow status overview';
+  const label=String(summaryText||'Workflow status overview').trim();
+  summary.textContent=label;
   summary.title=label;
   summary.setAttribute('aria-label',label);
   summary.dataset.tooltip=label;
-  summary.dataset.summary=label;
 }
 
 function syncWorkflowChip(){
@@ -2558,18 +2661,21 @@ function syncWorkflowChip(){
   const approval=normalizeApproval(window._approvalMode || ($('approvalModeValue')&&$('approvalModeValue').textContent) || 'manual');
   const reasoning=String(($('reasoningModeValue')&&$('reasoningModeValue').textContent) || 'default').trim().toLowerCase() || 'default';
   const model=String(($('modelStatusValue')&&$('modelStatusValue').textContent) || 'model').trim() || 'model';
-  const browser=String(($('browserStatusValue')&&$('browserStatusValue').textContent) || 'browser closed').trim() || 'browser closed';
-    const webBackend=_workflowWebBackendState();
+  const browserPermissionBtn=$('browserPermissionBtn');
+  const browserOpen=document.body&&document.body.classList.contains('browser-drawer-open');
+  const browserMode=String((browserPermissionBtn&&browserPermissionBtn.dataset&&browserPermissionBtn.dataset.state) || (browserPermissionBtn&&browserPermissionBtn.getAttribute('aria-pressed')==='true' ? 'control' : 'none')).trim().toLowerCase();
+  const browser=(browserOpen ? 'open' : 'closed')+' · '+(browserMode==='control' ? 'control' : (browserMode==='read' ? 'read' : 'locked'));
+  const webBackend=_workflowWebBackendState();
   const review=_workflowReviewState();
   const research=_workflowResearchModeState();
   const mcp=_workflowMcpSummaryState();
   const subagents=_workflowSubagentChipLabel();
-  value.textContent=approval+' Â· '+reasoning+' Â· '+(research.mode==='deep'?'deep':'quick')+(review.visible ? ' Â· review' : '')+' Â· '+subagents;
+  value.textContent=approval+' · '+reasoning+(review.visible ? ' · review' : '');
   badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
   const reviewLabel=review.visible ? _workflowReviewLabel() : 'local review ready';
   const researchLabel=research.mode==='deep' ? 'deep research' : 'quick search';
-  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+_workflowMcpLabel(mcp)+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status.';
-  badge.title=label;
+  const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+_workflowMcpLabel(mcp)+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status. Cmd/Ctrl+K opens the palette.';
+  badge.removeAttribute('title');
   badge.setAttribute('aria-label',label);
   _workflowSetHeaderMenuSummary(_workflowHeaderStatusSummaryText());
   workflowRefreshMcpBadge();
@@ -2578,25 +2684,9 @@ function syncWorkflowChip(){
   workflowRefreshHeaderMenu();
 }
 
-function _workflowApplyBrowserQaAction(btn, kind, fallbackText){
-  if(!btn) return;
-  const isRepro=kind==='repro';
-  const disabled=!!(isRepro ? window.browserQaReproDisabled : window.browserQaFixFindingsDisabled);
-  const text=String((isRepro ? window.browserQaReproMenuLabel : window.browserQaFixFindingsMenuLabel) || fallbackText || '').trim();
-  const title=String((isRepro ? window.browserQaReproTitle : window.browserQaFixFindingsTitle) || text || fallbackText || '').trim();
-  const aria=String((isRepro ? window.browserQaReproAria : window.browserQaFixFindingsAria) || title || text || fallbackText || '').trim();
-  btn.disabled=disabled;
-  btn.setAttribute('aria-disabled',disabled?'true':'false');
-  btn.textContent=text || fallbackText;
-  btn.title=title;
-  btn.setAttribute('aria-label',aria);
-}
-
 function workflowRefreshHeaderMenu(){
   const menu=$('workflowStatusMenu');
   const badge=$('workflowStatusBadge');
-  const menuBtn=$('workflowStatusMenuBtn');
-  const summary=$('workflowHeaderMenuSummary');
   const primarySubagent=$('workflowHeaderPrimarySubagentAction');
   const browserToggle=$('workflowHeaderBrowserToggleAction');
   const browserPermission=$('workflowHeaderBrowserPermissionAction');
@@ -2610,21 +2700,18 @@ function workflowRefreshHeaderMenu(){
   }
   if(badge){
     badge.classList.toggle('active',!!_workflowHeaderMenuOpen);
-  }
-  if(summary){
-    _workflowSetHeaderMenuSummary(_workflowHeaderStatusSummaryText());
-  }
-  if(menuBtn){
-    menuBtn.setAttribute('aria-expanded',_workflowHeaderMenuOpen?'true':'false');
+    badge.setAttribute('aria-expanded',_workflowHeaderMenuOpen?'true':'false');
   }
   if(primarySubagent){
     const preview=_workflowSubagentPreviewLabel(subagentState);
-    const available=!!subagentState.available;
+    const available=!!subagentState.count;
+    if(available) primarySubagent.removeAttribute('data-workflow-sticky-hidden');
+    else primarySubagent.setAttribute('data-workflow-sticky-hidden','1');
     primarySubagent.hidden=!available;
     primarySubagent.disabled=!available;
-    primarySubagent.textContent=preview ? 'Open first subagent Â· '+preview : 'Open first subagent';
+    primarySubagent.textContent=preview ? 'Open first subagent · '+preview : 'Open first subagent';
     primarySubagent.title=available
-      ? 'Open the first active subagent session'+(preview ? ' Â· '+preview : '')
+      ? 'Open the first active subagent session'+(preview ? ' · '+preview : '')
       : 'No active subagents';
     primarySubagent.setAttribute('aria-label',primarySubagent.title);
   }
@@ -2638,28 +2725,11 @@ function workflowRefreshHeaderMenu(){
       ? String(permissionBtn.dataset.state)
       : ((permissionBtn&&permissionBtn.getAttribute('aria-pressed')==='true') ? 'control' : 'none');
     browserPermission.textContent=mode==='control'
-      ? 'Pause to watch-only'
-      : (mode==='read' ? 'Enable browser control' : 'Enable browser watch');
+      ? 'Pause browser control'
+      : (mode==='read' ? 'Resume browser control' : 'Enable browser control');
   }
   const browserScreenshot=$('workflowHeaderBrowserScreenshotAction');
   if(browserScreenshot) browserScreenshot.textContent='Send screenshot to chat';
-  const browserQa=$('workflowHeaderBrowserQaAction');
-  if(browserQa) browserQa.textContent='Run browser QA';
-  const browserWebuiSmoke=$('workflowHeaderBrowserWebuiSmokeAction');
-  if(browserWebuiSmoke) browserWebuiSmoke.textContent='Run WebUI smoke';
-  const browserTestPage=$('workflowHeaderBrowserTestPageAction');
-  if(browserTestPage) browserTestPage.textContent='Test current page';
-  const browserRetestPage=$('workflowHeaderBrowserRetestPageAction');
-  if(browserRetestPage){
-    const retestLabel=window.browserQaRetestMenuLabel||'Retest current page';
-    browserRetestPage.textContent=retestLabel;
-    browserRetestPage.title=window.browserQaRetestTitle||retestLabel;
-    browserRetestPage.setAttribute('aria-label',window.browserQaRetestAria||retestLabel);
-  }
-  const browserFixFindings=$('workflowHeaderBrowserFixFindingsAction');
-  _workflowApplyBrowserQaAction(browserFixFindings,'fix','Fix browser findings');
-  const browserRepro=$('workflowHeaderBrowserReproAction');
-  _workflowApplyBrowserQaAction(browserRepro,'repro','Create browser repro');
   const browserPageContext=$('workflowHeaderBrowserPageContextAction');
   if(browserPageContext) browserPageContext.textContent='Send readable page text to chat';
   const browserFullPageContext=$('workflowHeaderBrowserFullPageContextAction');
@@ -2702,15 +2772,12 @@ function workflowRefreshHeaderMenu(){
   if(mcpAction){
     const mcpState=_workflowMcpSummaryState();
     mcpAction.textContent='Open MCP settings';
-    mcpAction.title='Open MCP settings'+(mcpState.available ? ' Â· '+_workflowMcpLabel(mcpState) : '');
+    mcpAction.title='Open MCP settings'+(mcpState.available ? ' · '+_workflowMcpLabel(mcpState) : '');
     mcpAction.setAttribute('aria-label',mcpAction.title);
   }
   if(subagents) subagents.textContent=_workflowSubagentMenuLabel();
   workflowFilterHeaderMenu(window._workflowHeaderMenuQuery||(_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
   workflowRefreshHeaderMenuFooter();
-  if(menu && _workflowHeaderMenuOpen && menuBtn && typeof _positionFixedDropdownWithinViewport==='function'){
-    _positionFixedDropdownWithinViewport(menu,menuBtn);
-  }
 }
 
 function workflowCloseHeaderMenu(){
@@ -2724,16 +2791,60 @@ function workflowCloseHeaderMenu(){
   if(search){
     search.value='';
   }
-  const menuBtn=$('workflowStatusMenuBtn');
-  if(menuBtn) menuBtn.setAttribute('aria-expanded','false');
   document.removeEventListener('click', _workflowHeaderMenuOutsideClick, true);
   document.removeEventListener('keydown', _workflowHeaderMenuKeydown, true);
   workflowRefreshHeaderMenu();
   workflowRefreshHeaderMenuFooter();
 }
+function workflowOpenHeaderMenu(event){
+  if(event&&typeof event.preventDefault==='function') event.preventDefault();
+  if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
+  const menu=$('workflowStatusMenu');
+  if(!menu || _workflowHeaderMenuOpen) return false;
+  if(menu.parentElement!==document.body){
+    document.body.appendChild(menu);
+  }
+  if(typeof closeModelDropdown==='function') closeModelDropdown();
+  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
+  _workflowHeaderMenuOpen=true;
+  menu.hidden=false;
+  workflowRefreshHeaderMenu();
+  const badge=$('workflowStatusBadge');
+  if(menu&&badge&&typeof menu.getBoundingClientRect==='function'&&typeof badge.getBoundingClientRect==='function'){
+    const badgeRect=badge.getBoundingClientRect();
+    const menuRect=menu.getBoundingClientRect();
+    const pad=12;
+    const desiredLeft=Math.round(badgeRect.right-menuRect.width);
+    const maxLeft=Math.max(pad, window.innerWidth-menuRect.width-pad);
+    const left=Math.max(pad, Math.min(maxLeft, desiredLeft));
+    const desiredTop=Math.round(badgeRect.top-menuRect.height-8);
+    const maxTop=Math.max(pad, window.innerHeight-menuRect.height-pad);
+    const top=Math.max(pad, Math.min(maxTop, desiredTop));
+    menu.style.position='fixed';
+    menu.style.left=left+'px';
+    menu.style.top=top+'px';
+    menu.style.right='auto';
+    menu.style.bottom='auto';
+  }
+  document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
+  document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
+  workflowFilterHeaderMenu((_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
+  workflowRefreshHeaderMenuFooter();
+  setTimeout(workflowFocusHeaderMenuSearch,0);
+  return false;
+}
+function workflowMaybeCloseHeaderMenu(event){
+  const menu=$('workflowStatusMenu');
+  const badge=$('workflowStatusBadge');
+  const next=event&&event.relatedTarget;
+  if(typeof window.matchMedia==='function' && !window.matchMedia('(hover: hover)').matches) return false;
+  if(next && ((menu&&menu.contains(next)) || (badge&&badge.contains(next)))) return false;
+  workflowCloseHeaderMenu();
+  return false;
+}
 function _workflowHeaderMenuOutsideClick(event){
   const menu=$('workflowStatusMenu');
-  const btn=$('workflowStatusMenuBtn');
+  const btn=$('workflowStatusBadge');
   if(!menu || menu.hidden) return;
   if(menu.contains(event.target)) return;
   if(btn && btn.contains(event.target)) return;
@@ -2747,31 +2858,11 @@ function _workflowHeaderMenuKeydown(event){
 function workflowToggleHeaderMenu(event){
   if(event&&typeof event.preventDefault==='function') event.preventDefault();
   if(event&&typeof event.stopPropagation==='function') event.stopPropagation();
-  const menu=$('workflowStatusMenu');
-  const menuBtn=$('workflowStatusMenuBtn');
-  if(!menu) return false;
   if(_workflowHeaderMenuOpen){
     workflowCloseHeaderMenu();
     return false;
   }
-  if(typeof closeModelDropdown==='function') closeModelDropdown();
-  if(typeof closeReasoningDropdown==='function') closeReasoningDropdown();
-  if(typeof browserToggleHeaderMenu==='function'){
-    const browserMenu=$('browserStatusMenu');
-    if(browserMenu && !browserMenu.hidden) browserToggleHeaderMenu();
-  }
-  _workflowHeaderMenuOpen=true;
-  menu.hidden=false;
-  workflowRefreshHeaderMenu();
-  if(menuBtn && typeof _positionFixedDropdownWithinViewport==='function'){
-    _positionFixedDropdownWithinViewport(menu,menuBtn);
-  }
-  document.addEventListener('click', _workflowHeaderMenuOutsideClick, true);
-  document.addEventListener('keydown', _workflowHeaderMenuKeydown, true);
-  workflowFilterHeaderMenu((_workflowHeaderMenuSearchEl()&&_workflowHeaderMenuSearchEl().value)||'');
-  workflowRefreshHeaderMenuFooter();
-  setTimeout(workflowFocusHeaderMenuSearch,0);
-  return false;
+  return workflowOpenHeaderMenu(event);
 }
 
 function workflowRunHeaderAction(action){
@@ -2780,6 +2871,22 @@ function workflowRunHeaderAction(action){
     case 'status':
       if(typeof executeCommand==='function') executeCommand('/workflow status');
       break;
+    case 'compact-layout':
+      if(typeof toggleCompactLayout==='function') toggleCompactLayout();
+      break;
+    case 'copy-conversation': {
+      const text=typeof transcript==='function' ? transcript() : '';
+      if(!text||!String(text).trim()){
+        showToast(typeof t==='function' ? t('no_active_session') : 'No active session');
+        break;
+      }
+      _copyText(text).then(()=>{
+        showToast(typeof t==='function' ? t('copied') : 'Copied!');
+      }).catch(()=>{
+        showToast(typeof t==='function' ? t('copy_failed') : 'Copy failed');
+      });
+      break;
+    }
     case 'subagent-primary': {
       const state=_workflowSubagentSummaryState();
       const target=String(state.sessionId||state.subagentId||'').trim();
@@ -2818,47 +2925,9 @@ function workflowRunHeaderAction(action){
       if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('permission');
       else if(typeof browserTogglePermission==='function') browserTogglePermission();
       break;
-    case 'browser-menu':
-      if(typeof browserToggleHeaderMenu==='function'){
-        const browserMenu=$('browserStatusMenu');
-        if(browserMenu && browserMenu.hidden) browserToggleHeaderMenu();
-      }
-      break;
     case 'browser-screenshot':
       if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('screenshot');
       else if(typeof browserSendScreenshotToChat==='function') browserSendScreenshotToChat();
-      break;
-    case 'browser-qa':
-      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('qa');
-      else if(typeof browserRunBrowserQaToChat==='function') browserRunBrowserQaToChat();
-      break;
-    case 'browser-webui-smoke':
-      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('webui-smoke');
-      else if(typeof browserRunWebuiSmokeToChat==='function') browserRunWebuiSmokeToChat();
-      break;
-    case 'browser-test-page':
-      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('test-page');
-      else if(typeof browserTestCurrentPageToChat==='function') browserTestCurrentPageToChat();
-      break;
-    case 'browser-retest-page':
-      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('retest-page');
-      else if(typeof browserRetestCurrentPageToChat==='function') browserRetestCurrentPageToChat();
-      break;
-    case 'browser-fix-findings':
-      if(window.browserQaFixFindingsDisabled){
-        if(typeof showToast==='function') showToast(window.browserQaFixFindingsTitle||'Run Browser QA before fixing browser findings.',2600,'warning');
-        break;
-      }
-      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('fix-findings');
-      else if(typeof browserFixFindingsToChat==='function') browserFixFindingsToChat();
-      break;
-    case 'browser-repro':
-      if(window.browserQaReproDisabled){
-        if(typeof showToast==='function') showToast(window.browserQaReproTitle||'Run Browser QA before creating a repro brief.',2600,'warning');
-        break;
-      }
-      if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('repro');
-      else if(typeof browserQaReproToChat==='function') browserQaReproToChat();
       break;
     case 'browser-pagecontext':
       if(typeof browserRunHeaderAction==='function') browserRunHeaderAction('pagecontext');
@@ -2903,6 +2972,7 @@ function workflowRunHeaderAction(action){
 if(typeof window!=='undefined'){
   window.workflowToggleHeaderMenu=workflowToggleHeaderMenu;
   window.workflowRunHeaderAction=workflowRunHeaderAction;
+  window.workflowOpenHeaderMenu=workflowOpenHeaderMenu;
   window.workflowCloseHeaderMenu=workflowCloseHeaderMenu;
   window.syncWorkflowChip=syncWorkflowChip;
   window.syncModelChip=syncModelChip;
@@ -2915,6 +2985,7 @@ if(typeof window!=='undefined'){
   window.workflowOpenMcpPanel=workflowOpenMcpPanel;
   window.workflowOpenSubagentsPanel=workflowOpenSubagentsPanel;
   window.workflowOpenExecPrompt=workflowOpenExecPrompt;
+  window._bindInlineClickFallbacks=_bindInlineClickFallbacks;
 }
 
 function _highlightReasoningOption(effort){
@@ -2952,19 +3023,15 @@ function toggleReasoningDropdown(){
   _positionReasoningDropdown();
   chip.classList.add('active');
   if(headerBadge) headerBadge.classList.add('active');
-  const mobileAction=$('composerMobileReasoningAction');
-  if(mobileAction) mobileAction.classList.add('active');
 }
 
 function _positionReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
   const headerBadge=$('reasoningModeBadge');
-  const mobileAction=$('composerMobileReasoningAction');
   const footer=document.querySelector('.composer-footer');
   if(!dd||!footer) return;
-  const panel=$('composerMobileConfigPanel');
-  const anchor=(panel&&panel.classList.contains('open')&&mobileAction)?mobileAction:(_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:mobileAction));
+  const anchor=_elementHasVisibleBox(chip)?chip:(_elementHasVisibleBox(headerBadge)?headerBadge:chip);
   if(!anchor) return;
   if(anchor===headerBadge) _positionFixedDropdownWithinViewport(dd,anchor);
   else _positionComposerDropdownWithinViewport(dd,anchor,footer);
@@ -2974,18 +3041,19 @@ function closeReasoningDropdown(){
   const dd=$('composerReasoningDropdown');
   const chip=$('composerReasoningChip');
   const headerBadge=$('reasoningModeBadge');
-  const mobileAction=$('composerMobileReasoningAction');
   if(dd) dd.classList.remove('open');
   if(chip) chip.classList.remove('active');
   if(headerBadge) headerBadge.classList.remove('active');
-  if(mobileAction) mobileAction.classList.remove('active');
+}
+if(typeof window!=='undefined'){
+  window.toggleReasoningDropdown=toggleReasoningDropdown;
+  window.closeReasoningDropdown=closeReasoningDropdown;
 }
 
 document.addEventListener('click',function(e){
   if(
     !e.target.closest('#reasoningModeBadge') &&
     !e.target.closest('#composerReasoningChip') &&
-    !e.target.closest('#composerMobileReasoningAction') &&
     !e.target.closest('#composerReasoningDropdown')
   ) closeReasoningDropdown();
   if(e.target.closest('.reasoning-option')){
@@ -2997,9 +3065,9 @@ document.addEventListener('click',function(e){
         .then(function(st){
           _currentReasoningContextKey=ctx.query;
           _applyReasoningChip((st&&st.reasoning_effort)||effort, st||{});
-          showToast('?? Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
+          showToast('✓ Reasoning effort set to '+((st&&st.reasoning_effort)||effort));
         })
-        .catch(function(){showToast('?? Failed to set effort');});
+        .catch(function(){showToast('❌ Failed to set effort');});
       closeReasoningDropdown();
     }
   }
@@ -3014,7 +3082,7 @@ function _applyToolsetsChip(toolsets) {
   const label = $('composerToolsetsLabel');
   const chip = $('composerToolsetsChip');
   if (!wrap || !label) return;
-  // Visibility is controlled entirely by responsive CSS â€” the chip shows only
+  // Visibility is controlled entirely by responsive CSS — the chip shows only
   // at wide composer-footer widths (>= 1100px container query). At narrower
   // widths the layout is too cramped (model + reasoning + profile + workspace
   // + context-ring + send) to add another chip. Cleared inline style so the
@@ -3026,12 +3094,11 @@ function _applyToolsetsChip(toolsets) {
   if (hasCustom) {
     label.textContent = toolsets.join(', ');
     chip.classList.add('has-custom');
-    chip.title = t('session_toolsets') + ': ' + toolsets.join(', ');
   } else {
     label.textContent = t('session_toolsets_global');
     chip.classList.remove('has-custom');
-    chip.title = t('session_toolsets');
   }
+  chip.removeAttribute('title');
 }
 
 function _syncToolsetsChip() {
@@ -3061,10 +3128,10 @@ function _populateToolsetsDropdown() {
   input.onkeydown = function(e) { if(e.key === 'Escape') closeToolsetsDropdown(); };
   const hasCustom = Array.isArray(_currentSessionToolsets) && _currentSessionToolsets.length > 0;
   if (hasCustom) {
-    state.textContent = 'ðŸ”§ ' + _currentSessionToolsets.join(', ');
+    state.textContent = '🔧 ' + _currentSessionToolsets.join(', ');
     input.value = _currentSessionToolsets.join(', ');
   } else {
-    state.textContent = 'ðŸŒ ' + t('session_toolsets_global');
+    state.textContent = '🌍 ' + t('session_toolsets_global');
     input.value = '';
   }
 }
@@ -3076,7 +3143,7 @@ function _positionToolsetsDropdown() {
   if (!dd || !chip || !footer) return;
   // Defense: if the chip has been hidden by responsive CSS (e.g. resize across
   // 1100px container threshold while dropdown was open), don't try to anchor
-  // to a zero-rect element â€” close the dropdown instead. (#1431)
+  // to a zero-rect element — close the dropdown instead. (#1431)
   if (chip.offsetParent === null) { closeToolsetsDropdown(); return; }
   const chipRect = chip.getBoundingClientRect();
   const footerRect = footer.getBoundingClientRect();
@@ -3128,9 +3195,9 @@ function _applySessionToolsets(toolsets) {
         S.session.enabled_toolsets = r.enabled_toolsets || null;
         _applyToolsetsChip(r.enabled_toolsets || null);
         if (r.enabled_toolsets && r.enabled_toolsets.length) {
-          showToast('ðŸ”§ ' + t('session_toolsets_applied') + ': ' + r.enabled_toolsets.join(', '));
+          showToast('🔧 ' + t('session_toolsets_applied') + ': ' + r.enabled_toolsets.join(', '));
         } else {
-          showToast('ðŸŒ ' + t('session_toolsets_cleared'));
+          showToast('🌍 ' + t('session_toolsets_cleared'));
         }
       } else {
         showToast(t('session_toolsets_failed') + (r && r.error ? r.error : 'Unknown error'), 3000, 'error');
@@ -3173,7 +3240,7 @@ document.addEventListener('click', function(e) {
 
 // Position toolsets dropdown on resize, OR close it if the chip is no longer
 // visible (e.g. resize crossed the 1100px container threshold while dropdown
-// was open â€” the wrap is hidden by CSS but the dropdown sibling stays open
+// was open — the wrap is hidden by CSS but the dropdown sibling stays open
 // without an anchor). (#1431)
 window.addEventListener('resize', () => {
   const dd = $('composerToolsetsDropdown');
@@ -3250,7 +3317,7 @@ window.addEventListener('resize',function(){
   }
 });
 
-// â”€â”€ Scroll pinning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Scroll pinning ──────────────────────────────────────────────────────────
 // When streaming, auto-scroll only if the user hasn't manually scrolled up.
 // Once the user scrolls back to within 250px of the bottom, re-pin.
 // Uses a guard flag to avoid the race where programmatic scrolls (from
@@ -3259,7 +3326,7 @@ window.addEventListener('resize',function(){
 // Direction-aware unpin (issue #1731): the hysteresis below is correct
 // for re-pinning (entering the near-bottom zone), but applying it to
 // unpinning stranded users who scrolled up by a small amount inside the
-// 250px zone â€” every upward sample still landed in the near-bottom
+// 250px zone — every upward sample still landed in the near-bottom
 // region, so the counter kept incrementing and _scrollPinned stayed
 // true. The next streaming token snapped them back. We now track
 // scrollTop direction: an explicit upward movement (scrollTop decreased
@@ -3319,7 +3386,7 @@ if(typeof document!=='undefined'){
   document.addEventListener('wheel',_recordNonMessageScrollIntent,{capture:true,passive:true});
   document.addEventListener('touchmove',_recordNonMessageScrollIntent,{capture:true,passive:true});
 }
-// Reset hook for session-switch â€” called from sessions.js loadSession() to
+// Reset hook for session-switch — called from sessions.js loadSession() to
 // prevent the new chat's first scroll comparing against the previous chat's
 // scrollTop (Opus stage-302 SHOULD-FIX, #1731 follow-up).
 function _resetScrollDirectionTracker(){ _lastScrollTop=null; }
@@ -3380,6 +3447,7 @@ if (typeof window !== 'undefined') {
   if (typeof workflowRefreshMcpBadge === 'function') window.workflowRefreshMcpBadge = workflowRefreshMcpBadge;
   if (typeof workflowRefreshSubagentBadge === 'function') window.workflowRefreshSubagentBadge = workflowRefreshSubagentBadge;
   if (typeof populateModelDropdown === 'function') window.populateModelDropdown = populateModelDropdown;
+  if (typeof _bindInlineClickFallbacks === 'function') window._bindInlineClickFallbacks = _bindInlineClickFallbacks;
 }
 
 // Keep settled activity disclosure labels honest and avoid stale mojibake labels.
@@ -3490,7 +3558,7 @@ function _clearActivityElapsedTimer(){
   _activityElapsedTimerGroup=null;
 }
 
-const _MOBILE_CONFIG_BASE_LABEL='Workspace, model, reasoning, and context settings';
+const _MOBILE_CONFIG_BASE_LABEL='Workspace and context settings';
 
 function _setCtxCompressButton(btn,text){
   if(!btn)return;
@@ -3523,7 +3591,7 @@ function _syncMobileCtxDisplay(state){
     if(row)row.style.display='none';
     if(mobileConfigBtn){
       mobileConfigBtn.setAttribute('aria-label',_MOBILE_CONFIG_BASE_LABEL);
-      mobileConfigBtn.setAttribute('title',_MOBILE_CONFIG_BASE_LABEL);
+      mobileConfigBtn.removeAttribute('title');
     }
     _setCtxCompressButton(compressBtn,'');
     return;
@@ -3533,11 +3601,12 @@ function _syncMobileCtxDisplay(state){
     badge.textContent=state.hasPromptTok?String(state.pct):'\u00b7';
     badge.classList.toggle('ctx-mid',state.pct>50&&state.pct<=75);
     badge.classList.toggle('ctx-high',state.pct>75);
-    badge.setAttribute('title',state.label);
+    badge.removeAttribute('title');
+    badge.setAttribute('aria-label',state.label);
   }
   if(mobileConfigBtn){
     mobileConfigBtn.setAttribute('aria-label',`${_MOBILE_CONFIG_BASE_LABEL}; ${state.label}`);
-    mobileConfigBtn.setAttribute('title',`${_MOBILE_CONFIG_BASE_LABEL} \u00b7 ${state.label}`);
+    mobileConfigBtn.removeAttribute('title');
   }
   if(row){
     row.style.display='';
@@ -3573,12 +3642,12 @@ function _syncCtxIndicator(usage){
   const wrap=$('ctxIndicatorWrap');
   const el=$('ctxIndicator');
   if(!el)return;
-  // #1436: Use last_prompt_tokens only â€” NEVER fall back to cumulative
+  // #1436: Use last_prompt_tokens only — NEVER fall back to cumulative
   // input_tokens for the "context window % used" calculation.  input_tokens
   // is summed across all turns, so dividing it by the context window gives a
   // nonsense percentage (often >100%) on long sessions.  When we have no
-  // last-prompt data we render "Â·" + "tokens used" via the !hasPromptTok
-  // branch below â€” honest "no data" instead of misleading "890% used".
+  // last-prompt data we render "·" + "tokens used" via the !hasPromptTok
+  // branch below — honest "no data" instead of misleading "890% used".
   const promptTok=usage.last_prompt_tokens||0;
   const totalTok=(usage.input_tokens||0)+(usage.output_tokens||0);
   // Default context window to 128K when not provided by backend
@@ -3611,7 +3680,7 @@ function _syncCtxIndicator(usage){
   const hasExplicitCtx=!!usage.context_length;
   el.classList.toggle('ctx-mid',pct>50&&pct<=75);
   el.classList.toggle('ctx-high',pct>75);
-  // â”€â”€ Compress affordance (#524) â”€â”€
+  // ── Compress affordance (#524) ──
   // Show a hint in the tooltip when context usage is high so users
   // discover /compress without having to know the slash command.
   const compressWrap=$('ctxTooltipCompress');
@@ -3663,7 +3732,7 @@ function _syncCtxIndicator(usage){
   });
 }
 
-// â”€â”€ Context info panel ("What's in context?") â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Context info panel ("What's in context?") ─────────────────────────
 let _contextPanelOpen = false;
 let _cachedContextInfo = null;
 
@@ -3703,7 +3772,7 @@ function _loadContextInfo() {
   }
   
   // Try backend API
-  fetch(hermesApiUrl('api/session/context-info?session_id=' + encodeURIComponent(sid)).href, {
+  fetch(sidekickApiUrl('api/session/context-info?session_id=' + encodeURIComponent(sid)).href, {
     cache: 'no-store',
     credentials: 'include',
   })
@@ -3865,10 +3934,10 @@ function _renderClientEstimate(body) {
   
   // Stacked bar
   var segs = [
-    {id:'chat_history', label:'Chat History', icon:'ðŸ’¬', tokens:chatTk, color:'#4fc3f7'},
-    {id:'system_prompt', label:'System Prompt', icon:'âš™ï¸', tokens:systemTk, color:'#ffb74d'},
-    {id:'files', label:'Files', icon:'ðŸ“Ž', tokens:fileTk, color:'#81c784'},
-    {id:'memory', label:'Memory', icon:'ðŸ§ ', tokens:memTk, color:'#ce93d8'},
+    {id:'chat_history', label:'Chat History', icon:'💬', tokens:chatTk, color:'#4fc3f7'},
+    {id:'system_prompt', label:'System Prompt', icon:'⚙️', tokens:systemTk, color:'#ffb74d'},
+    {id:'files', label:'Files', icon:'📎', tokens:fileTk, color:'#81c784'},
+    {id:'memory', label:'Memory', icon:'🧠', tokens:memTk, color:'#ce93d8'},
   ];
   
   html += '<div class="context-panel-stacked">';
@@ -3930,8 +3999,8 @@ function _escAttr(str) {
     .replace(/>/g, '&gt;');
 }
 
-// â”€â”€ Touch support: toggle context tooltip on tap (#524) â”€â”€
-// On mobile, hover doesn't work â€” allow tap on the context ring button
+// ── Touch support: toggle context tooltip on tap (#524) ──
+// On mobile, hover doesn't work — allow tap on the context ring button
 // to toggle the tooltip visibility so the compress affordance is reachable.
 document.addEventListener('DOMContentLoaded',function(){
   const wrap=document.getElementById('ctxIndicatorWrap');
@@ -4088,17 +4157,17 @@ function _gatewayRoutingFailoverText(routing){
   const attempts=Array.isArray(routing.routing)?routing.routing:[];
   const providers=attempts.map(a=>_gatewayProviderName(a&&a.provider)).filter(Boolean);
   const unique=[];providers.forEach(p=>{if(!unique.includes(p))unique.push(p);});
-  if(unique.length>=2)return`Failover: ${unique[0]} â†’ ${unique[unique.length-1]}`;
+  if(unique.length>=2)return`Failover: ${unique[0]} → ${unique[unique.length-1]}`;
   const from=_gatewayProviderName(routing.requested_provider);
   const to=_gatewayProviderName(routing.used_provider);
-  if(from&&to&&from!==to)return`Failover: ${from} â†’ ${to}`;
+  if(from&&to&&from!==to)return`Failover: ${from} → ${to}`;
   return'Gateway failover detected';
 }
 function _gatewayModelWarningText(routing){
   if(!routing||!routing.model_changed)return'';
   const requested=getModelLabel(routing.requested_model||'requested model');
   const used=getModelLabel(routing.used_model||'served model');
-  return`Model switched: ${requested} â†’ ${used}`;
+  return`Model switched: ${requested} → ${used}`;
 }
 function _latestGatewayRoutingForSession(session){
   if(!session)return null;
@@ -4113,16 +4182,16 @@ function _stripXmlToolCallsDisplay(s){
   // as tool calls; leaving them in the content causes them to render visibly
   // in the settled chat bubble.  (#702)
   // Also handles DSML-prefixed variants from DeepSeek/Bedrock, including
-  // spacing variants like "<ï½œDSML |function_calls" and truncated prefixes.
+  // spacing variants like "<｜DSML |function_calls" and truncated prefixes.
   if(!s) return s;
   const lo=String(s).toLowerCase();
   if(lo.indexOf('function_calls')===-1 && lo.indexOf('dsml')===-1) return s;
   // Support both plain <function_calls> and DSML-prefixed variants.
-  s=s.replace(/<(?:\s*ï½œ\s*DSML\s*[ï½œ|]\s*)?function_calls>[\s\S]*?<\/(?:\s*ï½œ\s*DSML\s*[ï½œ|]\s*)?function_calls>/gi,'');
+  s=s.replace(/<(?:\s*｜\s*DSML\s*[｜|]\s*)?function_calls>[\s\S]*?<\/(?:\s*｜\s*DSML\s*[｜|]\s*)?function_calls>/gi,'');
   // Also remove truncated opening tags (missing closing ">" at stream tail).
-  s=s.replace(/<(?:\s*ï½œ\s*DSML\s*[ï½œ|]\s*)?function_calls(?:>|$)[\s\S]*$/i,'');
-  // Remove malformed DSML tag fragments like "<ï½œDSML |" that can leak in tokens.
-  s=s.replace(/<\s*ï½œ\s*DSML\s*[ï½œ|]\s*/gi,'');
+  s=s.replace(/<(?:\s*｜\s*DSML\s*[｜|]\s*)?function_calls(?:>|$)[\s\S]*$/i,'');
+  // Remove malformed DSML tag fragments like "<｜DSML |" that can leak in tokens.
+  s=s.replace(/<\s*｜\s*DSML\s*[｜|]\s*/gi,'');
   return s.trim();
 }
 
@@ -4133,11 +4202,11 @@ function _sanitizeThinkingDisplayText(text){
 
 function renderMd(raw){
   let s=(raw||'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
-  // â”€â”€ Entity decode: must run FIRST so &gt; lines become > for the blockquote
+  // ── Entity decode: must run FIRST so &gt; lines become > for the blockquote
   // pre-pass below. LLMs sometimes emit HTML-entity-encoded output; without this
   // a blockquote sent as "&gt; text" would never be recognised as a blockquote.
   s=s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
-  // â”€â”€ Blockquote pre-pass (must run BEFORE every other markdown pass) â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Blockquote pre-pass (must run BEFORE every other markdown pass) ────────
   // Group consecutive >-prefixed lines, strip the > prefix from each line,
   // recursively render the stripped content with the full pipeline, and
   // replace the group with a stash token. This is the only way fenced code,
@@ -4158,11 +4227,11 @@ function renderMd(raw){
     let bqStart=-1;
     const flush=(end)=>{
       if(bqStart<0) return;
-      // Strip "> " prefix (and bare ">" â†’ empty) from each line
+      // Strip "> " prefix (and bare ">" → empty) from each line
       const stripped=lines.slice(bqStart,end).map(l=>l.replace(/^> ?/,'')).join('\n');
       // Recursive call: full pipeline on stripped content. Handles fenced
       // code, headings, hr, ordered/unordered lists, nested blockquotes
-      // (>>) â€” anything that renderMd handles at the top level.
+      // (>>) — anything that renderMd handles at the top level.
       const rendered=renderMd(stripped);
       _bq_stash.push('<blockquote>'+rendered+'</blockquote>');
       // Surround the token with blank lines so the paragraph splitter
@@ -4198,10 +4267,10 @@ function renderMd(raw){
     flush(lines.length);
     return out.join('\n');
   })(s);
-  // â”€â”€ ðŸ“Ž prefix: convert ðŸ“Ž path to MEDIA:path for inline rendering â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── 📎 prefix: convert 📎 path to MEDIA:path for inline rendering ─────────
   // This provides an alternative syntax that's more intuitive for users.
-  s=s.replace(/ðŸ“Ž\s+(\S+)/g,'MEDIA:$1');
-  // â”€â”€ MEDIA: token stash (must run first, before any other processing) â”€â”€â”€â”€â”€â”€â”€
+  s=s.replace(/📎\s+(\S+)/g,'MEDIA:$1');
+  // ── MEDIA: token stash (must run first, before any other processing) ───────
   // Detect MEDIA:<path-or-url> tokens emitted by the agent (e.g. screenshots,
   // generated images) and replace them with inline <img> or download links.
   // Stashed so the path/URL is never processed as markdown.
@@ -4210,7 +4279,7 @@ function renderMd(raw){
     media_stash.push(raw_ref);
     return '\x00D'+(media_stash.length-1)+'\x00';
   });
-  // â”€â”€ End MEDIA stash â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── End MEDIA stash ─────────────────────────────────────────────────────────
   // Pre-pass: decode HTML entities first so markdown processing works correctly.
   // This prevents double-escaping when LLM outputs entities like &lt; &gt; &amp;
   const decode=s=>s.replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
@@ -4222,8 +4291,8 @@ function renderMd(raw){
   // HTML-escaped by esc() when they reach an innerHTML assignment -- no XSS risk.
   // Fence stash: protect code blocks and backtick spans from all further processing.
   // Must run BEFORE math_stash so $..$ inside code spans is not extracted as math.
-  // Split into fenced blocks (\x00P â€” kept stashed until after all markdown passes)
-  // and inline backtick spans (\x00F â€” restored before bold/italic so **`code`** works).
+  // Split into fenced blocks (\x00P — kept stashed until after all markdown passes)
+  // and inline backtick spans (\x00F — restored before bold/italic so **`code`** works).
   // Fenced blocks are converted to <pre><code> here so their content is HTML-escaped
   // and never exposed to list/heading/table regexes that could corrupt the layout.
   // Fixes #1154: diff/patch lines inside fenced blocks (e.g. + added, - removed)
@@ -4231,7 +4300,7 @@ function renderMd(raw){
   // breaking </pre> closure and corrupting all subsequent message rendering.
   const _preBlock_stash=[];
   const fence_stash=[];
-  // CommonMark Â§4.5: opening fence must start a line (with up to 3 spaces of indent)
+  // CommonMark §4.5: opening fence must start a line (with up to 3 spaces of indent)
   // and closing fence must start a line with the same backtick char and at least
   // as many backticks as the opener. Without line/fence-length anchoring, a literal
   // ``` inside a code block (e.g. a nested markdown example) terminates the outer
@@ -4270,7 +4339,7 @@ function renderMd(raw){
         const rawAttr=rawCode.replace(/"/g,'&quot;').replace(/\n/g,'&#10;');
         const blockId='tree-'+Math.random().toString(36).slice(2,10);
         _preBlock_stash.push(`<div class="code-tree-wrap" data-raw="${rawAttr}" data-lang="${lang}" id="${blockId}">${h}<pre class="tree-raw-view"><code${langAttr}>${rawCode}</code></pre></div>`);
-      // CSV blocks â†’ render as styled table
+      // CSV blocks → render as styled table
       } else if(lang==='csv'){
         const rows=code.replace(/\n$/,'').split('\n').filter(r=>r.trim());
         if(rows.length>=2){
@@ -4294,13 +4363,13 @@ function renderMd(raw){
   s=s.replace(/\$\$([\s\S]+?)\$\$/g,(_,m)=>{math_stash.push({type:'display',src:m});return '\x00M'+(math_stash.length-1)+'\x00';});
   // Match a single literal backslash before the display delimiter (the common LLM form).
   s=s.replace(/\\\[([\s\S]+?)\\\]/g,(_,m)=>{math_stash.push({type:'display',src:m});return '\x00M'+(math_stash.length-1)+'\x00';});
-  // Inline math: $...$ â€” require non-space at boundaries to avoid false positives
+  // Inline math: $...$ — require non-space at boundaries to avoid false positives
   // e.g. "costs $5 and $10" should not trigger (space after opening $)
   s=s.replace(/\$([^\s$\n][^$\n]*?[^\s$\n]|\S)\$/g,(_,m)=>{math_stash.push({type:'inline',src:m});return '\x00M'+(math_stash.length-1)+'\x00';});
   // Also stash \(...\) LaTeX delimiters.
   // Match a single literal backslash before the delimiter (the common LLM form).
   s=s.replace(/\\\((.+?)\\\)/g,(_,m)=>{math_stash.push({type:'inline',src:m});return '\x00M'+(math_stash.length-1)+'\x00';});
-  // Safe tag â†’ markdown equivalent (these produce the same output as **text** etc.)
+  // Safe tag → markdown equivalent (these produce the same output as **text** etc.)
   // Stash raw <pre> blocks so the inline <code> rewrite below does not run
   // inside them. Running that rewrite in <pre> content can introduce stray
   // backticks for multiline code and break subsequent code-box rendering.
@@ -4312,7 +4381,7 @@ function renderMd(raw){
   s=s.replace(/<i>([\s\S]*?)<\/i>/gi,(_,t)=>'*'+t+'*');
   s=s.replace(/<code>([^<]*?)<\/code>/gi,(_,t)=>'`'+t+'`');
   s=s.replace(/<br\s*\/?>/gi,'\n');
-  // â”€â”€ Glued-bold-heading lift (issue #1446) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Glued-bold-heading lift (issue #1446) ────────────────────────────────
   // LLMs in thinking/reasoning mode frequently emit a "section header" glued
   // to the end of the previous paragraph with no whitespace, like:
   //
@@ -4327,22 +4396,22 @@ function renderMd(raw){
   //
   // Constraints (avoid false positives):
   //   - Trigger only on a sentence terminator (.!?) IMMEDIATELY before `**`
-  //     (no space) â€” that pattern is almost always a glued heading, not
+  //     (no space) — that pattern is almost always a glued heading, not
   //     intentional emphasis.
-  //   - Inner text length â‰¤ 80 chars â€” long bold runs are usually emphasis
+  //   - Inner text length ≤ 80 chars — long bold runs are usually emphasis
   //     prose, not headings.
-  //   - Trailing `\n\n` required â€” preserves mid-paragraph emphasis like
+  //   - Trailing `\n\n` required — preserves mid-paragraph emphasis like
   //     "this is **important**." untouched.
   //   - Inner text must not contain newlines or `*` (single-line bold only).
   //   - Runs after fenced code, math, and raw <pre> are stashed, so code
   //     content is protected (see pipeline notes).
   s=s.replace(/([.!?])\*\*([^*\n]{1,80})\*\*\n\n/g,'$1\n\n**$2**\n\n');
   // Inline backtick spans: restore <code> tags produced in the stash callback above.
-  // Must happen BEFORE bold/italic so **`code`** â†’ <strong><code>code</code></strong>.
+  // Must happen BEFORE bold/italic so **`code`** → <strong><code>code</code></strong>.
   s=s.replace(/\x00F(\d+)\x00/g,(_,i)=>fence_stash[+i]);
   // inlineMd: process bold/italic/code/links within a single line of text.
   // Used inside list items and blockquotes where the text may already contain
-  // HTML from the pre-pass â†’ bold pipeline, so we cannot call esc() directly.
+  // HTML from the pre-pass → bold pipeline, so we cannot call esc() directly.
   function inlineMd(t){
     // Stash backtick code spans first so bold/italic never esc() their content
     const _code_stash=[];
@@ -4350,9 +4419,9 @@ function renderMd(raw){
     t=t.replace(/\*\*\*(.+?)\*\*\*/g,(_,x)=>`<strong><em>${esc(x)}</em></strong>`);
     t=t.replace(/\*\*(.+?)\*\*/g,(_,x)=>`<strong>${esc(x)}</strong>`);
     t=t.replace(/\*([^*\n]+)\*/g,(_,x)=>`<em>${esc(x)}</em>`);
-    // Strikethrough: ~~text~~ â†’ <del>text</del>
+    // Strikethrough: ~~text~~ → <del>text</del>
     t=t.replace(/~~(.+?)~~/g,(_,x)=>`<del>${esc(x)}</del>`);
-    // #487: Image pass â€” runs while code stash is active so ![x](url) inside
+    // #487: Image pass — runs while code stash is active so ![x](url) inside
     // backticks stays protected as a \x00C token and is never rendered as <img>.
     // Must run before _code_stash restore and before _link_stash so the image
     // is not consumed by the [label](url) link regex.
@@ -4374,7 +4443,7 @@ function renderMd(raw){
     return t;
   }
   // Stash <code> tags from the backtick pass above so the outer bold/italic
-  // regexes don't esc() their content (e.g. **`code`** â†’ <strong><code>code</code></strong>)
+  // regexes don't esc() their content (e.g. **`code`** → <strong><code>code</code></strong>)
   const _ob_stash=[];
   s=s.replace(/(<code\b[^>]*>[\s\S]*?<\/code>)/g,m=>{_ob_stash.push(m);return `\x00O${_ob_stash.length-1}\x00`;});
   s=s.replace(/\*\*\*(.+?)\*\*\*/g,(_,t)=>`<strong><em>${esc(t)}</em></strong>`);
@@ -4394,8 +4463,8 @@ function renderMd(raw){
       const indent=/^ {2,}/.test(l);
       const text=l.replace(/^ {0,4}[-*+] /,'');
       let _ih;
-      if(/^\[x\] /i.test(text)) _ih='<span class="task-done">âœ…</span> '+inlineMd(text.slice(4));
-      else if(/^\[ \] /.test(text)) _ih='<span class="task-todo">â˜</span> '+inlineMd(text.slice(4));
+      if(/^\[x\] /i.test(text)) _ih='<span class="task-done">✅</span> '+inlineMd(text.slice(4));
+      else if(/^\[ \] /.test(text)) _ih='<span class="task-todo">☐</span> '+inlineMd(text.slice(4));
       else _ih=inlineMd(text);
       if(indent) html+=`<li style="margin-left:16px">${_ih}</li>`;
       else html+=`<li>${_ih}</li>`;
@@ -4404,7 +4473,7 @@ function renderMd(raw){
   });
   // Ordered lists: use value= on each <li> so the correct number is preserved
   // even when blank lines between items cause the paragraph splitter to place
-  // each item in its own <ol> container â€” without value= every <ol> restarts
+  // each item in its own <ol> container — without value= every <ol> restarts
   // at 1, producing "1. 1. 1." instead of "1. 2. 3." (#886).
   s=s.replace(/((?:^(?:  )?\d+\. .+\n?)+)/gm,block=>{
     const lines=block.trimEnd().split('\n');
@@ -4420,7 +4489,7 @@ function renderMd(raw){
   });
   // Tables: | col | col | header row followed by | --- | --- | separator then data rows
   // NOTE: table pass runs BEFORE outer link pass so [label](url) in table cells
-  // is handled by inlineMd() only â€” prevents double-linking.
+  // is handled by inlineMd() only — prevents double-linking.
   s=s.replace(/((?:^\|.+\|\n?)+)/gm,block=>{
     const rows=block.trim().split('\n').filter(r=>r.trim());
     if(rows.length<2)return block;
@@ -4432,7 +4501,7 @@ function renderMd(raw){
     const body=rows.slice(2).map(r=>`<tr>${parseRow(r)}</tr>`).join('');
     return `<table><thead>${header}</thead><tbody>${body}</tbody></table>`;
   });
-  // #487: Outer image pass â€” handles ![alt](url) in plain paragraphs (outside tables/lists).
+  // #487: Outer image pass — handles ![alt](url) in plain paragraphs (outside tables/lists).
   // Runs AFTER the table pass (images in table cells are handled by inlineMd() above).
   // Runs BEFORE the outer [label](url) link pass so the image is not consumed as a plain link.
   s=s.replace(/!\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/g,(_,alt,url)=>`<img src="${url.replace(/"/g,'%22')}" alt="${esc(alt)}" class="msg-media-img" loading="lazy">`);
@@ -4451,7 +4520,7 @@ function renderMd(raw){
   // raw/model-provided HTML like <img onerror=...> or <a href="javascript:...">
   // must lose executable attributes and dangerous schemes while preserving the
   // small set of attributes generated by this markdown pipeline.
-  // Reference only â€” documents the allowed tag set. Superseded by _tag() allowlists.
+  // Reference only — documents the allowed tag set. Superseded by _tag() allowlists.
   // Tests verify this list is complete; _tag() enforces it.
   const SAFE_TAGS=/^<\/?(?:strong|em|del|code|pre|h[1-6]|ul|ol|li|table|thead|tbody|tr|th|td|hr|blockquote|p|br|a|div|span|img)([\s>]|$)/i;
   function _safeAttrValue(v){
@@ -4541,7 +4610,7 @@ function renderMd(raw){
     return `<a href="${clean}" target="_blank" rel="noopener">${esc(clean)}</a>${trail}`;
   });
   s=s.replace(/\x00B(\d+)\x00/g,(_,i)=>_al_stash[+i]);
-  // Restore math stash â†’ katex placeholder spans/divs
+  // Restore math stash → katex placeholder spans/divs
   // These will be rendered by renderKatexBlocks() after DOM insertion
   s=s.replace(/\x00M(\d+)\x00/g,(_,i)=>{
     const item=math_stash[+i];
@@ -4550,7 +4619,7 @@ function renderMd(raw){
     }
     return `<span class="katex-inline" data-katex="inline">${esc(item.src)}</span>`;
   });
-  // Restore fenced block stash (\x00P) â†’ <pre><code> HTML.
+  // Restore fenced block stash (\x00P) → <pre><code> HTML.
   // Happens AFTER all markdown passes (lists, headings, tables, etc.) so
   // diff/patch content inside code blocks is never misinterpreted as markdown.
   // The _pre_stash below then protects these blocks from paragraph splitting.
@@ -4560,12 +4629,12 @@ function renderMd(raw){
   // with <br>. Token \x00E (next free after B D F G L M C O A).
   // Fixes #745: code blocks collapse to single line when not preceded by blank line.
   const _pre_stash=[];
-  // #1463 / #1618: regex must match <pre> with ANY attributes â€” PR #484 added
+  // #1463 / #1618: regex must match <pre> with ANY attributes — PR #484 added
   // <pre class="tree-raw-view"> for JSON/YAML and <pre class="diff-block"> for
   // diff/patch which the literal-<pre> shape missed. Newlines inside those
   // blocks were falling through to the paragraph wrap below and getting
   // converted to <br>, causing the YAML/JSON/diff collapse. PR #1516's CSS
-  // fix targeted the wrong layer (Prism token white-space) â€” by the time it
+  // fix targeted the wrong layer (Prism token white-space) — by the time it
   // ran, the \n had already been replaced. The CSS rule is kept as defense
   // in depth.
   s=s.replace(/(<div class="pre-header">[\s\S]*?<\/div>)?<pre[^>]*>[\s\S]*?<\/pre>|<div class="(mermaid-block|katex-block)"[\s\S]*?<\/div>/g,m=>{
@@ -4575,7 +4644,7 @@ function renderMd(raw){
   const parts=s.split(/\n{2,}/);
   s=parts.map(p=>{p=p.trim();if(!p)return '';if(/^<(h[1-6]|ul|ol|pre|hr|blockquote)|^\x00[EQ]/.test(p))return p;return `<p>${p.replace(/\n/g,'<br>')}</p>`;}).join('\n');
   s=s.replace(/\x00E(\d+)\x00/g,(_,i)=>_pre_stash[+i]);
-  // â”€â”€ Restore MEDIA stash â†’ inline images or download links â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── Restore MEDIA stash → inline images or download links ─────────────────
   s=s.replace(/\x00D(\d+)\x00/g,(_,i)=>{
     const ref=media_stash[+i];
     // Keep this logic self-contained: some tests extract renderMd() alone and
@@ -4601,7 +4670,7 @@ function renderMd(raw){
       // Rewrite localhost/127.0.0.1 to the actual server base URL so remote
       // users (VPN, Docker, deployed) can load agent-generated images (#642).
       // Strip the trailing slash from document.baseURI so the URL's own path
-      // joins cleanly â€” this preserves any subpath mount (e.g. /hermes/).
+      // joins cleanly — this preserves any subpath mount (e.g. /sidekick/).
       let src=ref;
       if(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(src)){
         const base=(document.baseURI||'').replace(/\/$/,'');
@@ -4612,12 +4681,12 @@ function renderMd(raw){
       // preserving explicit audio/video/SVG URLs with their proper handlers.
       const urlPath=src.split('?')[0];
       const mediaKind=mediaKindForName(urlPath);
-      // SVG URLs â†’ render inline as image
+      // SVG URLs → render inline as image
       if(_SVG_EXTS.test(urlPath)){
         return `<img class="msg-media-svg" src="${esc(src)}" alt="${t('media_svg_label')}" loading="lazy">`;
       }
       if(mediaKind==='audio'||mediaKind==='video') return mediaPlayerHtml(mediaKind,src,urlPath.split('/').pop()||mediaKind);
-      // Render all https:// URLs as <img> â€” extensionless CDN paths like fal.media still work (#853)
+      // Render all https:// URLs as <img> — extensionless CDN paths like fal.media still work (#853)
       if(_IMAGE_EXTS.test(urlPath) || /^https?:\/\//i.test(src)){
         return `<img class="msg-media-img" src="${esc(src)}" alt="image" loading="lazy">`;
       }
@@ -4627,46 +4696,46 @@ function renderMd(raw){
     const apiUrl='api/media?path='+encodeURIComponent(ref);
     const localKind=mediaKindForName(ref);
     if(localKind==='image'){
-      return `<img class="msg-media-img" src="${esc(apiUrl)}" alt="${esc(ref.split('/').pop())}" loading="lazy" onerror="this.replaceWith(document.createTextNode('âš ï¸ '+this.alt))">`;
+      return `<img class="msg-media-img" src="${esc(apiUrl)}" alt="${esc(ref.split('/').pop())}" loading="lazy" onerror="this.replaceWith(document.createTextNode('⚠️ '+this.alt))">`;
     }
-    // SVG â†’ inline image (no download, render directly)
+    // SVG → inline image (no download, render directly)
     if(_SVG_EXTS.test(ref)){
-      return `<img class="msg-media-svg" src="${esc(apiUrl)}" alt="${t('media_svg_label')}" loading="lazy" onerror="this.replaceWith(document.createTextNode('âš ï¸ SVG: '+this.alt))">`;
+      return `<img class="msg-media-svg" src="${esc(apiUrl)}" alt="${t('media_svg_label')}" loading="lazy" onerror="this.replaceWith(document.createTextNode('⚠️ SVG: '+this.alt))">`;
     }
-    // Audio/video â†’ inline player with speed controls; use &inline=1 for byte-range seeking
+    // Audio/video → inline player with speed controls; use &inline=1 for byte-range seeking
     if(_AUDIO_EXTS.test(ref)||_VIDEO_EXTS.test(ref)){
       const kind=_AUDIO_EXTS.test(ref)?'audio':'video';
       return _mediaPlayerHtml(kind,apiUrl+'&inline=1',ref.split('/').pop()||ref);
     }
-    // PDF files â†’ render first page preview with lazy-load
+    // PDF files → render first page preview with lazy-load
     if(_PDF_EXTS.test(ref)){
       const fname=esc(ref.split('/').pop()||ref);
-      return `<div class="pdf-preview-load" data-path="${esc(ref)}"><span class="pdf-preview-spinner">â³</span> ${t('pdf_loading')} ${fname}...</div>`;
+      return `<div class="pdf-preview-load" data-path="${esc(ref)}"><span class="pdf-preview-spinner">⏳</span> ${t('pdf_loading')} ${fname}...</div>`;
     }
-    // HTML files â†’ render inline in sandboxed iframe with lazy-load
+    // HTML files → render inline in sandboxed iframe with lazy-load
     if(_HTML_EXTS.test(ref)){
-      return `<div class="html-preview-load" data-path="${esc(ref)}"><span class="html-preview-spinner">â³</span> ${t('html_loading')}</div>`;
+      return `<div class="html-preview-load" data-path="${esc(ref)}"><span class="html-preview-spinner">⏳</span> ${t('html_loading')}</div>`;
     }
-    // .patch/.diff files â†’ render inline as colored diff instead of download
+    // .patch/.diff files → render inline as colored diff instead of download
     const fname=esc(ref.split('/').pop()||ref);
     if(/\.(patch|diff)$/i.test(ref)){
       return `<div class="diff-inline-load" data-path="${esc(ref)}">${t('diff_loading')} ${fname}...</div>`;
     }
-    // CSV files â†’ lazy-load and render as table
+    // CSV files → lazy-load and render as table
     if(_CSV_EXTS.test(ref)){
       return `<div class="csv-inline-load" data-path="${esc(ref)}">${t('csv_loading')} ${fname}...</div>`;
     }
-    // Excalidraw files â†’ lazy-load inline embed
+    // Excalidraw files → lazy-load inline embed
     if(_EXCALIDRAW_EXTS.test(ref)){
       return `<div class="excalidraw-inline-load" data-path="${esc(ref)}">${t('excalidraw_loading')} ${fname}...</div>`;
     }
-    return `<a class="msg-media-link" href="${esc(apiUrl+'&download=1')}" download="${fname}">ðŸ“Ž ${fname}</a>`;
+    return `<a class="msg-media-link" href="${esc(apiUrl+'&download=1')}" download="${fname}">📎 ${fname}</a>`;
   });
 
-  // â”€â”€ End MEDIA restore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── End MEDIA restore ──────────────────────────────────────────────────────
   // Restore blockquote stash. Done last so the inner HTML (already produced
   // by the recursive renderMd in the pre-pass) is dropped into the final
-  // string verbatim â€” no further passes can mangle it.
+  // string verbatim — no further passes can mangle it.
   s=s.replace(/\x00Q(\d+)\x00/g,(_,i)=>_bq_stash[+i]);
   return s;
 }
@@ -4676,19 +4745,50 @@ function setStatus(t){
   showToast(t, 4000);
 }
 
+function _composerBusyLabel(){
+  if(typeof t==='function'){
+    const voiceThinking=t('voice_thinking');
+    if(voiceThinking&&voiceThinking!=='voice_thinking') return voiceThinking;
+    const thinking=t('thinking');
+    if(thinking&&thinking!=='thinking') return thinking;
+  }
+  return 'Thinking...';
+}
+
 function setComposerStatus(t, isLoading){
   const el=$('composerStatus');
   if(!el)return;
   if(!t){
-    el.style.display='none';
-    el.textContent='';
-    el.classList.remove('is-loading');
-    return;
+    if(S&&S.busy){
+      t=_composerBusyLabel();
+      isLoading=true;
+    }else{
+      el.style.display='none';
+      el.textContent='';
+      el.classList.remove('is-loading');
+      return;
+    }
   }
   el.textContent=t;
   if(isLoading) el.classList.add('is-loading');
   else el.classList.remove('is-loading');
   el.style.display='';
+}
+
+function _syncComposerBusyStatus(){
+  const el=$('composerStatus');
+  if(!el) return;
+  if(S&&S.busy){
+    if(!(el.textContent||'').trim()){
+      setComposerStatus(_composerBusyLabel(), true);
+    }
+    return;
+  }
+  if((el.textContent||'').trim() && el.classList.contains('is-loading')) return;
+  if(!(el.textContent||'').trim()){
+    el.style.display='none';
+    el.classList.remove('is-loading');
+  }
 }
 
 let _composerLockState=null;
@@ -4845,7 +4945,7 @@ async function handleComposerPrimaryAction(){
   await send();
 }
 
-/* â”€â”€ Composer mode selector (queue / steer / bg) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Composer mode selector (queue / steer / bg) ──────────────────────── */
 
 function updateComposerModeChips(){
   const wrap=$('composerModeWrap');
@@ -4910,7 +5010,7 @@ async function setComposerMode(mode){
   showToast(t('mode_'+(mode||'action'))||('Mode: '+mode.charAt(0).toUpperCase()+mode.slice(1)));
 }
 
-/* â”€â”€ Compact Chat Layout Toggle â”€â”€ */
+/* ── Compact Chat Layout Toggle ── */
 function toggleCompactLayout(){
   const chat=document.getElementById('mainChat');
   if(!chat) return;
@@ -4918,6 +5018,7 @@ function toggleCompactLayout(){
   const btn=document.getElementById('compactToggleBtn');
   if(btn){
     btn.classList.toggle('active',active);
+    btn.classList.toggle('workflow-menu-active',active);
     btn.setAttribute('aria-pressed',active?'true':'false');
   }
   try{localStorage.setItem('sidekick-webui-compact-chat',active?'1':'');}catch(_){}
@@ -4930,6 +5031,7 @@ function _initCompactLayout(){
   const btn=document.getElementById('compactToggleBtn');
   if(btn){
     btn.classList.toggle('active',active);
+    btn.classList.toggle('workflow-menu-active',active);
     btn.setAttribute('aria-pressed',active?'true':'false');
   }
 }
@@ -4937,7 +5039,7 @@ if(document.readyState==='loading'){
   document.addEventListener('DOMContentLoaded',_initCompactLayout,{once:true});
 }else{ _initCompactLayout(); }
 
-/* â”€â”€ Context Window Visualizer â”€â”€ */
+/* ── Context Window Visualizer ── */
 let _ctxPollTimer=null;
 function updateContextGauge(percent, tokens, cost){
   const ring=$('ctxRingValue');
@@ -4991,11 +5093,11 @@ function handleFileDrop(files){
 }
 
 /**
- * initDragDrop â€” Consolidated drag & drop handler for the composer.
+ * initDragDrop — Consolidated drag & drop handler for the composer.
  *
  * Handles two types of drags:
- *   1. Workspace file-tree drag (application/ws-path) â†’ insert @path reference
- *   2. OS desktop file drag (Files) â†’ attach to S.pendingFiles via addFiles()
+ *   1. Workspace file-tree drag (application/ws-path) → insert @path reference
+ *   2. OS desktop file drag (Files) → attach to S.pendingFiles via addFiles()
  *
  * Shows visual feedback (drop-overlay) on composerWrap when dragging files
  * anywhere on the page. Drops are only processed if the cursor is over
@@ -5035,7 +5137,7 @@ function initDragDrop(){
     // Only process drops that land inside the composer box
     if(!box.contains(e.target)) return;
 
-    // 1) Workspace file-tree drag â†’ insert @path reference into msg textarea
+    // 1) Workspace file-tree drag → insert @path reference into msg textarea
     const wsPath=e.dataTransfer.getData('application/ws-path');
     if(wsPath){
       const msgEl=$('msg');
@@ -5050,7 +5152,7 @@ function initDragDrop(){
       return;
     }
 
-    // 2) OS file drag â†’ attach to pending files (max 10 per drop)
+    // 2) OS file drag → attach to pending files (max 10 per drop)
     var files=Array.from(e.dataTransfer.files);
     if(!files.length) return;
     var MAX=10,batch=files.slice(0,MAX);
@@ -5103,7 +5205,7 @@ function setBusy(v){
         $('msg').value=next.text||'';
         S.pendingFiles=Array.isArray(next.files)?[...next.files]:[];
         // Restore model from queued item (sent in /api/chat/start payload)
-        // Note: profile is NOT restored â€” full profile switch requires server interaction
+        // Note: profile is NOT restored — full profile switch requires server interaction
         if(next.model&&S.session&&next.model!==S.session.model){
           S.session.model=next.model;
         }
@@ -5118,16 +5220,17 @@ function setBusy(v){
       },120);
     }
   }
+  if(typeof _syncComposerBusyStatus==='function') _syncComposerBusyStatus();
 }
 
-// â”€â”€ Queue chip display (Codex Desktop pattern) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Queue chip display (Codex Desktop pattern) ─────────────────────────────
 // Queued messages appear as chips inside #queueChips (above the textarea)
 // while pending. When the session fires the queued message it becomes a
-// normal user bubble in the chat â€” the chip is removed at drain time.
+// normal user bubble in the chat — the chip is removed at drain time.
 const _queueRenderKeys={};  // per-session fingerprint to avoid redundant rebuilds
 const _queueCollapsed={};   // per-session: true when user explicitly collapsed the card
 
-// â”€â”€ Pop queued message back to composer for editing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Pop queued message back to composer for editing ─────────────────────
 // Moves the entry from the queue into the chat textarea so the user can
 // edit it freely before sending. The entry is removed from the queue.
 function _editQueuedMessageInComposer(sid, entry) {
@@ -5200,7 +5303,7 @@ function _renderQueueChips(sid){
     return;
   }
   if(card.dataset) card.dataset.queueSessionId=nextSid;
-  // Respect user-collapsed state â€” don't reopen if user explicitly hid the card
+  // Respect user-collapsed state — don't reopen if user explicitly hid the card
   if(_queueCollapsed[sid]){
     // Update chips content without showing card (so data is fresh if user re-expands)
     inner.innerHTML='';
@@ -5212,7 +5315,7 @@ function _renderQueueChips(sid){
   const _msgs=document.getElementById('messages');
   if(_msgs&&!_queueCollapsed[sid]){
     _msgs.classList.add('queue-open');
-    // Measure after 350ms transition completes (not mid-animation â€” height would be wrong)
+    // Measure after 350ms transition completes (not mid-animation — height would be wrong)
     setTimeout(()=>{
       if(!card.classList.contains('visible')) return;
       const h=card.getBoundingClientRect().height;
@@ -5242,7 +5345,7 @@ function _renderQueueChips(sid){
     const hasFiles=q.some(e=>e&&Array.isArray(e.files)&&e.files.length>0);
     const mergeBtn=document.createElement('button');
     mergeBtn.className='queue-card-btn';
-    mergeBtn.title='Combine all into one message'+(hasFiles?' â€” attachments will be removed':'');
+    mergeBtn.title='Combine all into one message'+(hasFiles?' — attachments will be removed':'');
     mergeBtn.innerHTML=li('layers',12)+'Combine';
     mergeBtn.onclick=()=>{
       const _doMerge=(snapshot)=>{
@@ -5259,7 +5362,7 @@ function _renderQueueChips(sid){
       if(hasFiles){
         if(typeof showToast==='function') showToast('Attachments on queued items will be removed',2600,'warning');
       }
-      // Merge from current live queue (no delay â€” snapshot + defer caused data-loss races)
+      // Merge from current live queue (no delay — snapshot + defer caused data-loss races)
       _doMerge([..._getSessionQueue(sid,false)]);
     };
     const clearBtn=document.createElement('button');
@@ -5270,7 +5373,7 @@ function _renderQueueChips(sid){
     clearBtn.onclick=()=>{q.length=0;_saveAndRefresh();};
     actions.appendChild(mergeBtn);
     actions.appendChild(clearBtn);
-    // Hide button â€” collapses flyout entirely; queue pill re-shows it
+    // Hide button — collapses flyout entirely; queue pill re-shows it
     const hideBtn=document.createElement('button');
     hideBtn.className='queue-card-icon-btn';
     hideBtn.title='Hide queue (click the queue pill to show again)';
@@ -5288,7 +5391,7 @@ function _renderQueueChips(sid){
     inner.appendChild(header);
   }
 
-  let _dragTs=null;  // use _queued_at timestamp â€” survives re-renders, not an index
+  let _dragTs=null;  // use _queued_at timestamp — survives re-renders, not an index
   q.forEach((entry,i)=>{
     const _entryTs=entry&&entry._queued_at;
     const entryText=entry&&(entry.text||entry.message||entry.content||'');
@@ -5313,15 +5416,15 @@ function _renderQueueChips(sid){
     const drag=document.createElement('span');
     drag.className='queue-card-drag';
     drag.setAttribute('aria-hidden','true');
-    drag.innerHTML=typeof li==='function'?li('list-todo',13):'â‰¡';
-    // Message text â€” click pops it back to composer for editing
+    drag.innerHTML=typeof li==='function'?li('list-todo',13):'≡';
+    // Message text — click pops it back to composer for editing
     const msgSpan=document.createElement('span');
     msgSpan.className='queue-card-text';
-    msgSpan.textContent=entryText||(_files.length?'':'â€”');
+    msgSpan.textContent=entryText||(_files.length?'':'—');
     msgSpan.setAttribute('draggable','false');
     msgSpan.setAttribute('tabindex','0');
     msgSpan.setAttribute('role','button');
-    msgSpan.setAttribute('aria-label','Queued message â€” click to edit in composer');
+    msgSpan.setAttribute('aria-label','Queued message — click to edit in composer');
     msgSpan.title='Click to edit in composer';
     msgSpan.style.cursor='pointer';
     msgSpan.onclick=(e)=>{
@@ -5348,7 +5451,7 @@ function _renderQueueChips(sid){
       mb.textContent=_modelLabel;
       badges.appendChild(mb);
     }
-    // Profile badge removed â€” drain cannot server-switch profiles so badge was misleading
+    // Profile badge removed — drain cannot server-switch profiles so badge was misleading
     // Delete button
     const delBtn=document.createElement('button');
     delBtn.className='queue-card-icon-btn';
@@ -5376,14 +5479,14 @@ function _renderQueueChips(sid){
 function _updateQueuePill(sid,count){
   const pill=document.getElementById('queuePill');
   if(!pill) return;
-  const pillOuter=pill.parentElement;  // .queue-pill-outer â€” same wrapper as .queue-card
+  const pillOuter=pill.parentElement;  // .queue-pill-outer — same wrapper as .queue-card
   const card=document.getElementById('queueCard');
   const flyoutVisible=card&&card.classList.contains('visible');
   if(count>0&&!flyoutVisible){
     const label=typeof t==='function'?t('queued_count',count):(count===1?'1 queued':`${count} queued`);
     pill.innerHTML=(typeof li==='function'?li('list-todo',12):'')+
       `<span class="queue-pill-count">${label}</span>`+
-      `<span class="queue-pill-chevron">`+(typeof li==='function'?li('chevron-up',12):'â–²')+`</span>`;
+      `<span class="queue-pill-chevron">`+(typeof li==='function'?li('chevron-up',12):'▲')+`</span>`;
     pill.title='Show queued messages';
     if(pillOuter) pillOuter.classList.add('show');
     pill.onclick=()=>{
@@ -5460,7 +5563,7 @@ function showToast(msg,ms,type){
   setToastDismissTimer(el,duration);
 }
 
-// â”€â”€ Shared app dialogs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Shared app dialogs ───────────────────────────────────────────────────────
 // showConfirmDialog(opts) and showPromptDialog(opts) replace browser-native dialog calls
 // throughout the UI. Both return Promises and support: title, message, confirmLabel,
 // cancelLabel, danger (confirm only), placeholder/value/inputType (prompt only).
@@ -5590,7 +5693,7 @@ function showPromptDialog(opts={}){
   if(input){
     input.type=opts.inputType||'text';input.style.display='';
     // Pre-fill: prefer `value`, accept `defaultValue` as alias for callers that
-    // mirror the standard HTMLInputElement.defaultValue naming. Both empty â†’
+    // mirror the standard HTMLInputElement.defaultValue naming. Both empty →
     // blank field (the default rename-from-scratch flow stays unchanged).
     const prefill=(opts.value!=null?opts.value:(opts.defaultValue!=null?opts.defaultValue:''));
     input.value=prefill;input.placeholder=opts.placeholder||'';
@@ -5606,13 +5709,13 @@ function showPromptDialog(opts={}){
       if(input&&input.style.display!=='none'){
         input.focus();
         // Selection behavior on focus:
-        //   selectStem:true â†’ select everything before the LAST '.' (e.g. for
+        //   selectStem:true → select everything before the LAST '.' (e.g. for
         //     'report.txt' selects 'report' so a user can retype the basename
         //     without losing the extension; matches macOS Finder rename UX).
         //     Falls back to selecting the full value when there's no '.' or
-        //     the dot is at index 0 ('.gitignore' â†’ full select).
-        //   selectAll:true â†’ select the entire prefilled value.
-        //   default       â†’ caret at end (current behavior).
+        //     the dot is at index 0 ('.gitignore' → full select).
+        //   selectAll:true → select the entire prefilled value.
+        //   default       → caret at end (current behavior).
         const v=input.value||'';
         if(opts.selectStem && v){
           const dot=v.lastIndexOf('.');
@@ -5667,10 +5770,10 @@ function copyMsg(btn){
   }).catch(()=>showToast(t('copy_failed')));
 }
 
-// â”€â”€ TTS: Text-to-Speech via Web Speech API (#499) â”€â”€
+// ── TTS: Text-to-Speech via Web Speech API (#499) ──
 // Strips markdown, code blocks, and MEDIA: paths for clean speech output.
 function _stripForTTS(text){
-  // Remove code blocks entirely (```) â€” line-anchored to match #1438 fix
+  // Remove code blocks entirely (```) — line-anchored to match #1438 fix
   text=text.replace(/(^|\n)[ ]{0,3}```(?:[\s\S]*?\n)?[ ]{0,3}```(?=\n|$)/g,' ');
   // Remove inline code
   text=text.replace(/`[^`]+`/g,' ');
@@ -5779,7 +5882,7 @@ function autoReadLastAssistant(){
   speechSynthesis.speak(utter);
 }
 
-// â”€â”€ Reconnect banner (B4/B5: reload resilience) â”€â”€
+// ── Reconnect banner (B4/B5: reload resilience) ──
 const INFLIGHT_KEY = 'sidekick-webui-inflight'; // localStorage key for in-flight session tracking
 const INFLIGHT_STATE_KEY = 'sidekick-webui-inflight-state'; // localStorage snapshots for mid-stream reload recovery
 
@@ -5818,7 +5921,7 @@ function saveInflightState(sid, state){
     const serialized=JSON.stringify(all);
     // LocalStorage quota guard: skip persist if payload exceeds ~1.5MB.
     // The inflight state is only for mid-stream reload recovery, not a full
-    // transcript. Dropping it is safe â€” the server has the canonical state.
+    // transcript. Dropping it is safe — the server has the canonical state.
     if(serialized.length>1.5*1024*1024){
       all=_purgeStaleStates(all, 1*1024*1024);
       const pruned=JSON.stringify(all);
@@ -5856,14 +5959,14 @@ function markInflight(sid, streamId) {
   try {
     localStorage.setItem(INFLIGHT_KEY, JSON.stringify({sid, streamId, ts: Date.now()}));
   } catch(e) {
-    // localStorage full (typically hermes-webui-inflight-state consumed quota).
+    // localStorage full (typically sidekick-webui-inflight-state consumed quota).
     // Purge stale states and try one more time; inflight tracking is non-critical.
     try {
       const all=_readInflightStateMap();
       _purgeStaleStates(all, 0);
       localStorage.setItem(INFLIGHT_STATE_KEY, JSON.stringify(all));
       localStorage.setItem(INFLIGHT_KEY, JSON.stringify({sid, streamId, ts: Date.now()}));
-    } catch(_) { /* give up â€” server has canonical state */ }
+    } catch(_) { /* give up — server has canonical state */ }
   }
 }
 function clearInflight() {
@@ -5878,7 +5981,7 @@ function dismissReconnect() {
   clearInflight();
 }
 
-// â”€â”€ Live host resource health panel (#693) â”€â”€
+// ── Live host resource health panel (#693) ──
 const SYSTEM_HEALTH_INTERVAL_MS=5000;
 let _systemHealthTimer=null;
 function _systemHealthPercent(metric){
@@ -5887,7 +5990,7 @@ function _systemHealthPercent(metric){
   return Math.max(0,Math.min(100,Math.round(percent*10)/10));
 }
 function _formatSystemHealthPercent(percent){
-  if(percent == null) return 'â€”';
+  if(percent == null) return '—';
   return `${percent.toFixed(percent%1?1:0)}%`;
 }
 function _formatSystemHealthBytes(metric){
@@ -5972,7 +6075,7 @@ document.addEventListener('visibilitychange',_syncSystemHealthMonitorVisibility)
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',startSystemHealthMonitor);
 else startSystemHealthMonitor();
 
-// â”€â”€ Nova agent/gateway heartbeat alert (#716) â”€â”€
+// ── Nova agent/gateway heartbeat alert (#716) ──
 const AGENT_HEALTH_INTERVAL_MS=30000;
 const AGENT_HEALTH_DISMISSED_KEY='agent-health-dismissed';
 let _agentHealthTimer=null;
@@ -6057,7 +6160,7 @@ if(document.readyState==='loading') document.addEventListener('DOMContentLoaded'
 else startAgentHealthMonitor();
 async function refreshSession() {
   // When the banner is in post-update restart mode, the "Reload" button
-  // should do a full page reload â€” a session refresh would just 502 while
+  // should do a full page reload — a session refresh would just 502 while
   // the server is still restarting.
   if (window._restartingForUpdate) { location.reload(); return; }
   dismissReconnect();
@@ -6074,7 +6177,7 @@ async function refreshSession() {
     showToast('Conversation refreshed');
   } catch(e) { setStatus('Refresh failed: ' + e.message); }
 }
-// â”€â”€ Update banner â”€â”€
+// ── Update banner ──
 function _formatUpdateTargetStatus(label,info){
   if(!info||!(info.behind>0)) return null;
   const branch=info.branch?` (${info.branch})`:'';
@@ -6094,7 +6197,7 @@ function _showUpdateBanner(data){
   window._updateData=data;
   // Wire up "What's new?" link.
   //
-  // Reset display:none + clear the href on every render â€” otherwise a stale
+  // Reset display:none + clear the href on every render — otherwise a stale
   // link from a prior update banner can stay visible after we've moved past
   // a state where the new payload no longer carries usable SHAs (#1579 case
   // when the local HEAD diverges from upstream and the compare URL would 404).
@@ -6160,7 +6263,7 @@ async function applyUpdates(){
         return;
       }
     }
-    showToast('Update applied â€” restartingâ€¦');
+    showToast('Update applied — restarting…');
     sessionStorage.removeItem('sidekick-update-checked');
     sessionStorage.removeItem('sidekick-update-dismissed');
     _waitForServerThenReload();
@@ -6208,7 +6311,7 @@ async function forceUpdate(btn){
       btn.disabled=false;btn.textContent='Force update';
       return;
     }
-    showToast('Force update applied â€” restartingâ€¦');
+    showToast('Force update applied — restarting…');
     sessionStorage.removeItem('sidekick-update-checked');
     sessionStorage.removeItem('sidekick-update-dismissed');
     _waitForServerThenReload();
@@ -6229,11 +6332,11 @@ async function _waitForServerThenReload(opts){
   window._restartingForUpdate=true;
   const msgEl=$('reconnectMsg');
   const banner=$('reconnectBanner');
-  if(msgEl) msgEl.textContent='â³ Restartingâ€¦ please wait';
+  if(msgEl) msgEl.textContent='⏳ Restarting… please wait';
   if(banner) banner.classList.add('visible');
   const deadline=Date.now()+maxMs;
   // Give the server a moment to actually begin its restart before the first
-  // probe â€” otherwise the old process may still respond ok on the first poll.
+  // probe — otherwise the old process may still respond ok on the first poll.
   await new Promise(r=>setTimeout(r, interval));
   while(Date.now()<deadline){
     try{
@@ -6246,10 +6349,10 @@ async function _waitForServerThenReload(opts){
           return;
         }
       }
-    }catch(_){ /* socket closed during restart â€” retry */ }
+    }catch(_){ /* socket closed during restart — retry */ }
     await new Promise(r=>setTimeout(r, interval));
   }
-  if(msgEl) msgEl.textContent='âš ï¸ Server is taking longer than expected â€” click Reload when ready';
+  if(msgEl) msgEl.textContent='⚠️ Server is taking longer than expected — click Reload when ready';
 }
 
 function getPendingSessionMessage(session){
@@ -6313,7 +6416,10 @@ function syncTopbar(){
     if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
     return;
   }
-  const sessionTitle=S.session.title||t('untitled');
+  const rawTitle=String(S.session.title||'').trim();
+  const sessionTitle=rawTitle && rawTitle!=='Untitled'
+    ? rawTitle
+    : (typeof t==='function' ? t('new_chat') : 'New chat');
   document.title=sessionTitle+' \u2014 '+(window._botName||'Nova');
   if(typeof syncAppTitlebar==='function') syncAppTitlebar();
   if(typeof _syncWorkspaceHeadingState==='function') _syncWorkspaceHeadingState();
@@ -6338,7 +6444,7 @@ function syncTopbar(){
       const fallback=_applySessionModelFallback(modelSel);
       if(fallback){
         // Defer state mutation + network write while the live model resolution
-        // is in flight â€” sessions.js sets _modelResolutionDeferred=true between
+        // is in flight — sessions.js sets _modelResolutionDeferred=true between
         // the fast-path session render and the resolve_model=1 round-trip.
         // Persisting here would race that resolution and would also issue
         // silent /api/session/update POSTs against imported/read-only CLI
@@ -6359,12 +6465,12 @@ function syncTopbar(){
       // default rather than silently retaining the previous chat's selection (#1771).
       if(!applied){
         const deferModelCorrection=Boolean(S.session._modelResolutionDeferred);
-        // Also defer if a live model fetch is still in flight â€” the model may be
+        // Also defer if a live model fetch is still in flight — the model may be
         // in the list once the fetch completes. Persisting now would corrupt the
         // session with the wrong model before live models arrive (#1169).
         const liveStillPending=window._activeProvider&&_liveModelFetchPending.has(window._activeProvider);
         if(liveStillPending){
-          // Live fetch in flight â€” don't touch sel.value or S.session.model yet.
+          // Live fetch in flight — don't touch sel.value or S.session.model yet.
           // _addLiveModelsToSelect() will re-apply S.session.model once done (#1169).
         } else {
           const fallback=_applySessionModelFallback(modelSel);
@@ -6476,12 +6582,12 @@ function toggleReasoningAccordion(btn){
   const accordion = btn.closest('.reasoning-accordion');
   if(accordion) accordion.classList.toggle('open');
 }
-// â”€â”€ Activity-group user expand intent (#1298) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Activity-group user expand intent (#1298) ──────────────────────────────
 // When the user manually expands the live "Activity" dropdown during streaming,
 // preserve that intent across the destroy/recreate cycle that fires on every
 // thinking/tool event. Without this, ensureActivityGroup() re-creates the group
 // with the default collapsed state and finalizeThinkingCard() force-collapses
-// it whenever the assistant transitions from thinking â†’ tool â†’ thinking, so
+// it whenever the assistant transitions from thinking → tool → thinking, so
 // the panel snaps shut every few seconds while the user is trying to read it.
 //
 // The tracker is a singleton boolean: there is at most one live activity group
@@ -6779,7 +6885,7 @@ function _compressionReferenceCardHtml(text, open=false){
         <div class="tool-card-header" onclick="this.closest('.tool-card').classList.toggle('open')">
           <span class="tool-card-icon">${li('star',13)}</span>
           <span class="tool-card-name">${esc(t('context_compaction_label'))}</span>
-          <span class="tool-card-preview">${esc(t('reference_only_label'))} Â· ${esc(preview)}</span>
+          <span class="tool-card-preview">${esc(t('reference_only_label'))} · ${esc(preview)}</span>
           <span class="tool-card-toggle">${li('chevron-right',12)}</span>
           <button class="msg-copy-btn msg-action-btn tool-card-copy compression-reference-copy" title="${t('copy')}" onclick="copyMsg(this);event.stopPropagation()">${li('copy',13)}</button>
         </div>
@@ -6842,7 +6948,7 @@ function _formatMessageFooterTimestamp(tsVal){
   if(!tsVal) return '';
   const date=new Date(tsVal*1000);
   const now=new Date();
-  // Use _formatInServerTz when available â€” it correctly handles fractional-hour
+  // Use _formatInServerTz when available — it correctly handles fractional-hour
   // offsets like India +0530 that Etc/GMT cannot express. Falls back to plain
   // toLocaleString when sessions.js hasn't loaded yet.
   const fmt=(typeof _formatInServerTz==='function')?_formatInServerTz:null;
@@ -7178,67 +7284,15 @@ function _largeMessagePreviewHtml(rawText, sid, rawIdx){
     `</div>`
   );
 }
-let _messagePostprocessToken = 0;
-let _messagePostprocessIdle = null;
-let _messagePostprocessTimer = null;
-function _scheduleMessagePostprocess(container, options = {}) {
-  const target = container || $('msgInner');
-  if (!target) return;
-  const token = ++_messagePostprocessToken;
-  const sid = S.session && S.session.session_id ? S.session.session_id : null;
-  const preserveScroll = !!options.preserveScroll;
-  const scrollSnapshot = options.scrollSnapshot || null;
-  if (_messagePostprocessIdle && typeof cancelIdleCallback === 'function') {
-    try { cancelIdleCallback(_messagePostprocessIdle); } catch (_) {}
-  }
-  _messagePostprocessIdle = null;
-  if (_messagePostprocessTimer) {
-    clearTimeout(_messagePostprocessTimer);
-    _messagePostprocessTimer = null;
-  }
-  const run = () => {
-    _messagePostprocessIdle = null;
-    _messagePostprocessTimer = null;
-    if (token !== _messagePostprocessToken) return;
-    if (sid && (!S.session || S.session.session_id !== sid)) return;
-    const current = container || $('msgInner');
-    if (!current) return;
-    try {
-      highlightCode(current);
-      addCopyButtons();
-      loadDiffInline();
-      loadCsvInline();
-      loadExcalidrawInline();
-      loadPdfInline();
-      loadHtmlInline();
-      renderMermaidBlocks();
-      renderKatexBlocks();
-      if (typeof _initDiffActions === 'function') _initDiffActions();
-      _scheduleCollapsibleMessages(current);
-      if (typeof initTreeViews === 'function') initTreeViews();
-      if (typeof _makeFilePathsClickable === 'function') _makeFilePathsClickable();
-    } catch (_) {}
-    if (preserveScroll) {
-      if (_scrollPinned) scrollIfPinned();
-      else _restoreMessageScrollSnapshot(scrollSnapshot);
-    }
-  };
-  requestAnimationFrame(() => {
-    if (token !== _messagePostprocessToken) return;
-    if (typeof requestIdleCallback === 'function') {
-      _messagePostprocessIdle = requestIdleCallback(run, {timeout: 1200});
-    } else {
-      _messagePostprocessTimer = setTimeout(run, 80);
-    }
-  });
-}
 function _expandLargeMessage(btn, key){
   const raw = _largeMessageRawByKey.get(String(key || ''));
   if (!raw) return;
   const body = btn && btn.closest ? btn.closest('.msg-body') : null;
   if (!body) return;
   body.innerHTML = renderMd(_stripXmlToolCallsDisplay(String(raw)));
-  _scheduleMessagePostprocess($('msgInner'));
+  requestAnimationFrame(()=>{
+    try { highlightCode(); addCopyButtons(); loadDiffInline(); loadCsvInline(); loadExcalidrawInline(); loadPdfInline(); loadHtmlInline(); renderMermaidBlocks(); renderKatexBlocks(); _applyCollapsibleMessages($('msgInner')); } catch (_) {}
+  });
 }
 
 function renderMessages(options){
@@ -7263,7 +7317,7 @@ function renderMessages(options){
   // Fast path: switching back to a previously rendered session with same count.
   // Guard: sid !== _sessionHtmlCacheSid ensures in-session updates (edits,
   // new messages, tool_complete) always get a fresh rebuild.
-  // Skip cache if this session is still streaming â€” the live smd parser writes
+  // Skip cache if this session is still streaming — the live smd parser writes
   // into a DOM node inside the cached subtree; serving cached HTML detaches it.
   // Also skip cache for transient transcript cards such as /compress and
   // cross-channel handoff summaries; otherwise the cached transcript returns
@@ -7278,7 +7332,11 @@ function renderMessages(options){
       _wireMessageWindowLoadEarlierButton();
       if(typeof _applySessionNavigationPrefs==='function') _applySessionNavigationPrefs();
       _scrollAfterMessageRender(preserveScroll, scrollSnapshot);
-      _scheduleMessagePostprocess(inner, {preserveScroll, scrollSnapshot});
+      requestAnimationFrame(()=>{
+        highlightCode();addCopyButtons();loadDiffInline();loadCsvInline();loadExcalidrawInline();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();_initDiffActions();_applyCollapsibleMessages(inner);
+        if(preserveScroll){ if(_scrollPinned) scrollIfPinned(); else _restoreMessageScrollSnapshot(scrollSnapshot); }
+      });
+      requestAnimationFrame(()=>{initTreeViews();});
       if(typeof _initMediaPlaybackObserver==='function') _initMediaPlaybackObserver();
       if(typeof loadTodos==='function'&&document.getElementById('panelTodos')&&document.getElementById('panelTodos').classList.contains('active')){loadTodos();}
       return;
@@ -7310,8 +7368,7 @@ function renderMessages(options){
     }
     return m._statusCard||msgContent(m)||m.attachments?.length;
   });
-  const hasLoadedConversation=!!(S.session&&S.session.session_id);
-  $('emptyState').style.display=(hasLoadedConversation||vis.length||preservedCompressionTaskMessages.length)?'none':'';
+  $('emptyState').style.display=(vis.length||preservedCompressionTaskMessages.length)?'none':'';
   _saveExpandedCodeBlocks();
   inner.innerHTML='';
   const compressionNode=compressionState?_compressionCardsNode(compressionState):null;
@@ -7333,16 +7390,6 @@ function renderMessages(options){
     const hasTu=Array.isArray(m.content)&&m.content.some(p=>p&&p.type==='tool_use');
     if(msgContent(m)||m._statusCard||m.attachments?.length||(m.role==='assistant'&&(hasTc||hasTu||_messageHasReasoningPayload(m)))) visWithIdx.push({m,rawIdx});
     rawIdx++;
-  }
-  if(!visWithIdx.length&&!preservedCompressionTaskMessages.length&&hasLoadedConversation&&!S.busy){
-    const emptyConversation=document.createElement('div');
-    emptyConversation.className='conversation-empty-state';
-    const reportedCount=Number(S.session&&S.session.message_count||0);
-    emptyConversation.style.cssText='display:flex;align-items:center;justify-content:center;min-height:220px;padding:40px;text-align:center;color:var(--text-muted);font-size:14px;line-height:1.5;';
-    emptyConversation.textContent=reportedCount>0
-      ? 'This conversation has no renderable chat messages. It may contain legacy or tool-only entries.'
-      : 'No messages in this conversation yet.';
-    inner.appendChild(emptyConversation);
   }
   // Show a top affordance when earlier transcript content exists either in
   // memory (DOM windowing) or on the server (paginated session fetch).
@@ -7530,7 +7577,7 @@ function renderMessages(options){
     if(thinkingText&&window._showThinking!==false){
       assistantThinking.set(rawIdx, thinkingText);
     }
-    // â”€â”€ Plan card rendering (Plan-Then-Code two-phase mode) â”€â”€
+    // ── Plan card rendering (Plan-Then-Code two-phase mode) ──
     if(m._isPlan){
       seg.classList.add('plan-code-segment');
       seg.dataset.planId=m._planId||'';
@@ -7542,23 +7589,23 @@ function renderMessages(options){
       seg.insertAdjacentHTML('beforeend',
         '<div class="plan-card'+(isResolved?' plan-card--resolved':' plan-card--pending')+(isCollapsed?' plan-card-collapsed':'')+'">'+
           '<div class="plan-card-header">'+
-            '<span class="plan-card-icon">ðŸ“‹</span>'+
+            '<span class="plan-card-icon">📋</span>'+
             '<span class="plan-card-label">'+(isResolved
-              ? (planStatus==='accepted'?'âœ… Plan accepted':'âŒ Plan rejected')
+              ? (planStatus==='accepted'?'✅ Plan accepted':'❌ Plan rejected')
               : 'Plan')+'</span>'+
-            (isResolved ? '' : '<span class="plan-card-minimize-btn" onclick="_togglePlanCollapse(this)" title="Minimize">'+(isCollapsed?'+':'âˆ’')+'</span>')+
+            (isResolved ? '' : '<span class="plan-card-minimize-btn" onclick="_togglePlanCollapse(this)" title="Minimize">'+(isCollapsed?'+':'−')+'</span>')+
           '</div>'+
           '<div class="plan-card-body">'+
             renderMd(planContent)+
           '</div>'+
           (isResolved ? '' :
             '<div class="plan-card-actions">'+
-              '<button class="plan-btn plan-btn--accept" onclick="_acceptPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">âœ“ Accept</button>'+
-              '<button class="plan-btn plan-btn--revise" onclick="_showPlanReviseForm('+rawIdx+')">âœŽ Revise</button>'+
-              '<button class="plan-btn plan-btn--reject" onclick="_rejectPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">âœ• Reject</button>'+
+              '<button class="plan-btn plan-btn--accept" onclick="_acceptPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">✓ Accept</button>'+
+              '<button class="plan-btn plan-btn--revise" onclick="_showPlanReviseForm('+rawIdx+')">✎ Revise</button>'+
+              '<button class="plan-btn plan-btn--reject" onclick="_rejectPlan(\''+escAttr(m._planId||'')+'\','+rawIdx+')">✕ Reject</button>'+
             '</div>'+
             '<div class="plan-revise-form" id="planReviseForm_'+rawIdx+'" style="display:none">'+
-              '<textarea class="plan-revise-input" placeholder="Describe what should changeâ€¦" rows="3"></textarea>'+
+              '<textarea class="plan-revise-input" placeholder="Describe what should change…" rows="3"></textarea>'+
               '<div class="plan-revise-actions">'+
                 '<button class="plan-btn plan-btn--send" onclick="_submitPlanRevision('+rawIdx+')">Send Feedback</button>'+
                 '<button class="plan-btn plan-btn--cancel" onclick="_cancelPlanRevision('+rawIdx+')">Cancel</button>'+
@@ -7567,7 +7614,7 @@ function renderMessages(options){
           )+
         '</div>'
       );
-      // Skip normal body rendering â€” plan card replaces it
+      // Skip normal body rendering — plan card replaces it
       const hasOnlyPlanCard=!(statusHtml||filesHtml);
       if(hasOnlyPlanCard){
         _assistantTurnBlocks(currentAssistantTurn).appendChild(seg);
@@ -7875,8 +7922,8 @@ function renderMessages(options){
         const inTok=msg._turnUsage.input_tokens||0;
         const outTok=msg._turnUsage.output_tokens||0;
         const cost=msg._turnUsage.estimated_cost;
-        let text=`${_fmtTokens(inTok)} in Â· ${_fmtTokens(outTok)} out`;
-        if(cost) text+=` Â· ~$${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
+        let text=`${_fmtTokens(inTok)} in · ${_fmtTokens(outTok)} out`;
+        if(cost) text+=` · ~$${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
         usage.textContent=text;
         fragments.push(usage);
       }
@@ -7886,16 +7933,21 @@ function renderMessages(options){
       }
     }
   }
-  // Only force-scroll when not actively streaming â€” mid-stream re-renders
+  // Only force-scroll when not actively streaming — mid-stream re-renders
   // (tool completion, session switch) must not override the user's scroll position.
   // scrollIfPinned() respects _scrollPinned, so it's a no-op if user scrolled up.
   _scrollAfterMessageRender(preserveScroll, scrollSnapshot);
   if (fastRender) {
     _endSessionFastRender(window._sessionFastRenderToken, sid);
   } else {
-    // Make heavy Markdown post-processing idle/debounced so session switching
-    // stays responsive even when the transcript contains many code/math/media blocks.
-    _scheduleMessagePostprocess(inner, {preserveScroll, scrollSnapshot});
+    // Apply syntax highlighting after DOM is built
+    requestAnimationFrame(()=>{
+      highlightCode();addCopyButtons();loadDiffInline();loadCsvInline();loadExcalidrawInline();loadPdfInline();loadHtmlInline();renderMermaidBlocks();renderKatexBlocks();_applyCollapsibleMessages(inner);
+      if(preserveScroll){ if(_scrollPinned) scrollIfPinned(); else _restoreMessageScrollSnapshot(scrollSnapshot); }
+    });
+    requestAnimationFrame(()=>{initTreeViews();});
+    // Make file paths clickable — runs after DOM is settled
+    if(typeof _makeFilePathsClickable==='function') _makeFilePathsClickable();
   }
   // Refresh todo panel if it's currently open
   if(typeof loadTodos==='function' && document.getElementById('panelTodos') && document.getElementById('panelTodos').classList.contains('active')){
@@ -7993,7 +8045,7 @@ function buildToolCard(tc, rawIdx){
   const isSubagent=tc.name==='subagent_progress';
   const isDelegation=tc.name==='delegate_task';
   let cardClass='tool-card'+(tc.done===false?' tool-card-running':'')+(isSubagent?' tool-card-subagent':'');
-  // â”€â”€ Terminal error detection â”€â”€
+  // ── Terminal error detection ──
   const _isTermErr = (typeof _isTerminalError === 'function') && _isTerminalError(tc);
   if (_isTermErr) cardClass += ' tool-card-error';
   // Build error context for the "Fix this?" button (stored as JSON in data attr)
@@ -8003,8 +8055,8 @@ function buildToolCard(tc, rawIdx){
   // Clean up legacy subagent prefixes since the Lucide icon already shows it
   let displayName=_toolDisplayName(tc);
   let previewText=tc.preview||displaySnippet||'';
-  if(isSubagent) previewText=previewText.replace(/^(?:\u{1F500}|â†³)\s*/u,'');
-  // Subagent with a known child session â†’ make the card clickable
+  if(isSubagent) previewText=previewText.replace(/^(?:\u{1F500}|↳)\s*/u,'');
+  // Subagent with a known child session → make the card clickable
   const childSid=isSubagent&&tc._child_session_id?String(tc._child_session_id).trim():'';
   const cardClick=childSid?`onclick="event.stopPropagation();if(typeof loadSession==='function')loadSession('${esc(childSid)}')"`:'';
   row.innerHTML=`
@@ -8056,11 +8108,11 @@ function _fixThisTool(btn) {
   }
   // Disable button, show "Fixing..." state
   btn.disabled = true;
-  btn.innerHTML = btn.innerHTML.replace('Fix this?', 'Fixingâ€¦');
+  btn.innerHTML = btn.innerHTML.replace('Fix this?', 'Fixing…');
   btn.classList.add('is-fixing');
 }
 
-// â”€â”€ Execution Timeline helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Execution Timeline helpers ─────────────────────────────────────
 function _toolTimelineCategory(name){
   const readSet={read_file:1,search_files:1,web_extract:1,web_search:1,browser_navigate:1,vision_analyze:1};
   const writeSet={write_file:1,patch:1,memory:1,skill_manage:1};
@@ -8093,11 +8145,11 @@ function _buildMsgTimelineHtml(tcs){
     let title=name;
     if(dur) title+=' ('+dur+')';
     if(tc._ts_start){
-      try{ title+=' Â· '+new Date(tc._ts_start).toLocaleTimeString(); }catch(_){}
+      try{ title+=' · '+new Date(tc._ts_start).toLocaleTimeString(); }catch(_){}
     }
     chips.push('<span class="timeline-chip timeline-'+cat+errClass+'" data-tc-name="'+esc(tc.name||'')+'" title="'+esc(title)+'" onclick="scrollToTimelineTool(this)">'+icon+esc(name)+durHtml+'</span>');
   }
-  return '<div class="msg-timeline">'+chips.join('<span class="timeline-sep">â†’</span>')+'</div>';
+  return '<div class="msg-timeline">'+chips.join('<span class="timeline-sep">→</span>')+'</div>';
 }
 function scrollToTimelineTool(el){
   if(!el) return;
@@ -8123,7 +8175,7 @@ function scrollToTimelineTool(el){
       return;
     }
   }
-  // Fallback: activity group collapsed â€” open it and scroll
+  // Fallback: activity group collapsed — open it and scroll
   const group=turn.querySelector('.tool-call-group');
   if(group){
     group.classList.add('open');
@@ -8148,8 +8200,8 @@ function _syncToolCallGroupSummary(group){
   const label=group.querySelector('.tool-call-group-label');
   const durationEl=group.querySelector('.tool-call-group-duration');
   if(label){
-    if(toolCount) label.textContent=`â–¶ Show details (${toolCount} tool call${toolCount===1?'':'s'})`;
-    else label.textContent='â–¶ Show details';
+    if(toolCount) label.textContent=`▶ Show details (${toolCount} tool call${toolCount===1?'':'s'})`;
+    else label.textContent='▶ Show details';
   }
   if(durationEl){
     if(group.getAttribute('data-live-tool-call-group')==='1'){
@@ -8166,11 +8218,11 @@ function _syncToolCallGroupSummary(group){
   }
 }
 
-// â”€â”€ Live tool card helpers (called during SSE streaming) â”€â”€
+// ── Live tool card helpers (called during SSE streaming) ──
 // Live cards are inserted INLINE inside #msgInner (tagged with data-live-tid)
 // so the streaming layout matches the settled layout produced by renderMessages
-// (user â†’ thinking â†’ tool cards â†’ response). The legacy #liveToolCards
-// sibling container is no longer used for placement â€” keeping the cards in the
+// (user → thinking → tool cards → response). The legacy #liveToolCards
+// sibling container is no longer used for placement — keeping the cards in the
 // message column eliminates the visible "jump" users saw when renderMessages
 // fired on the done event.
 function appendLiveToolCard(tc){
@@ -8195,7 +8247,7 @@ function appendLiveToolCard(tc){
         const replacement=buildToolCard(tc);
         replacement.dataset.liveTid=tid;
         existing.replaceWith(replacement);
-        // Keep #toolRunningRow alive â€” dots stay until text starts streaming
+        // Keep #toolRunningRow alive — dots stay until text starts streaming
         // or the next tool fires (which replaces them). Removing here caused
         // a gap between tool completion and the first text token arriving.
         return;
@@ -8205,8 +8257,8 @@ function appendLiveToolCard(tc){
     if(tid) row.dataset.liveTid=tid;
     // Insert after whichever comes last: the current live assistant segment or
     // the last tool card. This handles both cases:
-    //   text â†’ tool1 â†’ tool2  (no text between tools: anchor is card1)
-    //   text1 â†’ tool1 â†’ text2 â†’ tool2  (text between tools: anchor is text2)
+    //   text → tool1 → tool2  (no text between tools: anchor is card1)
+    //   text1 → tool1 → text2 → tool2  (text between tools: anchor is text2)
     const children=Array.from(inner.children);
     // Include .reasoning-accordion-row so tool cards land AFTER a finalized thinking
     // card, not between the text segment and thinking.
@@ -8256,23 +8308,23 @@ function clearLiveToolCards(){
   if(typeof _clearLiveActivityUserIntent==='function') _clearLiveActivityUserIntent();
   // Clear live progress timer cards
   if(typeof _clearAllLiveToolCards==='function') _clearAllLiveToolCards();
-  // Legacy #liveToolCards container cleanup â€” kept for safety in case any
+  // Legacy #liveToolCards container cleanup — kept for safety in case any
   // leftover cards were inserted there before this refactor took effect.
   const container=$('liveToolCards');
   if(container){container.innerHTML='';container.style.display='none';}
 }
 
-// â”€â”€ Live Tool Progress Spinner + Timer (in #liveToolCards) â”€â”€
+// ── Live Tool Progress Spinner + Timer (in #liveToolCards) ──
 const _toolTimers={};
 const _toolLiveCards={};
 
 /**
  * Show a compact live-progress card in #liveToolCards with spinner + elapsed time.
  * Called from messages.js 'tool' SSE event handler.
- * @param {string} toolId  â€” Unique ID for this tool invocation
- * @param {string} toolName â€” Display name
- * @param {string} status  â€” 'running' | 'done' | 'error'
- * @param {number} startTime â€” Date.now() epoch ms
+ * @param {string} toolId  — Unique ID for this tool invocation
+ * @param {string} toolName — Display name
+ * @param {string} status  — 'running' | 'done' | 'error'
+ * @param {number} startTime — Date.now() epoch ms
  */
 function renderToolLiveCard(toolId, toolName, status, startTime){
   const c=$('liveToolCards');
@@ -8295,7 +8347,7 @@ function renderToolLiveCard(toolId, toolName, status, startTime){
 }
 
 /**
- * Update an existing live tool card (spinner â†’ checkmark/X, freeze timer).
+ * Update an existing live tool card (spinner → checkmark/X, freeze timer).
  * Called from messages.js 'tool_complete' SSE event handler.
  * @param {string} toolId
  * @param {{status:string,error?:string}} [opts]
@@ -8363,7 +8415,7 @@ function _clearAllLiveToolCards(){
   if(c){c.innerHTML='';c.style.display='none';}
 }
 
-// â”€â”€ Edit + Regenerate â”€â”€
+// ── Edit + Regenerate ──
 
 function editMessage(btn) {
   if(S.busy) return;
@@ -8471,7 +8523,7 @@ async function regenerateResponse(btn) {
   } catch(e) { setStatus(t('regen_failed') + e.message); }
 }
 
-// â”€â”€ Composer Edit & Resend â”€â”€
+// ── Composer Edit & Resend ──
 
 async function composerEditMsg(rawIdx) {
   if(S.busy || !S.session) return;
@@ -8541,7 +8593,7 @@ function highlightCode(container, force) {
 
   Prism.highlightAllUnder(el);
 
-  // â”€â”€ Post-processing: line numbers, lang badges, collapsible blocks, line hover â”€â”€
+  // ── Post-processing: line numbers, lang badges, collapsible blocks, line hover ──
   el.querySelectorAll('pre > code[class*="language-"]').forEach(codeEl => {
     const pre = codeEl.parentElement;
     if(pre.dataset.codeEnhanced) return;
@@ -8551,7 +8603,7 @@ function highlightCode(container, force) {
     const header = pre.previousElementSibling;
     const hasHeader = header && header.classList.contains('pre-header');
 
-    // â”€â”€ Language badge in pre-header â”€â”€
+    // ── Language badge in pre-header ──
     if(hasHeader && lang) {
       let badge = header.querySelector('.lang-badge');
       if(!badge) {
@@ -8565,14 +8617,14 @@ function highlightCode(container, force) {
       textNodes.forEach(n => { n.textContent = ''; });
     }
 
-    // â”€â”€ Line numbers: wrap each visual line in .code-line â”€â”€
+    // ── Line numbers: wrap each visual line in .code-line ──
     const lines = codeEl.innerHTML.split('\n');
     const lineCount = lines.length;
     if(lineCount > 1) {
       codeEl.innerHTML = lines.map(line => `<span class="code-line">${line}</span>`).join('\n');
     }
 
-    // â”€â”€ Collapsible: blocks > 20 lines get "Show more" toggle â”€â”€
+    // ── Collapsible: blocks > 20 lines get "Show more" toggle ──
     if(lineCount > 20) {
       // Only collapse if the code block is not inside a diff-block or tree-raw-view
       if(pre.classList.contains('diff-block') || pre.closest('.tree-raw-view, .diff-inline')) return;
@@ -8647,7 +8699,7 @@ function initTreeViews(){
         try{ parsed=jsyaml.load(rawText); }catch(e){ parseFailed=true; }
       }else{
         // Defer: remove init marker so we retry after load.
-        // Note: if CDN load fails, s.onerror does NOT call back â€”
+        // Note: if CDN load fails, s.onerror does NOT call back —
         // the wrap stays un-initialised (raw view only), which is safe.
         wrap.removeAttribute('data-tree-init');
         _loadJsyamlThen(initTreeViews);
@@ -8717,7 +8769,7 @@ function _buildTreeDOM(val, depth){
     const collapsed=depth>=2;
     const header=document.createElement('span');
     header.className='tree-collapsible';
-    header.innerHTML=(collapsed?'â–¸ ': 'â–¾ ')+`<span class="tree-bracket">[</span><span class="tree-count">${val.length}</span><span class="tree-bracket">]</span>`;
+    header.innerHTML=(collapsed?'▸ ': '▾ ')+`<span class="tree-bracket">[</span><span class="tree-count">${val.length}</span><span class="tree-bracket">]</span>`;
     const body=document.createElement('div');
     body.className='tree-children'+(collapsed?' tree-collapsed':'');
     val.forEach((item,i)=>{
@@ -8729,7 +8781,7 @@ function _buildTreeDOM(val, depth){
     });
     el.appendChild(header);
     el.appendChild(body);
-    header.onclick=(()=>{const c=body.classList.contains('tree-collapsed'); body.classList.toggle('tree-collapsed'); header.innerHTML=(c?'â–¾ ':'â–¸ ')+`<span class="tree-bracket">[</span><span class="tree-count">${val.length}</span><span class="tree-bracket">]</span>`;});
+    header.onclick=(()=>{const c=body.classList.contains('tree-collapsed'); body.classList.toggle('tree-collapsed'); header.innerHTML=(c?'▾ ':'▸ ')+`<span class="tree-bracket">[</span><span class="tree-count">${val.length}</span><span class="tree-bracket">]</span>`;});
     return el;
   }
   if(typeof val==='object'){
@@ -8738,7 +8790,7 @@ function _buildTreeDOM(val, depth){
     const collapsed=depth>=2;
     const header=document.createElement('span');
     header.className='tree-collapsible';
-    header.innerHTML=(collapsed?'â–¸ ': 'â–¾ ')+`<span class="tree-bracket">{</span><span class="tree-count">${keys.length}</span><span class="tree-bracket">}</span>`;
+    header.innerHTML=(collapsed?'▸ ': '▾ ')+`<span class="tree-bracket">{</span><span class="tree-count">${keys.length}</span><span class="tree-bracket">}</span>`;
     const body=document.createElement('div');
     body.className='tree-children'+(collapsed?' tree-collapsed':'');
     keys.forEach((key,i)=>{
@@ -8751,14 +8803,14 @@ function _buildTreeDOM(val, depth){
     });
     el.appendChild(header);
     el.appendChild(body);
-    header.onclick=(()=>{const c=body.classList.contains('tree-collapsed'); body.classList.toggle('tree-collapsed'); header.innerHTML=(c?'â–¾ ':'â–¸ ')+`<span class="tree-bracket">{</span><span class="tree-count">${keys.length}</span><span class="tree-bracket">}</span>`;});
+    header.onclick=(()=>{const c=body.classList.contains('tree-collapsed'); body.classList.toggle('tree-collapsed'); header.innerHTML=(c?'▾ ':'▸ ')+`<span class="tree-bracket">{</span><span class="tree-count">${keys.length}</span><span class="tree-bracket">}</span>`;});
     return el;
   }
   el.innerHTML=`<span class="tree-val">${esc(String(val))}</span>`;
   return el;
 }
 
-// â”€â”€ Language â†’ filename extension map for code block save â”€â”€
+// ── Language → filename extension map for code block save ──
 const _codeLangExtMap={
   javascript:'js', js:'js', typescript:'ts', ts:'ts', python:'py',
   ruby:'rb', go:'go', rust:'rs', java:'java', kotlin:'kt',
@@ -8789,37 +8841,37 @@ function addCopyButtons(container){
       if(m) lang=m[1];
     }
 
-    // â”€â”€ Build toolbar â”€â”€
+    // ── Build toolbar ──
     const toolbar=document.createElement('div');
     toolbar.className='code-toolbar';
 
     // Copy button
-    const copyBtn=_codeToolbarBtn('ðŸ“‹',t('copy'));
+    const copyBtn=_codeToolbarBtn('📋',t('copy'));
     copyBtn.onclick=(e)=>{
       e.stopPropagation();
       _copyText(codeEl.textContent).then(()=>{
-        copyBtn.innerHTML='<span class="toolbar-icon">âœ“</span><span class="toolbar-label">'+t('copied')+'</span>';
-        setTimeout(()=>{copyBtn.innerHTML='<span class="toolbar-icon">ðŸ“‹</span><span class="toolbar-label">'+t('copy')+'</span>';},1500);
+        copyBtn.innerHTML='<span class="toolbar-icon">✓</span><span class="toolbar-label">'+t('copied')+'</span>';
+        setTimeout(()=>{copyBtn.innerHTML='<span class="toolbar-icon">📋</span><span class="toolbar-label">'+t('copy')+'</span>';},1500);
       }).catch(()=>{
-        copyBtn.innerHTML='<span class="toolbar-icon">âœ—</span><span class="toolbar-label">'+t('copy_failed')+'</span>';
-        setTimeout(()=>{copyBtn.innerHTML='<span class="toolbar-icon">ðŸ“‹</span><span class="toolbar-label">'+t('copy')+'</span>';},1500);
+        copyBtn.innerHTML='<span class="toolbar-icon">✗</span><span class="toolbar-label">'+t('copy_failed')+'</span>';
+        setTimeout(()=>{copyBtn.innerHTML='<span class="toolbar-icon">📋</span><span class="toolbar-label">'+t('copy')+'</span>';},1500);
       });
     };
     toolbar.appendChild(copyBtn);
 
     // Save button
-    const saveBtn=_codeToolbarBtn('ðŸ’¾','Save');
+    const saveBtn=_codeToolbarBtn('💾','Save');
     saveBtn.onclick=(e)=>{e.stopPropagation();_codeBlockSave(codeEl,lang);};
     toolbar.appendChild(saveBtn);
 
     // Run button (only for non-empty code)
     if(codeEl.textContent.trim()){
-      const runBtn=_codeToolbarBtn('â–¶','Run');
+      const runBtn=_codeToolbarBtn('▶','Run');
       runBtn.onclick=(e)=>{e.stopPropagation();_codeBlockRun(codeEl,lang);};
       toolbar.appendChild(runBtn);
     }
 
-    // â”€â”€ Insert toolbar into DOM â”€â”€
+    // ── Insert toolbar into DOM ──
     if(header&&header.classList.contains('pre-header')){
       header.style.display='flex';
       header.style.justifyContent='space-between';
@@ -8855,7 +8907,7 @@ async function _codeBlockSave(codeEl,lang){
       method:'POST',
       body:JSON.stringify({session_id:sid, path:filename, content:code})
     });
-    showToast('âœ“ Saved as '+filename);
+    showToast('✓ Saved as '+filename);
   }catch(err){
     // If file exists, try overwrite via save
     if(err.status===400&&err.body&&err.body.includes('already exists')){
@@ -8864,7 +8916,7 @@ async function _codeBlockSave(codeEl,lang){
           method:'POST',
           body:JSON.stringify({session_id:sid, path:filename, content:code})
         });
-        showToast('âœ“ Updated '+filename);
+        showToast('✓ Updated '+filename);
       }catch(e2){
         showToast('Failed to save: '+(e2.message||e2));
       }
@@ -8892,7 +8944,7 @@ async function _codeBlockRun(codeEl,lang){
       method:'POST',
       body:JSON.stringify({session_id:sid, data:code+'\n'})
     });
-    showToast('â–¶ Running'+(lang?' '+lang:'')+' code in terminalâ€¦');
+    showToast('▶ Running'+(lang?' '+lang:'')+' code in terminal…');
   }catch(err){
     showToast('Run failed: '+(err.message||err));
   }
@@ -9029,7 +9081,7 @@ function loadCsvInline(){
         // Auto-detect separator (comma, semicolon, tab)
         // Heuristic: uses the first separator found in the header row. Edge case:
         // quoted fields containing commas without non-quoted commas in the header
-        // could cause misdetection â€” acceptable trade-off for a preview renderer.
+        // could cause misdetection — acceptable trade-off for a preview renderer.
         const firstLine=rows[0];
         const separators=[',',';','\t'];
         let sep=separators.find(s=>firstLine.includes(s))||',';
@@ -9163,11 +9215,11 @@ function _renderExcalidrawCanvases(){
   });
 }
 
-// â”€â”€ PDF inline preview (first page) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── PDF inline preview (first page) ────────────────────────────────────────
 // NOTE: PDF.js is loaded from CDN (jsdelivr). Offline/air-gapped deployments
 // will not get inline previews; the 15 s fallback timeout degrades to a
 // download link in that case. The 4 MB size cap is checked client-side after
-// the full buffer is received â€” ideally the server would enforce it before
+// the full buffer is received — ideally the server would enforce it before
 // streaming (out of scope for this client-side PR).
 let _pdfjsReady=false, _pdfjsLoading=false;
 function loadPdfInline(){
@@ -9181,7 +9233,7 @@ function loadPdfInline(){
         .then(r=>{if(!r.ok) throw new Error(r.status); return r.arrayBuffer();})
         .then(buf=>{
           if(buf.byteLength>PDF_MAX_SIZE){
-            el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="api/media?path=${encodeURIComponent(path)}&download=1" download="${esc(fname)}">ðŸ“Ž ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_too_large')}</span></div>`;
+            el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="api/media?path=${encodeURIComponent(path)}&download=1" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_too_large')}</span></div>`;
             return;
           }
           return pdfjsLib.getDocument({data:buf}).promise;
@@ -9197,12 +9249,12 @@ function loadPdfInline(){
             canvas.className='pdf-preview-canvas';
             page.render({canvasContext:canvas.getContext('2d'),viewport}).promise.then(()=>{
               // Canvas bitmap is runtime state, not part of HTML serialization.
-              // Attach the canvas as a DOM node â€” interpolating its serialized
+              // Attach the canvas as a DOM node — interpolating its serialized
               // form into a template string parses back as an empty canvas.
               const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
               const wrap=document.createElement('div');
               wrap.className='pdf-preview-wrap';
-              wrap.innerHTML=`<div class="pdf-preview-header"><span>ðŸ“„ ${esc(fname)}</span><a href="${dlUrl}" download="${esc(fname)}" class="pdf-download-link">${t('pdf_download')} â†“</a></div><div class="pdf-preview-body"></div>`;
+              wrap.innerHTML=`<div class="pdf-preview-header"><span>📄 ${esc(fname)}</span><a href="${dlUrl}" download="${esc(fname)}" class="pdf-download-link">${t('pdf_download')} ↓</a></div><div class="pdf-preview-body"></div>`;
               wrap.querySelector('.pdf-preview-body').appendChild(canvas);
               el.replaceWith(wrap);
             });
@@ -9210,7 +9262,7 @@ function loadPdfInline(){
         })
         .catch(()=>{
           const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
-          el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">ðŸ“Ž ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_error')}</span></div>`;
+          el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_error')}</span></div>`;
         });
     };
     if(_pdfjsReady){
@@ -9233,7 +9285,7 @@ function loadPdfInline(){
         if(!_pdfjsReady){
           const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
           if(el.parentNode){
-            el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">ðŸ“Ž ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_error')}</span></div>`;
+            el.outerHTML=`<div class="pdf-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('pdf_error')}</span></div>`;
           }
         }
       },15000);
@@ -9243,7 +9295,7 @@ function loadPdfInline(){
   });
 }
 
-// â”€â”€ HTML inline preview (sandboxed iframe) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── HTML inline preview (sandboxed iframe) ─────────────────────────────────
 function loadHtmlInline(){
   const HTML_MAX_SIZE=256*1024; // 256 KB cap for inline HTML preview
   document.querySelectorAll('.html-preview-load:not([data-loaded])').forEach(el=>{
@@ -9255,16 +9307,16 @@ function loadHtmlInline(){
       .then(html=>{
         if(html.length>HTML_MAX_SIZE){
           const openUrl='api/media?path='+encodeURIComponent(path)+'&inline=1';
-          el.outerHTML=`<div class="html-preview-fallback"><a class="msg-media-link" href="${openUrl}" target="_blank" rel="noopener">ðŸ“Ž ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('html_too_large')}</span></div>`;
+          el.outerHTML=`<div class="html-preview-fallback"><a class="msg-media-link" href="${openUrl}" target="_blank" rel="noopener">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('html_too_large')}</span></div>`;
           return;
         }
         const openUrl='api/media?path='+encodeURIComponent(path)+'&inline=1';
         const safeHtml=html.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        el.outerHTML=`<div class="html-preview-wrap"><div class="html-preview-header"><span>${t('html_sandbox_label')}</span><a href="${openUrl}" target="_blank" rel="noopener" class="html-open-link">${t('html_open_full')} â†—</a></div><iframe srcdoc="${safeHtml}" sandbox="allow-scripts" class="html-preview-iframe" loading="lazy"></iframe></div>`;
+        el.outerHTML=`<div class="html-preview-wrap"><div class="html-preview-header"><span>${t('html_sandbox_label')}</span><a href="${openUrl}" target="_blank" rel="noopener" class="html-open-link">${t('html_open_full')} ↗</a></div><iframe srcdoc="${safeHtml}" sandbox="allow-scripts" class="html-preview-iframe" loading="lazy"></iframe></div>`;
       })
       .catch(()=>{
         const dlUrl='api/media?path='+encodeURIComponent(path)+'&download=1';
-        el.outerHTML=`<div class="html-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">ðŸ“Ž ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('html_error')}</span></div>`;
+        el.outerHTML=`<div class="html-preview-fallback"><a class="msg-media-link" href="${dlUrl}" download="${esc(fname)}">📎 ${esc(fname)}</a><br><span style="color:var(--muted);font-size:12px">${t('html_error')}</span></div>`;
       });
   });
 }
@@ -9362,10 +9414,10 @@ function _thinkingMarkup(text=''){
   const openClass=isSimplifiedToolCalling()?'':' open';
   return (clean&&String(clean).trim())
     ? `<div class="reasoning-accordion${openClass}"><div class="reasoning-accordion-header" onclick="toggleReasoningAccordion(this)"><span>\u{1F9E0}</span><span class="reasoning-accordion-label">${t('reasoning_thought')}</span><span class="chevron">${li('chevron-right',12)}</span></div><div class="reasoning-accordion-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
-    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">Thinkingï¿½</span><div class="thinking-indicator-tools"></div></div>`;
+    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">Thinking�</span><div class="thinking-indicator-tools"></div></div>`;
 }
 
-// â”€â”€ Thinking-indicator delayed labels â”€â”€
+// ── Thinking-indicator delayed labels ──
 // Two timers: one for the "Still thinking..." label at 10s, one for
 // the live tool-call summary at 30s. Cleared when content arrives or
 // the thinking card is finalized/removed.
@@ -9378,7 +9430,7 @@ function _updateThinkingToolsSummary(containerEl){
   if(!containerEl) return;
   const tools=Array.isArray(S.toolCalls)?S.toolCalls:[];
   if(!tools.length){
-    containerEl.textContent='â³ Waiting for tool callsâ€¦';
+    containerEl.textContent='⏳ Waiting for tool calls…';
     containerEl.classList.add('visible');
     return;
   }
@@ -9386,7 +9438,7 @@ function _updateThinkingToolsSummary(containerEl){
     const done=tc.done?' done':'';
     return `<span class="tool-pill${done}">${escAttr(tc.name||'tool')}</span>`;
   }).join('');
-  containerEl.innerHTML='âš¡ <span style="opacity:.65">Tools:</span> '+pills;
+  containerEl.innerHTML='⚡ <span style="opacity:.65">Tools:</span> '+pills;
   containerEl.classList.add('visible');
 }
 
@@ -9394,7 +9446,7 @@ function finalizeThinkingCard(){
   _clearThinkingTimers();
   // Guard
   // Without this check, switching tabs while a stream is running causes finalizeThinkingCard
-  // to remove/modify the thinking card DOM of the wrong session â€” the card belongs to the
+  // to remove/modify the thinking card DOM of the wrong session — the card belongs to the
   // stream that started it, not the session currently displayed.
   const _guardTurn = $('liveAssistantTurn');
   if(_guardTurn && S.session && _guardTurn.dataset.sessionId !== S.session.session_id) return;
@@ -9402,7 +9454,7 @@ function finalizeThinkingCard(){
     const row=$('thinkingRow');
     if(!row) return;
     // If the row is still just a spinner (no thinking content rendered),
-    // remove it entirely â€” it's the initial waiting dots.
+    // remove it entirely — it's the initial waiting dots.
     const hasContent=row.querySelector('.reasoning-accordion') || row.classList.contains('reasoning-accordion-row');
     if(!hasContent && row.getAttribute('data-thinking-active')==='1'){
       row.remove();
@@ -9423,7 +9475,7 @@ function finalizeThinkingCard(){
   const turn=$('liveAssistantTurn');
   const group=turn&&turn.querySelector('.tool-call-group[data-live-tool-call-group="1"]');
   if(group){
-    // Respect the user's explicit expand intent (#1298) â€” only force-collapse
+    // Respect the user's explicit expand intent (#1298) — only force-collapse
     // when the user has not manually expanded this turn's activity group, or
     // has manually collapsed it. Otherwise the panel snaps shut whenever new
     // activity arrives, even mid-read.
@@ -9463,7 +9515,7 @@ function appendThinking(text=''){
       // Insert after whichever comes last: a live assistant segment or a tool card.
       // This mirrors appendLiveToolCard's anchor logic so thinking always appears
       // in the right position in the interleaved sequence.
-      // Also skip #toolRunningRow (dots) â€” thinking should go before dots, not after.
+      // Also skip #toolRunningRow (dots) — thinking should go before dots, not after.
       const allChildren=Array.from(blocks.children);
       const anchor=allChildren.filter(el=>
         el.id!=='toolRunningRow' &&
@@ -9556,7 +9608,7 @@ function addStreamCursor(){
   const cursor=document.createElement('span');
   cursor.className='stream-cursor';
   cursor.setAttribute('aria-hidden','true');
-  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">Thinkingï¿½</span>';
+  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">Thinking�</span>';
   body.appendChild(cursor);
 }
 function removeStreamCursor(){
@@ -9659,11 +9711,11 @@ function toggleWorkspaceHiddenFiles(value){
 }
 try{S.showHiddenWorkspaceFiles=localStorage.getItem('sidekick-workspace-show-hidden-files')==='1';}catch(_){}
 
-// â”€â”€ Workspace preferences kebab menu (#1793 UX refinement) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Workspace preferences kebab menu (#1793 UX refinement) ───────────────
 // The "Show hidden files" toggle used to live as a permanent inline row
 // below the breadcrumb bar. That ate ~32px of vertical space on every
 // panel view (root, subdir, file preview), even though the toggle is a
-// set-once preference â€” most users flip it once or never. Moving the
+// set-once preference — most users flip it once or never. Moving the
 // control into a kebab dropdown reclaims the space; the small "(hidden
 // files visible)" indicator on the heading reflects the non-default state
 // so the affordance isn't lost.
@@ -9735,7 +9787,7 @@ document.addEventListener('click',e=>{
   if(!_workspacePrefsMenu) return;
   if(_workspacePrefsMenu.contains(e.target)) return;
   if(_workspacePrefsAnchor&&_workspacePrefsAnchor.contains(e.target)) return;
-  // Indicator chip is also an opener â€” clicking it should toggle, not close.
+  // Indicator chip is also an opener — clicking it should toggle, not close.
   const ind=$('workspaceHiddenIndicator');
   if(ind&&ind.contains(e.target)) return;
   _closeWorkspacePrefsMenu();
@@ -9923,14 +9975,14 @@ function _renderTreeItems(container, entries, depth){
     // Name
     const nameEl=document.createElement('span');
     nameEl.className='file-name';nameEl.textContent=item.name;
-    // Tooltip only on FILES â€” dblclick renames them. On directories, dblclick
+    // Tooltip only on FILES — dblclick renames them. On directories, dblclick
     // navigates into the folder; rename lives in the right-click context menu
     // (the "Double-click to rename" hint here would be misleading). #1710.
     if(item.type!=='dir')nameEl.title=t('double_click_rename');
     // Single-click opens (file) or expand-toggles (dir) but is debounced 300ms so a
     // double-click can cancel it and trigger rename instead. Without the debounce, the
-    // click bubbles to el.onclick before dblclick can fire â€” that's #1698. Without the
-    // restored activation, single-click on the filename does nothing â€” that's #1707.
+    // click bubbles to el.onclick before dblclick can fire — that's #1698. Without the
+    // restored activation, single-click on the filename does nothing — that's #1707.
     let _nameClickTimer=null;
     nameEl.onclick=(e)=>{
       e.stopPropagation();
@@ -10096,7 +10148,7 @@ function _showFileContextMenu(e, item){
   revealItem.onclick=async()=>{menu.remove();try{await api('/api/file/reveal',{method:'POST',body:JSON.stringify({session_id:S.session.session_id,path:item.path})});}catch(err){showToast(t('reveal_failed')+(err.message||err));}};
   menu.appendChild(revealItem);
 
-  // Copy file path â€” resolves the absolute on-disk path on the server (so the
+  // Copy file path — resolves the absolute on-disk path on the server (so the
   // user gets the full /home/.../workspace/foo.py rather than the relative
   // path the file tree shows) and writes it to the OS clipboard. Useful for
   // pasting into terminals, editors, or other apps without taking the slower
@@ -10117,7 +10169,7 @@ function _showFileContextMenu(e, item){
       }catch(clipErr){
         // Fallback for browsers where Clipboard API is gated (older Safari,
         // non-secure contexts). Use the legacy execCommand path against a
-        // hidden textarea â€” this is the same pattern boot.js uses for the
+        // hidden textarea — this is the same pattern boot.js uses for the
         // "Copy" buttons on code blocks.
         const ta=document.createElement('textarea');
         ta.value=abs;
@@ -10157,7 +10209,7 @@ async function _inlineRenameFileItem(item){
   if(!S.session)return;
   // Pre-fill the input with the current name and select just the stem
   // (everything before the last '.') so the user can immediately retype the
-  // basename while preserving the extension â€” matches macOS Finder. For
+  // basename while preserving the extension — matches macOS Finder. For
   // directories or names with no '.', the helper selects the full value.
   // `selectStem` also handles dotfiles ('.gitignore') by full-selecting.
   const newName=await showPromptDialog({
@@ -10277,9 +10329,9 @@ function renderTray(){ // non-media files use paperclip chip
       } else if(_SVG_EXTS.test(f.name)){
         chip.innerHTML=`<img class="attach-thumb attach-thumb--svg" src="${esc(blobUrl)}" alt="${esc(f.name)}" title="${esc(f.name)}"><button title="${t('remove_title')}">${li('x',12)}</button>`;
       } else if(mediaKind==='audio'){
-        chip.innerHTML=`<span class="attach-chip-media">ðŸŽµ ${esc(f.name)}</span><audio controls preload="metadata" src="${esc(blobUrl)}"></audio><button title="${t('remove_title')}">${li('x',12)}</button>`;
+        chip.innerHTML=`<span class="attach-chip-media">🎵 ${esc(f.name)}</span><audio controls preload="metadata" src="${esc(blobUrl)}"></audio><button title="${t('remove_title')}">${li('x',12)}</button>`;
       } else if(mediaKind==='video'){
-        chip.innerHTML=`<span class="attach-chip-media">ðŸŽ¬ ${esc(f.name)}</span><video controls preload="metadata" src="${esc(blobUrl)}"></video><button title="${t('remove_title')}">${li('x',12)}</button>`;
+        chip.innerHTML=`<span class="attach-chip-media">🎬 ${esc(f.name)}</span><video controls preload="metadata" src="${esc(blobUrl)}"></video><button title="${t('remove_title')}">${li('x',12)}</button>`;
       }
     } else {
       chip.innerHTML=`${li('paperclip',12)} ${esc(f.name)} <button title="${t('remove_title')}">${li('x',12)}</button>`;
@@ -10346,7 +10398,15 @@ async function uploadPendingFiles(){
 }
 
 
-/* â”€â”€ Split pane resize (Codex-style: resizable chat + workspace) â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Split pane resize (Codex-style: resizable chat + workspace) ─────── */
+
+function syncWorkspaceRightpanelWidth(){
+  const root=document.documentElement;
+  if(!root) return;
+  const panel=document.querySelector('.rightpanel');
+  const width=panel ? Math.max(0,Math.round(panel.getBoundingClientRect().width)) : 0;
+  root.style.setProperty('--workspace-rightpanel-width',width+'px');
+}
 
 function initSplitPane(){
   const handle=document.getElementById('chatSplitResize');
@@ -10355,6 +10415,17 @@ function initSplitPane(){
   if(!layout) return;
   const panel=layout.querySelector('.rightpanel');
   if(!panel) return;
+  syncWorkspaceRightpanelWidth();
+  if(typeof ResizeObserver!=='undefined'){
+    if(window._workspaceRightpanelWidthObserver && typeof window._workspaceRightpanelWidthObserver.disconnect==='function'){
+      window._workspaceRightpanelWidthObserver.disconnect();
+    }
+    window._workspaceRightpanelWidthObserver=new ResizeObserver(()=>syncWorkspaceRightpanelWidth());
+    window._workspaceRightpanelWidthObserver.observe(panel);
+  }else if(!window._workspaceRightpanelWidthResizeBound){
+    window._workspaceRightpanelWidthResizeBound=true;
+    window.addEventListener('resize',syncWorkspaceRightpanelWidth);
+  }
   let isDragging=false;
   handle.addEventListener('mousedown',function(e){
     isDragging=true;
@@ -10370,6 +10441,7 @@ function initSplitPane(){
       if(!isDragging) return;
       const newW=Math.max(250,Math.min(maxW,startW-(ev.clientX-startX)));
       panel.style.flex=`0 0 ${newW}px`;
+      syncWorkspaceRightpanelWidth();
     };
     const onUp=function(){
       isDragging=false;
@@ -10381,6 +10453,7 @@ function initSplitPane(){
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
       try{localStorage.setItem('sidekick-rightpanel-width',panel.style.flex);}catch(_){}
+      syncWorkspaceRightpanelWidth();
     };
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
@@ -10390,10 +10463,11 @@ function initSplitPane(){
     const saved=localStorage.getItem('sidekick-rightpanel-width');
     if(saved) panel.style.flex=saved;
   }catch(_){}
+  syncWorkspaceRightpanelWidth();
 }
 
 
-/* â”€â”€ Message Edit + Branching (Codex-style) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Message Edit + Branching (Codex-style) ──────────────────────────── */
 
 function cancelEditMessage(idx){
   renderMessages();
@@ -10421,7 +10495,7 @@ async function saveEditedMessage(idx){
   }
 }
 
-/* â”€â”€ Right panel resize (Codex-style split pane) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ── Right panel resize (Codex-style split pane) ─────────────────────── */
 
 function escAttr(str){
   return String(str||'')
@@ -10443,7 +10517,7 @@ function _togglePlanCollapse(btn){
   const rawIdx=seg ? parseInt(seg.dataset.msgIdx,10) : null;
   if(card.classList.contains('plan-card-collapsed')){
     card.classList.remove('plan-card-collapsed');
-    btn.textContent='âˆ’';
+    btn.textContent='−';
     if(rawIdx!==null && !isNaN(rawIdx)) _PLAN_COLLAPSED.delete(rawIdx);
   } else {
     card.classList.add('plan-card-collapsed');
@@ -10461,8 +10535,8 @@ async function _acceptPlan(planId, rawIdx){
   if(msg){ msg._planStatus='accepted'; }
   renderMessages({preserveScroll:true});
   // Show a brief status
-  if(typeof setComposerStatus==='function') setComposerStatus('âœ… Plan accepted â€” starting implementationâ€¦');
-  // Fire the API call â€” the server streams code via SSE
+  if(typeof setComposerStatus==='function') setComposerStatus('✅ Plan accepted — starting implementation…');
+  // Fire the API call — the server streams code via SSE
   try{
     await api('/api/chat/plan/accept',{
       method:'POST',
@@ -10476,8 +10550,8 @@ async function _acceptPlan(planId, rawIdx){
     // On error, revert plan status
     if(msg){ msg._planStatus='pending'; }
     renderMessages({preserveScroll:true});
-    if(typeof setComposerStatus==='function') setComposerStatus('âŒ '+t('error_prefix')+err.message);
-    if(typeof showToast==='function') showToast('âŒ Plan accept failed: '+err.message,4000,'error');
+    if(typeof setComposerStatus==='function') setComposerStatus('❌ '+t('error_prefix')+err.message);
+    if(typeof showToast==='function') showToast('❌ Plan accept failed: '+err.message,4000,'error');
   }
 }
 
@@ -10489,7 +10563,7 @@ function _rejectPlan(planId, rawIdx){
     msg._isPlan=false;  // Remove plan card, show the original raw content
   }
   renderMessages({preserveScroll:true});
-  if(typeof showToast==='function') showToast('âœ• Plan rejected',2000);
+  if(typeof showToast==='function') showToast('✕ Plan rejected',2000);
 }
 
 function _showPlanReviseForm(rawIdx){
@@ -10525,7 +10599,7 @@ async function _submitPlanRevision(rawIdx){
   // Disable the send button to prevent double-submit
   const sendBtn=form.querySelector('.plan-btn--send');
   if(sendBtn) sendBtn.disabled=true;
-  if(typeof setComposerStatus==='function') setComposerStatus('âœŽ Sending revision feedbackâ€¦');
+  if(typeof setComposerStatus==='function') setComposerStatus('✎ Sending revision feedback…');
   try{
     await api('/api/chat/plan/revise',{
       method:'POST',
@@ -10540,15 +10614,15 @@ async function _submitPlanRevision(rawIdx){
     const msg=S.messages[rawIdx];
     if(msg) msg._planStatus='revising';
     renderMessages({preserveScroll:true});
-    if(typeof showToast==='function') showToast('âœŽ Revision sent â€” waiting for updated planâ€¦',3000);
+    if(typeof showToast==='function') showToast('✎ Revision sent — waiting for updated plan…',3000);
   }catch(err){
     if(sendBtn) sendBtn.disabled=false;
-    if(typeof setComposerStatus==='function') setComposerStatus('âŒ Revision failed: '+err.message);
-    if(typeof showToast==='function') showToast('âŒ Revision send failed: '+err.message,4000,'error');
+    if(typeof setComposerStatus==='function') setComposerStatus('❌ Revision failed: '+err.message);
+    if(typeof showToast==='function') showToast('❌ Revision send failed: '+err.message,4000,'error');
   }
 }
 
-// â”€â”€ Collapsible Output per Message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Collapsible Output per Message ──────────────────────────
 function _applyCollapsibleMessages(container) {
   if (_applyCollapsibleMessages._running) return;
   _applyCollapsibleMessages._running = true;
@@ -10621,34 +10695,32 @@ function _applyCollapsibleMessages(container) {
   }
 }
 
-function _scheduleCollapsibleMessages(container) {
-  container = container || document.getElementById('msgInner');
-  if (!container) return;
-  _scheduleCollapsibleMessages._container = container;
-  if (_scheduleCollapsibleMessages._pending) return;
-  _scheduleCollapsibleMessages._pending = true;
-  const run = function(){
-    _scheduleCollapsibleMessages._pending = false;
-    _applyCollapsibleMessages(_scheduleCollapsibleMessages._container || container);
-  };
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(run, {timeout: 1200});
-  } else {
-    setTimeout(run, 120);
-  }
-}
-
-
-// Collapsible observer â€” watches for new segments during live streaming
+// Collapsible observer — watches for new segments during live streaming
 (function(){
   function init(){
     var inner = document.getElementById('msgInner');
     if (!inner) { setTimeout(init, 500); return; }
+    var pending = false;
     var obs = new MutationObserver(function(){
-      _scheduleCollapsibleMessages(inner);
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(function(){
+        pending = false;
+        _applyCollapsibleMessages(inner);
+      });
     });
-    obs.observe(inner, { childList: true, subtree: false });
-    _scheduleCollapsibleMessages(inner);
+    obs.observe(inner, { childList: true, subtree: true });
+    _applyCollapsibleMessages(inner);
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else { init(); }
+})();
+
+// Collapsible observer — watches for new segments during live streaming
+(function(){
+  function init(){
+    return;
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

@@ -39,7 +39,7 @@ Aktuell: 10 Tests in `tests/smoke_all.py`
 
 **Neue Tests:**
 1. `SIDEKICK_HOME` → Config-Ladetest
-2. `HERMES_HOME` → Legacy-Compat-Test
+2. `SIDEKICK_HOME` → Legacy-Compat-Test
 3. WebUI-Server: `/health`-Endpoint via HTTP (start/stop server)
 4. WebUI: Session create/list über API
 5. `--version` Output parsen
@@ -51,11 +51,11 @@ Systematisch prüfen, dass alle Legacy-Fallback-Chains funktionieren:
 | Test | Beschreibung |
 |------|-------------|
 | `SIDEKICK_HOME` set → Config wird von dort geladen | ✅ |
-| `HERMES_HOME` set → Config wird von dort geladen (Fallback) | ⏳ |
+| `SIDEKICK_HOME` set → Config wird von dort geladen (Fallback) | ⏳ |
 | `~/.sidekick/` existiert → wird genutzt | ⏳ |
-| `~/.hermes/` existiert → wird genutzt (nur wenn ~/.sidekick fehlt) | ⏳ |
+| `~/.sidekick/` existiert → wird genutzt (nur wenn ~/.sidekick fehlt) | ⏳ |
 | `SIDEKICK_STATE_DIR` → überschreibt state-Pfad | ⏳ |
-| `HERMES_STATE_DIR` → überschreibt state-Pfad (Fallback) | ⏳ |
+| `SIDEKICK_STATE_DIR` → überschreibt state-Pfad (Fallback) | ⏳ |
 
 ### E. Gateway-Hardening (niedrige Priorität)
 

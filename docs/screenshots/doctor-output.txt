@@ -18,9 +18,9 @@
   ✓ discord.py (optional)
 
 ◆ Configuration Files
-  ✓ C:\HermesPortable\home/.env file exists
+  ✓ C:\SidekickPortable\home/.env file exists
   ✓ API key or custom endpoint configured
-  ✓ C:\HermesPortable\home/config.yaml exists
+  ✓ C:\SidekickPortable\home/config.yaml exists
   ✓ Config version up to date (v23)
 
 ◆ Auth Providers
@@ -31,17 +31,17 @@
   ✓ codex CLI
 
 ◆ Directory Structure
-  ✓ C:\HermesPortable\home directory exists
-  ✓ C:\HermesPortable\home/cron/ exists
-  ✓ C:\HermesPortable\home/sessions/ exists
-  ✓ C:\HermesPortable\home/logs/ exists
-  ✓ C:\HermesPortable\home/skills/ exists
-  ✓ C:\HermesPortable\home/memories/ exists
-  ✓ C:\HermesPortable\home/SOUL.md exists (persona configured)
-  ✓ C:\HermesPortable\home/memories/ directory exists
+  ✓ C:\SidekickPortable\home directory exists
+  ✓ C:\SidekickPortable\home/cron/ exists
+  ✓ C:\SidekickPortable\home/sessions/ exists
+  ✓ C:\SidekickPortable\home/logs/ exists
+  ✓ C:\SidekickPortable\home/skills/ exists
+  ✓ C:\SidekickPortable\home/memories/ exists
+  ✓ C:\SidekickPortable\home/SOUL.md exists (persona configured)
+  ✓ C:\SidekickPortable\home/memories/ directory exists
   ✓ MEMORY.md exists (2069 chars)
   ✓ USER.md exists (1352 chars)
-  ✓ C:\HermesPortable\home/state.db exists (7498 sessions)
+  ✓ C:\SidekickPortable\home/state.db exists (7498 sessions)
     → WAL file is 15 MB (normal for active sessions)
 
 ◆ External Tools
@@ -92,7 +92,7 @@
 
 ◆ Skills Hub
   ⚠ Skills Hub directory not initialized (run: sidekick skills list)
-  ⚠ No GITHUB_TOKEN (60 req/hr rate limit — set in C:\HermesPortable\home/.env for better rates)
+  ⚠ No GITHUB_TOKEN (60 req/hr rate limit — set in C:\SidekickPortable\home/.env for better rates)
 
 ◆ Memory Provider
   ✓ Built-in memory active (no external provider configured — this is fine)

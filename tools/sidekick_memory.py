@@ -38,7 +38,7 @@ def _run_vector_memory(args: list) -> dict:
         result = subprocess.run(
             cmd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=30,
             env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )

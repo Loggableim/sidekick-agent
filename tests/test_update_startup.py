@@ -2,7 +2,9 @@ import subprocess
 import inspect
 import sys
 import textwrap
+import os
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
@@ -51,6 +53,48 @@ def test_resolve_remote_default_branch_prefers_origin_head_master(tmp_path):
     assert main._resolve_remote_default_branch(["git"], install, "origin") == "master"
 
 
+def test_fetch_origin_retries_remote_ref_compare_and_swap_race(monkeypatch, tmp_path):
+    import cli.main as main
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            return SimpleNamespace(
+                returncode=1, stdout="",
+                stderr="error: cannot lock ref 'refs/remotes/origin/master': is at aaa but expected bbb",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    result = main._fetch_origin_with_ref_race_retry(["git"], tmp_path)
+
+    assert result.returncode == 0
+    assert calls == [
+        ["git", "fetch", "origin"],
+        ["git", "fetch", "--prune", "origin"],
+    ]
+
+
+def test_fetch_origin_does_not_retry_unrelated_failure(monkeypatch, tmp_path):
+    import cli.main as main
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=1, stdout="", stderr="fatal: authentication failed")
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    result = main._fetch_origin_with_ref_race_retry(["git"], tmp_path)
+
+    assert result.returncode == 1
+    assert calls == [["git", "fetch", "origin"]]
+
+
 def test_update_check_uses_origin_default_branch_master(monkeypatch, tmp_path, capsys):
     import cli.main as main
 
@@ -69,11 +113,37 @@ def test_windows_zip_update_fallback_uses_sidekick_master_archive():
 
     assert "Loggableim/sidekick-agent" in source
     assert 'branch = "master"' in source
-    assert "NousResearch/hermes-agent" not in source
+    assert "NousResearch/sidekick-agent" not in source
     assert 'branch = "main"' not in source
 
 
-def test_import_web_server_does_not_run_git():
+def test_windows_update_quarantines_running_entrypoints_from_dot_venv(monkeypatch, tmp_path):
+    import cli.main as main
+
+    scripts = tmp_path / ".venv" / "Scripts"
+    scripts.mkdir(parents=True)
+    entrypoints = [
+        scripts / "sidekick.exe",
+        scripts / "sidekick-gateway.exe",
+        scripts / "hermes.exe",
+        scripts / "hermes-gateway.exe",
+    ]
+    for path in entrypoints:
+        path.write_text("old launcher", encoding="utf-8")
+    (tmp_path / "venv" / "Scripts").mkdir(parents=True)
+
+    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(main, "_is_windows", lambda: True)
+
+    assert main._venv_scripts_dir() == scripts
+    moved = main._quarantine_running_sidekick_exe(scripts)
+
+    assert {original for original, _ in moved} == set(entrypoints)
+    assert all(not path.exists() for path in entrypoints)
+    assert all(quarantined.name.startswith(original.name + ".old.") for original, quarantined in moved)
+
+
+def test_import_fastapi_web_server_does_not_run_git():
     script = textwrap.dedent(
         """
         import subprocess
@@ -82,13 +152,13 @@ def test_import_web_server_does_not_run_git():
 
         def blocked_run(cmd, *args, **kwargs):
             if isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "git":
-                raise AssertionError("web.server import ran git")
+                raise AssertionError("cli.web_server import ran git")
             return real_run(cmd, *args, **kwargs)
 
         subprocess.run = blocked_run
 
-        import web.server
-        assert web.server.Handler.server_version
+        import cli.web_server
+        assert cli.web_server.app.title == "Sidekick Agent"
         """
     )
 
@@ -101,3 +171,62 @@ def test_import_web_server_does_not_run_git():
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_web_server_run_git_uses_utf8_decode_guards(monkeypatch, tmp_path):
+    import cli.web_server as web_server
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="status ok")
+
+    monkeypatch.setattr(web_server.subprocess, "run", fake_run)
+
+    assert web_server._run_git(tmp_path, "status") == "status ok"
+    assert captured["cmd"] == ["git", "status"]
+    assert captured["kwargs"]["encoding"] == "utf-8"
+    assert captured["kwargs"]["errors"] == "replace"
+
+
+def test_tui_node_bootstrap_uses_sidekick_home(monkeypatch, tmp_path):
+    import cli.main as main
+
+    repo_root = tmp_path / "repo"
+    helper = repo_root / "scripts" / "lib" / "node-bootstrap.sh"
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    captured = {}
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "sidekick-home"))
+    monkeypatch.setattr(main, "PROJECT_ROOT", repo_root)
+    monkeypatch.setattr(main.shutil, "which", lambda _name: None)
+
+    def fake_run(cmd, **kwargs):
+        captured["env"] = kwargs["env"]
+        return SimpleNamespace(stdout="/tmp/node\n", returncode=0)
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+
+    main._ensure_tui_node()
+
+    assert captured["env"]["SIDEKICK_HOME"] == str(tmp_path / "sidekick-home")
+
+
+def test_cleanup_gateway_service_restores_unset_sidekick_home(monkeypatch, tmp_path):
+    import cli.profiles as profiles
+
+    profile_dir = tmp_path / "profiles" / "coder"
+    profile_dir.mkdir(parents=True)
+
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("cli.gateway.get_service_name", lambda: "sidekick-coder")
+    monkeypatch.setattr("cli.gateway.get_launchd_plist_path", lambda: tmp_path / "unused.plist")
+
+    profiles._cleanup_gateway_service("coder", profile_dir)
+
+    assert os.environ.get("SIDEKICK_HOME") is None

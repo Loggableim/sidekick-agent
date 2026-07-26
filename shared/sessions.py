@@ -27,7 +27,7 @@ import os
 import tempfile
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -36,11 +36,19 @@ from shared.runtime import web_state_dir
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SESSION_TITLE = "New chat"
+LEGACY_DEFAULT_SESSION_TITLES = frozenset({"Untitled", "New Chat", DEFAULT_SESSION_TITLE})
+
+
+def is_default_session_title(title: str | None) -> bool:
+    clean = str(title or "").strip()
+    return not clean or clean in LEGACY_DEFAULT_SESSION_TITLES
+
 
 @dataclass
 class Session:
     session_id: str
-    title: str = "Untitled"
+    title: str = DEFAULT_SESSION_TITLE
     workspace: str = ""
     model: str = "default"
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -48,7 +56,7 @@ class Session:
     updated_at: float = field(default_factory=time.time)
 
     def compact(self) -> dict[str, Any]:
-        return {
+        payload = {
             "session_id": self.session_id,
             "title": self.title,
             "workspace": self.workspace,
@@ -57,46 +65,47 @@ class Session:
             "updated_at": self.updated_at,
             "message_count": len(self.messages),
         }
+        payload.update(_session_extra_payload(self))
+        return payload
+
+
+_SESSION_FIELD_NAMES = frozenset(field.name for field in fields(Session))
+
+
+def _session_from_payload(payload: dict[str, Any]) -> Session:
+    if not isinstance(payload, dict):
+        raise TypeError("Session payload must be a mapping")
+
+    known = {key: value for key, value in payload.items() if key in _SESSION_FIELD_NAMES}
+    extra = {key: value for key, value in payload.items() if key not in _SESSION_FIELD_NAMES}
+    session = Session(**known)
+    if extra:
+        # Preserve richer WebUI metadata so cross-surface round-trips do not
+        # silently drop session fields that shared.sessions does not model.
+        setattr(session, "_extra", extra)
+    return session
+
+
+def _session_to_payload(session: Session) -> dict[str, Any]:
+    payload = asdict(session)
+    payload.update(_session_extra_payload(session))
+    # Also keep any other ad-hoc public attrs that callers may have attached.
+    for key, value in session.__dict__.items():
+        if key.startswith("_") or key in payload:
+            continue
+        payload[key] = value
+    return payload
+
+
+def _session_extra_payload(session: Session) -> dict[str, Any]:
+    extra = getattr(session, "_extra", None)
+    return dict(extra) if isinstance(extra, dict) else {}
 
 
 def sessions_dir() -> Path:
     path = web_state_dir() / "sessions"
     path.mkdir(parents=True, exist_ok=True)
     return path
-
-
-def migrate_legacy_sessions() -> int:
-    """Copy legacy ``~/.hermes/webui/sessions/`` JSON files to the canonical
-    ``~/.sidekick/state/webui/sessions/`` directory, if they exist and are
-    not already present in the target.
-
-    Returns the number of migrated session files.
-    Skips files that already exist in the target (path conflict).
-    """
-    target = sessions_dir()
-    # Legacy paths — checked in priority order
-    legacy_candidates = [
-        Path.home() / ".hermes" / "webui" / "sessions",
-        Path.home() / ".hermes" / "sessions",
-    ]
-    count = 0
-    for legacy_dir in legacy_candidates:
-        if not legacy_dir.is_dir():
-            continue
-        for src in sorted(legacy_dir.glob("*.json")):
-            dst = target / src.name
-            if dst.exists():
-                continue
-            try:
-                import shutil
-                shutil.copy2(str(src), str(dst))
-                count += 1
-            except OSError:
-                logger.warning("Failed to migrate legacy session %s", src.name)
-                continue
-    if count > 0:
-        logger.info("Migrated %d legacy session(s) to %s", count, target)
-    return count
 
 
 def _session_path(session_id: str) -> Path:
@@ -112,7 +121,7 @@ def save_session(session: Session) -> Path:
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            json.dump(asdict(session), handle, ensure_ascii=False, indent=2)
+            json.dump(_session_to_payload(session), handle, ensure_ascii=False, indent=2)
         os.replace(tmp_name, path)
     except Exception:
         try:
@@ -129,7 +138,7 @@ def load_session(session_id: str) -> Session | None:
         return None
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
-    return Session(**data)
+    return _session_from_payload(data)
 
 
 def delete_session(session_id: str) -> bool:
@@ -177,7 +186,7 @@ def append_message(
             "timestamp": time.time(),
         }
     )
-    if session.title == "Untitled" and role == "user" and content.strip():
+    if is_default_session_title(session.title) and role == "user" and content.strip():
         session.title = content.strip()[:60]
     session.updated_at = time.time()
     save_session(session)
@@ -185,19 +194,12 @@ def append_message(
 
 
 def list_sessions() -> list[dict[str, Any]]:
-    # One-shot legacy migration: copy ~/.hermes sessions on first list
-    if not getattr(list_sessions, "_migrated", False):
-        list_sessions._migrated = True  # type: ignore[attr-defined]
-        try:
-            migrate_legacy_sessions()
-        except Exception:
-            pass
     rows: list[dict[str, Any]] = []
     for path in sorted(sessions_dir().glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
-            session = Session(**data)
+            session = _session_from_payload(data)
             rows.append(session.compact())
         except Exception:
             continue
@@ -213,7 +215,7 @@ def new_session(
     now = time.time()
     session = Session(
         session_id=uuid.uuid4().hex[:12],
-        title=title or "Untitled",
+        title=title or DEFAULT_SESSION_TITLE,
         workspace=workspace or get_default_workspace(),
         model=model or "default",
         created_at=now,
@@ -310,8 +312,9 @@ def undo_last(session_id: str) -> dict[str, Any]:
 def session_status(session_id: str) -> dict[str, Any]:
     """Return a metadata snapshot for a session.
 
-    Returns dict with keys: session_id, title, model, message_count,
-    last_user_text, last_assistant_text.
+    Returns dict with keys: session_id, title, workspace, model, message_count,
+    last_user_text, last_assistant_text, plus any preserved WebUI metadata
+    fields that were loaded with the session.
     """
     session = load_session(session_id)
     if session is None:
@@ -321,11 +324,14 @@ def session_status(session_id: str) -> dict[str, Any]:
     last_assistant = next(
         (m for m in reversed(messages) if m.get("role") == "assistant"), None
     )
-    return {
+    status = {
         "session_id": session.session_id,
         "title": session.title,
+        "workspace": session.workspace,
         "model": session.model,
         "message_count": len(messages),
         "last_user_text": _extract_text(last_user.get("content", ""))[:200] if last_user else "",
         "last_assistant_text": _extract_text(last_assistant.get("content", ""))[:200] if last_assistant else "",
     }
+    status.update(_session_extra_payload(session))
+    return status

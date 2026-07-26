@@ -177,12 +177,12 @@ def _gateway_root_pid_path() -> Path | None:
     """Return the root Nova gateway PID path.
 
     Gateway runtime files are root-level singletons.  A profile-scoped WebUI
-    process may have HERMES_HOME=<root>/profiles/<name>, but gateway.pid,
+    process may have SIDEKICK_HOME=<root>/profiles/<name>, but gateway.pid,
     gateway.lock, and gateway_state.json still live under <root>.
     """
     try:
-        from runtime._compat.shim_constants import get_default_hermes_root
-        return get_default_hermes_root() / _GATEWAY_PID_FILE
+        from runtime._compat.shim_constants import get_default_sidekick_root
+        return get_default_sidekick_root() / _GATEWAY_PID_FILE
     except Exception:
         return None
 

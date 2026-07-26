@@ -322,16 +322,21 @@ _OR_HEADERS_BASE = {
 _TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
+def _env_trim(name: str) -> str:
+    """Return a trimmed env var value, treating unset values as empty."""
+    return str(os.environ.get(name) or "").strip()
+
+
 def build_or_headers(or_config: dict | None = None) -> dict:
     """Build OpenRouter headers, optionally including response-cache headers.
 
     Precedence for response cache: env var > config.yaml > default (enabled).
 
     Environment variables:
-        ``HERMES_OPENROUTER_CACHE`` — truthy (``1``/``true``/``yes``/``on``)
+        ``SIDEKICK_OPENROUTER_CACHE`` — truthy (``1``/``true``/``yes``/``on``)
             enables caching; ``0``/``false``/``no``/``off`` disables.
             Overrides ``openrouter.response_cache`` in config.yaml.
-        ``HERMES_OPENROUTER_CACHE_TTL`` — integer seconds (1-86400).
+        ``SIDEKICK_OPENROUTER_CACHE_TTL`` — integer seconds (1-86400).
             Overrides ``openrouter.response_cache_ttl`` in config.yaml.
 
     *or_config* is the ``openrouter`` section from config.yaml.  When *None*,
@@ -348,7 +353,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
             or_config = {}
 
     # Determine cache enabled: env var overrides config.
-    env_cache = (os.environ.get("SIDEKICK_OPENROUTER_CACHE")).strip().lower()
+    env_cache = _env_trim("SIDEKICK_OPENROUTER_CACHE").lower()
     if env_cache:
         cache_enabled = env_cache in _TRUTHY_ENV_VALUES
     else:
@@ -360,7 +365,7 @@ def build_or_headers(or_config: dict | None = None) -> dict:
     headers["X-OpenRouter-Cache"] = "true"
 
     # Determine TTL: env var overrides config.
-    env_ttl = (os.environ.get("SIDEKICK_OPENROUTER_CACHE_TTL")).strip()
+    env_ttl = _env_trim("SIDEKICK_OPENROUTER_CACHE_TTL")
     if env_ttl:
         if env_ttl.isdigit():
             ttl = int(env_ttl)
@@ -1048,7 +1053,7 @@ def _endpoint_speaks_anthropic_messages(base_url: str) -> bool:
     """True if the endpoint at ``base_url`` speaks the Anthropic Messages
     protocol instead of OpenAI chat.completions.
 
-    Mirrors ``hermes_cli.runtime_provider._detect_api_mode_for_url`` so the
+    Mirrors ``sidekick_cli.runtime_provider._detect_api_mode_for_url`` so the
     auxiliary client and the main agent stay in sync on transport selection.
     Covers:
 
@@ -1303,6 +1308,13 @@ def _resolve_api_key_provider() -> Tuple[Optional[OpenAI], Optional[str]]:
 
 
 def _try_openrouter(explicit_api_key: str = None) -> Tuple[Optional[OpenAI], Optional[str]]:
+    def _resolved_openrouter_key() -> str:
+        try:
+            from cli.config import get_env_value
+            return str(get_env_value("OPENROUTER_API_KEY") or "").strip()
+        except Exception:
+            return str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+
     pool_present, entry = _select_pool_entry("openrouter")
     if pool_present:
         or_key = explicit_api_key or _pool_runtime_api_key(entry)
@@ -1313,7 +1325,7 @@ def _try_openrouter(explicit_api_key: str = None) -> Tuple[Optional[OpenAI], Opt
         return OpenAI(api_key=or_key, base_url=base_url,
                        default_headers=build_or_headers()), _OPENROUTER_MODEL
 
-    or_key = explicit_api_key or os.getenv("OPENROUTER_API_KEY")
+    or_key = explicit_api_key or _resolved_openrouter_key()
     if not or_key:
         return None, None
     logger.debug("Auxiliary client: OpenRouter")
@@ -1323,13 +1335,20 @@ def _try_openrouter(explicit_api_key: str = None) -> Tuple[Optional[OpenAI], Opt
 
 def _describe_openrouter_unavailable() -> str:
     """Return a more precise OpenRouter auth failure reason for logs."""
+    def _resolved_openrouter_key() -> str:
+        try:
+            from cli.config import get_env_value
+            return str(get_env_value("OPENROUTER_API_KEY") or "").strip()
+        except Exception:
+            return str(os.getenv("OPENROUTER_API_KEY") or "").strip()
+
     pool_present, entry = _select_pool_entry("openrouter")
     if pool_present:
         if entry is None:
             return "OpenRouter credential pool has no usable entries (credentials may be exhausted)"
         if not _pool_runtime_api_key(entry):
             return "OpenRouter credential pool entry is missing a runtime API key"
-    if not str(os.getenv("OPENROUTER_API_KEY") or "").strip():
+    if not _resolved_openrouter_key():
         return "OPENROUTER_API_KEY not set"
     return "no usable OpenRouter credentials found"
 
@@ -2794,7 +2813,7 @@ def resolve_provider_client(
             resolve_external_process_provider_credentials,
         )
     except ImportError:
-        logger.debug("hermes_cli.auth not available for provider %s", provider)
+        logger.debug("sidekick_cli.auth not available for provider %s", provider)
         return None, None
 
     pconfig = PROVIDER_REGISTRY.get(provider)
@@ -3627,6 +3646,22 @@ def _get_task_extra_body(task: str) -> Dict[str, Any]:
     return {}
 
 
+def _raise_if_game_mode_blocks_local_request(provider: str | None, base_url: str | None = "") -> None:
+    """Raise a Game Mode error when the resolved LLM target is local."""
+    try:
+        from web.api.config import game_mode_blocked_payload, game_mode_blocks_local_model_request
+    except Exception:
+        return
+    if not game_mode_blocks_local_model_request(provider, base_url):
+        return
+    payload = game_mode_blocked_payload("local_model")
+    message = str((payload.get("error") or {}).get("message") or "").strip()
+    raise RuntimeError(
+        message
+        or "Game Mode is active. Local model requests are blocked so GPU/VRAM resources stay available for games."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Anthropic-compatible endpoint detection + image block conversion
 # ---------------------------------------------------------------------------
@@ -3923,6 +3958,8 @@ def call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    _raise_if_game_mode_blocks_local_request(resolved_provider, resolved_base_url)
+
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
@@ -3982,6 +4019,10 @@ def call_llm(
                 f"Run: sidekick setup")
 
     effective_timeout = timeout if timeout is not None else _get_task_timeout(task)
+    _raise_if_game_mode_blocks_local_request(
+        resolved_provider,
+        str(getattr(client, "base_url", "") or "") or resolved_base_url,
+    )
 
     # Log what we're about to do — makes auxiliary operations visible
     _base_info = str(getattr(client, "base_url", resolved_base_url) or "")
@@ -4265,6 +4306,8 @@ async def async_call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    _raise_if_game_mode_blocks_local_request(resolved_provider, resolved_base_url)
+
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
@@ -4316,6 +4359,10 @@ async def async_call_llm(
                 f"Run: sidekick setup")
 
     effective_timeout = timeout if timeout is not None else _get_task_timeout(task)
+    _raise_if_game_mode_blocks_local_request(
+        resolved_provider,
+        str(getattr(client, "base_url", "") or "") or resolved_base_url,
+    )
 
     # Pass the client's actual base_url (not just resolved_base_url) so
     # endpoint-specific temperature overrides can distinguish

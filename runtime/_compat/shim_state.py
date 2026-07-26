@@ -105,6 +105,7 @@ class SessionDB:
 
         self.db_path = db_path or get_sidekick_home() / "state.db"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._fts_enabled = False
 
         try:
             self._conn = sqlite3.connect(
@@ -154,12 +155,13 @@ class SessionDB:
 
             CREATE TABLE IF NOT EXISTS state_meta (
                 key TEXT PRIMARY KEY,
-                value TEXT NOT NULL,
-                updated_at REAL DEFAULT (strftime('%s','now'))
+                value TEXT NOT NULL DEFAULT ''
+                ,updated_at REAL DEFAULT (strftime('%s','now'))
             );
             """
         )
         self._repair_missing_parent_session_refs()
+        self._init_message_search_index()
 
     def _repair_missing_parent_session_refs(self) -> int:
         """Drop parent links that point at sessions no longer present."""
@@ -194,6 +196,53 @@ class SessionDB:
                 """
             )
         return int(cursor.rowcount or 0)
+
+    def _init_message_search_index(self) -> None:
+        """Create and backfill a lightweight FTS index for message search."""
+        import sqlite3
+
+        try:
+            self._conn.execute(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS message_fts
+                USING fts5(
+                    session_id UNINDEXED,
+                    role UNINDEXED,
+                    content,
+                    reasoning_content,
+                    tokenize = 'unicode61'
+                )
+                """
+            )
+        except sqlite3.OperationalError:
+            self._fts_enabled = False
+            return
+        except Exception:
+            self._fts_enabled = False
+            return
+
+        try:
+            row = self._conn.execute("SELECT COUNT(*) AS n FROM message_fts").fetchone()
+            if row and int(row["n"] or 0) > 0:
+                self._fts_enabled = True
+                return
+
+            message_columns = self._table_columns("messages")
+            if "reasoning_content" in message_columns:
+                reasoning_expr = "COALESCE(reasoning_content, '')"
+            else:
+                reasoning_expr = "''"
+            sql = f"""
+                INSERT INTO message_fts(rowid, session_id, role, content, reasoning_content)
+                SELECT id, session_id, role, content, {reasoning_expr}
+                FROM messages
+                """  # noqa: S608 - reasoning_expr is selected from hardcoded schema branches.
+            self._conn.execute(sql)
+            self._fts_enabled = True
+        except Exception:
+            # FTS is best-effort.  If backfill fails, keep the functional LIKE
+            # fallback instead of breaking the compatibility shim.
+            self._fts_enabled = False
 
     # ------------------------------------------------------------------
     # Minimal public API — matches what agent modules call
@@ -487,10 +536,25 @@ class SessionDB:
         values = [candidates[col] for col in insert_cols]
         if insert_cols:
             placeholders = ", ".join("?" for _ in insert_cols)
-            self._conn.execute(
+            cursor = self._conn.execute(
                 f"INSERT INTO messages ({', '.join(insert_cols)}) VALUES ({placeholders})",  # noqa: S608 - insert_cols comes from hardcoded candidates intersected with PRAGMA columns.
                 values,
             )
+            message_rowid = cursor.lastrowid if cursor is not None else None
+            if self._fts_enabled and message_rowid is not None and "content" in columns:
+                try:
+                    fts_reasoning = ""
+                    if "reasoning_content" in columns and reasoning_content is not None:
+                        fts_reasoning = _json_or_none(reasoning_content) or ""
+                    self._conn.execute(
+                        """
+                        INSERT INTO message_fts(rowid, session_id, role, content, reasoning_content)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (message_rowid, session_id, role, content_text, fts_reasoning),
+                    )
+                except Exception:
+                    self._fts_enabled = False
 
         session_columns = self._table_columns("sessions")
         pk_col = "session_id" if "session_id" in session_columns else "id"
@@ -565,6 +629,27 @@ class SessionDB:
                 row["session_id"] = row[session_col]
         return rows
 
+    def get_meta(self, key: str) -> str | None:
+        if not key:
+            return None
+        row = self._conn.execute(
+            "SELECT value FROM state_meta WHERE key = ?",
+            (str(key),),
+        ).fetchone()
+        if row is None:
+            return None
+        value = row[0]
+        return None if value is None else str(value)
+
+    def set_meta(self, key: str, value: Any) -> None:
+        if not key:
+            return
+        text = "" if value is None else str(value)
+        self._conn.execute(
+            "INSERT OR REPLACE INTO state_meta (key, value) VALUES (?, ?)",
+            (str(key), text),
+        )
+
     def delete_session(self, session_id: str) -> bool:
         sid = self.resolve_session_id(session_id)
         if not sid:
@@ -596,7 +681,7 @@ class SessionDB:
     def _derive_title_from_messages(self, session_id: str) -> str | None:
         """Best-effort fallback title from the first user message.
 
-        Legacy Hermes/Sidekick state.db rows often have NULL session titles.
+        Legacy Sidekick/Sidekick state.db rows often have NULL session titles.
         The WebUI should still show something meaningful instead of ``Untitled``
         when message history is present.
         """
@@ -690,6 +775,168 @@ class SessionDB:
             else:
                 row["title"] = self._fallback_title(row)
         return rows
+
+    def _normalize_search_query(self, query: str) -> str:
+        import re
+
+        terms: list[str] = []
+        for token in self._search_query_terms(query):
+            if token:
+                terms.append(token)
+        return " ".join(terms).lower().strip()
+
+    def _search_query_terms(self, query: str) -> list[str]:
+        import re
+
+        terms: list[str] = []
+        for token in re.findall(r'"[^"]*"|\S+', str(query or "").strip()):
+            token = token.strip().strip('"').strip("'")
+            token = token.replace("*", "")
+            if not token:
+                continue
+            for part in token.split():
+                part = part.strip()
+                if part:
+                    terms.append(part)
+        return terms
+
+    def _message_snippet(self, content: Any, *, limit: int = 180) -> str:
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text") or item.get("content") or "").strip())
+                elif isinstance(item, str):
+                    parts.append(item.strip())
+            text = " ".join(part for part in parts if part)
+        elif content is not None:
+            text = str(content)
+        text = " ".join(text.split())
+        if len(text) > limit:
+            return text[: max(0, limit - 1)].rstrip() + "…"
+        return text
+
+    def search_messages(self, query: str, limit: int = 20, source: str | None = None) -> list[dict[str, Any]]:
+        terms = self._search_query_terms(query)
+        if not terms:
+            return []
+
+        columns = self._table_columns("messages")
+        if "content" not in columns:
+            return []
+        session_columns = self._table_columns("sessions")
+        session_pk = self._session_pk_column()
+        session_col = "session_id" if "session_id" in columns else "sid"
+
+        if "started_at" in session_columns and "created_at" in session_columns:
+            session_started_expr = "COALESCE(s.started_at, s.created_at, m.timestamp, 0)"
+        elif "started_at" in session_columns:
+            session_started_expr = "COALESCE(s.started_at, m.timestamp, 0)"
+        elif "created_at" in session_columns:
+            session_started_expr = "COALESCE(s.created_at, m.timestamp, 0)"
+        else:
+            session_started_expr = "COALESCE(m.timestamp, 0)"
+
+        if "timestamp" in columns:
+            if "updated_at" in session_columns and "created_at" in session_columns:
+                order_expr = "COALESCE(m.timestamp, s.updated_at, s.created_at, 0) DESC"
+            elif "updated_at" in session_columns:
+                order_expr = "COALESCE(m.timestamp, s.updated_at, 0) DESC"
+            elif "created_at" in session_columns:
+                order_expr = "COALESCE(m.timestamp, s.created_at, 0) DESC"
+            else:
+                order_expr = "COALESCE(m.timestamp, 0) DESC"
+        else:
+            if "updated_at" in session_columns and "created_at" in session_columns:
+                order_expr = "COALESCE(s.updated_at, s.created_at, 0) DESC"
+            elif "updated_at" in session_columns:
+                order_expr = "COALESCE(s.updated_at, 0) DESC"
+            elif "created_at" in session_columns:
+                order_expr = "COALESCE(s.created_at, 0) DESC"
+            else:
+                order_expr = "COALESCE(s.rowid, 0) DESC"
+
+        max_limit = max(0, int(limit))
+        if self._fts_enabled:
+            fts_query = " ".join(f"{part}*" for part in terms)
+            where_sql = [f"message_fts MATCH ?"]
+            params = [fts_query]
+            if source and "source" in session_columns:
+                where_sql.append("LOWER(COALESCE(s.source, '')) = ?")
+                params.append(str(source).strip().lower())
+            sql = f"""
+                SELECT
+                    f.session_id AS session_id,
+                    COALESCE(s.title, '') AS session_title,
+                    COALESCE(s.source, '') AS session_source,
+                    COALESCE(s.model, '') AS session_model,
+                    {session_started_expr} AS session_started,
+                    f.role AS role,
+                    f.content AS content,
+                    m.timestamp AS timestamp
+                FROM message_fts f
+                JOIN messages m ON m.rowid = f.rowid
+                JOIN sessions s ON s.{session_pk} = f.session_id
+                WHERE {' AND '.join(where_sql)}
+                ORDER BY {order_expr}
+                LIMIT ?
+                """  # noqa: S608 - session_started_expr/session_pk are hardcoded schema branches.
+            cursor = self._conn.execute(sql, [*params, max_limit])
+        else:
+            content_expr = "LOWER(COALESCE(m.content, ''))"
+            if "reasoning_content" in columns:
+                content_expr = "LOWER(COALESCE(m.content, '') || ' ' || COALESCE(m.reasoning_content, ''))"
+            where_clause = [f"{content_expr} LIKE ?"]
+            params = [f"%{' '.join(terms).lower().strip()}%"]
+            if source and "source" in session_columns:
+                where_clause.append("LOWER(COALESCE(s.source, '')) = ?")
+                params.append(str(source).strip().lower())
+            sql = f"""
+                SELECT
+                    m.{session_col} AS session_id,
+                    COALESCE(s.title, '') AS session_title,
+                    COALESCE(s.source, '') AS session_source,
+                    COALESCE(s.model, '') AS session_model,
+                    {session_started_expr} AS session_started,
+                    m.role AS role,
+                    m.content AS content,
+                    m.timestamp AS timestamp
+                FROM messages m
+                JOIN sessions s ON s.{session_pk} = m.{session_col}
+                WHERE {' AND '.join(where_clause)}
+                ORDER BY {order_expr}
+                LIMIT ?
+                """  # noqa: S608 - session_started_expr/session_col/order_expr are hardcoded schema branches.
+            cursor = self._conn.execute(sql, [*params, max_limit])
+        results: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            snippet = self._message_snippet(row["content"])
+            results.append(
+                {
+                    "session_id": row["session_id"],
+                    "snippet": snippet,
+                    "title": snippet,
+                    "match_type": "content",
+                    "role": row["role"],
+                    "source": row["session_source"] or None,
+                    "model": row["session_model"] or None,
+                    "session_started": row["session_started"],
+                    "timestamp": row["timestamp"],
+                }
+            )
+        return results
+
+    def search_sessions(
+        self,
+        *,
+        source: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        return self.list_sessions(limit=limit, offset=offset, source=source)
 
     def close(self) -> None:
         try:

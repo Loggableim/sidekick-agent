@@ -5,6 +5,8 @@ import logging
 import os
 import socket
 import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -60,36 +62,68 @@ def _normalize_ollama_root(raw_url: str) -> str:
     return urllib.parse.urlunparse(rebuilt).rstrip("/")
 
 
+def _is_local_ollama_base_url(raw_url: str) -> bool:
+    """Return True for local Ollama endpoints that actually consume VRAM."""
+    try:
+        normalized = _normalize_ollama_root(raw_url)
+        return bool(normalized) and cfg._base_url_points_at_local_server(normalized)
+    except Exception:
+        return False
+
+
 def _ollama_base_urls() -> list[str]:
-    urls = {_normalize_ollama_root(os.getenv("OLLAMA_HOST", ""))}
+    urls: set[str] = set()
+
+    def consider(value: Any, *hints: Any, allow_env: bool = False) -> None:
+        text = str(value or "").strip()
+        if not text:
+            return
+        normalized = _normalize_ollama_root(text)
+        if not _is_local_ollama_base_url(normalized):
+            return
+        hint_text = " ".join(str(item or "").strip().lower() for item in hints)
+        if allow_env or "ollama" in hint_text or "ollama" in normalized.lower():
+            urls.add(normalized)
+
+    # Always keep the canonical local default in scope so a cloud-only
+    # OLLAMA_HOST does not accidentally suppress unloads for a real local
+    # Ollama server on the default port.
+    consider("http://127.0.0.1:11434", allow_env=True)
+    consider(os.getenv("OLLAMA_HOST", ""), allow_env=True)
     try:
         conf = cfg.get_config()
     except Exception:
         conf = {}
 
-    def consider(value: Any) -> None:
-        text = str(value or "").strip()
-        if text and "ollama" in text.lower():
-            urls.add(_normalize_ollama_root(text))
-
     if isinstance(conf, dict):
         model_cfg = conf.get("model") or {}
         if isinstance(model_cfg, dict):
-            consider(model_cfg.get("base_url"))
+            consider(
+                model_cfg.get("base_url"),
+                model_cfg.get("provider"),
+                model_cfg.get("name"),
+                "model",
+            )
         providers = conf.get("providers") or {}
         if isinstance(providers, dict):
             for key, entry in providers.items():
-                if str(key).strip().lower() == "ollama" and isinstance(entry, dict):
-                    consider(entry.get("base_url"))
+                if isinstance(entry, dict):
+                    consider(
+                        entry.get("base_url"),
+                        key,
+                        entry.get("name"),
+                        entry.get("provider"),
+                    )
         custom = conf.get("custom_providers") or []
         if isinstance(custom, list):
             for entry in custom:
                 if not isinstance(entry, dict):
                     continue
-                name = str(entry.get("name") or entry.get("provider") or "").lower()
-                base_url = str(entry.get("base_url") or "")
-                if "ollama" in name or "ollama" in base_url.lower():
-                    consider(base_url)
+                consider(
+                    entry.get("base_url"),
+                    entry.get("name"),
+                    entry.get("provider"),
+                )
     return sorted(urls)
 
 
@@ -171,6 +205,8 @@ def _unload_ollama_model(base_url: str, model: str) -> dict:
             ["ollama", "stop", model_name],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=8,
         )
         return {
@@ -194,6 +230,81 @@ def _unload_ollama_models() -> dict:
             result.setdefault("base_url", base_url)
             unloaded.append(result)
     return {"checked": checked, "unloaded": unloaded}
+
+
+def _game_mode_lock_paths() -> tuple[Path, ...]:
+    try:
+        lock_paths = tuple(cfg._game_mode_lock_paths())
+        if lock_paths:
+            return lock_paths
+    except Exception:
+        pass
+    try:
+        state_dir = Path(cfg.SETTINGS_FILE).parent
+        legacy_lock = state_dir.parent / "game_mode.lock"
+        return (state_dir / "game_mode.lock", legacy_lock)
+    except Exception:
+        return (
+            Path("C:/sidekick/home/state/webui/game_mode.lock"),
+            Path("C:/sidekick/home/state/game_mode.lock"),
+        )
+
+
+def _game_mode_watchdog_state_path() -> Path:
+    try:
+        settings_file = Path(cfg.SETTINGS_FILE)
+        return settings_file.parent.parent / "gpu_watchdog_state.json"
+    except Exception:
+        return Path("C:/sidekick/home/state/gpu_watchdog_state.json")
+
+
+def sync_game_mode_runtime_state(
+    enabled: bool,
+    *,
+    action: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Synchronize the lock file and watchdog state with the desired Game Mode state."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    lock_results: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for lock_path in _game_mode_lock_paths():
+        try:
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            if enabled:
+                lock_path.write_text(timestamp, encoding="utf-8")
+                lock_results.append({"path": str(lock_path), "status": "written"})
+            else:
+                if lock_path.exists():
+                    lock_path.unlink()
+                    lock_results.append({"path": str(lock_path), "status": "removed"})
+                else:
+                    lock_results.append({"path": str(lock_path), "status": "absent"})
+        except Exception as exc:
+            errors.append({"path": str(lock_path), "error": repr(exc)[:240]})
+
+    state_path = _game_mode_watchdog_state_path()
+    state_payload = {
+        "last_game_mode": bool(enabled),
+        "last_action": action or ("blocked" if enabled else "unblocked"),
+        "last_check": timestamp,
+        "last_details": details or {},
+    }
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as exc:
+        errors.append({"path": str(state_path), "error": repr(exc)[:240]})
+
+    return {
+        "ok": not errors,
+        "game_mode_enabled": bool(enabled),
+        "locks": lock_results,
+        "state_file": str(state_path),
+        "state": state_payload,
+        "errors": errors,
+    }
 
 
 def _cancel_stream(stream_id: str) -> bool:
@@ -378,7 +489,7 @@ def _classify_gpu_process(proc: Any | None) -> tuple[str, bool]:
         return ("ollama", True)
     if any(marker in text for marker in _LOCAL_IMAGE_BACKEND_PROCESS_MARKERS):
         return ("image_generation_backend", True)
-    if "sidekick" in text or "web.server" in text or "run_agent.py" in text:
+    if "sidekick" in text or "run_agent.py" in text:
         return ("sidekick", True)
     return ("other", False)
 
@@ -410,6 +521,8 @@ $byProcess.GetEnumerator() |
             ["powershell", "-NoProfile", "-Command", script],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
         )
     except Exception as exc:

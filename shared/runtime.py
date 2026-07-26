@@ -7,11 +7,11 @@ from pathlib import Path
 
 from shared.paths import sidekick_home, state_dir
 
-WEB_HOST_ENVS = ("SIDEKICK_WEBUI_HOST", "HERMES_WEBUI_HOST")
-WEB_PORT_ENVS = ("SIDEKICK_WEBUI_PORT", "HERMES_WEBUI_PORT")
-WEB_STATE_DIR_ENVS = ("SIDEKICK_WEBUI_STATE_DIR", "HERMES_WEBUI_STATE_DIR")
-WEB_AGENT_DIR_ENVS = ("SIDEKICK_WEBUI_AGENT_DIR", "HERMES_WEBUI_AGENT_DIR")
-WEB_PYTHON_ENVS = ("SIDEKICK_WEBUI_PYTHON", "HERMES_WEBUI_PYTHON")
+WEB_HOST_ENVS = ("SIDEKICK_WEBUI_HOST",)
+WEB_PORT_ENVS = ("SIDEKICK_WEBUI_PORT",)
+WEB_STATE_DIR_ENVS = ("SIDEKICK_WEBUI_STATE_DIR",)
+WEB_AGENT_DIR_ENVS = ("SIDEKICK_WEBUI_AGENT_DIR",)
+WEB_PYTHON_ENVS = ("SIDEKICK_WEBUI_PYTHON",)
 
 
 def _env_first(*names: str, default: str = "") -> str:
@@ -47,12 +47,11 @@ def discover_agent_dir(repo_root: Path) -> Path | None:
 
     home = sidekick_home()
     candidates.append((home / "sidekick-agent").resolve())
-    candidates.append((home / "hermes-agent").resolve())  # legacy fallback
+    candidates.append((home / "sidekick-agent").resolve())  # legacy fallback
     # Monorepo: ourselves (discovery in shared.runtime should prefer the running repo)
     candidates.append((repo_root).resolve())
     candidates.append((repo_root.parent / "sidekick-agent").resolve())
     candidates.append((Path.home() / ".sidekick" / "sidekick-agent").resolve())
-    candidates.append((Path.home() / ".hermes" / "hermes-agent").resolve())  # legacy fallback
 
     seen: set[Path] = set()
     for candidate in candidates:

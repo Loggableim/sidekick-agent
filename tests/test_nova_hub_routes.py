@@ -6,8 +6,17 @@ import sys
 import warnings
 from pathlib import Path
 
+import os
+import pytest
 
-MODULE_PATH = Path("C:/HermesPortable/home/cockpit/dashboard_server.py")
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
+
+
+MODULE_PATH = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py")
 COCKPIT_DIR = MODULE_PATH.parent
 
 
@@ -76,10 +85,21 @@ def test_hub_cockpit_settings_live_under_sidekick_home():
 
 
 def test_webui_cockpit_settings_use_same_sidekick_home(monkeypatch, tmp_path):
-    from web.api import routes
+    from web.api import profiles, routes
 
     home = tmp_path / "home"
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
-    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv("SIDEKICK_HOME", raising=False)
+    profiles.refresh_profile_base_home_from_env()
 
     assert routes._cockpit_settings_path() == home / "cockpit" / ".cockpit_settings.json"
+
+
+def test_webui_cockpit_settings_follow_sidekick_home(monkeypatch, tmp_path):
+    from web.api import profiles, routes
+
+    sidekick_home = tmp_path / "sidekick-home"
+    monkeypatch.setenv("SIDEKICK_HOME", str(sidekick_home))
+    profiles.refresh_profile_base_home_from_env()
+
+    assert routes._cockpit_settings_path() == sidekick_home / "cockpit" / ".cockpit_settings.json"

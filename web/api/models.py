@@ -7,13 +7,16 @@ import os
 import threading
 import time
 import uuid
+from functools import lru_cache
 from contextlib import closing
 from pathlib import Path
 
+from shared.sessions import DEFAULT_SESSION_TITLE, is_default_session_title
 import web.api.config as _cfg
+from web.api._home import get_webui_home
 from web.api.config import (
     SESSIONS, SESSIONS_MAX,
-    LOCK, STREAMS, STREAMS_LOCK, DEFAULT_WORKSPACE, DEFAULT_MODEL, PROJECTS_FILE, HOME,
+    LOCK, STREAMS, STREAMS_LOCK,
     get_effective_default_model, _get_session_agent_lock,
     get_session_dir, set_session_dir,
 )
@@ -21,6 +24,9 @@ from web.api.workspace import get_last_workspace
 from web.api.agent_sessions import (
     _is_continuation_session,
     read_importable_agent_session_rows as _read_importable_agent_session_rows,
+    _with_normalized_source,
+    _with_session_defaults,
+    read_importable_agent_session_rows,
     read_session_lineage_metadata,
 )
 
@@ -508,33 +514,68 @@ def load_session_message_window(sid, limit=None, before=None):
     except Exception:
         logger.debug("load_session_message_window failed for %s", sid, exc_info=True)
         return None
+@lru_cache(maxsize=8)
+def _read_index_entries_cached(index_path: str, mtime_ns: int, size: int) -> tuple[dict, ...]:
+    """Return frozen session-index rows for the given file snapshot."""
+    entries = json.loads(Path(index_path).read_text(encoding='utf-8'))
+    if not isinstance(entries, list):
+        return ()
+    return tuple(dict(entry) for entry in entries if isinstance(entry, dict))
+
+
+def _read_index_entry_map() -> dict[str, dict]:
+    """Return the current session-index rows keyed by session_id."""
+    index_path = _session_index_file()
+    try:
+        stat = index_path.stat()
+    except OSError:
+        return {}
+    try:
+        entries = _read_index_entries_cached(str(index_path), stat.st_mtime_ns, stat.st_size)
+    except Exception:
+        return {}
+    return {
+        str(entry.get('session_id')): dict(entry)
+        for entry in entries
+        if entry.get('session_id')
+    }
+
+
+def _lookup_index_entry(session_id):
+    """Return the indexed row for ``session_id`` without loading the session file."""
+    sid = str(session_id or '').strip()
+    if not sid:
+        return None
+    return _read_index_entry_map().get(sid)
+
+
+def _lookup_index_title(session_id):
+    """Return the indexed session title without loading the full session file."""
+    entry = _lookup_index_entry(session_id)
+    if not entry:
+        return None
+    title = entry.get('title')
+    return title if isinstance(title, str) and title.strip() else None
 
 
 def _lookup_index_message_count(session_id):
     """Return the indexed message count without loading the full session file."""
+    entry = _lookup_index_entry(session_id)
+    if not entry:
+        return None
+    count = entry.get('message_count')
+    if isinstance(count, int) and count >= 0:
+        return count
     try:
-        entries = json.loads(_session_index_file().read_text(encoding='utf-8'))
-    except Exception:
+        count = int(count)
+    except (TypeError, ValueError):
         return None
-    if not isinstance(entries, list):
-        return None
-    for entry in entries:
-        if entry.get('session_id') != session_id:
-            continue
-        count = entry.get('message_count')
-        if isinstance(count, int) and count >= 0:
-            return count
-        try:
-            count = int(count)
-        except (TypeError, ValueError):
-            return None
-        return count if count >= 0 else None
-    return None
+    return count if count >= 0 else None
 
 
 class Session:
-    def __init__(self, session_id: str=None, title: str='Untitled',
-                 workspace=str(DEFAULT_WORKSPACE), model=DEFAULT_MODEL,
+    def __init__(self, session_id: str=None, title: str=DEFAULT_SESSION_TITLE,
+                 workspace=None, model=None,
                  model_provider=None,
                  messages=None, created_at=None, updated_at=None,
                  tool_calls=None, pinned: bool=False, archived: bool=False,
@@ -558,11 +599,15 @@ class Session:
                 worktree_branch=None,
                 worktree_repo_root=None,
                 worktree_created_at=None,
-                enabled_toolsets=None,
-                composer_draft=None,
-                **kwargs):
+                 enabled_toolsets=None,
+                 composer_draft=None,
+                 **kwargs):
         self.session_id = session_id or uuid.uuid4().hex[:12]
         self.title = title
+        if workspace is None:
+            workspace = _cfg.load_settings().get("default_workspace") or str(_cfg.resolve_default_workspace())
+        if model is None:
+            model = get_effective_default_model()
         self.workspace = str(Path(workspace).expanduser().resolve())
         self.model = model
         self.model_provider = str(model_provider).strip().lower() if model_provider else None
@@ -959,16 +1004,16 @@ class Session:
         }
 
 def _get_profile_home(profile) -> Path:
-    """Resolve the hermes agent home directory for the given profile.
+    """Resolve the sidekick agent home directory for the given profile.
 
     Prefers the profile-specific helper from api.profiles; falls back to the
-    HERMES_HOME environment variable or ~/.hermes, expanding ~ correctly.
+    SIDEKICK_HOME environment variable or ~/.sidekick, expanding ~ correctly.
     """
     try:
-        from web.api.profiles import get_hermes_home_for_profile
-        return Path(get_hermes_home_for_profile(profile))
-    except ImportError:
-        return Path(os.environ.get('SIDEKICK_HOME', '~/.sidekick')).expanduser()
+        from web.api.profiles import get_profile_home
+        return Path(get_profile_home(profile))
+    except Exception:
+        return get_webui_home()
 
 
 def _apply_core_sync_or_error_marker(
@@ -1347,13 +1392,13 @@ def _hide_from_default_sidebar(session: dict) -> bool:
 
 
 def _active_state_db_path() -> Path:
-    """Return state.db for the active Nova profile, degrading to HERMES_HOME."""
+    """Return state.db for the active Nova profile, degrading to SIDEKICK_HOME."""
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
-    return hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    return sidekick_home / 'state.db'
 
 
 def _enrich_sidebar_lineage_metadata(sessions: list[dict]) -> None:
@@ -1446,19 +1491,19 @@ def all_sessions(diag=None):
                     )
             _diag_stage(diag, "all_sessions.sort_filter")
             result = sorted(index_map.values(), key=lambda s: (s.get('pinned', False), _session_sort_timestamp(s)), reverse=True)
-            # Hide empty Untitled sessions from the UI entirely — they are ephemeral
+            # Hide empty default-title sessions from the UI entirely — they are ephemeral
             # scratch pads that only become real once the first message is sent (#1171).
-            # No grace window: a 0-message Untitled session is never shown in the list
+            # No grace window: a 0-message default session is never shown in the list
             # regardless of age. This means page refreshes and accidental New Conversation
             # clicks never leave orphan entries in the sidebar.
             #
             # Exception: sessions with active_stream_id set are actively streaming (#1327).
             # #1184 deferred the first save() until the first message, so during the
-            # initial streaming turn the session still looks like Untitled+0-messages.
+            # initial streaming turn the session still looks like the default title+0-messages.
             # Without this exemption, navigating away during a long first turn causes
             # the session to vanish from the sidebar.
             result = [s for s in result if not (
-                s.get('title', 'Untitled') == 'Untitled'
+                is_default_session_title(s.get('title'))
                 and s.get('message_count', 0) == 0
                 and not s.get('active_stream_id')
                 and not s.get('has_pending_user_message')
@@ -1492,11 +1537,11 @@ def all_sessions(diag=None):
         if all(s.session_id != x.session_id for x in out): out.append(s)
     _diag_stage(diag, "all_sessions.full_scan_sort_filter")
     out.sort(key=lambda s: (getattr(s, 'pinned', False), _session_sort_timestamp(s)), reverse=True)
-    # Hide empty Untitled sessions from the UI entirely — kept consistent with the
-    # index-path filter above. No grace window: a 0-message Untitled session is
+    # Hide empty default-title sessions from the UI entirely — kept consistent with the
+    # index-path filter above. No grace window: a 0-message default session is
     # never shown regardless of age (#1171).  Same streaming exemption as above (#1327).
     result = [s.compact(include_runtime=True, active_stream_ids=active_stream_ids) for s in out if not (
-        s.title == 'Untitled'
+        is_default_session_title(s.title)
         and len(s.messages) == 0
         and not s.active_stream_id
         and not s.pending_user_message
@@ -1513,7 +1558,7 @@ def all_sessions(diag=None):
     return _copy_session_list_rows(result)
 
 
-def title_from(messages, fallback: str='Untitled'):
+def title_from(messages, fallback: str=DEFAULT_SESSION_TITLE):
     """Derive a session title from the first user message."""
     for m in messages:
         if m.get('role') == 'user':
@@ -1529,10 +1574,27 @@ def title_from(messages, fallback: str='Untitled'):
 def _generate_title_via_ollama(messages) -> str | None:
     """Generate a short title via local Ollama (qwen3:4b).
 
-    Uses the first user + assistant message as context. Returns None on
-    any error/timeout so callers can fall back gracefully.
+    In Game Mode, route the same title request through Ollama Cloud DeepSeek
+    instead of the local model so Nova can keep working without touching GPU
+    local model servers.
+    Returns None on any error/timeout so callers can fall back gracefully.
     """
     try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            from web.api.streaming import _first_exchange_snippets, _sanitize_generated_title, generate_title_raw_via_aux
+
+            user_msg, asst_msg = _first_exchange_snippets(messages)
+            raw_title, _status = generate_title_raw_via_aux(
+                user_msg,
+                asst_msg,
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+            )
+            title = _sanitize_generated_title(raw_title or "")
+            return title[:80] if title else None
+
         import json
         import urllib.request
 
@@ -1590,16 +1652,17 @@ def _extract_facts_via_llamacpp(messages, session_id: str, title: str = "") -> s
     Uses /v1/completions because this build of llama-server has a bug
     in /v1/chat/completions. Tries GPU (port 8080) first,
     falls back to CPU (port 8081).
-    Returns a formatted string block ready for appending to MEMORY.md,
-    or None on error.
+    In Game Mode, route the same extraction through Ollama Cloud DeepSeek
+    instead of local llama.cpp so Nova can keep appending facts without local
+    GPU work.
+    Returns a formatted string block ready for appending to MEMORY.md, or
+    None on error.
     """
     import json
     import urllib.request
     import urllib.error
 
-    def _call_llama(port: int) -> str | None:
-        """Try llama.cpp on given port, return facts or None."""
-        # Build conversation text from messages
+    def _conversation_text() -> str:
         parts = []
         for m in messages:
             content = m.get('content', '')
@@ -1614,29 +1677,64 @@ def _extract_facts_via_llamacpp(messages, session_id: str, title: str = "") -> s
 
         conversation = "\n".join(parts)
         if not conversation:
-            return None
+            return ""
 
         # Truncate to max 6000 chars to fit context window
         if len(conversation) > 6000:
             conversation = conversation[:6000] + "\n[truncated...]"
+        return conversation
 
-        prompt = (
-            "Extract key facts from this conversation.\n"
-            "Sort them into these categories:\n\n"
-            "[PREFERENCE] - User preferences, likes/dislikes, opinions, style choices\n"
-            "[DECISION] - Decisions made, choices, conclusions, agreements\n"
-            "[FACT] - Technical facts, knowledge, discovered information, configuration\n"
-            "[WORKFLOW] - Processes, methods, recurring patterns, commands\n\n"
-            "Rules:\n"
-            "- Write facts in the SAME LANGUAGE as the conversation\n"
-            "- Be specific and concise (max 2 sentences per fact)\n"
-            "- Include version numbers, paths, commands, port numbers where relevant\n"
-            "- Skip greetings, small talk, meta-discussion about the conversation itself\n"
-            "- If nothing useful found, respond with: [NO FACTS]\n\n"
-            f"Conversation:\n{conversation}\n\n"
-            "Facts:"
-        )
+    conversation = _conversation_text()
+    if not conversation:
+        return None
 
+    prompt = (
+        "Extract key facts from this conversation.\n"
+        "Sort them into these categories:\n\n"
+        "[PREFERENCE] - User preferences, likes/dislikes, opinions, style choices\n"
+        "[DECISION] - Decisions made, choices, conclusions, agreements\n"
+        "[FACT] - Technical facts, knowledge, discovered information, configuration\n"
+        "[WORKFLOW] - Processes, methods, recurring patterns, commands\n\n"
+        "Rules:\n"
+        "- Write facts in the SAME LANGUAGE as the conversation\n"
+        "- Be specific and concise (max 2 sentences per fact)\n"
+        "- Include version numbers, paths, commands, port numbers where relevant\n"
+        "- Skip greetings, small talk, meta-discussion about the conversation itself\n"
+        "- If nothing useful found, respond with: [NO FACTS]\n\n"
+        f"Conversation:\n{conversation}\n\n"
+        "Facts:"
+    )
+
+    try:
+        from web.api import config as cfg
+
+        if cfg.is_game_mode_enabled():
+            try:
+                from runtime.auxiliary_client import call_llm, extract_content_or_reasoning
+
+                response = call_llm(
+                    provider="ollama-cloud",
+                    model="deepseek-v4-flash",
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": conversation},
+                    ],
+                    temperature=0.2,
+                    max_tokens=512,
+                    timeout=30,
+                )
+                facts = extract_content_or_reasoning(response).strip()
+                if not facts or facts == "[NO FACTS]":
+                    return None
+                title_line = f" ({title})" if title else ""
+                return f"§\n[SESSION: {session_id}]{title_line}\n{facts}\n"
+            except Exception:
+                return None
+    except Exception:
+        pass
+
+    def _call_llama(port: int) -> str | None:
+        """Try llama.cpp on given port, return facts or None."""
         # Use /v1/completions because /v1/chat/completions is buggy in this
         # llama-server build.  Wrap the prompt in Llama 3 instruct format so
         # the model sees the right chat structure.
@@ -1741,10 +1839,10 @@ def load_projects(*, _migrate: bool = True) -> list:
     callsites that want the raw on-disk shape (test fixtures, e.g.).
     """
     global _projects_migrated
-    if not PROJECTS_FILE.exists():
+    if not _cfg.PROJECTS_FILE.exists():
         return []
     try:
-        projects = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
+        projects = json.loads(_cfg.PROJECTS_FILE.read_text(encoding='utf-8'))
     except Exception:
         return []
     if _migrate and not _projects_migrated:
@@ -1758,7 +1856,7 @@ def load_projects(*, _migrate: bool = True) -> list:
                 # rows (which a mutation route could then write back,
                 # silently overwriting the migration).
                 try:
-                    return json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
+                    return json.loads(_cfg.PROJECTS_FILE.read_text(encoding='utf-8'))
                 except Exception:
                     return projects
             if _backfill_project_profiles_if_needed(projects):
@@ -1775,7 +1873,7 @@ def load_projects(*, _migrate: bool = True) -> list:
 
 def save_projects(projects) -> None:
     """Write project list to disk."""
-    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding='utf-8')
+    _cfg.PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 CRON_PROJECT_NAME = 'Cron Jobs'
@@ -2101,6 +2199,226 @@ def get_claude_code_session_messages(sid, projects_dir: Path | str | None = None
     return []
 
 
+def get_cli_session_metadata(session_id: str) -> dict:
+    """Return metadata for one CLI/state.db session without scanning the full list.
+
+    This fast-path is used by request handlers that only need one row. It keeps
+    the existing full-list projection unchanged for sidebar enumeration while
+    avoiding the multi-second ``get_cli_sessions()`` scan for ordinary session
+    loads and single-session fallbacks.
+    """
+    sid = str(session_id or '').strip()
+    if not sid:
+        return {}
+
+    if sid.startswith(f'{CLAUDE_CODE_SOURCE}_'):
+        try:
+            for path in _iter_claude_code_jsonl_files(None) or []:
+                if _claude_code_session_id(path) != sid:
+                    continue
+                messages, summary_title, first_ts, last_ts = _parse_claude_code_jsonl(path)
+                if not messages:
+                    return {}
+                source = CLAUDE_CODE_SOURCE
+                display_title = _claude_code_title(messages, summary_title)
+                raw_ts = last_ts or first_ts or path.stat().st_mtime
+                return {
+                    'session_id': sid,
+                    'title': display_title,
+                    'workspace': str(get_last_workspace()),
+                    'model': 'claude-code',
+                    'message_count': len(messages),
+                    'created_at': first_ts or last_ts or path.stat().st_mtime,
+                    'updated_at': raw_ts,
+                    'pinned': False,
+                    'archived': False,
+                    'project_id': None,
+                    'profile': None,
+                    'source_tag': source,
+                    'raw_source': source,
+                    'session_source': 'external_agent',
+                    'source_label': CLAUDE_CODE_SOURCE_LABEL,
+                    'is_cli_session': True,
+                    'read_only': True,
+                }
+        except Exception:
+            return {}
+
+    try:
+        import sqlite3
+    except ImportError:
+        return {}
+
+    try:
+        from web.api.profiles import get_active_profile_home, get_active_profile_name
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
+        cli_profile = get_active_profile_name()
+    except Exception:
+        sidekick_home = get_webui_home()
+        cli_profile = None
+
+    db_path = sidekick_home / 'state.db'
+    if not db_path.exists():
+        return {}
+
+    try:
+        with closing(sqlite3.connect(str(db_path), timeout=1.0)) as conn:
+            try:
+                conn.execute("PRAGMA busy_timeout=1000")
+            except Exception:
+                pass
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            cur.execute("PRAGMA table_info(sessions)")
+            session_cols = {row[1] for row in cur.fetchall()}
+            cur.execute("PRAGMA table_info(messages)")
+            message_cols = {row[1] for row in cur.fetchall()}
+            if 'source' not in session_cols:
+                return {}
+
+            cur.execute(
+                """
+                SELECT s.*
+                FROM sessions s
+                WHERE s.id = ?
+                """,
+                (sid,),
+            )
+            raw = cur.fetchone()
+            if not raw:
+                return {}
+
+            row = _with_session_defaults(dict(raw), session_cols)
+
+            if 'role' in message_cols and 'timestamp' in message_cols:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS actual_message_count,
+                           SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                           MAX(timestamp) AS last_activity
+                    FROM messages
+                    WHERE session_id = ?
+                    """,
+                    (sid,),
+                )
+            elif 'role' in message_cols:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS actual_message_count,
+                           SUM(CASE WHEN LOWER(role) = 'user' THEN 1 ELSE 0 END) AS actual_user_message_count,
+                           NULL AS last_activity
+                    FROM messages
+                    WHERE session_id = ?
+                    """,
+                    (sid,),
+                )
+            elif 'timestamp' in message_cols:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS actual_message_count,
+                           COUNT(*) AS actual_user_message_count,
+                           MAX(timestamp) AS last_activity
+                    FROM messages
+                    WHERE session_id = ?
+                    """,
+                    (sid,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS actual_message_count,
+                           COUNT(*) AS actual_user_message_count,
+                           NULL AS last_activity
+                    FROM messages
+                    WHERE session_id = ?
+                    """,
+                    (sid,),
+                )
+            stats = cur.fetchone()
+            if stats is None:
+                row['actual_message_count'] = 0
+                row['actual_user_message_count'] = 0
+                row['last_activity'] = None
+            else:
+                row['actual_message_count'] = stats[0] or 0
+                row['actual_user_message_count'] = stats[1] or 0
+                row['last_activity'] = stats[2]
+
+            row = _with_normalized_source(row)
+            source = row.get('source') or 'cli'
+
+            display_title = row.get('title')
+            if not display_title and source == 'cron' and sid.startswith('cron_'):
+                parts = sid.split('_')
+                if len(parts) >= 3:
+                    job_id = parts[1]
+                    try:
+                        jobs_path = sidekick_home / 'cron' / 'jobs.json'
+                        if jobs_path.exists():
+                            import json as _json
+                            jobs_data = _json.loads(jobs_path.read_text())
+                            for job in jobs_data.get('jobs', []):
+                                if job.get('id') == job_id:
+                                    display_title = job.get('name') or display_title
+                                    break
+                    except Exception:
+                        pass
+
+            webui_title = _lookup_index_title(sid)
+            if webui_title:
+                display_title = webui_title
+
+            if not display_title:
+                derived_title = title_from(get_cli_session_messages(sid), fallback='')
+                if derived_title:
+                    display_title = derived_title
+
+            raw_ts = row.get('last_activity') or row.get('started_at')
+            payload = {
+                'session_id': sid,
+                'title': display_title or f'{source.title()} Session',
+                'workspace': str(get_last_workspace()),
+                'model': row.get('model') or None,
+                'message_count': row.get('message_count') or row.get('actual_message_count') or 0,
+                'created_at': row.get('started_at'),
+                'updated_at': raw_ts,
+                'pinned': False,
+                'archived': False,
+                'project_id': ensure_cron_project() if is_cron_session(sid, source) else None,
+                'profile': cli_profile,
+                'source': source,
+                'source_tag': source,
+                'raw_source': row.get('raw_source'),
+                'user_id': row.get('user_id'),
+                'chat_id': row.get('chat_id') or row.get('origin_chat_id'),
+                'chat_type': row.get('chat_type'),
+                'thread_id': row.get('thread_id'),
+                'session_key': row.get('session_key'),
+                'platform': row.get('platform'),
+                'session_source': row.get('session_source'),
+                'source_label': row.get('source_label'),
+                'parent_session_id': row.get('parent_session_id'),
+                'parent_title': row.get('parent_title'),
+                'parent_source': row.get('parent_source'),
+                'relationship_type': row.get('relationship_type'),
+                '_parent_lineage_root_id': row.get('_parent_lineage_root_id'),
+                'end_reason': row.get('end_reason'),
+                'actual_message_count': row.get('actual_message_count'),
+                'actual_user_message_count': row.get('actual_user_message_count'),
+                'user_message_count': row.get('actual_user_message_count'),
+                'last_activity': row.get('last_activity'),
+                '_lineage_root_id': row.get('_lineage_root_id'),
+                '_lineage_tip_id': row.get('_lineage_tip_id'),
+                '_compression_segment_count': row.get('_compression_segment_count'),
+                'is_cli_session': True,
+            }
+            return payload
+    except Exception:
+        logger.debug("get_cli_session_metadata() failed for %s", sid, exc_info=True)
+        return {}
+
+
 def get_cli_sessions() -> list:
     """Read CLI sessions from the agent's SQLite store and return them as
     dicts in a format the WebUI sidebar can render alongside local sessions.
@@ -2108,28 +2426,27 @@ def get_cli_sessions() -> list:
     Returns empty list if the SQLite DB is missing or any error occurs -- the
     bridge is purely additive and never crashes the WebUI.
     """
-    import os
     cli_sessions = []
     try:
         cli_sessions.extend(get_claude_code_sessions())
     except Exception:
         logger.debug("Claude Code session scan failed", exc_info=True)
 
-    # Use the active WebUI profile's HERMES_HOME to find state.db.
+    # Use the active WebUI profile's SIDEKICK_HOME to find state.db.
     # The active profile is determined by what the user has selected in the UI
     # (stored in the server's runtime config). This means:
-    #   - default profile  -> ~/.hermes/state.db
-    #   - named profile X  -> ~/.hermes/profiles/X/state.db
+    #   - default profile  -> ~/.sidekick/state.db
+    #   - named profile X  -> ~/.sidekick/profiles/X/state.db
     # We resolve the active profile's home directory rather than just using
-    # HERMES_HOME (which is the server's launch profile, not necessarily the
+    # SIDEKICK_HOME (which is the server's launch profile, not necessarily the
     # active one after a profile switch).
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
+        sidekick_home = get_webui_home()
 
-    db_path = hermes_home / 'state.db'
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return cli_sessions
 
@@ -2189,7 +2506,7 @@ def get_cli_sessions() -> list:
                 if len(parts) >= 3:
                     _job_id = parts[1]
                     try:
-                        _jobs_path = hermes_home / 'cron' / 'jobs.json'
+                        _jobs_path = sidekick_home / 'cron' / 'jobs.json'
                         if _jobs_path.exists():
                             import json as _json
                             _jobs_data = _json.loads(_jobs_path.read_text())
@@ -2201,18 +2518,11 @@ def get_cli_sessions() -> list:
                         pass  # degrade gracefully
             # If a WebUI JSON file exists for this session (e.g. previously
             # imported or renamed in the sidebar), prefer its title over the
-            # state.db title. Keep this strictly local to the active session
-            # directory: Session.load_metadata_only() falls back to scanning all
-            # workspace session dirs on a miss, and get_cli_sessions() calls this
-            # inside a loop. For CLI rows, misses are common; a workspace-wide
-            # fallback per row makes /api/sessions?workspace=default visibly lag.
-            try:
-                if (get_session_dir() / f'{sid}.json').exists():
-                    _webui_meta = Session.load_metadata_only(sid)
-                    if _webui_meta and getattr(_webui_meta, 'title', None):
-                        _title = _webui_meta.title
-            except Exception:
-                pass
+            # state.db title.  This fixes rename-not-persisting for CLI sessions
+            # after compression chain extension (#1486).
+            webui_title = _lookup_index_title(sid)
+            if webui_title:
+                _title = webui_title
             if not _title:
                 _derived_title = title_from(
                     get_cli_session_messages(sid),
@@ -2293,7 +2603,6 @@ def get_cli_session_messages(sid, limit=None, before=None) -> list:
     continuation chain, return the stitched full transcript across all segments
     in chronological order. Returns empty list on any error.
     """
-    import os
     if str(sid or '').startswith(f'{CLAUDE_CODE_SOURCE}_'):
         messages = get_claude_code_session_messages(sid)
         if before is not None:
@@ -2313,11 +2622,11 @@ def get_cli_session_messages(sid, limit=None, before=None) -> list:
         return []
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
-    db_path = hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return []
 
@@ -2468,14 +2777,14 @@ def count_conversation_rounds(sid: str, since: float | None = None) -> int:
     int
         Number of complete conversation rounds.
     """
-    import os, sqlite3, datetime
+    import sqlite3, datetime
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
-    db_path = hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return 0
 
@@ -2541,18 +2850,17 @@ def delete_cli_session(sid) -> bool:
     """Delete a CLI session from state.db (messages + session row).
     Returns True if deleted, False if not found or error.
     """
-    import os
     try:
         import sqlite3
     except ImportError:
         return False
 
     try:
-        from web.api.profiles import get_active_hermes_home
-        hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
+        from web.api.profiles import get_active_profile_home
+        sidekick_home = Path(get_active_profile_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('SIDEKICK_HOME', str(HOME / '.sidekick'))).expanduser().resolve()
-    db_path = hermes_home / 'state.db'
+        sidekick_home = get_webui_home()
+    db_path = sidekick_home / 'state.db'
     if not db_path.exists():
         return False
 

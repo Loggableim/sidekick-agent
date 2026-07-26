@@ -1313,25 +1313,11 @@ function Install-Dependencies {
         $env:VIRTUAL_ENV = $script:VenvPath
     }
     
-    # Install main package.  Tiered fallback so a single flaky git+https dep
-    # doesn't silently drop dashboard/MCP/cron/messaging extras.  Each tier's
-    # stdout/stderr is preserved - no Out-Null swallowing - so the user can
-    # see what failed.
-    #
-    # Tier 1: [all] - everything, including RL git+https deps (best case).
-    # Tier 2: [core-extras] synthesised locally - all PyPI-only extras we
-    #         ship (web, mcp, cron, cli, voice, messaging, slack, dev, acp,
-    #         pty, homeassistant, sms, tts-premium, honcho, google, mistral,
-    #         bedrock, dingtalk, feishu, modal, daytona, vercel).  Drops [rl]
-    #         and [matrix] (linux-only) which are the usual failure culprits.
-    # Tier 3: [web,mcp,cron,cli,messaging,dev] - the minimum we strongly
-    #         believe a user expects `sidekick dashboard` / slash commands /
-    #         cron / messaging platforms to work out of the box.
-    # Tier 4: bare `.` - last-resort so at least the core CLI launches.
+    # Install only extras that are declared in pyproject.toml.  Keep the
+    # fallback path small and truthful: the release path is the complete
+    # WebUI-focused install, then the WebUI minimum, then the core CLI.
     $installTiers = @(
-        @{ Name = "all (with RL/matrix extras)"; Spec = ".[all]" },
-        @{ Name = "PyPI-only extras (no git deps)"; Spec = ".[web,mcp,cron,cli,voice,messaging,slack,dev,acp,pty,homeassistant,sms,tts-premium,honcho,google,mistral,bedrock,dingtalk,feishu,modal,daytona,vercel]" },
-        @{ Name = "dashboard + core platforms"; Spec = ".[web,mcp,cron,cli,messaging,dev]" },
+        @{ Name = "complete Sidekick install"; Spec = ".[all]" },
         @{ Name = "webui + minimal"; Spec = ".[web]" },
         @{ Name = "core only (no extras)"; Spec = "." }
     )

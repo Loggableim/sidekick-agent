@@ -20,20 +20,31 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional
 
+from web.api._home import get_active_webui_home, get_webui_home
+
 logger = logging.getLogger(__name__)
 
 # ── Pfade ──────────────────────────────────────────────────────────────
-HERMES_HOME = Path(os.environ.get("SIDEKICK_HOME"))
-WORKSPACES_ROOT = HERMES_HOME / "workspaces"
+SIDEKICK_HOME = get_webui_home()
+WORKSPACES_ROOT = SIDEKICK_HOME / "workspaces"
 
 _LLM_CACHE = {}  # Cache für Config
+
+
+def _active_home() -> Path:
+    """Return the active home for the current request when available."""
+    try:
+        return Path(get_active_webui_home()).expanduser().resolve()
+    except Exception:
+        return Path(get_webui_home()).expanduser().resolve()
 
 
 # ── LLM-Config (lazy, gecached) ────────────────────────────────────────
 
 def _get_llm_config() -> dict:
     """Lade LLM-Config aus .env + config.yaml (einmalig gecached)."""
-    if _LLM_CACHE.get("config"):
+    home = _active_home()
+    if _LLM_CACHE.get("config") and _LLM_CACHE.get("home") == str(home):
         return _LLM_CACHE["config"]
 
     try:
@@ -56,7 +67,7 @@ def _get_llm_config() -> dict:
     api_key = ""
     model = "openai/gpt-oss-20b:free"
     base_url = "https://openrouter.ai/api/v1"
-    env_path = HERMES_HOME / ".env"
+    env_path = home / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -68,7 +79,7 @@ def _get_llm_config() -> dict:
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
 
     # Model aus config.yaml
-    config_path = HERMES_HOME / "config.yaml"
+    config_path = home / "config.yaml"
     if config_path.exists():
         mm = re.search(r'default:\s*[\"\']?(.+?)[\"\']?\s*$',
                        config_path.read_text(encoding="utf-8"), re.MULTILINE)
@@ -76,6 +87,7 @@ def _get_llm_config() -> dict:
             model = mm.group(1).strip()
 
     config = {"api_key": api_key, "model": model, "base_url": base_url}
+    _LLM_CACHE["home"] = str(home)
     _LLM_CACHE["config"] = config
     return config
 
@@ -86,6 +98,26 @@ def _call_llm(messages: list, timeout: int = 30) -> Optional[str]:
     api_key = config.get("api_key", "")
     model = config.get("model", "openai/gpt-oss-20b:free")
     base_url = config.get("base_url") or "https://openrouter.ai/api/v1"
+
+    try:
+        from web.api.config import game_mode_blocks_local_model_request
+
+        if game_mode_blocks_local_model_request(config.get("provider"), base_url):
+            from runtime.auxiliary_client import call_llm
+
+            response = call_llm(
+                provider="ollama-cloud",
+                model="deepseek-v4-flash",
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1000,
+                timeout=timeout,
+                extra_body={"response_format": {"type": "json_object"}},
+            )
+            return response.choices[0].message.content
+    except Exception:
+        logger.debug("Agent workspace Game Mode remote fallback failed", exc_info=True)
+        return None
 
     if not api_key or len(api_key) < 10:
         logger.warning("No valid API key for LLM call")
@@ -190,7 +222,7 @@ def ensure_agent_workspace(agent_slug: str, workdir: str = "") -> str:
         ws_dir.mkdir(parents=True, exist_ok=True)
         return str(ws_dir.resolve())
 
-    ws_dir = WORKSPACES_ROOT / agent_slug
+    ws_dir = _active_home() / "workspaces" / agent_slug
     ws_dir.mkdir(parents=True, exist_ok=True)
     readme = ws_dir / "README.md"
     if not readme.exists():

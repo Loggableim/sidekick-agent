@@ -113,7 +113,7 @@ Basis: `C:\Users\logga\sidekick\static\`
 | P4.1 | Active Files Anzeige | ⚠️ **Ansätze** | `.open-files-bar` im HTML, kein Content |
 | P4.2 | Syntax-Highlighting Workspace | ❌ **Fehlt** | Prism.js geladen, nicht im Workspace genutzt |
 | P4.3 | Quick Peek | ❌ **Fehlt** | Kein Overlay-Preview |
-| P4.4 | Git-Status Badges | ❌ **Fehlt** | Kein Git-Status |
+| P4.4 | Git-Status Badges | ⚠️ **Teilweise** | Badge im Workspace-Panel vorhanden; jetzt auch im Composer sichtbar, API-Routen noch uneinheitlich |
 | P4.5 | Selection Toolbar | ❌ **Fehlt** | Keine File-Aktionen |
 
 ### PHASE 5 — UI POLISH (5 Tasks)

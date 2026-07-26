@@ -5,8 +5,17 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import os
+import pytest
 
-MODULE_PATH = Path("C:/HermesPortable/home/cockpit/dashboard_server.py")
+_COCKPIT_ROOT = os.getenv("SIDEKICK_COCKPIT_ROOT", "").strip()
+pytestmark = pytest.mark.skipif(
+    not _COCKPIT_ROOT,
+    reason="external cockpit integration requires SIDEKICK_COCKPIT_ROOT",
+)
+
+
+MODULE_PATH = Path("C:/SidekickPortable/home/cockpit/dashboard_server.py")
 COCKPIT_DIR = MODULE_PATH.parent
 
 

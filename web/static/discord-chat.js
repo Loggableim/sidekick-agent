@@ -13,7 +13,7 @@
   let _loadingMessages = false;
   let _hasMoreMessages = true;
   let _oldestMessageId = null;
-  let _hermesMode = 'discord'; // 'discord' or 'hermes'
+  let _sidekickMode = 'discord'; // 'discord' or 'sidekick'
   let _refreshTimer = null;
   let _overviewTab = 'dashboard';
   let _memberCache = [];
@@ -140,7 +140,7 @@
               <span>💬 Nachricht an <strong id="discordNovaChannelLabel">#channel</strong></span>
               <div class="discord-nova-mode">
                 <button class="discord-nova-mode-btn active" data-mode="discord" onclick="discordSetInputMode('discord')">📨 Discord</button>
-                <button class="discord-nova-mode-btn" data-mode="nova" onclick="discordSetInputMode('hermes')">🤖 Nova</button>
+                <button class="discord-nova-mode-btn" data-mode="nova" onclick="discordSetInputMode('sidekick')">🤖 Nova</button>
               </div>
             </div>
             <div class="discord-nova-input-row">
@@ -691,9 +691,9 @@
     return text;
   }
 
-  /* ═══════════════════ HERMES CHAT INPUT ═══════════════════ */
+  /* ═══════════════════ SIDEKICK CHAT INPUT ═══════════════════ */
   window.discordSetInputMode = function (mode) {
-    _hermesMode = mode;
+    _sidekickMode = mode;
     document.querySelectorAll('.discord-nova-mode-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.mode === mode));
     const input = $('discordNovaInput');
@@ -722,7 +722,7 @@
     input.value = '';
     input.style.height = 'auto';
 
-    if (_hermesMode === 'discord') {
+    if (_sidekickMode === 'discord') {
       // Send to Discord channel
       if (!_activeChannelId) {
         showNovaResponse('❌ Kein Channel ausgewählt');
@@ -789,7 +789,7 @@
       scrollEl.insertAdjacentHTML('beforeend', userHtml);
 
       // Show thinking indicator
-      const thinkHtml = `<div class="discord-message bot-message" id="hermesThinking">
+      const thinkHtml = `<div class="discord-message bot-message" id="sidekickThinking">
         <div class="discord-message-avatar" style="background:#5865F2;">H</div>
         <div class="discord-message-body">
           <div class="discord-message-author">
@@ -811,7 +811,7 @@
         const data = await resp.json();
 
         // Remove thinking indicator
-        const thinking = document.getElementById('hermesThinking');
+        const thinking = document.getElementById('sidekickThinking');
         if (thinking) thinking.remove();
 
         if (data.answer) {
@@ -830,7 +830,7 @@
           showNovaResponse('❌ Keine Antwort erhalten.');
         }
       } catch (e) {
-        const thinking = document.getElementById('hermesThinking');
+        const thinking = document.getElementById('sidekickThinking');
         if (thinking) thinking.remove();
         showNovaResponse('❌ Fehler: ' + esc(e.message));
       }

@@ -63,6 +63,27 @@ def test_autonomy_guard_blocks_external_mutations_at_level_two(monkeypatch, tmp_
     assert set(autonomy["levels"]) == {0, 1, 2, 3, 4}
 
 
+def test_nova_yolo_bypasses_autonomy_guards_and_records_governance(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import (
+        guard_autonomous_action,
+        load_events,
+        load_nova_yolo_state,
+        set_nova_yolo_enabled,
+    )
+
+    assert guard_autonomous_action({"type": "read", "target": "C:/sidekick/home/auth.json"})["allowed"] is False
+
+    enabled = set_nova_yolo_enabled(True)
+    override = guard_autonomous_action({"type": "delete", "target": "C:/sidekick/home/auth.json"})
+
+    assert enabled["enabled"] is True
+    assert load_nova_yolo_state()["enabled"] is True
+    assert override == {"allowed": True, "reason": "nova_yolo_override", "autonomy_level": 2, "yolo_enabled": True}
+    assert load_events(limit=1, include_private=True)[0]["type"] == "governance"
+
+
 def test_post_turn_creates_versioned_event_and_queues_reflection(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
@@ -89,6 +110,60 @@ def test_post_turn_creates_versioned_event_and_queues_reflection(monkeypatch, tm
     assert "personality_queued" in events[0]["steps"]
     assert queue[0]["source_event_id"] == result["event_id"]
     assert personality["last_event_id"] == result["event_id"]
+
+
+def test_post_turn_filters_goal_loop_from_vector_memory_and_personality_queue(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    import web.api.nova_lifecycle as lifecycle
+
+    calls = []
+    monkeypatch.setattr(lifecycle, "_run_local_script", lambda *args, **kwargs: calls.append(args) or {"ok": True, "stdout": ""})
+    result = lifecycle.post_turn(
+        session_id="goal-loop",
+        user_text="[Continuing toward your standing goal] Goal: Lebe dein Leben. Continue working toward this goal.",
+        assistant_text="Acknowledged",
+        workspace_slug="nova",
+        blocking=True,
+    )
+    events = lifecycle.load_events(limit=1, include_private=True)
+    queue = json.loads(lifecycle.get_nova_state_paths().reflection_queue.read_text(encoding="utf-8")) if lifecycle.get_nova_state_paths().reflection_queue.exists() else []
+
+    assert result["ok"] is True
+    assert "memory_filtered" in events[0]["steps"]
+    assert "personality_filtered" in events[0]["steps"]
+    assert not any(args and args[0] == "vector_memory.py" for args in calls)
+    assert queue == []
+
+
+def test_entity_prompt_context_doses_internal_state_without_raw_metrics(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    import web.api.nova_lifecycle as lifecycle
+    from nova.entity_state import EntityStateStore
+
+    space = lifecycle.get_nova_state_paths().space
+    store = EntityStateStore(space / "nova_data" / "entity" / "entity_state.json", space)
+    state = store.load()
+    state["dynamic"]["mood"] = 0.8
+    state["dynamic"]["energy"] = 0.2
+    state["dynamic"]["focus"] = 0.9
+    state["traits"] = {
+        "curiosity": {"current": 0.8, "visibility": "public"},
+        "risk_tolerance": {"current": 0.3, "visibility": "private"},
+    }
+    state["preferences"]["learned"] = {"concise": "Ich bevorzuge kurze Statusmeldungen."}
+    state["opinions"] = {"trust": {"position": "Ich denke, Vertrauen braucht nachvollziehbare Gründe.", "confidence": 0.8}}
+    store.save(state)
+
+    normal = lifecycle.entity_prompt_context("Hilf mir mit Code")
+    asked = lifecycle.entity_prompt_context("Wie geht es dir und wie fühlst du dich?")
+    public = lifecycle.personality_snapshot("public")
+
+    assert "Current felt state:" not in normal
+    assert "Current felt state: warm, quiet, clear" in asked
+    assert "Learned preferences: Ich bevorzuge kurze Statusmeldungen." in normal
+    assert "Vertrauen braucht nachvollziehbare Gründe" in lifecycle.entity_prompt_context("Was bedeutet Vertrauen?")
+    assert "0.8" not in asked and "0.2" not in asked and "0.9" not in asked
+    assert "risk_tolerance" not in public["traits"]
 
 
 def test_pre_turn_repairs_incomplete_events(monkeypatch, tmp_path):
@@ -189,7 +264,7 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     import runtime.cron.jobs as runtime_cron_jobs
 
     wrong_home = tmp_path / "wrong-home"
-    monkeypatch.setattr(runtime_cron_jobs, "HERMES_DIR", wrong_home)
+    monkeypatch.setattr(runtime_cron_jobs, "SIDEKICK_HOME_DIR", wrong_home)
     monkeypatch.setattr(runtime_cron_jobs, "CRON_DIR", wrong_home / "cron")
     monkeypatch.setattr(runtime_cron_jobs, "JOBS_FILE", wrong_home / "cron" / "jobs.json")
     monkeypatch.setattr(runtime_cron_jobs, "OUTPUT_DIR", wrong_home / "cron" / "output")
@@ -199,7 +274,7 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
     jobs_file = tmp_path / "home" / "cron" / "jobs.json"
 
     assert result["ok"] is True
-    assert len(result["active"]) == 3
+    assert len(result["active"]) == 5
     assert (scripts / "nova_substrate_heartbeat.py").exists()
     assert (scripts / "nova_dream_reflection_tick.py").exists()
     assert jobs_file.exists()
@@ -210,8 +285,273 @@ def test_background_cron_jobs_are_ensured(monkeypatch, tmp_path):
         "Nova substrate heartbeat",
         "Nova background tick",
         "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
     }
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    assert all(job.get("game_mode_pause") is False for job in jobs)
     assert result["mode"] == "sidekick_cron_no_agent"
+
+
+def test_background_cron_jobs_prune_legacy_nova_jobs(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "22f6a477b2f9",
+                        "name": "Nova Substrate Heartbeat",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "substrate.py once",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "id": "1cc50ad5bfb8",
+                        "name": "Nova Entity Kernel Tick",
+                        "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+                        "schedule_display": "every 15m",
+                        "script": "entity_kernel.py tick",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    names = {job["name"] for job in jobs}
+
+    assert result["ok"] is True
+    assert len(result["active"]) == 5
+    assert len(jobs) == 5
+    assert "Nova Substrate Heartbeat" not in names
+    assert "Nova Entity Kernel Tick" not in names
+    assert names == {
+        "Nova substrate heartbeat",
+        "Nova background tick",
+        "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
+    }
+
+
+def test_background_cron_jobs_prune_legacy_nova_jobs_even_if_metadata_drifted(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "22f6a477b2f9",
+                        "name": "Nova Substrate Heartbeat",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "substrate.py once",
+                        "no_agent": False,
+                        "deliver": "remote",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "id": "1cc50ad5bfb8",
+                        "name": "Nova Entity Kernel Tick",
+                        "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+                        "schedule_display": "every 15m",
+                        "script": "entity_kernel.py tick",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    names = {job["name"] for job in jobs}
+
+    assert result["ok"] is True
+    assert len(result["active"]) == 5
+    assert len(jobs) == 5
+    assert "Nova Substrate Heartbeat" not in names
+    assert "Nova Entity Kernel Tick" not in names
+    assert names == {
+        "Nova substrate heartbeat",
+        "Nova background tick",
+        "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
+    }
+
+
+def test_background_cron_jobs_prune_legacy_nova_jobs_with_display_suffix(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "22f6a477b2f9",
+                        "name": "Nova Substrate Heartbeat (5m)",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "legacy_substrate_wrapper.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                    {
+                        "id": "1cc50ad5bfb8",
+                        "name": "Nova Entity Kernel Tick (15m)",
+                        "schedule": {"kind": "interval", "minutes": 15, "display": "every 15m"},
+                        "schedule_display": "every 15m",
+                        "script": "legacy_entity_kernel_wrapper.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "scheduled",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+    names = {job["name"] for job in jobs}
+
+    assert result["ok"] is True
+    assert len(result["active"]) == 5
+    assert len(jobs) == 5
+    assert "Nova Substrate Heartbeat (5m)" not in names
+    assert "Nova Entity Kernel Tick (15m)" not in names
+    assert names == {
+        "Nova substrate heartbeat",
+        "Nova background tick",
+        "Nova dream/reflection tick",
+        "Nova daily coherence reflection",
+        "Nova weekly coherence reflection",
+    }
+
+
+def test_background_cron_jobs_clear_stale_error_state_on_current_nova_jobs(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from web.api.nova_lifecycle import ensure_background_cron_jobs
+
+    jobs_file = tmp_path / "home" / "cron" / "jobs.json"
+    jobs_file.parent.mkdir(parents=True, exist_ok=True)
+    jobs_file.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "id": "j1",
+                        "name": "Nova substrate heartbeat",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "nova_substrate_heartbeat.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "error",
+                        "last_status": "error",
+                        "last_error": "boom",
+                        "last_delivery_error": "delivery boom",
+                    },
+                    {
+                        "id": "j2",
+                        "name": "Nova background tick",
+                        "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
+                        "schedule_display": "every 5m",
+                        "script": "nova_background_tick.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "error",
+                        "last_status": "error",
+                        "last_error": "boom",
+                        "last_delivery_error": "delivery boom",
+                    },
+                    {
+                        "id": "j3",
+                        "name": "Nova dream/reflection tick",
+                        "schedule": {"kind": "interval", "minutes": 30, "display": "every 30m"},
+                        "schedule_display": "every 30m",
+                        "script": "nova_dream_reflection_tick.py",
+                        "no_agent": True,
+                        "deliver": "local",
+                        "enabled": True,
+                        "state": "error",
+                        "last_status": "error",
+                        "last_error": "boom",
+                        "last_delivery_error": "delivery boom",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    result = ensure_background_cron_jobs()
+    jobs = json.loads(jobs_file.read_text(encoding="utf-8"))["jobs"]
+
+    assert result["ok"] is True
+    assert [job["state"] for job in jobs] == ["scheduled"] * 5
+    assert [job["last_status"] for job in jobs] == [None] * 5
+    assert [job["last_error"] for job in jobs] == [None] * 5
+    assert [job["last_delivery_error"] for job in jobs] == [None] * 5
+    assert all(job["enabled"] is True for job in jobs)
+
+
+def test_background_tick_updates_substrate_heartbeat_fields(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_now", lambda: "2026-07-09T12:00:00+00:00")
+
+    result = lifecycle.background_tick()
+    substrate = json.loads((tmp_path / "home" / "spaces" / "nova" / "substrate_state.json").read_text(encoding="utf-8"))
+    events = lifecycle.load_events(limit=1, include_private=True)
+
+    assert result["ok"] is True
+    assert substrate["last_heartbeat"] == "2026-07-09T12:00:00+00:00"
+    assert substrate["last_lifecycle_heartbeat"] == "2026-07-09T12:00:00+00:00"
+    assert substrate["lifecycle_status"] == "alive"
+    assert events[0]["steps"][-1] == "substrate_done"
 
 
 def test_nova_status_degrades_when_cron_storage_write_fails(monkeypatch, tmp_path):
@@ -272,27 +612,106 @@ def test_dream_tick_defers_when_qwen_offline(monkeypatch, tmp_path):
     assert events[0]["steps"][-1] == "qwen_offline_deferred"
 
 
-def test_dream_tick_defers_in_game_mode_before_model_health(monkeypatch, tmp_path):
+def test_dream_tick_uses_remote_deepseek_in_game_mode(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     import web.api.nova_lifecycle as lifecycle
+    import runtime.auxiliary_client as aux
+    from types import SimpleNamespace
 
     monkeypatch.setattr(lifecycle, "_game_mode_enabled", lambda: True)
 
     def fail_local_script(*args, **kwargs):
-        raise AssertionError("Game Mode must not touch local LLM scripts")
+        raise AssertionError("Game Mode should not touch local LLM scripts")
 
     monkeypatch.setattr(lifecycle, "_run_local_script", fail_local_script)
+
+    captured = {}
+
+    def fake_call_llm(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content="  Traum aus DeepSeek V4 Flash  ",
+                        reasoning=None,
+                        reasoning_content=None,
+                        reasoning_details=None,
+                    )
+                )
+            ]
+        )
+
+    monkeypatch.setattr(aux, "call_llm", fake_call_llm)
 
     result = lifecycle.dream_tick()
     events = lifecycle.load_events(limit=1, include_private=True)
 
     assert result["ok"] is True
-    assert result["deferred"] is True
-    assert result["reason"] == "game_mode_enabled"
     assert result["game_mode_enabled"] is True
-    assert events[0]["status"] == "deferred"
-    assert events[0]["steps"][-1] == "game_mode_deferred"
+    assert result["remote_provider"] == "ollama-cloud"
+    assert result["remote_model"] == "deepseek-v4-flash"
+    assert "DeepSeek V4 Flash" in result["narrative_preview"]
+    assert captured["provider"] == "ollama-cloud"
+    assert captured["model"] == "deepseek-v4-flash"
+    assert events[0]["status"] == "completed"
+    assert events[0]["steps"][-1] == "dream_remote_done"
+    assert events[0]["remote_provider"] == "ollama-cloud"
+    assert events[0]["remote_model"] == "deepseek-v4-flash"
+
+
+def test_game_mode_enabled_uses_current_settings_parent(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.config as cfg
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(cfg, "is_game_mode_enabled", lambda: False)
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "home" / "state" / "webui" / "settings.json")
+
+    settings_parent = tmp_path / "home" / "state" / "webui"
+    settings_parent.mkdir(parents=True, exist_ok=True)
+    lock_file = settings_parent / "game_mode.lock"
+    lock_file.write_text("1", encoding="utf-8")
+
+    real_path = lifecycle.Path
+
+    def fake_path(value):
+        if value == "C:/sidekick/home/state/game_mode.lock":
+            return tmp_path / "hardcoded" / "game_mode.lock"
+        if value == "C:/sidekick/home/state/gpu_watchdog_state.json":
+            return tmp_path / "hardcoded" / "gpu_watchdog_state.json"
+        return real_path(value)
+
+    monkeypatch.setattr(lifecycle, "Path", fake_path)
+
+    assert lifecycle._game_mode_enabled() is True
+
+    lock_file.unlink()
+    wd_file = settings_parent / "gpu_watchdog_state.json"
+    wd_file.write_text(json.dumps({"last_game_mode": True}), encoding="utf-8")
+
+    assert lifecycle._game_mode_enabled() is True
+
+
+def test_game_mode_enabled_accepts_legacy_state_dir_lock(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    import web.api.config as cfg
+    import web.api.nova_lifecycle as lifecycle
+
+    monkeypatch.setattr(cfg, "SETTINGS_FILE", tmp_path / "home" / "state" / "webui" / "settings.json")
+    monkeypatch.setattr(cfg, "load_settings", lambda: {"game_mode_enabled": False})
+
+    legacy_lock = tmp_path / "home" / "state" / "game_mode.lock"
+    legacy_lock.parent.mkdir(parents=True, exist_ok=True)
+    legacy_lock.write_text("1", encoding="utf-8")
+
+    assert cfg.is_game_mode_enabled() is True
+
+    monkeypatch.setattr(cfg, "is_game_mode_enabled", lambda: False)
+    assert lifecycle._game_mode_enabled() is True
 
 
 def test_nova_status_skips_local_model_health_in_game_mode(monkeypatch, tmp_path):
@@ -498,8 +917,10 @@ def test_dashboard_nova_api_endpoints_require_token_and_filter_visibility(monkey
     unauthorized = client.get("/api/nova/status")
     assert unauthorized.status_code == 401
 
-    headers = {"X-Hermes-Session-Token": web_server._SESSION_TOKEN}
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
     status = client.get("/api/nova/status", headers=headers)
+    yolo_before = client.get("/api/nova/yolo", headers=headers)
+    yolo_after = client.post("/api/nova/yolo", json={"enabled": True}, headers=headers)
     personality_public = client.get("/api/nova/personality", headers=headers)
     events_private = client.get("/api/nova/events?scope=private", headers=headers)
 
@@ -507,6 +928,8 @@ def test_dashboard_nova_api_endpoints_require_token_and_filter_visibility(monkey
     assert status.json()["autonomy_level"] == 2
     assert status.json()["autonomy"]["definition"]["name"] == "read_and_analyze"
     assert status.json()["model_strategy"]["fast_classifier"]["port"] == 8081
+    assert yolo_before.json()["enabled"] is False
+    assert yolo_after.json()["enabled"] is True
     assert status.json()["cron"]["ok"] is True
     assert personality_public.status_code == 200
     assert "relationship" not in personality_public.json()

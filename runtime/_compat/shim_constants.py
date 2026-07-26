@@ -1,9 +1,9 @@
 """
-Compat shim — bridges old ``sidekick_constants`` / ``hermes_constants`` imports
+Compat shim — bridges old ``sidekick_constants`` / ``sidekick_constants`` imports
 to the new ``shared.constants`` and ``shared.paths`` layouts.
 
 All names that agent modules import from ``sidekick_constants`` or
-``hermes_constants`` are re-exported here so that the import-rewrite rules
+``sidekick_constants`` are re-exported here so that the import-rewrite rules
 in ``copy_runtime_modules.py`` and ``copy_dependent_modules.py`` can point
 at ``runtime._compat.shim_constants`` and everything works.
 """
@@ -19,11 +19,11 @@ from shared.constants import (
     apply_ipv4_preference,
     display_sidekick_home,
     get_config_path,
-    get_default_sidekick_root,
+    get_default_sidekick_root as _get_default_sidekick_root,
     get_env_path,
     get_optional_skills_dir,
-    get_sidekick_dir,
-    get_sidekick_home,
+    get_sidekick_dir as _get_sidekick_dir,
+    get_sidekick_home as _get_sidekick_home,
     get_skills_dir,
     get_subprocess_home,
     is_container,
@@ -39,28 +39,28 @@ from shared.paths import (
 )
 
 # ── Constants missing from shared.constants that agent code expects ────────
-# These were defined in the original hermes_constants.py
+# These were defined in the original sidekick_constants.py
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODELS_URL = f"{OPENROUTER_BASE_URL}/models"
 AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1"
 
 
-def get_default_hermes_root() -> Path:
-    """Return the root Hermes directory (legacy name, delegates to get_default_sidekick_root)."""
-    return get_default_sidekick_root()
+def get_default_sidekick_root() -> Path:
+    """Return the root Sidekick directory."""
+    return _get_default_sidekick_root()
 
 
-def get_hermes_dir(new_subpath: str, old_name: str) -> Path:
-    """Resolve a Hermes subdirectory with backward compat (delegates to get_sidekick_dir)."""
-    return get_sidekick_dir(new_subpath, old_name)
+def get_sidekick_dir(new_subpath: str, old_name: str) -> Path:
+    """Resolve a Sidekick subdirectory, preserving existing local data paths."""
+    return _get_sidekick_dir(new_subpath, old_name)
 
 
 # ── Also add the sidekick-specific helpers that existed in the old sidekick_constants ──
 
-def get_hermes_home() -> Path:
-    """Return the Hermes home directory path. MUST return Path, not str."""
-    return get_sidekick_home()
+def get_sidekick_home() -> Path:
+    """Return the Sidekick home directory path. MUST return Path, not str."""
+    return _get_sidekick_home()
 
 
 def find_node_executable() -> str | None:
@@ -83,10 +83,9 @@ def find_node_executable() -> str | None:
 def get_subprocess_home_sidekick() -> str | None:
     """Return a per-profile HOME directory for subprocesses, or None.
 
-    Uses ``SIDEKICK_HOME`` primary, ``HERMES_HOME`` secondary.
-    Mirrors ``get_subprocess_home()`` in ``hermes_constants``.
+    Uses ``SIDEKICK_HOME`` when the active profile provides an isolated home.
     """
-    home = os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME")
+    home = os.getenv("SIDEKICK_HOME")
     if not home:
         return None
     profile_home = os.path.join(home, "home")
@@ -104,14 +103,12 @@ __all__ = [
     "apply_ipv4_preference",
     "display_sidekick_home",
     "get_config_path",
-    "get_default_hermes_root",
     "get_default_sidekick_root",
     "get_env_path",
-    "get_hermes_dir",
-    "get_hermes_home",
+    "get_sidekick_dir",
+    "get_sidekick_home",
     "find_node_executable",
     "get_optional_skills_dir",
-    "get_sidekick_dir",
     "get_sidekick_home",
     "get_skills_dir",
     "get_subprocess_home",

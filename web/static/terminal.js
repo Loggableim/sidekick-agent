@@ -455,8 +455,11 @@ function syncTerminalButton(){
   toggle.disabled=!hasWorkspace;
   toggle.classList.toggle('active',TERMINAL_UI.open);
   toggle.setAttribute('aria-pressed',TERMINAL_UI.open?'true':'false');
-  toggle.title=hasWorkspace?(TERMINAL_UI.collapsed?t('terminal_expand'):t('terminal_open_title')):t('terminal_no_workspace_title');
-  toggle.setAttribute('aria-label',toggle.title);
+  const label=hasWorkspace
+    ? (TERMINAL_UI.collapsed ? t('terminal_expand') : t('terminal_open_title'))
+    : t('terminal_no_workspace_title');
+  toggle.setAttribute('aria-label',label);
+  toggle.removeAttribute('title');
 }
 
 function focusComposerTerminalInput(){
@@ -811,7 +814,7 @@ const TerminalStream = {
         };
         // Also dispatch a custom event so tool cards can react
         try {
-          window.dispatchEvent(new CustomEvent('hermes:terminal-error', {
+          window.dispatchEvent(new CustomEvent('sidekick:terminal-error', {
             detail: { code: code, text: exitText || _terminalBufferText() },
           }));
         } catch (_) {}

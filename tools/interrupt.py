@@ -20,7 +20,7 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-# Opt-in debug tracing — pairs with HERMES_DEBUG_INTERRUPT in
+# Opt-in debug tracing — pairs with SIDEKICK_DEBUG_INTERRUPT in
 # tools/environments/base.py.  Enables per-call logging of set/check so the
 # caller thread, target thread, and current state are visible when
 # diagnosing "interrupt signaled but tool never saw it" reports.

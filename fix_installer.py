@@ -2,7 +2,7 @@
 """Fix install.ps1: replace 2>&1 with temp-file stderr capture to avoid ErrorActionPreference=Stop issues."""
 import sys, os
 
-os.chdir("/c/HermesPortable/sidekick")
+os.chdir("/c/SidekickPortable/sidekick")
 
 with open('install.ps1', 'r', encoding='utf-8') as f:
     text = f.read()

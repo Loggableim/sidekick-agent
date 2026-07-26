@@ -21,6 +21,7 @@ from cli.config import (
     save_config,
     get_env_value,
     save_env_value,
+    _collect_unresolved_env_refs,
     get_sidekick_home,  # noqa: F401 — used by test mocks
 )
 from cli.colors import Colors, color
@@ -210,6 +211,13 @@ def _probe_single_server(
 
     _ensure_mcp_loop()
 
+    unresolved = _collect_unresolved_env_refs(config)
+    if unresolved:
+        raise ValueError(
+            f"Server '{name}' has unresolved config placeholder(s): "
+            f"{', '.join(unresolved)}"
+        )
+
     tools_found: List[Tuple[str, str]] = []
 
     async def _probe():
@@ -250,7 +258,7 @@ def _unwrap_exception_group(exc: BaseException) -> Exception:
     return RuntimeError(str(exc))
 
 
-# ─── hermes mcp add ──────────────────────────────────────────────────────────
+# ─── sidekick mcp add ──────────────────────────────────────────────────────────
 
 def cmd_mcp_add(args):
     """Add a new MCP server with discovery-first tool selection."""
@@ -446,7 +454,7 @@ def cmd_mcp_add(args):
     _info("Start a new session to use these tools.")
 
 
-# ─── hermes mcp remove ───────────────────────────────────────────────────────
+# ─── sidekick mcp remove ───────────────────────────────────────────────────────
 
 def cmd_mcp_remove(args):
     """Remove an MCP server from config."""
@@ -478,7 +486,7 @@ def cmd_mcp_remove(args):
         pass
 
 
-# ─── hermes mcp list ──────────────────────────────────────────────────────────
+# ─── sidekick mcp list ──────────────────────────────────────────────────────────
 
 def cmd_mcp_list(args=None):
     """List all configured MCP servers."""
@@ -547,7 +555,7 @@ def cmd_mcp_list(args=None):
     print()
 
 
-# ─── hermes mcp test ──────────────────────────────────────────────────────────
+# ─── sidekick mcp test ──────────────────────────────────────────────────────────
 
 def cmd_mcp_test(args):
     """Test connection to an MCP server."""
@@ -567,7 +575,10 @@ def cmd_mcp_test(args):
 
     # Show transport info
     if "url" in cfg:
-        _info(f"Transport: HTTP → {cfg['url']}")
+        from runtime.redact import redact_sensitive_text
+
+        safe_url = redact_sensitive_text(str(cfg["url"]), force=True)
+        _info(f"Transport: HTTP → {safe_url}")
     else:
         cmd = cfg.get("command", "?")
         _info(f"Transport: stdio → {cmd}")
@@ -575,6 +586,13 @@ def cmd_mcp_test(args):
     # Show auth info (masked)
     auth_type = cfg.get("auth", "")
     headers = cfg.get("headers", {})
+    unresolved = _collect_unresolved_env_refs(cfg)
+    if unresolved:
+        _error(
+            "Auth: missing environment variable(s): "
+            + ", ".join(unresolved)
+        )
+        return
     if auth_type == "oauth":
         _info("Auth: OAuth 2.1 PKCE")
     elif headers:
@@ -618,7 +636,7 @@ def _interpolate_value(value: str) -> str:
     return re.sub(r"\$\{(\w+)\}", _replace, value)
 
 
-# ─── hermes mcp login ────────────────────────────────────────────────────────
+# ─── sidekick mcp login ────────────────────────────────────────────────────────
 
 def cmd_mcp_login(args):
     """Force re-authentication for an OAuth-based MCP server.
@@ -675,7 +693,7 @@ def cmd_mcp_login(args):
         _error(f"Authentication failed: {exc}")
 
 
-# ─── hermes mcp configure ────────────────────────────────────────────────────
+# ─── sidekick mcp configure ────────────────────────────────────────────────────
 
 def cmd_mcp_configure(args):
     """Reconfigure which tools are enabled for an existing MCP server."""

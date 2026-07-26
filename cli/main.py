@@ -80,7 +80,7 @@ def _add_accept_hooks_flag(parser) -> None:
         default=argparse.SUPPRESS,
         help=(
             "Auto-approve unseen shell hooks without a TTY prompt "
-            "(equivalent to HERMES_ACCEPT_HOOKS=1 / hooks_auto_accept: true)."
+            "(equivalent to SIDEKICK_ACCEPT_HOOKS=1 / hooks_auto_accept: true)."
         ),
     )
 
@@ -107,47 +107,18 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def _apply_portable_home_default() -> None:
-    """Prefer the bundled portable home when running from a Sidekick bundle.
-
-    Windows installs launch from ``C:\\sidekick\\sidekick`` with state in
-    ``C:\\sidekick\\home``.  Existing machines can still have a user-scoped
-    ``HERMES_HOME`` from the old Hermes install; if ``SIDEKICK_HOME`` is not
-    explicitly set that legacy value would silently move the WebUI back to the
-    old state.  Keep library-level Hermes compatibility intact, but make the
-    standalone CLI deterministic for portable installs.
-    """
-    if os.environ.get("SIDEKICK_HOME", "").strip():
-        return
-    if os.environ.get("SIDEKICK_DISABLE_PORTABLE_HOME", "").strip().lower() in {"1", "true", "yes"}:
-        return
-
-    portable_home = PROJECT_ROOT.parent / "home"
-    if not portable_home.exists():
-        return
-    if PROJECT_ROOT.parent.name.lower() != "sidekick":
-        return
-    if PROJECT_ROOT.name.lower() not in {"sidekick", "sidekick-agent"}:
-        return
-
-    os.environ["SIDEKICK_HOME"] = str(portable_home)
-    os.environ["SIDEKICK_HOME"] = str(portable_home)
-
-
-_apply_portable_home_default()
-
 
 # ---------------------------------------------------------------------------
-# Profile override — MUST happen before any hermes module import.
+# Profile override — MUST happen before any sidekick module import.
 #
-# Many modules cache HERMES_HOME at import time (module-level constants).
+# Many modules cache SIDEKICK_HOME at import time (module-level constants).
 # We intercept --profile/-p from sys.argv here and set the env var so that
-# every subsequent ``os.getenv("SIDEKICK_HOME") or os.getenv("HERMES_HOME", ...)`` resolves correctly.
+# every subsequent ``os.getenv("SIDEKICK_HOME")`` resolves correctly.
 # The flag is stripped from sys.argv so argparse never sees it.
 # Falls back to ~/.sidekick/active_profile for sticky default.
 # ---------------------------------------------------------------------------
 def _apply_profile_override() -> None:
-    """Pre-parse --profile/-p and set HERMES_HOME before module imports."""
+    """Pre-parse --profile/-p and set SIDEKICK_HOME before module imports."""
     argv = sys.argv[1:]
     profile_name = None
     consume = 0
@@ -174,12 +145,12 @@ def _apply_profile_override() -> None:
             profile_name = None
             consume = 0
 
-    # 1.5 If HERMES_HOME is already set and no explicit flag was given, trust it
+    # 1.5 If SIDEKICK_HOME is already set and no explicit flag was given, trust it
     # only when it already points to a specific profile directory.  The
     # distinguishing heuristic: a profile path has "profiles" as its immediate
     # parent directory name (e.g. ~/.sidekick/profiles/coder or
-    # /opt/data/profiles/coder).  If HERMES_HOME points to the sidekick root
-    # instead (e.g. systemd hardcodes HERMES_HOME=/root/.hermes), we must
+    # /opt/data/profiles/coder).  If SIDEKICK_HOME points to the sidekick root
+    # instead (e.g. systemd hardcodes SIDEKICK_HOME=/root/.sidekick), we must
     # still read active_profile — the user may have switched profiles via
     # `sidekick profile use` and the gateway should honour that choice.
     # See issue #22502.
@@ -191,9 +162,9 @@ def _apply_profile_override() -> None:
     # 2. If no flag, check active_profile in the sidekick root
     if profile_name is None:
         try:
-            from runtime._compat.shim_constants import get_default_hermes_root
+            from runtime._compat.shim_constants import get_default_sidekick_root
 
-            active_path = get_default_hermes_root() / "active_profile"
+            active_path = get_default_sidekick_root() / "active_profile"
             if active_path.exists():
                 name = active_path.read_text().strip()
                 if name and name != "default":
@@ -202,23 +173,23 @@ def _apply_profile_override() -> None:
         except (UnicodeDecodeError, OSError):
             pass  # corrupted file, skip
 
-    # 3. If we found a profile, resolve and set HERMES_HOME
+    # 3. If we found a profile, resolve and set SIDEKICK_HOME
     if profile_name is not None:
         try:
             from cli.profiles import resolve_profile_env
 
-            hermes_home = resolve_profile_env(profile_name)
+            profile_home = resolve_profile_env(profile_name)
         except (ValueError, FileNotFoundError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
         except Exception as exc:
-            # A bug in profiles.py must NEVER prevent hermes from starting
+            # A bug in profiles.py must never prevent Sidekick from starting
             print(
                 f"Warning: profile override failed ({exc}), using default",
                 file=sys.stderr,
             )
             return
-        os.environ["SIDEKICK_HOME"] = hermes_home
+        os.environ["SIDEKICK_HOME"] = profile_home
         # Strip the flag from argv so argparse doesn't choke
         if consume > 0:
             for i, arg in enumerate(argv):
@@ -241,13 +212,13 @@ from cli.env_loader import load_sidekick_dotenv
 
 load_sidekick_dotenv(project_env=PROJECT_ROOT / ".env")
 
-# Bridge security.redact_secrets from config.yaml → HERMES_REDACT_SECRETS env
-# var BEFORE hermes_logging imports agent.redact (which snapshots the flag at
+# Bridge security.redact_secrets from config.yaml → SIDEKICK_REDACT_SECRETS env
+# var BEFORE sidekick_logging imports agent.redact (which snapshots the flag at
 # module-import time). Without this, config.yaml's toggle is ignored because
 # the setup_logging() call below imports agent.redact, which reads the env var
 # exactly once. Env var in .env still wins — this is config.yaml fallback only.
 try:
-    if "HERMES_REDACT_SECRETS" not in os.environ:
+    if "SIDEKICK_REDACT_SECRETS" not in os.environ:
         import yaml as _yaml_early
 
         _cfg_path = get_sidekick_home() / "config.yaml"
@@ -319,7 +290,7 @@ def _has_any_provider_configured() -> bool:
     from cli.config import get_env_path, get_sidekick_home, load_config
     from cli.auth import get_auth_status
 
-    # Determine whether Hermes itself has been explicitly configured (model
+    # Determine whether Sidekick itself has been explicitly configured (model
     # in config that isn't the hardcoded default). Used below to gate external
     # tool credentials (Claude Code, Codex CLI) that shouldn't silently skip
     # the setup wizard on a fresh install.
@@ -334,7 +305,7 @@ def _has_any_provider_configured() -> bool:
         _model_name = model_cfg.strip()
     else:
         _model_name = ""
-    _has_hermes_config = _model_name and _model_name != _DEFAULT_MODEL
+    _has_sidekick_config = _model_name and _model_name != _DEFAULT_MODEL
 
     # Check env vars (may be set by .env or shell).
     # OPENAI_BASE_URL alone counts — local models (vLLM, llama.cpp, etc.)
@@ -410,7 +381,7 @@ def _has_any_provider_configured() -> bool:
     # Check for Claude Code OAuth credentials (~/.claude/.credentials.json)
     # Only count these if Sidekick has been explicitly configured — Claude Code
     # being installed doesn't mean the user wants Sidekick to use their tokens.
-    if _has_hermes_config:
+    if _has_sidekick_config:
         try:
             from runtime.anthropic_adapter import (
                 read_claude_code_credentials,
@@ -696,7 +667,14 @@ def _probe_container(cmd: list, backend: str, via_sudo: bool = False):
     all other exceptions propagate naturally.
     """
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
     except subprocess.TimeoutExpired:
         label = f"sudo {backend}" if via_sudo else backend
         print(
@@ -716,14 +694,14 @@ def _exec_in_container(container_info: dict, cli_args: list):
     On failure, OSError propagates naturally.
 
     Args:
-        container_info: dict with backend, container_name, exec_user, hermes_bin
-        cli_args: the original CLI arguments (everything after 'hermes')
+        container_info: dict with backend, container_name, exec_user, sidekick_bin
+        cli_args: the original CLI arguments (everything after 'sidekick')
     """
 
     backend = container_info["backend"]
     container_name = container_info["container_name"]
     exec_user = container_info["exec_user"]
-    hermes_bin = container_info["hermes_bin"]
+    sidekick_bin = container_info["sidekick_bin"]
 
     runtime = shutil.which(backend)
     if not runtime:
@@ -793,7 +771,7 @@ def _exec_in_container(container_info: dict, cli_args: list):
         + tty_flags
         + ["-u", exec_user]
         + env_flags
-        + [container_name, hermes_bin]
+        + [container_name, sidekick_bin]
         + cli_args
     )
 
@@ -925,7 +903,7 @@ to avoid false-positive reinstalls on every launch.
 
 
 def _tui_need_npm_install(root: Path) -> bool:
-    """True when @hermes/ink is missing or node_modules is behind package-lock.json.
+    """True when @sidekick/ink is missing or node_modules is behind package-lock.json.
 
     Prebuilt bundle mode: when ``dist/entry.js`` exists and there is no
     ``package-lock.json`` (nix install layout only ships ``dist/`` +
@@ -956,7 +934,7 @@ def _tui_need_npm_install(root: Path) -> bool:
     if entry.is_file() and not lock.is_file():
         return False
 
-    ink = root / "node_modules" / "@hermes" / "ink" / "package.json"
+    ink = root / "node_modules" / "@sidekick" / "ink" / "package.json"
     if not ink.is_file():
         return True
     if not lock.is_file():
@@ -1008,7 +986,7 @@ def _ensure_tui_node() -> None:
     was used (nvm, fnm, proto, brew, or the bundled fallback).
 
     Idempotent no-op when node+npm are already discoverable. Set
-    ``HERMES_SKIP_NODE_BOOTSTRAP=1`` to disable auto-install.
+    ``SIDEKICK_SKIP_NODE_BOOTSTRAP=1`` to disable auto-install.
     """
     if shutil.which("node") and shutil.which("npm"):
         return
@@ -1019,7 +997,7 @@ def _ensure_tui_node() -> None:
     if not helper.is_file():
         return
 
-    hermes_home = os.environ.get("SIDEKICK_HOME") or str(Path.home() / ".hermes")
+    sidekick_home = os.environ.get("SIDEKICK_HOME") or str(Path.home() / ".sidekick")
     try:
         # Helper writes logs to stderr; we ask bash to print `command -v node`
         # on stdout once ensure_node succeeds. Subshell PATH edits don't leak
@@ -1030,9 +1008,9 @@ def _ensure_tui_node() -> None:
                 "-c",
                 f'source "{helper}" >&2 && ensure_node >&2 && command -v node',
             ],
-            env={**os.environ, "HERMES_HOME": hermes_home},
+            env={**os.environ, "SIDEKICK_HOME": sidekick_home},
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
@@ -1045,7 +1023,7 @@ def _ensure_tui_node() -> None:
     if resolved:
         extras.append(Path(resolved).resolve().parent)
 
-    extras.extend([Path(hermes_home) / "node" / "bin", Path.home() / ".local" / "bin"])
+    extras.extend([Path(sidekick_home) / "node" / "bin", Path.home() / ".local" / "bin"])
 
     for extra in extras:
         s = str(extra)
@@ -1055,7 +1033,7 @@ def _ensure_tui_node() -> None:
 
 
 def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
-    """TUI: --dev → tsx src; else node dist (HERMES_TUI_DIR prebuilt or esbuild)."""
+    """TUI: --dev → tsx src; else node dist (SIDEKICK_TUI_DIR prebuilt or esbuild)."""
     _ensure_tui_node()
 
     def _node_bin(bin: str) -> str:
@@ -1073,9 +1051,9 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
     ext_dir = os.environ.get("SIDEKICK_TUI_DIR")
     if tui_dev and ext_dir:
         print(
-            f"Error: --dev is incompatible with HERMES_TUI_DIR={ext_dir}\n"
+            f"Error: --dev is incompatible with SIDEKICK_TUI_DIR={ext_dir}\n"
             f"The prebuilt TUI has no source code to hot-reload.\n"
-            f"Unset HERMES_TUI_DIR (e.g. `unset HERMES_TUI_DIR`) to use --dev from a checkout.",
+            f"Unset SIDEKICK_TUI_DIR (e.g. `unset SIDEKICK_TUI_DIR`) to use --dev from a checkout.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1099,7 +1077,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
             cwd=str(tui_dir),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             env={**os.environ, "CI": "1"},
         )
         if result.returncode != 0:
@@ -1123,7 +1101,7 @@ def _make_tui_argv(tui_dir: Path, tui_dev: bool) -> tuple[list[str], Path]:
         [npm, "run", "build"],
         cwd=str(tui_dir),
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if result.returncode != 0:
         combined = f"{result.stdout or ''}{result.stderr or ''}".strip()
@@ -1185,21 +1163,25 @@ def _launch_tui(
 
     env = os.environ.copy()
     active_session_fd, active_session_file = tempfile.mkstemp(
-        prefix="hermes-tui-active-session-", suffix=".json"
+        prefix="sidekick-tui-active-session-", suffix=".json"
     )
     os.close(active_session_fd)
-    env["HERMES_TUI_ACTIVE_SESSION_FILE"] = active_session_file
-    env["HERMES_PYTHON_SRC_ROOT"] = os.environ.get(
-        "HERMES_PYTHON_SRC_ROOT", str(PROJECT_ROOT)
+    env["SIDEKICK_TUI_ACTIVE_SESSION_FILE"] = active_session_file
+    env["SIDEKICK_PYTHON_SRC_ROOT"] = os.environ.get(
+        "SIDEKICK_PYTHON_SRC_ROOT", str(PROJECT_ROOT)
     )
-    env.setdefault("HERMES_PYTHON", sys.executable)
-    env.setdefault("HERMES_CWD", os.getcwd())
+    env.setdefault("SIDEKICK_PYTHON", sys.executable)
+    env.setdefault("SIDEKICK_CWD", os.getcwd())
     env.setdefault("NODE_ENV", "development" if tui_dev else "production")
+    from cli.config import get_worktree_settings
+
+    worktree_settings = get_worktree_settings()
 
     wt_info = None
-    if worktree:
+    use_worktree = worktree or worktree_settings["enabled"]
+    if use_worktree:
         try:
-            from cli import (
+            from cli.cli import (
                 _cleanup_worktree,
                 _git_repo_root,
                 _prune_stale_worktrees,
@@ -1215,18 +1197,18 @@ def _launch_tui(
             wt_info = None
         if not wt_info:
             sys.exit(1)
-        env["HERMES_CWD"] = wt_info["path"]
+        env["SIDEKICK_CWD"] = wt_info["path"]
         env["TERMINAL_CWD"] = wt_info["path"]
 
     if model:
-        env["HERMES_MODEL"] = model
-        env["HERMES_INFERENCE_MODEL"] = model
+        env["SIDEKICK_MODEL"] = model
+        env["SIDEKICK_INFERENCE_MODEL"] = model
     if provider:
-        env["HERMES_TUI_PROVIDER"] = provider
-        env["HERMES_INFERENCE_PROVIDER"] = provider
+        env["SIDEKICK_TUI_PROVIDER"] = provider
+        env["SIDEKICK_INFERENCE_PROVIDER"] = provider
     tui_toolsets = _normalize_tui_toolsets(toolsets)
     if tui_toolsets:
-        env["HERMES_TUI_TOOLSETS"] = ",".join(tui_toolsets)
+        env["SIDEKICK_TUI_TOOLSETS"] = ",".join(tui_toolsets)
     if skills:
         if isinstance(skills, (list, tuple)):
             flattened = []
@@ -1235,27 +1217,27 @@ def _launch_tui(
                     part.strip() for part in str(item).split(",") if part.strip()
                 )
             if flattened:
-                env["HERMES_TUI_SKILLS"] = ",".join(flattened)
+                env["SIDEKICK_TUI_SKILLS"] = ",".join(flattened)
         else:
             value = str(skills).strip()
             if value:
-                env["HERMES_TUI_SKILLS"] = value
+                env["SIDEKICK_TUI_SKILLS"] = value
     if query:
-        env["HERMES_TUI_QUERY"] = query
+        env["SIDEKICK_TUI_QUERY"] = query
     if image:
-        env["HERMES_TUI_IMAGE"] = image
+        env["SIDEKICK_TUI_IMAGE"] = image
     if checkpoints:
-        env["HERMES_TUI_CHECKPOINTS"] = "1"
+        env["SIDEKICK_TUI_CHECKPOINTS"] = "1"
     if pass_session_id:
-        env["HERMES_TUI_PASS_SESSION_ID"] = "1"
+        env["SIDEKICK_TUI_PASS_SESSION_ID"] = "1"
     if max_turns is not None:
-        env["HERMES_TUI_MAX_TURNS"] = str(max_turns)
+        env["SIDEKICK_TUI_MAX_TURNS"] = str(max_turns)
     if verbose:
-        env["HERMES_TUI_TOOL_PROGRESS"] = "verbose"
+        env["SIDEKICK_TUI_TOOL_PROGRESS"] = "verbose"
     elif quiet:
-        env["HERMES_TUI_TOOL_PROGRESS"] = "off"
+        env["SIDEKICK_TUI_TOOL_PROGRESS"] = "off"
     if accept_hooks:
-        env["HERMES_ACCEPT_HOOKS"] = "1"
+        env["SIDEKICK_ACCEPT_HOOKS"] = "1"
     # Guarantee an 8GB V8 heap + exposed GC for the TUI. Default node cap is
     # ~1.5–4GB depending on version and can fatal-OOM on long sessions with
     # large transcripts / reasoning blobs. Token-level merge: respect any
@@ -1268,7 +1250,7 @@ def _launch_tui(
         _tokens.append("--expose-gc")
     env["NODE_OPTIONS"] = " ".join(_tokens)
     if resume_session_id:
-        env["HERMES_TUI_RESUME"] = resume_session_id
+        env["SIDEKICK_TUI_RESUME"] = resume_session_id
 
     argv, cwd = _make_tui_argv(tui_dir, tui_dev)
     code: Optional[int] = None
@@ -1285,7 +1267,7 @@ def _launch_tui(
             os.unlink(active_session_file)
         except OSError:
             pass
-        if wt_info:
+        if wt_info and worktree_settings["cleanup_on_exit"]:
             try:
                 _cleanup_worktree(wt_info)
             except Exception:
@@ -1295,7 +1277,7 @@ def _launch_tui(
 
 
 def _pin_kanban_board_env() -> None:
-    """Pin the active kanban board into ``HERMES_KANBAN_BOARD`` for the chat session.
+    """Pin the active kanban board into ``SIDEKICK_KANBAN_BOARD`` for the chat session.
 
     Without this, in-process tools (``kanban_*``) and shelled-out CLI calls
     (``sidekick kanban …``) resolve the board on different paths: the env-pin if
@@ -1305,12 +1287,17 @@ def _pin_kanban_board_env() -> None:
     calls hit board B (#20074). Pinning at chat boot mirrors what the
     dispatcher already does for spawned workers.
     """
-    if os.environ.get("SIDEKICK_KANBAN_BOARD"):
+    current_board = os.environ.get("SIDEKICK_KANBAN_BOARD")
+    if current_board:
+        os.environ["SIDEKICK_KANBAN_BOARD"] = current_board
+        os.environ["SIDEKICK_KANBAN_BOARD"] = current_board
         return
     try:
         from cli.kanban_db import get_current_board
 
-        os.environ["SIDEKICK_KANBAN_BOARD"] = get_current_board()
+        current_board = get_current_board()
+        os.environ["SIDEKICK_KANBAN_BOARD"] = current_board
+        os.environ["SIDEKICK_KANBAN_BOARD"] = current_board
     except Exception:
         pass
 
@@ -1357,7 +1344,7 @@ def cmd_chat(args):
     if not _has_any_provider_configured():
         print()
         print(
-            "It looks like Hermes isn't configured yet -- no API keys or providers found."
+            "It looks like Sidekick isn't configured yet -- no API keys or providers found."
         )
         print()
         print("  Run:  sidekick setup")
@@ -1606,7 +1593,7 @@ def cmd_whatsapp(args):
                 cwd=str(bridge_dir),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         except KeyboardInterrupt:
             print("\n  ✗ Install cancelled")
@@ -2055,7 +2042,7 @@ def _clear_stale_openai_base_url():
 # ─────────────────────────────────────────────────────────────────────────────
 # Auxiliary model configuration
 #
-# Hermes uses lightweight "auxiliary" models for side tasks (vision analysis,
+# Sidekick uses lightweight "auxiliary" models for side tasks (vision analysis,
 # context compression, web extraction, session search, etc.). Each task has
 # its own provider+model pair in config.yaml under `auxiliary.<task>`.
 #
@@ -4080,7 +4067,7 @@ def _model_flow_copilot_acp(config, current_model=""):
     except Exception as exc:
         print(f"  ⚠ {exc}")
         print(
-            "  Set HERMES_COPILOT_ACP_COMMAND or COPILOT_CLI_PATH if Copilot CLI is installed elsewhere."
+            "  Set SIDEKICK_COPILOT_ACP_COMMAND or COPILOT_CLI_PATH if Copilot CLI is installed elsewhere."
         )
         return
 
@@ -4789,7 +4776,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
                     "(<= 250 requests/day for gemini-2.5-flash)."
                 )
                 print(
-                    "   Hermes typically makes 3-10 API calls per user turn "
+                    "   Sidekick typically makes 3-10 API calls per user turn "
                     "(tool iterations + auxiliary tasks),"
                 )
                 print(
@@ -4799,7 +4786,7 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
                 print("   an agent session.")
                 print()
                 print(
-                    "   To use Gemini with Hermes, enable billing on your "
+                    "   To use Gemini with Sidekick, enable billing on your "
                     "Google Cloud project and regenerate"
                 )
                 print(
@@ -5022,7 +5009,7 @@ def _run_anthropic_oauth_flow(save_env_value):
             from runtime._compat.shim_constants import display_sidekick_home as _dhh_fn
 
             print(
-                f"    Hermes will use Claude's credential store directly instead of copying a setup-token into {_dhh_fn()}/.env."
+                f"    Sidekick will use Claude's credential store directly instead of copying a setup-token into {_dhh_fn()}/.env."
             )
             return True
         return False
@@ -5722,14 +5709,14 @@ def _find_stale_dashboard_pids() -> list[int]:
         else:
             # Linux / macOS: scan the process table via ps and match against
             # the same explicit patterns list used on Windows.  Using ps
-            # (rather than `pgrep -f "hermes.*dashboard"`) keeps us consistent
+            # (rather than `pgrep -f "sidekick.*dashboard"`) keeps us consistent
             # with `sidekick_cli.gateway._scan_gateway_pids` and avoids the
             # greedy regex matching unrelated cmdlines that merely contain
             # both words (e.g. a chat session discussing "dashboard").
             result = subprocess.run(
                 ["ps", "-A", "-o", "pid=,command="],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=10,
             )
             if result.returncode == 0:
@@ -5917,7 +5904,7 @@ def _kill_stale_dashboard_processes(
                 result = subprocess.run(
                     ["taskkill", "/PID", str(pid), "/F"],
                     capture_output=True,
-                    text=True,
+                    text=True, encoding="utf-8", errors="replace",
                     timeout=10,
                 )
                 if result.returncode == 0:
@@ -6137,7 +6124,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
         git_cmd + ["status", "--porcelain"],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=True,
     )
     if not status.stdout.strip():
@@ -6151,7 +6138,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
         git_cmd + ["ls-files", "--unmerged"],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if unmerged.stdout.strip():
         print("→ Clearing unmerged index entries from a previous conflict...")
@@ -6160,7 +6147,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
     from datetime import datetime, timezone
 
     stash_name = datetime.now(timezone.utc).strftime(
-        "hermes-update-autostash-%Y%m%d-%H%M%S"
+        "sidekick-update-autostash-%Y%m%d-%H%M%S"
     )
     print("→ Local changes detected — stashing before update...")
     subprocess.run(
@@ -6172,7 +6159,7 @@ def _stash_local_changes_if_needed(git_cmd: list[str], cwd: Path) -> Optional[st
         git_cmd + ["rev-parse", "--verify", "refs/stash"],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=True,
     ).stdout.strip()
     return stash_ref
@@ -6185,7 +6172,7 @@ def _resolve_stash_selector(
         git_cmd + ["stash", "list", "--format=%gd %H"],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=True,
     )
     for line in stash_list.stdout.splitlines():
@@ -6240,7 +6227,7 @@ def _restore_stashed_changes(
         git_cmd + ["stash", "apply", stash_ref],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
 
     # Check for unmerged (conflicted) files — can happen even when returncode is 0
@@ -6248,7 +6235,7 @@ def _restore_stashed_changes(
         git_cmd + ["diff", "--name-only", "--diff-filter=U"],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     has_conflicts = bool(unmerged.stdout.strip())
 
@@ -6270,7 +6257,7 @@ def _restore_stashed_changes(
         print(f"  Stash ref: {stash_ref}")
 
         # Always reset to clean state — leaving conflict markers in source
-        # files makes hermes completely unrunnable (SyntaxError on import).
+        # files makes sidekick completely unrunnable (SyntaxError on import).
         # The user's changes are safe in the stash for manual recovery.
         subprocess.run(
             git_cmd + ["reset", "--hard", "HEAD"],
@@ -6287,7 +6274,7 @@ def _restore_stashed_changes(
     stash_selector = _resolve_stash_selector(git_cmd, cwd, stash_ref)
     if stash_selector is None:
         print(
-            "⚠ Local changes were restored, but Hermes couldn't find the stash entry to drop."
+            "⚠ Local changes were restored, but Sidekick couldn't find the stash entry to drop."
         )
         print(
             "  The stash was left in place. You can remove it manually after checking the result."
@@ -6298,11 +6285,11 @@ def _restore_stashed_changes(
             git_cmd + ["stash", "drop", stash_selector],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if drop.returncode != 0:
             print(
-                "⚠ Local changes were restored, but Hermes couldn't drop the saved stash entry."
+                "⚠ Local changes were restored, but Sidekick couldn't drop the saved stash entry."
             )
             if drop.stdout.strip():
                 print(drop.stdout.strip())
@@ -6339,7 +6326,7 @@ def _get_origin_url(git_cmd: list[str], cwd: Path) -> Optional[str]:
             git_cmd + ["remote", "get-url", "origin"],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -6372,7 +6359,7 @@ def _has_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
             git_cmd + ["remote", "get-url", "upstream"],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return result.returncode == 0
     except Exception:
@@ -6386,7 +6373,7 @@ def _add_upstream_remote(git_cmd: list[str], cwd: Path) -> bool:
             git_cmd + ["remote", "add", "upstream", OFFICIAL_REPO_URL],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return result.returncode == 0
     except Exception:
@@ -6400,13 +6387,33 @@ def _count_commits_between(git_cmd: list[str], cwd: Path, base: str, head: str) 
             git_cmd + ["rev-list", "--count", f"{base}..{head}"],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if result.returncode == 0:
             return int(result.stdout.strip())
     except Exception:
         pass
     return -1
+
+
+def _fetch_origin_with_ref_race_retry(git_cmd: list[str], cwd: Path):
+    """Fetch origin and recover once from Git's remote-ref compare-and-swap race."""
+    kwargs = {
+        "cwd": cwd,
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    result = subprocess.run(git_cmd + ["fetch", "origin"], **kwargs)
+    stderr = str(result.stderr or "").lower()
+    ref_race = "cannot lock ref 'refs/remotes/" in stderr and "but expected" in stderr
+    if result.returncode != 0 and ref_race:
+        # Another fetch updated the remote-tracking ref between Git reading and
+        # locking it. Pruning and retrying is safe: it never touches local
+        # branches or working-tree changes.
+        result = subprocess.run(git_cmd + ["fetch", "--prune", "origin"], **kwargs)
+    return result
 
 
 def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -> str:
@@ -6418,7 +6425,7 @@ def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -
             git_cmd + ["symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD"],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         ref = result.stdout.strip()
         prefix = f"{remote}/"
@@ -6434,7 +6441,7 @@ def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -
             git_cmd + ["remote", "show", remote],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if result.returncode == 0:
             for line in result.stdout.splitlines():
@@ -6451,7 +6458,7 @@ def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -
             git_cmd + ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         upstream = result.stdout.strip()
         prefix = f"{remote}/"
@@ -6468,7 +6475,7 @@ def _resolve_remote_default_branch(git_cmd: list[str], cwd: Path, remote: str) -
                 git_cmd + ["rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}"],
                 cwd=cwd,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             if result.returncode == 0:
                 return branch
@@ -6505,7 +6512,7 @@ def _sync_fork_with_upstream(git_cmd: list[str], cwd: Path, branch: str) -> bool
             git_cmd + ["push", "origin", branch, "--force-with-lease"],
             cwd=cwd,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         return result.returncode == 0
     except Exception:
@@ -6638,9 +6645,9 @@ def _invalidate_update_cache():
     """
     homes = []
     # Default profile home (Docker-aware — uses /opt/data in Docker)
-    from runtime._compat.shim_constants import get_default_hermes_root
+    from runtime._compat.shim_constants import get_default_sidekick_root
 
-    default_home = get_default_hermes_root()
+    default_home = get_default_sidekick_root()
     homes.append(default_home)
     # Named profiles under <root>/profiles/
     profiles_root = default_home / "profiles"
@@ -6731,14 +6738,17 @@ def _is_windows() -> bool:
 
 def _venv_scripts_dir() -> Path | None:
     """Return the venv Scripts directory if we're running inside the project venv."""
-    venv_dir = PROJECT_ROOT / "venv"
-    if not venv_dir.is_dir():
-        return None
-    scripts = venv_dir / ("Scripts" if _is_windows() else "bin")
-    return scripts if scripts.is_dir() else None
+    for venv_name in (".venv", "venv"):
+        venv_dir = PROJECT_ROOT / venv_name
+        if not venv_dir.is_dir():
+            continue
+        scripts = venv_dir / ("Scripts" if _is_windows() else "bin")
+        if scripts.is_dir():
+            return scripts
+    return None
 
 
-def _hermes_exe_shims(scripts_dir: Path) -> list[Path]:
+def _sidekick_exe_shims(scripts_dir: Path) -> list[Path]:
     """Entry-point shims that uv may try to rewrite during ``pip install -e .``.
 
     On Windows these are .exe launchers generated by setuptools/uv. On POSIX
@@ -6748,21 +6758,23 @@ def _hermes_exe_shims(scripts_dir: Path) -> list[Path]:
     if not _is_windows():
         return []
     return [
+        scripts_dir / "sidekick.exe",
+        scripts_dir / "sidekick-gateway.exe",
         scripts_dir / "hermes.exe",
         scripts_dir / "hermes-gateway.exe",
     ]
 
 
-def _quarantine_running_hermes_exe(scripts_dir: Path) -> list[tuple[Path, Path]]:
-    """Pre-empt Windows file lock on the running ``hermes.exe``.
+def _quarantine_running_sidekick_exe(scripts_dir: Path) -> list[tuple[Path, Path]]:
+    """Pre-empt Windows file lock on the running ``sidekick.exe``.
 
     Windows allows RENAMING a mapped/running executable (the kernel tracks the
     file by handle, not path), but blocks DELETE/REPLACE while it's loaded. uv
     needs to overwrite the entry-point shims during ``pip install -e .``;
-    when ``sidekick update`` runs, ``hermes.exe`` IS the live process, and uv
+    when ``sidekick update`` runs, ``sidekick.exe`` IS the live process, and uv
     fails with ``Access is denied. (os error 5)``.
 
-    We rename live shims to ``hermes.exe.old.<unix-ms>`` first. uv then writes
+    We rename live shims to ``sidekick.exe.old.<unix-ms>`` first. uv then writes
     fresh shims at the original paths. The ``.old`` files are cleaned up on
     the next sidekick invocation by ``_cleanup_quarantined_exes``.
 
@@ -6775,7 +6787,7 @@ def _quarantine_running_hermes_exe(scripts_dir: Path) -> list[tuple[Path, Path]]
 
     import time
     stamp = int(time.time() * 1000)
-    for shim in _hermes_exe_shims(scripts_dir):
+    for shim in _sidekick_exe_shims(scripts_dir):
         if not shim.exists():
             continue
         target = shim.with_suffix(shim.suffix + f".old.{stamp}")
@@ -6790,7 +6802,7 @@ def _quarantine_running_hermes_exe(scripts_dir: Path) -> list[tuple[Path, Path]]
 
 
 def _restore_quarantined_exes(moved: list[tuple[Path, Path]]) -> None:
-    """Roll back ``_quarantine_running_hermes_exe`` if uv didn't write replacements."""
+    """Roll back ``_quarantine_running_sidekick_exe`` if uv didn't write replacements."""
     for original, quarantined in moved:
         try:
             if not original.exists() and quarantined.exists():
@@ -6800,7 +6812,7 @@ def _restore_quarantined_exes(moved: list[tuple[Path, Path]]) -> None:
 
 
 def _cleanup_quarantined_exes(scripts_dir: Path | None = None) -> None:
-    """Sweep ``hermes.exe.old.*`` left by prior updates.
+    """Sweep ``sidekick.exe.old.*`` left by prior updates.
 
     Called early on every sidekick invocation. The .old files are unlocked once
     their owning process exited, so deletion succeeds the next run. Silent
@@ -6833,17 +6845,17 @@ def _install_python_dependencies_with_optional_fallback(
     By default this targets ``.[all]``; Termux callers can pass
     ``group='termux-all'`` to use the curated Android-compatible profile.
 
-    On Windows, pre-renames live ``hermes.exe`` / ``hermes-gateway.exe`` shims
+    On Windows, pre-renames live ``sidekick.exe`` / ``sidekick-gateway.exe`` shims
     in the venv Scripts dir before each install attempt so uv can write fresh
     copies (Windows blocks REPLACE on a running .exe but allows RENAME). See
-    ``_quarantine_running_hermes_exe`` for the rationale.
+    ``_quarantine_running_sidekick_exe`` for the rationale.
     """
     scripts_dir = _venv_scripts_dir() if _is_windows() else None
 
     def _install(args: list[str]) -> None:
         moved: list[tuple[Path, Path]] = []
         if scripts_dir is not None:
-            moved = _quarantine_running_hermes_exe(scripts_dir)
+            moved = _quarantine_running_sidekick_exe(scripts_dir)
         try:
             _run_install_with_heartbeat(install_cmd_prefix + args, env=env)
         except BaseException:
@@ -7185,17 +7197,12 @@ def _cmd_update_check():
         git_cmd + ["fetch", "upstream"],
         cwd=PROJECT_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
     )
     if fetch_result.returncode != 0:
         # Fallback to origin if upstream doesn't exist
         print("→ Fetching from origin...")
-        fetch_result = subprocess.run(
-            git_cmd + ["fetch", "origin"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-        )
+        fetch_result = _fetch_origin_with_ref_race_retry(git_cmd, PROJECT_ROOT)
         compare_remote = "origin"
     else:
         compare_remote = "upstream"
@@ -7219,7 +7226,7 @@ def _cmd_update_check():
         git_cmd + ["rev-list", f"HEAD..{compare_branch}", "--count"],
         cwd=PROJECT_ROOT,
         capture_output=True,
-        text=True,
+        text=True, encoding="utf-8", errors="replace",
         check=True,
     )
     behind = int(rev_result.stdout.strip())
@@ -7245,10 +7252,10 @@ def _ensure_fhs_path_guard() -> None:
     (su, sudo -s, tmux panes, some web terminals): /etc/bashrc doesn't
     add /usr/local/bin and /root/.bash_profile doesn't either.  Symptom:
     ``sidekick`` prints ``command not found`` even though the symlink lives
-    at /usr/local/bin/hermes.
+    at /usr/local/bin/sidekick.
 
     Silent no-op on: non-Linux, non-root, non-FHS installs, and any system
-    where ``bash -i -c 'command -v hermes'`` already resolves.  Idempotent.
+    where ``bash -i -c 'command -v sidekick'`` already resolves.  Idempotent.
     """
     if sys.platform != "linux":
         return
@@ -7258,8 +7265,8 @@ def _ensure_fhs_path_guard() -> None:
     except AttributeError:
         return
     # Only act when this is actually an FHS-layout install (command link at
-    # /usr/local/bin/hermes, code at /usr/local/lib/hermes-agent).
-    fhs_link = Path("/usr/local/bin/hermes")
+    # /usr/local/bin/sidekick, code at /usr/local/lib/sidekick-agent).
+    fhs_link = Path("/usr/local/bin/sidekick")
     if not fhs_link.is_symlink() and not fhs_link.exists():
         return
 
@@ -7277,10 +7284,10 @@ def _ensure_fhs_path_guard() -> None:
                 "bash",
                 "-i",
                 "-c",
-                "command -v hermes",
+                "command -v sidekick",
             ],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=10,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -7324,11 +7331,11 @@ def _ensure_fhs_path_guard() -> None:
 
 
 def _run_pre_update_backup(args) -> None:
-    """Create a full zip backup of HERMES_HOME before running the update.
+    """Create a full zip backup of SIDEKICK_HOME before running the update.
 
     Gated on ``updates.pre_update_backup`` in config (default false).  Off
     by default because the zip can add minutes to every update on large
-    HERMES_HOME directories.  The ``--backup`` flag on ``sidekick update``
+    SIDEKICK_HOME directories.  The ``--backup`` flag on ``sidekick update``
     opts in for a single run; ``--no-backup`` forces it off when config
     has it enabled.  Never raises — a backup failure should not block the
     update itself.
@@ -7525,7 +7532,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             git_cmd + ["fetch", "origin"],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
         )
         if fetch_result.returncode != 0:
             stderr = fetch_result.stderr.strip()
@@ -7549,7 +7556,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             git_cmd + ["rev-parse", "--abbrev-ref", "HEAD"],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=True,
         )
         current_branch = result.stdout.strip()
@@ -7571,7 +7578,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 git_cmd + ["checkout", branch],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 check=True,
             )
         else:
@@ -7588,7 +7595,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             git_cmd + ["rev-list", f"HEAD..origin/{branch}", "--count"],
             cwd=PROJECT_ROOT,
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             check=True,
         )
         commit_count = int(result.stdout.strip())
@@ -7609,7 +7616,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     git_cmd + ["checkout", current_branch],
                     cwd=PROJECT_ROOT,
                     capture_output=True,
-                    text=True,
+                    text=True, encoding="utf-8", errors="replace",
                     check=False,
                 )
             print("✓ Already up to date!")
@@ -7620,7 +7627,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
         # Snapshot critical state (state.db, config, pairing JSONs, etc.)
         # before pulling so a user can recover if something goes wrong.
         # Issue #15733 reported missing pairing data after an update; even
-        # though `git pull` can't touch $HERMES_HOME, this is cheap
+        # though `git pull` can't touch $SIDEKICK_HOME, this is cheap
         # belt-and-suspenders insurance and gives the user something to
         # restore from via `/snapshot list` / `/snapshot restore <id>`.
         try:
@@ -7640,7 +7647,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                 git_cmd + ["pull", "--ff-only", "origin", branch],
                 cwd=PROJECT_ROOT,
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
             if pull_result.returncode != 0:
                 # ff-only failed — local and remote have diverged (e.g. upstream
@@ -7653,7 +7660,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                     git_cmd + ["reset", "--hard", f"origin/{branch}"],
                     cwd=PROJECT_ROOT,
                     capture_output=True,
-                    text=True,
+                    text=True, encoding="utf-8", errors="replace",
                 )
                 if reset_result.returncode != 0:
                     print(f"✗ Failed to reset to origin/{branch}.")
@@ -7686,7 +7693,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
 
         # Clear stale .pyc bytecode cache — prevents ImportError on gateway
         # restart when updated source references names that didn't exist in
-        # the old bytecode (e.g. get_sidekick_home added to hermes_constants).
+        # the old bytecode (e.g. get_sidekick_home added to sidekick_constants).
         removed = _clear_bytecode_cache(PROJECT_ROOT)
         if removed:
             print(
@@ -7752,12 +7759,12 @@ def _cmd_update_impl(args, gateway_mode: bool):
         print("✓ Code updated!")
 
         # After git pull, source files on disk are newer than cached Python
-        # modules in this process.  Reload hermes_constants so that any lazy
+        # modules in this process.  Reload sidekick_constants so that any lazy
         # import executed below (skills sync, gateway restart) sees new
         # attributes like display_sidekick_home() added since the last release.
         try:
             import importlib
-            import hermes_constants as _hc
+            import sidekick_constants as _hc
 
             importlib.reload(_hc)
         except Exception:
@@ -7786,10 +7793,10 @@ def _cmd_update_impl(args, gateway_mode: bool):
             logger.debug("Skills sync during update failed: %s", e)
 
         # Sync bundled skills to all profiles (including the active one).
-        # seed_profile_skills() uses subprocess with an explicit HERMES_HOME so
-        # it is not affected by sync_skills()'s module-level HERMES_HOME cache,
+        # seed_profile_skills() uses subprocess with an explicit SIDEKICK_HOME so
+        # it is not affected by sync_skills()'s module-level SIDEKICK_HOME cache,
         # which means the active profile is reliably synced regardless of whether
-        # the caller's HERMES_HOME env var points at the default or a named profile.
+        # the caller's SIDEKICK_HOME env var points at the default or a named profile.
         try:
             from cli.profiles import (
                 list_profiles,
@@ -8013,7 +8020,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         _verify = subprocess.run(
                             scope_cmd_ + ["is-active", svc_name_],
                             capture_output=True,
-                            text=True,
+                            text=True, encoding="utf-8", errors="replace",
                             timeout=5,
                         )
                         if _verify.stdout.strip() == "active":
@@ -8047,7 +8054,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             "--value",
                         ],
                         capture_output=True,
-                        text=True,
+                        text=True, encoding="utf-8", errors="replace",
                         timeout=5,
                     )
                 except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -8112,7 +8119,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
             relaunched_profiles = []
 
             # --- Systemd services (Linux) ---
-            # Discover all hermes-gateway* units (default + profiles)
+            # Discover all sidekick-gateway* units (default + profiles)
             if supports_systemd_services():
                 try:
                     _ensure_user_systemd_env()
@@ -8128,13 +8135,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             scope_cmd
                             + [
                                 "list-units",
-                                "hermes-gateway*",
+                                "sidekick-gateway*",
                                 "--plain",
                                 "--no-legend",
                                 "--no-pager",
                             ],
                             capture_output=True,
-                            text=True,
+                            text=True, encoding="utf-8", errors="replace",
                             timeout=10,
                         )
                         for line in result.stdout.strip().splitlines():
@@ -8143,7 +8150,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                 continue
                             unit = parts[
                                 0
-                            ]  # e.g. hermes-gateway.service or hermes-gateway-coder.service
+                            ]  # e.g. sidekick-gateway.service or sidekick-gateway-coder.service
                             if not unit.endswith(".service"):
                                 continue
                             svc_name = unit.removesuffix(".service")
@@ -8151,7 +8158,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             check = subprocess.run(
                                 scope_cmd + ["is-active", svc_name],
                                 capture_output=True,
-                                text=True,
+                                text=True, encoding="utf-8", errors="replace",
                                 timeout=5,
                             )
                             if check.stdout.strip() != "active":
@@ -8174,7 +8181,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                         "--value",
                                     ],
                                     capture_output=True,
-                                    text=True,
+                                    text=True, encoding="utf-8", errors="replace",
                                     timeout=5,
                                 )
                                 _main_pid = int((_show.stdout or "").strip() or 0)
@@ -8220,13 +8227,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                 subprocess.run(
                                     scope_cmd + ["reset-failed", svc_name],
                                     capture_output=True,
-                                    text=True,
+                                    text=True, encoding="utf-8", errors="replace",
                                     timeout=10,
                                 )
                                 subprocess.run(
                                     scope_cmd + ["start", svc_name],
                                     capture_output=True,
-                                    text=True,
+                                    text=True, encoding="utf-8", errors="replace",
                                     timeout=15,
                                 )
                                 # Short poll: the gateway should be up within
@@ -8289,13 +8296,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
                             subprocess.run(
                                 scope_cmd + ["reset-failed", svc_name],
                                 capture_output=True,
-                                text=True,
+                                text=True, encoding="utf-8", errors="replace",
                                 timeout=10,
                             )
                             restart = subprocess.run(
                                 scope_cmd + ["restart", svc_name],
                                 capture_output=True,
-                                text=True,
+                                text=True, encoding="utf-8", errors="replace",
                                 timeout=15,
                             )
                             if restart.returncode == 0:
@@ -8321,13 +8328,13 @@ def _cmd_update_impl(args, gateway_mode: bool):
                                     subprocess.run(
                                         scope_cmd + ["reset-failed", svc_name],
                                         capture_output=True,
-                                        text=True,
+                                        text=True, encoding="utf-8", errors="replace",
                                         timeout=10,
                                     )
                                     subprocess.run(
                                         scope_cmd + ["restart", svc_name],
                                         capture_output=True,
-                                        text=True,
+                                        text=True, encoding="utf-8", errors="replace",
                                         timeout=15,
                                     )
                                     if _wait_for_service_active(
@@ -8367,7 +8374,7 @@ def _cmd_update_impl(args, gateway_mode: bool):
                         check = subprocess.run(
                             ["launchctl", "list", get_launchd_label()],
                             capture_output=True,
-                            text=True,
+                            text=True, encoding="utf-8", errors="replace",
                             timeout=5,
                         )
                         if check.returncode == 0:
@@ -8487,26 +8494,26 @@ def _cmd_update_impl(args, gateway_mode: bool):
         except Exception as e:
             logger.debug("Gateway restart during update failed: %s", e)
 
-        # Warn if legacy Hermes gateway unit files (pre-rename) are still installed.
-        # When both hermes.service (from a pre-rename install) and the
+        # Warn if legacy Sidekick gateway unit files (pre-rename) are still installed.
+        # When both sidekick.service (from a pre-rename install) and the
         # current sidekick-gateway.service are enabled, they SIGTERM-fight
         # for the same bot token (see PR #11909). Flagging here means
         # every `sidekick update` surfaces the issue until the user migrates.
         try:
             from cli.gateway import (
-                has_legacy_hermes_units,
-                _find_legacy_hermes_units,
+                has_legacy_sidekick_units,
+                _find_legacy_sidekick_units,
                 supports_systemd_services,
             )
 
-            if supports_systemd_services() and has_legacy_hermes_units():
+            if supports_systemd_services() and has_legacy_sidekick_units():
                 print()
                 print("⚠ Legacy Sidekick gateway unit(s) detected:")
-                for _name, path, is_sys in _find_legacy_hermes_units():
+                for _name, path, is_sys in _find_legacy_sidekick_units():
                     scope = "system" if is_sys else "user"
                     print(f"    {path}  ({scope} scope)")
                 print()
-                print("  These pre-rename units (hermes.service — legacy) fight the current")
+                print("  These pre-rename units (sidekick.service — legacy) fight the current")
                 print("  sidekick-gateway.service for the bot token and cause SIGTERM")
                 print("  flap loops. Remove them with:")
                 print()
@@ -8952,7 +8959,7 @@ def cmd_profile(args):
             # Preview: stage the distribution into a scratch dir, show the
             # manifest, then do the real install.  The double-stage avoids
             # any side-effects if the user declines.
-            with tempfile.TemporaryDirectory(prefix="hermes_dist_preview_") as tmp:
+            with tempfile.TemporaryDirectory(prefix="sidekick_dist_preview_") as tmp:
                 plan = plan_install(
                     args.source,
                     Path(tmp),
@@ -9061,8 +9068,8 @@ def cmd_profile(args):
             print(f"Author:       {data['author']}")
         if data.get("license"):
             print(f"License:      {data['license']}")
-        if data.get("hermes_requires"):
-            print(f"Requires:     Sidekick {data['hermes_requires']}")
+        if data.get("sidekick_requires"):
+            print(f"Requires:     Sidekick {data['sidekick_requires']}")
         if data.get("source"):
             print(f"Source:       {data['source']}")
         if data.get("installed_at"):
@@ -9090,8 +9097,8 @@ def _render_distribution_plan(plan) -> None:
         print(f"  {mf.description}")
     if mf.author:
         print(f"  Author:   {mf.author}")
-    if mf.hermes_requires:
-        print(f"  Requires: Hermes {mf.hermes_requires}")
+    if mf.sidekick_requires:
+        print(f"  Requires: Sidekick {mf.sidekick_requires}")
     print(f"  Source:   {plan.provenance}")
     print(f"  Target:   {plan.target_dir}")
     if plan.existing:
@@ -9421,9 +9428,9 @@ def main():
     except Exception:
         pass
 
-    # Sweep stale ``hermes.exe.old.*`` quarantine files left by previous
+    # Sweep stale ``sidekick.exe.old.*`` quarantine files left by previous
     # ``sidekick update`` runs on Windows. Silent no-op on non-Windows or when
-    # there's nothing to clean. See ``_quarantine_running_hermes_exe``.
+    # there's nothing to clean. See ``_quarantine_running_sidekick_exe``.
     try:
         _cleanup_quarantined_exes()
     except Exception:
@@ -9642,9 +9649,9 @@ def main():
         "migrate-legacy",
         help="Remove legacy sidekick.service units from pre-rename installs",
         description=(
-            "Stop, disable, and remove legacy Hermes gateway unit files "
-            "(e.g. hermes.service) left over from older installs. Profile "
-            "units (hermes-gateway-<profile>.service) and unrelated "
+            "Stop, disable, and remove legacy Sidekick gateway unit files "
+            "(e.g. sidekick.service) left over from older installs. Profile "
+            "units (sidekick-gateway-<profile>.service) and unrelated "
             "third-party services are never touched."
         ),
     )
@@ -9741,7 +9748,7 @@ def main():
         default=None,
         metavar="PATH",
         help="Write manifest to a file instead of stdout. With no PATH "
-        "writes to $HERMES_HOME/slack-manifest.json.",
+        "writes to $SIDEKICK_HOME/slack-manifest.json.",
     )
     slack_manifest.add_argument(
         "--name",
@@ -9892,7 +9899,7 @@ def main():
         default="login",
     )
     auth_spotify.add_argument(
-        "--client-id", help="Spotify app client_id (or set HERMES_SPOTIFY_CLIENT_ID)"
+        "--client-id", help="Spotify app client_id (or set SIDEKICK_SPOTIFY_CLIENT_ID)"
     )
     auth_spotify.add_argument(
         "--redirect-uri",
@@ -10245,19 +10252,19 @@ def main():
     repair_subparsers = repair_parser.add_subparsers(dest="repair_command")
     local_state = repair_subparsers.add_parser(
         "local-state",
-        help="Migrate legacy HermesPortable state into the Sidekick home",
+        help="Import state from an explicitly selected previous Sidekick home",
     )
     local_state.add_argument(
         "--from",
         dest="source",
-        default=r"C:\hermesportable\home",
-        help=r"Legacy source home (default: C:\hermesportable\home)",
+        required=True,
+        help="Source home to import",
     )
     local_state.add_argument(
         "--to",
         dest="target",
-        default=r"C:\sidekick\home",
-        help=r"Target Sidekick home (default: C:\sidekick\home)",
+        default=get_sidekick_home(),
+        help=f"Target Sidekick home (default: {get_sidekick_home()})",
     )
     local_state.add_argument(
         "--apply",
@@ -10358,7 +10365,7 @@ Examples:
         "backup",
         help="Back up Sidekick home directory to a zip file",
         description="Create a zip archive of your entire Sidekick configuration, "
-        "skills, sessions, and data (excludes the hermes-agent codebase). "
+        "skills, sessions, and data (excludes the sidekick-agent codebase). "
         "Use --quick for a fast snapshot of just critical state files.",
     )
     backup_parser.add_argument(
@@ -11041,7 +11048,7 @@ Examples:
                 try:
                     version = subprocess.run(
                         ["cua-driver", "--version"],
-                        capture_output=True, text=True, timeout=5,
+                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
                     ).stdout.strip()
                 except Exception:
                     pass
@@ -11351,7 +11358,7 @@ Examples:
                 print("Cancelled.")
                 return
 
-            # Launch hermes --resume <id> by replacing the current process
+            # Launch sidekick --resume <id> by replacing the current process
             print(f"Resuming session: {selected_id}")
             from cli.relaunch import relaunch
 
@@ -11682,7 +11689,7 @@ Examples:
         "install",
         help="Install a profile distribution from a git URL or local directory",
         description=(
-            "Install a Hermes profile distribution. SOURCE can be a git URL "
+            "Install a Sidekick profile distribution. SOURCE can be a git URL "
             "(github.com/user/repo, https://..., git@...) or a local "
             "directory containing distribution.yaml at its root."
         ),
@@ -11779,7 +11786,7 @@ Examples:
         action="store_true",
         help=(
             "Expose the in-browser Chat tab (embedded `sidekick --tui` via PTY/WebSocket). "
-            "Alternatively set HERMES_DASHBOARD_TUI=1."
+            "Alternatively set SIDEKICK_DASHBOARD_TUI=1."
         ),
     )
     dashboard_parser.add_argument(
@@ -11942,7 +11949,7 @@ Examples:
 
     # Discover Python plugins and register shell hooks once, before any
     # command that can fire lifecycle hooks.  Both are idempotent; gated
-    # so introspection/management commands (hermes hooks list, cron
+    # so introspection/management commands (sidekick hooks list, cron
     # list, gateway status, mcp add, ...) don't pay discovery cost or
     # trigger consent prompts for hooks the user is still inspecting.
     # Groups with mixed admin/CRUD vs. agent-running entries narrow via

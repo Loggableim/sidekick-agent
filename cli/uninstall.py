@@ -50,7 +50,7 @@ def find_shell_configs() -> list:
 
 
 def remove_path_from_shell_configs():
-    """Remove Hermes PATH entries from shell configuration files."""
+    """Remove Sidekick PATH entries from shell configuration files."""
     configs = find_shell_configs()
     removed_from = []
     
@@ -59,22 +59,22 @@ def remove_path_from_shell_configs():
             content = config_path.read_text()
             original_content = content
             
-            # Remove lines containing hermes-agent or hermes PATH entries
+            # Remove lines containing sidekick-agent or sidekick PATH entries
             new_lines = []
             skip_next = False
             
             for line in content.split('\n'):
                 # Skip the "# Sidekick Agent" comment and following line
-                if '# Sidekick Agent' in line or '# hermes-agent' in line:
+                if '# Sidekick Agent' in line or '# sidekick-agent' in line:
                     skip_next = True
                     continue
-                if skip_next and ('hermes' in line.lower() and 'PATH' in line):
+                if skip_next and ('sidekick' in line.lower() and 'PATH' in line):
                     skip_next = False
                     continue
                 skip_next = False
                 
-                # Remove any PATH line containing hermes
-                if 'hermes' in line.lower() and ('PATH=' in line or 'path=' in line.lower()):
+                # Remove any PATH line containing sidekick
+                if 'sidekick' in line.lower() and ('PATH=' in line or 'path=' in line.lower()):
                     continue
                     
                 new_lines.append(line)
@@ -99,8 +99,8 @@ def remove_wrapper_script():
     """Remove the sidekick wrapper script if it exists."""
     wrapper_paths = [
         Path.home() / ".local" / "bin" / "sidekick",
-        Path.home() / ".local" / "bin" / "hermes",
-        Path("/usr/local/bin/hermes"),
+        Path.home() / ".local" / "bin" / "sidekick",
+        Path("/usr/local/bin/sidekick"),
         Path("/usr/local/bin/sidekick"),
     ]
     
@@ -110,7 +110,7 @@ def remove_wrapper_script():
             try:
                 # Check if it's our wrapper (contains sidekick_cli reference)
                 content = wrapper.read_text()
-                if 'sidekick_cli' in content or 'hermes-agent' in content:
+                if 'sidekick_cli' in content or 'sidekick-agent' in content:
                     wrapper.unlink()
                     removed.append(wrapper)
             except Exception as e:
@@ -237,20 +237,20 @@ def uninstall_gateway_service():
 # The installer (``scripts/install.ps1``) does four Windows-only things that
 # ``remove_path_from_shell_configs`` / ``remove_wrapper_script`` don't cover:
 #
-#   1. Sets User-scope env vars ``HERMES_HOME`` and ``HERMES_GIT_BASH_PATH``
+#   1. Sets User-scope env vars ``SIDEKICK_HOME`` and ``SIDEKICK_GIT_BASH_PATH``
 #      via ``[Environment]::SetEnvironmentVariable(..., "User")``.  These
 #      don't live in ~/.bashrc — they're in the Windows registry at
 #      HKCU\Environment.
 #   2. Prepends to User-scope ``PATH`` (same registry location) entries
-#      like ``%LOCALAPPDATA%\hermes\git\cmd``, ``%LOCALAPPDATA%\hermes\git\bin``,
-#      ``%LOCALAPPDATA%\hermes\git\usr\bin``, ``%LOCALAPPDATA%\hermes\node``.
+#      like ``%LOCALAPPDATA%\sidekick\git\cmd``, ``%LOCALAPPDATA%\sidekick\git\bin``,
+#      ``%LOCALAPPDATA%\sidekick\git\usr\bin``, ``%LOCALAPPDATA%\sidekick\node``.
 #      Again not in any rc file — only accessible via the registry or the
 #      .NET [Environment] API.
-#   3. Downloads PortableGit to ``%LOCALAPPDATA%\hermes\git\`` and Node to
-#      ``%LOCALAPPDATA%\hermes\node\`` as user-scoped, isolated copies.
+#   3. Downloads PortableGit to ``%LOCALAPPDATA%\sidekick\git\`` and Node to
+#      ``%LOCALAPPDATA%\sidekick\node\`` as user-scoped, isolated copies.
 #      These are ~200MB combined and serve no purpose after uninstall.
 #   4. On the ``sidekick dashboard`` + gateway paths, drops files into
-#      ``%LOCALAPPDATA%\hermes\gateway-service\`` and sometimes
+#      ``%LOCALAPPDATA%\sidekick\gateway-service\`` and sometimes
 #      ``%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`` — the
 #      latter is handled by ``gateway_windows.uninstall()`` already.
 #
@@ -262,21 +262,21 @@ def uninstall_gateway_service():
 # or open a new terminal anyway).
 
 
-def _hermes_path_markers(hermes_home: Path) -> list[str]:
-    """Path-entry substrings that identify Hermes-owned User-PATH entries."""
-    root = str(hermes_home).rstrip("\\/")
+def _sidekick_path_markers(sidekick_home: Path) -> list[str]:
+    """Path-entry substrings that identify Sidekick-owned User-PATH entries."""
+    root = str(sidekick_home).rstrip("\\/")
     # Match on prefix so sub-entries (git\cmd, git\bin, git\usr\bin, node, etc.)
-    # all get swept.  Also match the bare hermes-agent install dir.
-    markers = [root + "\\hermes-agent", root + "\\git", root + "\\node", root + "\\venv"]
-    # Also match if HERMES_HOME was customised to somewhere else — find-and-nuke
-    # any entry whose path component contains "hermes".  We don't want to catch
-    # unrelated entries like "chermes-foo" or "ephermeral", so we look for
-    # backslash-hermes as a word-ish boundary.
+    # all get swept.  Also match the bare sidekick-agent install dir.
+    markers = [root + "\\sidekick-agent", root + "\\git", root + "\\node", root + "\\venv"]
+    # Also match if SIDEKICK_HOME was customised to somewhere else — find-and-nuke
+    # any entry whose path component contains "sidekick".  We don't want to catch
+    # unrelated entries like "csidekick-foo" or "ephermeral", so we look for
+    # backslash-sidekick as a word-ish boundary.
     return markers
 
 
-def remove_path_from_windows_registry(hermes_home: Path) -> list[str]:
-    """Strip Hermes-owned entries from User-scope PATH in the registry.
+def remove_path_from_windows_registry(sidekick_home: Path) -> list[str]:
+    """Strip Sidekick-owned entries from User-scope PATH in the registry.
 
     Returns the list of removed path entries.  Operates on HKCU\\Environment,
     same key the installer wrote to via ``[Environment]::SetEnvironmentVariable``.
@@ -297,7 +297,7 @@ def remove_path_from_windows_registry(hermes_home: Path) -> list[str]:
                 return []
             # Preserve REG_EXPAND_SZ vs REG_SZ so unexpanded %VARS% survive.
             entries = [e for e in path_value.split(";") if e]
-            markers = _hermes_path_markers(hermes_home)
+            markers = _sidekick_path_markers(sidekick_home)
             kept: list[str] = []
             for entry in entries:
                 entry_norm = entry.rstrip("\\/")
@@ -314,8 +314,8 @@ def remove_path_from_windows_registry(hermes_home: Path) -> list[str]:
     return removed
 
 
-def remove_hermes_env_vars_windows() -> list[str]:
-    """Delete HERMES_HOME and HERMES_GIT_BASH_PATH from User-scope env vars."""
+def remove_sidekick_env_vars_windows() -> list[str]:
+    """Delete SIDEKICK_HOME and SIDEKICK_GIT_BASH_PATH from User-scope env vars."""
     try:
         import winreg
     except ImportError:
@@ -325,7 +325,7 @@ def remove_hermes_env_vars_windows() -> list[str]:
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment", 0,
                             winreg.KEY_READ | winreg.KEY_WRITE) as key:
-            for name in ("HERMES_HOME", "HERMES_GIT_BASH_PATH"):
+            for name in ("SIDEKICK_HOME", "SIDEKICK_GIT_BASH_PATH"):
                 try:
                     winreg.QueryValueEx(key, name)
                 except FileNotFoundError:
@@ -340,13 +340,13 @@ def remove_hermes_env_vars_windows() -> list[str]:
     return removed
 
 
-def remove_portable_tooling_windows(hermes_home: Path) -> list[Path]:
+def remove_portable_tooling_windows(sidekick_home: Path) -> list[Path]:
     """Delete PortableGit and Node installs the Windows installer created under
-    ``%LOCALAPPDATA%\\hermes\\``.  Only called on full uninstall; they're
+    ``%LOCALAPPDATA%\\sidekick\\``.  Only called on full uninstall; they're
     isolated from any system Git / Node so they cannot break other tools."""
     removed: list[Path] = []
     for sub in ("git", "node", "gateway-service"):
-        target = hermes_home / sub
+        target = sidekick_home / sub
         if target.exists():
             try:
                 shutil.rmtree(target, ignore_errors=False)
@@ -361,11 +361,11 @@ def _is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def _is_default_sidekick_home(hermes_home: Path) -> bool:
-    """Return True when ``hermes_home`` points at the default (non-profile) root."""
+def _is_default_sidekick_home(sidekick_home: Path) -> bool:
+    """Return True when ``sidekick_home`` points at the default (non-profile) root."""
     try:
-        from runtime._compat.shim_constants import get_default_hermes_root
-        return hermes_home.resolve() == get_default_hermes_root().resolve()
+        from runtime._compat.shim_constants import get_default_sidekick_root
+        return sidekick_home.resolve() == get_default_sidekick_root().resolve()
     except Exception:
         return False
 
@@ -387,11 +387,11 @@ def _discover_named_profiles():
 
 def _uninstall_profile(profile) -> None:
     """Fully uninstall a single named profile: stop its gateway service,
-    remove its alias wrapper, and wipe its HERMES_HOME directory.
+    remove its alias wrapper, and wipe its SIDEKICK_HOME directory.
 
     We shell out to ``sidekick -p <name> gateway stop|uninstall`` because
     service names, unit paths, and plist paths are all derived from the
-    current HERMES_HOME and can't be easily switched in-process.
+    current SIDEKICK_HOME and can't be easily switched in-process.
     """
     import sys as _sys
     name = profile.name
@@ -402,11 +402,11 @@ def _uninstall_profile(profile) -> None:
     # 1. Stop and remove this profile's gateway service.
     #    Use `python -m sidekick_cli.main` so we don't depend on a `sidekick`
     #    wrapper that may be half-removed mid-uninstall.
-    hermes_invocation = [_sys.executable, "-m", "sidekick_cli.main", "--profile", name]
+    sidekick_invocation = [_sys.executable, "-m", "sidekick_cli.main", "--profile", name]
     for subcmd in ("stop", "uninstall"):
         try:
             subprocess.run(
-                hermes_invocation + ["gateway", subcmd],
+                sidekick_invocation + ["gateway", subcmd],
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -426,7 +426,7 @@ def _uninstall_profile(profile) -> None:
         except Exception as e:
             log_warn(f"  Could not remove alias {alias_path}: {e}")
 
-    # 3. Wipe the profile's HERMES_HOME directory.
+    # 3. Wipe the profile's SIDEKICK_HOME directory.
     try:
         if profile_home.exists():
             shutil.rmtree(profile_home)
@@ -444,12 +444,12 @@ def run_uninstall(args):
     - Keep data: removes code but keeps ~/.sidekick/ for future reinstall
     """
     project_root = get_project_root()
-    hermes_home = get_sidekick_home()
+    sidekick_home = get_sidekick_home()
 
     # Detect named profiles when uninstalling from the default root —
-    # offer to clean them up too instead of leaving zombie HERMES_HOMEs
+    # offer to clean them up too instead of leaving zombie SIDEKICK_HOMEs
     # and systemd units behind.
-    is_default_profile = _is_default_sidekick_home(hermes_home)
+    is_default_profile = _is_default_sidekick_home(sidekick_home)
     named_profiles = _discover_named_profiles() if is_default_profile else []
 
     print()
@@ -461,9 +461,9 @@ def run_uninstall(args):
     # Show what will be affected
     print(color("Current Installation:", Colors.CYAN, Colors.BOLD))
     print(f"  Code:    {project_root}")
-    print(f"  Config:  {hermes_home / 'config.yaml'}")
-    print(f"  Secrets: {hermes_home / '.env'}")
-    print(f"  Data:    {hermes_home / 'cron/'}, {hermes_home / 'sessions/'}, {hermes_home / 'logs/'}")
+    print(f"  Config:  {sidekick_home / 'config.yaml'}")
+    print(f"  Secrets: {sidekick_home / '.env'}")
+    print(f"  Data:    {sidekick_home / 'cron/'}, {sidekick_home / 'sessions/'}, {sidekick_home / 'logs/'}")
     print()
 
     if named_profiles:
@@ -501,7 +501,7 @@ def run_uninstall(args):
 
     # When doing a full uninstall from the default profile, also offer to
     # remove any named profiles — stopping their gateway services, unlinking
-    # their alias wrappers, and wiping their HERMES_HOME dirs. Otherwise
+    # their alias wrappers, and wiping their SIDEKICK_HOME dirs. Otherwise
     # those leave zombie services and data behind.
     remove_profiles = False
     if full_uninstall and named_profiles:
@@ -570,23 +570,23 @@ def run_uninstall(args):
 
     if _is_windows():
         log_info("Removing PATH entries from Windows User environment...")
-        # Expand %LOCALAPPDATA% etc. in hermes_home so the marker matching is
+        # Expand %LOCALAPPDATA% etc. in sidekick_home so the marker matching is
         # against fully resolved paths — installer writes literal strings
-        # like C:\Users\<u>\AppData\Local\hermes\git\cmd, not %LOCALAPPDATA%.
-        removed_path_entries = remove_path_from_windows_registry(Path(os.path.expandvars(str(hermes_home))))
+        # like C:\Users\<u>\AppData\Local\sidekick\git\cmd, not %LOCALAPPDATA%.
+        removed_path_entries = remove_path_from_windows_registry(Path(os.path.expandvars(str(sidekick_home))))
         if removed_path_entries:
             for entry in removed_path_entries:
                 log_success(f"Removed from User PATH: {entry}")
         else:
-            log_info("No Hermes-owned PATH entries in User environment")
+            log_info("No Sidekick-owned PATH entries in User environment")
 
-        log_info("Removing HERMES_HOME / HERMES_GIT_BASH_PATH User env vars...")
-        removed_env = remove_hermes_env_vars_windows()
+        log_info("Removing SIDEKICK_HOME / SIDEKICK_GIT_BASH_PATH User env vars...")
+        removed_env = remove_sidekick_env_vars_windows()
         if removed_env:
             for name in removed_env:
                 log_success(f"Removed User env var: {name}")
         else:
-            log_info("No Hermes-set User env vars to remove")
+            log_info("No Sidekick-set User env vars to remove")
     
     # 3. Remove wrapper script
     log_info("Removing sidekick command...")
@@ -604,8 +604,8 @@ def run_uninstall(args):
     # We need to be careful here
     try:
         if project_root.exists():
-            # If the install is inside ~/.sidekick/, just remove the hermes-agent subdir
-            if hermes_home in project_root.parents or project_root.parent == hermes_home:
+            # If the install is inside ~/.sidekick/, just remove the sidekick-agent subdir
+            if sidekick_home in project_root.parents or project_root.parent == sidekick_home:
                 shutil.rmtree(project_root)
                 log_success(f"Removed {project_root}")
             else:
@@ -618,13 +618,13 @@ def run_uninstall(args):
 
     # 4b. Remove Windows-only installer artifacts that are NOT user data:
     #     PortableGit, bundled Node, gateway-service dir.  Installer put them
-    #     under HERMES_HOME but they're install tooling, not config — safe to
+    #     under SIDEKICK_HOME but they're install tooling, not config — safe to
     #     remove even in "keep data" mode.  If we're doing a full uninstall
-    #     the step-5 rmtree(hermes_home) would sweep them anyway; calling
+    #     the step-5 rmtree(sidekick_home) would sweep them anyway; calling
     #     this helper there is a no-op since they'll already be gone.
     if _is_windows():
         log_info("Removing Windows installer artifacts (PortableGit, Node, gateway-service)...")
-        removed_artifacts = remove_portable_tooling_windows(hermes_home)
+        removed_artifacts = remove_portable_tooling_windows(sidekick_home)
         if removed_artifacts:
             for path in removed_artifacts:
                 log_success(f"Removed {path}")
@@ -634,7 +634,7 @@ def run_uninstall(args):
     # 5. Optionally remove ~/.sidekick/ data directory (and named profiles)
     if full_uninstall:
         # 5a. Stop and remove each named profile's gateway service and
-        #     alias wrapper. The profile HERMES_HOME dirs live under
+        #     alias wrapper. The profile SIDEKICK_HOME dirs live under
         #     ``<default>/profiles/<name>/`` and will be swept away by the
         #     rmtree below, but services + alias scripts live OUTSIDE the
         #     default root and have to be cleaned up explicitly.
@@ -644,14 +644,14 @@ def run_uninstall(args):
 
         log_info("Removing configuration and data...")
         try:
-            if hermes_home.exists():
-                shutil.rmtree(hermes_home)
-                log_success(f"Removed {hermes_home}")
+            if sidekick_home.exists():
+                shutil.rmtree(sidekick_home)
+                log_success(f"Removed {sidekick_home}")
         except Exception as e:
-            log_warn(f"Could not fully remove {hermes_home}: {e}")
+            log_warn(f"Could not fully remove {sidekick_home}: {e}")
             log_info("You may need to manually remove it")
     else:
-        log_info(f"Keeping configuration and data in {hermes_home}")
+        log_info(f"Keeping configuration and data in {sidekick_home}")
     
     # Done
     print()
@@ -662,13 +662,13 @@ def run_uninstall(args):
     
     if not full_uninstall:
         print(color("Your configuration and data have been preserved:", Colors.CYAN))
-        print(f"  {hermes_home}/")
+        print(f"  {sidekick_home}/")
         print()
         print("To reinstall later with your existing settings:")
         if _is_windows():
-            print(color("  irm https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.ps1 | iex", Colors.DIM))
+            print(color("  irm https://raw.githubusercontent.com/NousResearch/sidekick-agent/main/scripts/install.ps1 | iex", Colors.DIM))
         else:
-            print(color("  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash", Colors.DIM))
+            print(color("  curl -fsSL https://raw.githubusercontent.com/NousResearch/sidekick-agent/main/scripts/install.sh | bash", Colors.DIM))
         print()
 
     if _is_windows():

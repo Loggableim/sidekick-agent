@@ -25,8 +25,8 @@ function _shouldAttachWorkspaceHeader(urlObj) {
 
 function _dashboardSessionToken() {
   try {
-    if (typeof window.__HERMES_SESSION_TOKEN__ === 'string' && window.__HERMES_SESSION_TOKEN__) {
-      return window.__HERMES_SESSION_TOKEN__;
+    if (typeof window.__SIDEKICK_SESSION_TOKEN__ === 'string' && window.__SIDEKICK_SESSION_TOKEN__) {
+      return window.__SIDEKICK_SESSION_TOKEN__;
     }
   } catch (_) {}
   return '';
@@ -36,13 +36,13 @@ function _headersWithWorkspace(existing, urlObj, options={}) {
   const headers = new Headers(existing || {});
   if (options.defaultJson !== false && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   const isDashboardApi = _shouldAttachWorkspaceHeader(urlObj);
-  if (isDashboardApi && !headers.has('X-Hermes-Workspace')) {
+  if (isDashboardApi && !headers.has('X-Sidekick-Workspace')) {
     const slug = _activeWorkspaceSlug();
-    if (slug) headers.set('X-Hermes-Workspace', slug);
+    if (slug) headers.set('X-Sidekick-Workspace', slug);
   }
-  if (isDashboardApi && !headers.has('X-Hermes-Session-Token')) {
+  if (isDashboardApi && !headers.has('X-Sidekick-Session-Token')) {
     const token = _dashboardSessionToken();
-    if (token) headers.set('X-Hermes-Session-Token', token);
+    if (token) headers.set('X-Sidekick-Session-Token', token);
   }
   return headers;
 }
@@ -84,7 +84,7 @@ async function api(path,opts={}){
       if(!res.ok){
         // 401 means the auth session expired. Redirect to login so the user can
         // re-authenticate. This is especially important for iOS PWA (standalone mode)
-        // and for subpath mounts like /hermes/, where /login escapes to the site root.
+        // and for subpath mounts like /sidekick/, where /login escapes to the site root.
         if(res.status===401){
           const hasDashboardToken = !!_dashboardSessionToken();
           const onLoginPage = /\/login\/?$/.test(window.location.pathname);
@@ -125,7 +125,7 @@ async function api(path,opts={}){
             _xhr.open('POST','api/errors/log',true);
             _xhr.setRequestHeader('Content-Type','application/json');
             var _token=_dashboardSessionToken();
-            if(_token)_xhr.setRequestHeader('X-Hermes-Session-Token',_token);
+            if(_token)_xhr.setRequestHeader('X-Sidekick-Session-Token',_token);
             _xhr.send(JSON.stringify({
               type:'api_error',
               message:String(message).slice(0,4000),
@@ -171,6 +171,8 @@ async function _workspaceApiWithTimeout(path, timeoutMs) {
   }
 }
 
+window._workspaceApiWithTimeout = window._workspaceApiWithTimeout || _apiWithTimeout;
+
 function _isCurrentLoadDir(loadRev, sessionId) {
   return loadRev === _loadDirRev && S.session && S.session.session_id === sessionId;
 }
@@ -215,7 +217,8 @@ function flushPendingWorkspaceTreeRefresh(){
   return true;
 }
 
-async function loadDir(path, opts){
+async function loadDir(path){
+  const opts = arguments[1];
   if(!S.session)return;
   const requestedPath = path || '.';
   if (opts && opts.auto && !_workspaceTreeVisibleForAutoRefresh()) {
@@ -287,8 +290,8 @@ async function loadDir(path, opts){
 window.flushPendingWorkspaceTreeRefresh = flushPendingWorkspaceTreeRefresh;
 
 async function _refreshGitBadge(){
-  const badge=$('gitBadge');
-  if(!badge||!S.session)return;
+  const badges=[$('gitBadge'),$('composerGitBadge')].filter(Boolean);
+  if(!badges.length||!S.session)return;
   try{
     const data=await api(`/api/git-info?session_id=${encodeURIComponent(S.session.session_id)}`);
     if(data.git&&data.git.is_git){
@@ -297,14 +300,18 @@ async function _refreshGitBadge(){
       if(g.dirty>0) text+=` \u00b7 ${g.dirty}\u2206`; // middot + delta
       if(g.behind>0) text+=` \u2193${g.behind}`;
       if(g.ahead>0) text+=` \u2191${g.ahead}`;
-      badge.textContent=text;
-      badge.className='git-badge'+(g.dirty>0?' dirty':'');
-      badge.style.display='';
+      badges.forEach(badge=>{
+        badge.textContent=text;
+        badge.className='git-badge'+(g.dirty>0?' dirty':'');
+        badge.style.display='';
+      });
     } else {
-      badge.style.display='none';
-      badge.textContent='';
+      badges.forEach(badge=>{
+        badge.style.display='none';
+        badge.textContent='';
+      });
     }
-  }catch(e){badge.style.display='none';}
+  }catch(e){badges.forEach(badge=>{badge.style.display='none';});}
 }
 
 function navigateUp(){

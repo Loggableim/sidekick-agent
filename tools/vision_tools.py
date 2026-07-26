@@ -38,7 +38,7 @@ from typing import Any, Awaitable, Dict, Optional
 from urllib.parse import urlparse
 import httpx
 from runtime.auxiliary_client import async_call_llm, extract_content_or_reasoning
-from runtime._compat.shim_constants import get_hermes_dir
+from runtime._compat.shim_constants import get_sidekick_dir
 from tools.debug_helpers import DebugSession
 from tools.website_policy import check_website_access
 import sys
@@ -53,7 +53,7 @@ _debug = DebugSession("vision_tools", env_var="VISION_TOOLS_DEBUG")
 def _resolve_download_timeout() -> float:
     env_val = (
         os.getenv("SIDEKICK_VISION_DOWNLOAD_TIMEOUT")
-        or os.getenv("HERMES_VISION_DOWNLOAD_TIMEOUT")
+        or os.getenv("SIDEKICK_VISION_DOWNLOAD_TIMEOUT")
         or ""
     ).strip()
     if env_val:
@@ -575,7 +575,7 @@ async def _vision_analyze_native(
             blocked = check_website_access(image_url)
             if blocked:
                 return tool_error(blocked["message"], success=False)
-            temp_dir = get_hermes_dir("cache/vision", "temp_vision_images")
+            temp_dir = get_sidekick_dir("cache/vision", "temp_vision_images")
             temp_image_path = temp_dir / f"temp_image_{uuid.uuid4()}.jpg"
             await _download_image(image_url, temp_image_path)
             should_cleanup = True
@@ -667,7 +667,7 @@ async def vision_analyze_tool(
         Exception: If download fails, analysis fails, or API key is not set
         
     Note:
-        - For URLs, temporary images are stored under $HERMES_HOME/cache/vision/ and cleaned up
+        - For URLs, temporary images are stored under $SIDEKICK_HOME/cache/vision/ and cleaned up
         - For local file paths, the file is used directly and NOT deleted
         - Supports common image formats (JPEG, PNG, GIF, WebP, etc.)
     """
@@ -717,7 +717,7 @@ async def vision_analyze_tool(
             if blocked:
                 raise PermissionError(blocked["message"])
             logger.info("Downloading image from URL...")
-            temp_dir = get_hermes_dir("cache/vision", "temp_vision_images")
+            temp_dir = get_sidekick_dir("cache/vision", "temp_vision_images")
             temp_image_path = temp_dir / f"temp_image_{uuid.uuid4()}.jpg"
             await _download_image(image_url, temp_image_path)
             should_cleanup = True
@@ -1215,7 +1215,7 @@ async def video_analyze_tool(
             blocked = check_website_access(video_url)
             if blocked:
                 raise PermissionError(blocked["message"])
-            temp_dir = get_hermes_dir("cache/video", "temp_video_files")
+            temp_dir = get_sidekick_dir("cache/video", "temp_video_files")
             temp_video_path = temp_dir / f"temp_video_{uuid.uuid4()}.mp4"
             await _download_video(video_url, temp_video_path)
             should_cleanup = True

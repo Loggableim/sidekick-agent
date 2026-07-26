@@ -23,10 +23,6 @@ def _bootstrap() -> None:
         ("sidekick_logging", "runtime._compat.shim_logging"),
         ("sidekick_bootstrap", "runtime._compat.shim_bootstrap"),
         ("sidekick_time", "runtime._compat.shim_time"),
-        ("hermes_constants", "runtime._compat.shim_constants"),
-        ("hermes_state", "runtime._compat.shim_state"),
-        ("hermes_bootstrap", "runtime._compat.shim_bootstrap"),
-        ("hermes_time", "runtime._compat.shim_time"),
     ]
 
     for alias, target in import_paths:
@@ -42,7 +38,7 @@ def _bootstrap() -> None:
     # (AIAgent, _sidekick_home, get_tool_definitions, etc.). The compat stub
     # in runtime/_compat/run_agent.py re-exports from it, but if we set a lazy
     # empty proxy here, the WebUI crashes with
-    # "module 'run_agent' has no attribute '_hermes_home'" because the proxy
+    # "module 'run_agent' has no attribute '_sidekick_home'" because the proxy
     # is empty. Import the real module directly.
     if "run_agent" not in sys.modules:
         try:

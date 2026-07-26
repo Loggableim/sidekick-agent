@@ -10,8 +10,8 @@ def test_gateway_session_context_exports_helpers():
 
     tokens = set_session_vars(platform="webui-smoke", session_key="test-session")
     try:
-        assert get_session_env("HERMES_SESSION_PLATFORM") == "webui-smoke"
-        assert get_session_env("HERMES_SESSION_KEY") == "test-session"
+        assert get_session_env("SIDEKICK_SESSION_PLATFORM") == "webui-smoke"
+        assert get_session_env("SIDEKICK_SESSION_KEY") == "test-session"
     finally:
         clear_session_vars(tokens)
 

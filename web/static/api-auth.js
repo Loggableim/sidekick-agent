@@ -26,8 +26,8 @@
 
   function dashboardSessionToken() {
     try {
-      if (typeof window.__HERMES_SESSION_TOKEN__ === 'string' && window.__HERMES_SESSION_TOKEN__) {
-        return window.__HERMES_SESSION_TOKEN__;
+      if (typeof window.__SIDEKICK_SESSION_TOKEN__ === 'string' && window.__SIDEKICK_SESSION_TOKEN__) {
+        return window.__SIDEKICK_SESSION_TOKEN__;
       }
     } catch (_) {}
     return '';
@@ -38,13 +38,13 @@
     var isDashboardApi = shouldAttachWorkspaceHeader(urlObj);
     var opts = options || {};
     if (opts.defaultJson && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-    if (isDashboardApi && !headers.has('X-Hermes-Workspace')) {
+    if (isDashboardApi && !headers.has('X-Sidekick-Workspace')) {
       var slug = activeWorkspaceSlug();
-      if (slug) headers.set('X-Hermes-Workspace', slug);
+      if (slug) headers.set('X-Sidekick-Workspace', slug);
     }
-    if (isDashboardApi && !headers.has('X-Hermes-Session-Token')) {
+    if (isDashboardApi && !headers.has('X-Sidekick-Session-Token')) {
       var token = dashboardSessionToken();
-      if (token) headers.set('X-Hermes-Session-Token', token);
+      if (token) headers.set('X-Sidekick-Session-Token', token);
     }
     return headers;
   }

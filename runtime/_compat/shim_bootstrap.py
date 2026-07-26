@@ -2,7 +2,7 @@
 Compat shim — bridges old ``sidekick_bootstrap`` imports to the new bootstrap
 structure.
 
-The original ``sidekick_bootstrap.py`` (in ``cids-hermes-agent/``) provides a
+The original ``sidekick_bootstrap.py`` (in ``cids-sidekick-agent/``) provides a
 Windows UTF-8 bootstrap function that fixes Unicode handling on Windows.
 This shim re-exports that functionality.
 

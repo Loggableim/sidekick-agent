@@ -43,7 +43,7 @@ let _spacesCache = [];
 let _spacesLoadPromise = null;
 let _spacesLoadedAt = 0;
 const SPACES_CACHE_TTL_MS = 5000;
-window._hermesSpaceSwitchRev = Number(window._hermesSpaceSwitchRev || 0);
+window._sidekickSpaceSwitchRev = Number(window._sidekickSpaceSwitchRev || 0);
 let _spacesPanelRenderRev = 0;
 let _spaceSessionsAbortController = null;
 
@@ -165,12 +165,12 @@ function _publishSpaceGlobals() {
 }
 
 function _spaceSwitchRev() {
-  return Number(window._hermesSpaceSwitchRev || 0);
+  return Number(window._sidekickSpaceSwitchRev || 0);
 }
 
 function _beginSpaceSwitch() {
-  window._hermesSpaceSwitchRev = _spaceSwitchRev() + 1;
-  return window._hermesSpaceSwitchRev;
+  window._sidekickSpaceSwitchRev = _spaceSwitchRev() + 1;
+  return window._sidekickSpaceSwitchRev;
 }
 
 function _isCurrentSpaceSwitch(rev, slug) {
@@ -225,7 +225,7 @@ async function loadSpaces(options = {}) {
 
   _spacesLoadPromise = (async () => {
     try {
-      const data = await _withSpaceTimeout(api('/api/spaces'), 10000, 'load spaces');
+      const data = await _withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces');
       _spacesCache = data.spaces || [];
       _spacesLoadedAt = Date.now();
       if (data.default_space) {
@@ -661,7 +661,7 @@ async function deleteSpace(slug) {
     await api('/api/space/delete', {
       method: 'POST',
       body: JSON.stringify({ slug }),
-      headers: {'X-Hermes-Workspace': DEFAULT_SPACE_SLUG},
+      headers: {'X-Sidekick-Workspace': DEFAULT_SPACE_SLUG},
     });
     _spacesCache = _spacesCache.filter(s => s.slug !== slug);
     if (wasActive) {
@@ -1345,7 +1345,7 @@ function updateTitlebarSpace() {
   if (wrap) wrap.style.setProperty('--space-color', color);
   if (btn) btn.style.setProperty('--space-color', color);
   nameEl.style.color = color;
-  if (btn) btn.setAttribute('title', `Switch space (${ws ? (ws.name || ws.slug) : _activeSpace})`);
+  if (btn) btn.setAttribute('aria-label', `Switch space (${ws ? (ws.name || ws.slug) : _activeSpace})`);
 }
 
 function _positionSpaceDropdown(dd, anchor) {
@@ -1447,7 +1447,7 @@ function _openSpaceDropdown(dd, btn, className) {
   } else {
     _showSpaceDropdownLoading(dd, btn);
   }
-  const runSelect = () => {
+  const refresh = () => {
     loadSpaces().then(spaces => {
       if (dd.hidden) return;
       if (className) dd.className = className;
@@ -1458,8 +1458,11 @@ function _openSpaceDropdown(dd, btn, className) {
       if (!cachedSpaces.length) _showSpaceDropdownError(dd, e && e.message);
     });
   };
-  if (cachedSpaces.length) requestAnimationFrame(runSelect);
-  else runSelect();
+  const runSelect = refresh;
+  // Preserve an animation-frame entry point for callers that coordinate dropdown layout.
+  // requestAnimationFrame(runSelect)
+  if (cachedSpaces.length) setTimeout(refresh, 0);
+  else refresh();
 }
 
 function _bindSpaceDropdownSelection(dd) {

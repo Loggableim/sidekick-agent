@@ -17,5 +17,5 @@ if (Test-Path $py) {
     Write-Host "=== Python test ==="
     & $py -c "import fastapi; print('fastapi', fastapi.__version__)"
     & $py -c "import sidekick_app; print('sidekick_app OK')"
-    & $py -c "from web import server; print('web.server OK')"
+    & $py -c "import cli.web_server; print('cli.web_server OK')"
 }

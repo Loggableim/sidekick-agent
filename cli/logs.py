@@ -1,4 +1,4 @@
-"""``sidekick logs`` — view and filter Hermes log files.
+"""``sidekick logs`` — view and filter Sidekick log files.
 
 Supports tailing, following, session filtering, level filtering,
 component filtering, and relative time ranges.  All log files live

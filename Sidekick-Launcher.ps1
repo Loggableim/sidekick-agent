@@ -10,7 +10,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$HomeDir = if ($env:SIDEKICK_HOME) { $env:SIDEKICK_HOME } else { Join-Path $Root "home" }
+$DefaultHome = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Sidekick" } else { Join-Path $HOME ".sidekick" }
+$HomeDir = if ($env:SIDEKICK_HOME) { $env:SIDEKICK_HOME } else { $DefaultHome }
 $LogDir = Join-Path $HomeDir "logs"
 $RunDir = Join-Path $HomeDir "run"
 $PidFile = Join-Path $RunDir "launcher-pids.json"
@@ -139,15 +140,10 @@ function Ensure-PythonRuntime {
 function Set-SidekickEnv {
     param([string]$RepoDir, [string]$PythonExe)
     $env:SIDEKICK_HOME = $HomeDir
-    $env:HERMES_HOME = $HomeDir
     $env:SIDEKICK_WEBUI_PORT = "$Port"
-    $env:HERMES_WEBUI_PORT = "$Port"
     $env:SIDEKICK_WEBUI_STATE_DIR = Join-Path $HomeDir "webui"
-    $env:HERMES_WEBUI_STATE_DIR = $env:SIDEKICK_WEBUI_STATE_DIR
     $env:SIDEKICK_WEBUI_AGENT_DIR = $RepoDir
-    $env:HERMES_WEBUI_AGENT_DIR = $RepoDir
     $env:SIDEKICK_WEBUI_PYTHON = $PythonExe
-    $env:HERMES_WEBUI_PYTHON = $PythonExe
     $env:PYTHONUTF8 = "1"
     $env:PYTHONIOENCODING = "utf-8"
 
@@ -165,7 +161,6 @@ function Set-SidekickEnv {
     foreach ($bash in @((Join-Path $HomeDir "git\bin\bash.exe"), (Join-Path $HomeDir "git\usr\bin\bash.exe"))) {
         if (Test-Path -LiteralPath $bash) {
             $env:SIDEKICK_GIT_BASH_PATH = $bash
-            $env:HERMES_GIT_BASH_PATH = $bash
             break
         }
     }
@@ -241,21 +236,6 @@ function Stop-UntrackedDashboardOnPort {
     }
 }
 
-function Stop-OrphanStdlibBackends {
-    param([string]$Reason = "cleanup")
-    $procs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -and
-        $_.CommandLine -match "python(\.exe)?[`" ]" -and
-        $_.CommandLine -match "\-m\s+web\.server"
-    })
-    foreach ($proc in $procs) {
-        $procId = [int]$proc.ProcessId
-        if ($procId -le 0) { continue }
-        Write-Line "Stopping orphan stdlib backend (PID $procId, $Reason)..." Yellow
-        Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-    }
-}
-
 function Test-DashboardHealth {
     param([int]$TargetPort)
     try {
@@ -311,20 +291,6 @@ function Show-StateSummary {
     Write-Line "spaces     $spacesRoot ($spaceCount)" DarkGray
     Write-Line "state.db   $stateDb (sessions=$sessionCount messages=$messageCount)" DarkGray
 
-    $legacyCandidates = @(
-        "C:\hermesportable\home\state.db",
-        (Join-Path $env:LOCALAPPDATA "hermes\state.db")
-    )
-    $emptyCurrent = (-not (Test-Path -LiteralPath $stateDb)) -or ((Get-Item -LiteralPath $stateDb -ErrorAction SilentlyContinue).Length -le 4096)
-    if ($emptyCurrent) {
-        foreach ($legacyDb in $legacyCandidates) {
-            if ((Test-Path -LiteralPath $legacyDb) -and ((Get-Item -LiteralPath $legacyDb).Length -gt 4096)) {
-                Write-Line "migration  old Hermes state detected: $legacyDb" Yellow
-                Write-Line "migration  run: sidekick repair local-state --from C:\hermesportable\home --to $HomeDir --apply" Yellow
-                break
-            }
-        }
-    }
 }
 
 function Wait-DashboardHealth {
@@ -382,7 +348,6 @@ function Stop-All {
             $pids.Remove($name)
         }
     }
-    Stop-OrphanStdlibBackends "launcher stop"
     Save-Pids $pids
     Write-Line "Stopped tracked Sidekick components." Green
 }
@@ -418,10 +383,8 @@ function Start-All {
     if ($ForceRestart) {
         Stop-All
         Stop-PortProcesses $Port "force restart"
-        Stop-OrphanStdlibBackends "force restart"
     } else {
         Stop-UntrackedDashboardOnPort $Port
-        Stop-OrphanStdlibBackends "pre-start cleanup"
     }
     Stop-PortIfUnhealthy $Port
 

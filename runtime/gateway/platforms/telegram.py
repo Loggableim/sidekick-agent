@@ -13,12 +13,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+try:
+    from telegram.request import HTTPXRequest
+except Exception:  # pragma: no cover - optional dependency guard
+    HTTPXRequest = None  # type: ignore[assignment]
+
 from runtime.gateway.config import PlatformConfig
 from runtime.gateway.platforms.base import (
     BasePlatformAdapter,
     MessageEvent,
     MessageType,
 )
+from shared.paths import sidekick_home
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +40,51 @@ def check_telegram_requirements() -> bool:
         return True
     except ImportError:
         return False
+
+
+def _telegram_tls_verify_source() -> str | None:
+    """Return a concrete CA bundle path for Telegram HTTPX clients."""
+    candidates: list[str] = []
+
+    env_cert = os.getenv("SSL_CERT_FILE", "").strip()
+    if env_cert:
+        candidates.append(env_cert)
+
+    try:
+        import certifi
+
+        candidates.append(certifi.where())
+    except Exception:
+        pass
+
+    try:
+        import ssl
+
+        paths = ssl.get_default_verify_paths()
+        candidates.extend([
+            str(paths.cafile or "").strip(),
+            str(paths.openssl_cafile or "").strip(),
+        ])
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        if candidate and Path(candidate).expanduser().exists():
+            return str(Path(candidate).expanduser())
+    return None
+
+
+def _build_telegram_httpx_request(connection_pool_size: int):
+    if HTTPXRequest is None:
+        raise RuntimeError("telegram.request.HTTPXRequest is unavailable")
+    httpx_kwargs: dict[str, Any] = {}
+    verify_source = _telegram_tls_verify_source()
+    if verify_source:
+        httpx_kwargs["verify"] = verify_source
+    return HTTPXRequest(
+        connection_pool_size=connection_pool_size,
+        httpx_kwargs=httpx_kwargs or None,
+    )
 
 
 class TelegramAdapter(BasePlatformAdapter):
@@ -79,7 +130,13 @@ class TelegramAdapter(BasePlatformAdapter):
             return False
         try:
             from telegram.ext import Application, MessageHandler, filters
-            self._app = Application.builder().token(self._token).build()
+            self._app = (
+                Application.builder()
+                .token(self._token)
+                .request(_build_telegram_httpx_request(connection_pool_size=256))
+                .get_updates_request(_build_telegram_httpx_request(connection_pool_size=1))
+                .build()
+            )
             self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_text))
             self._app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, self._on_voice))
             self._app.add_handler(MessageHandler(filters.COMMAND, self._on_cmd))
@@ -206,19 +263,22 @@ class TelegramAdapter(BasePlatformAdapter):
         return self._whisper_model if self._whisper_model else None
 
     async def _transcribe(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
-        # Local Whisper first — fastest, no codec issues, accepts OGG Opus directly.
-        local_model = self._get_whisper_model()
-        if local_model:
-            text = await self._transcribe_local(audio_bytes, local_model)
-            if text:
-                return text
         if self._fish_audio_key():
             text = await self._transcribe_fish_audio(audio_bytes, mime_type=mime_type)
             if text:
                 return text
         key = os.getenv("GROQ_API_KEY", "")
         if key:
-            return await self._transcribe_groq(audio_bytes, key)
+            text = await self._transcribe_groq(audio_bytes, key)
+            if text:
+                return text
+        # Local Whisper is the fallback when the hosted providers are absent
+        # or could not transcribe the audio.
+        local_model = self._get_whisper_model()
+        if local_model:
+            text = await self._transcribe_local(audio_bytes, local_model)
+            if text:
+                return text
         return None  # no providers left
 
     async def _transcribe_fish_audio(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> Optional[str]:
@@ -276,7 +336,7 @@ class TelegramAdapter(BasePlatformAdapter):
             return None
         try:
             import httpx
-            audio_dir = Path(os.getenv("SIDEKICK_HOME", "C:/sidekick/home")) / "audio_cache"
+            audio_dir = sidekick_home() / "audio_cache"
             audio_dir.mkdir(parents=True, exist_ok=True)
             async with httpx.AsyncClient(timeout=120) as c:
                 r = await c.post(FISH_ENDPOINT,
@@ -372,8 +432,8 @@ class TelegramAdapter(BasePlatformAdapter):
             if value:
                 return value
         for path in (
-            Path(os.getenv("SIDEKICK_HOME", "C:/sidekick/home")) / "auth.json",
-            Path("C:/HermesPortable/home/auth.json"),
+            sidekick_home() / "auth.json",
+            Path("C:/SidekickPortable/home/auth.json"),
         ):
             value = self._read_fish_key_from_auth(path)
             if value:

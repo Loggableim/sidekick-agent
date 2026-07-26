@@ -52,20 +52,46 @@ const _msgEl=document.getElementById('msg');
 if(_msgEl) _msgEl.addEventListener('focus', ()=>{ if('speechSynthesis' in window && speechSynthesis.speaking) speechSynthesis.pause(); });
 if(_msgEl) _msgEl.addEventListener('blur', ()=>{ if('speechSynthesis' in window && speechSynthesis.paused) speechSynthesis.resume(); });
 
-function _gameModeWouldBlockClientModel(model, provider){
+function _gameModeWouldBlockClientModel(model, provider, spaceSlug){
   if(window._gameModeEnabled!==true) return false;
+  if(_gameModeAllowsNovaRemoteFallback(spaceSlug)) return false;
   const p=String(provider||'').trim().toLowerCase();
   const m=String(model||'').trim().toLowerCase();
-  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai']);
+  const localProviders=new Set(['lmstudio','lm-studio','ollama','llamacpp','llama-cpp','vllm','tabby','tabbyapi','koboldcpp','textgen','localai','local-gpu','local-cpu','local-qwen','qwen-local']);
   if(localProviders.has(p)) return true;
   if(p.startsWith('custom:')&&localProviders.has(p.slice(7))) return true;
   return m.startsWith('@ollama:')||m.startsWith('ollama:')||m.includes('@ollama:');
+}
+
+function _gameModeAllowsNovaRemoteFallback(spaceSlug){
+  const slug=String(spaceSlug||'').trim().toLowerCase();
+  if(slug==='nova') return true;
+  const activeSpace=String(typeof _activeSpace!=='undefined'&&_activeSpace ? _activeSpace : '').trim().toLowerCase();
+  if(slug&&activeSpace&&slug!==activeSpace) return false;
+  const cfg=window._activeSpaceConfig;
+  return !!(cfg&&typeof cfg==='object'&&cfg.nova&&typeof cfg.nova==='object'&&cfg.nova.enabled);
 }
 
 function _showGameModeClientBlock(){
   const msg=(typeof t==='function')?t('game_mode_on'):'Game Mode: local GPU blocked';
   setComposerStatus(msg);
   if(typeof showToast==='function') showToast(msg,5000,'warning');
+}
+
+function _currentComposerModelState(){
+  const sel=$('modelSelect');
+  const selectedModel=String((sel&&sel.value)||(S.session&&S.session.model)||'').trim();
+  const fallbackProvider=S.session&&S.session.model_provider ? String(S.session.model_provider).trim() : null;
+  if(typeof _modelStateForSelect==='function'){
+    const state=_modelStateForSelect(sel,selectedModel);
+    if(state&&typeof state==='object'){
+      return {
+        model:String(state.model||selectedModel||'').trim(),
+        model_provider:state.model_provider ? String(state.model_provider).trim() : fallbackProvider,
+      };
+    }
+  }
+  return {model:selectedModel, model_provider:fallbackProvider};
 }
 
 let _isSendingChat=false;
@@ -94,6 +120,8 @@ async function send(){
   if(!text&&!S.pendingFiles.length)return;
   // Don't send while an inline message edit is active
   if(document.querySelector('.msg-edit-area'))return;
+
+  const selectedModelState=_currentComposerModelState();
 
   // Dismiss handoff hint when user sends a message (resets seen_at).
   if(S.session&&S.session.session_id&&typeof _dismissHandoffHint==='function'){
@@ -138,7 +166,7 @@ async function send(){
         S.pendingFiles=[];renderTray();
       } else if(busyMode==='interrupt'){
         // Queue the message, then cancel so drain re-sends it.
-        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:selectedModelState.model,model_provider:selectedModelState.model_provider,profile:S.activeProfile||'default'});
         updateQueueBadge(S.session.session_id);
         $('msg').value='';autoResize();_collapseExpandIfOpen();
         S.pendingFiles=[];renderTray();
@@ -151,7 +179,7 @@ async function send(){
       } else {
         // Default: queue mode (current behavior). Also the fallback for
         // 'steer' mode when no stream is active or _trySteer is unavailable.
-        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:selectedModelState.model,model_provider:selectedModelState.model_provider,profile:S.activeProfile||'default'});
         $('msg').value='';autoResize();_collapseExpandIfOpen();
         S.pendingFiles=[];renderTray();
         updateQueueBadge(S.session.session_id);
@@ -244,9 +272,12 @@ async function send(){
   if(uploaded.length&&!msgText)msgText=`I've uploaded ${uploaded.length} file(s): ${uploadedPaths.join(', ')}`;
   else if(uploaded.length)msgText=`${text}\n\n[Attached files: ${uploadedPaths.join(', ')}]`;
   if(!msgText){setComposerStatus('Nothing to send');return;}
-  const selectedModel=S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'';
-  const selectedProvider=S.session&&S.session.model_provider||null;
-  if(_gameModeWouldBlockClientModel(selectedModel,selectedProvider)){
+  const selectedWorkspaceSlug=String(
+    (S.session&&(S.session.workspace_slug||S.session.space_slug||S.session.space))||
+    (typeof _activeSpace!=='undefined'&&_activeSpace)||
+    ''
+  ).trim().toLowerCase();
+  if(_gameModeWouldBlockClientModel(selectedModelState.model,selectedModelState.model_provider,selectedWorkspaceSlug)){
     _showGameModeClientBlock();
     return;
   }
@@ -314,8 +345,10 @@ async function send(){
   try{
     const startData=await api('/api/chat/start',{method:'POST',body:JSON.stringify({
       session_id:activeSid,message:msgText,
-      model:S.session.model||$('modelSelect').value,workspace:S.session.workspace,
-      model_provider:S.session.model_provider||null,
+      model:selectedModelState.model,workspace:S.session.workspace,
+      workspace_slug:selectedWorkspaceSlug,
+      space_slug:selectedWorkspaceSlug,
+      model_provider:selectedModelState.model_provider,
       profile:S.activeProfile||S.session.profile||'default',
       mode: window._composerMode||'action',
       chat_mode: S.mode||'chat',
@@ -400,7 +433,7 @@ async function send(){
       stopApprovalPolling();
       stopClarifyPolling();
       // Keep the user's attempted turn by queueing it for after the current run.
-      queueSessionMessage(activeSid,{text:msgText,files:[],model:S.session&&S.session.model||($('modelSelect')&&$('modelSelect').value)||'',model_provider:S.session&&S.session.model_provider||null,profile:S.activeProfile||'default'});
+      queueSessionMessage(activeSid,{text:msgText,files:[],model:selectedModelState.model,model_provider:selectedModelState.model_provider,profile:S.activeProfile||'default'});
       updateQueueBadge(activeSid);
       if(conflictStreamId&&S.session&&S.session.session_id===activeSid){
         S.activeStreamId=conflictStreamId;
@@ -792,6 +825,52 @@ async function _syncGoalStateFromServer(){
   }
 }
 
+function _goalBudgetLabel(value){
+  if(value===null||value===undefined||value==='') return '∞';
+  const n=Number(value);
+  return Number.isFinite(n)&&n>0 ? String(n) : '∞';
+}
+
+function _goalBudgetControls(){
+  return {
+    input:$('goalTurnBudgetInput'),
+    unlimited:$('goalUnlimitedBtn'),
+    wrap:$('goalBudgetControl'),
+  };
+}
+
+function _syncGoalBudgetUI(isUnlimited){
+  const {input, unlimited, wrap}=_goalBudgetControls();
+  if(!input||!unlimited) return;
+  const active=!!isUnlimited;
+  input.disabled=active;
+  unlimited.classList.toggle('active', active);
+  unlimited.setAttribute('aria-pressed', active?'true':'false');
+  if(wrap)wrap.classList.toggle('is-unlimited', active);
+}
+
+function _setGoalBudgetDefaults(){
+  const {input}=_goalBudgetControls();
+  if(input) input.value='20';
+  _syncGoalBudgetUI(false);
+}
+
+function _readGoalBudgetSelection(){
+  const {input, unlimited}=_goalBudgetControls();
+  const isUnlimited=!!(unlimited&&unlimited.classList.contains('active'));
+  if(isUnlimited) return {unlimited:true, max_turns:null};
+  const raw=input?parseInt(String(input.value||'').trim(),10):NaN;
+  const maxTurns=Number.isFinite(raw)&&raw>0?raw:20;
+  if(input) input.value=String(maxTurns);
+  return {unlimited:false, max_turns:maxTurns};
+}
+
+function _toggleGoalBudgetUnlimited(){
+  const {unlimited}=_goalBudgetControls();
+  const next=!(unlimited&&unlimited.classList.contains('active'));
+  _syncGoalBudgetUI(next);
+}
+
 function _renderGoalBanner(){
   const banner=$('goalBanner');
   const icon=$('goalBannerIcon');
@@ -835,8 +914,7 @@ function _renderGoalBanner(){
   else {icon.textContent='⊙';}
   text.textContent=gs.goal.length>90?gs.goal.slice(0,87)+'…':gs.goal;
   const tu=typeof gs.turns_used==='number'?gs.turns_used:0;
-  const mt=typeof gs.max_turns==='number'?gs.max_turns:20;
-  turns.textContent='('+tu+'/'+mt+')';
+  turns.textContent='('+tu+'/'+_goalBudgetLabel(gs.max_turns)+')';
   pauseBtn.style.display=(status==='active')?'':'none';
   resumeBtn.style.display=(status==='paused')?'':'none';
   clearBtn.style.display='';
@@ -856,7 +934,9 @@ function _updateGoalState(state){
     goal:String(state.goal||'').trim(),
     status:String(state.status||'').trim(),
     turns_used:typeof state.turns_used==='number'?state.turns_used:0,
-    max_turns:typeof state.max_turns==='number'?state.max_turns:20,
+    max_turns:state.max_turns===null||state.max_turns===undefined
+      ? null
+      : (Number.isFinite(Number(state.max_turns))&&Number(state.max_turns)>0 ? Number(state.max_turns) : null),
     last_verdict:state.last_verdict||null,
     last_reason:state.last_reason||null,
     paused_reason:state.paused_reason||null,
@@ -893,10 +973,12 @@ function _toggleGoalMode(){
     box.classList.remove('goal-mode');
     if(input)input.value='';
     if(toggle)toggle.classList.remove('active');
+    _setGoalBudgetDefaults();
     $('msg').focus();
   }else{
     box.classList.add('goal-mode');
     if(toggle)toggle.classList.add('active');
+    _setGoalBudgetDefaults();
     if(input){input.value='';input.focus();}
   }
 }
@@ -909,6 +991,7 @@ function _exitGoalMode(){
   if(toggle)toggle.classList.remove('active');
   const input=$('goalInputField');
   if(input)input.value='';
+  _setGoalBudgetDefaults();
   $('msg').focus();
 }
 
@@ -917,11 +1000,12 @@ function _submitGoal(){
   if(!input)return;
   const text=input.value.trim();
   if(!text){showToast('Please enter a goal description.',2000);input.focus();return;}
+  const budget=_readGoalBudgetSelection();
   _exitGoalMode();
   showToast('🎯 Setting goal…',1500);
   // Small delay so the UI state transition settles
   setTimeout(function(){
-    if(typeof cmdGoal==='function')cmdGoal(text);
+    if(typeof cmdGoal==='function')cmdGoal({text, ...budget});
     else showToast('Goal command not available — try /goal '+text,3000);
   },100);
 }
@@ -1002,9 +1086,6 @@ function _togglePlanMode(){
     window._planMode=nextMode==='plan';
   }
   _renderPlanBanner();
-  // Toggle-Button visuell updaten
-  const btn=document.querySelector('.plan-mode-toggle');
-  if(btn)btn.classList.toggle('active',window._planMode);
   const box=$('composerBox');
   if(box)box.classList.toggle('plan-mode',window._planMode);
   if(typeof setComposerMode!=='function'){
@@ -2245,10 +2326,11 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
         const txt=String(d.text||'').trim();
         if(!txt||sid!==activeSid) return;
         if(typeof queueSessionMessage==='function'){
+          const composerModelState=_currentComposerModelState();
           queueSessionMessage(sid,{
             text:txt,files:[],
-            model:S.session&&S.session.model||'',
-            model_provider:S.session&&S.session.model_provider||null,
+            model:composerModelState.model,
+            model_provider:composerModelState.model_provider,
             profile:S.activeProfile||'default',
           });
           if(typeof updateQueueBadge==='function') updateQueueBadge(sid);
@@ -2681,6 +2763,51 @@ document.addEventListener('keydown',function(e){
 //   • Session switch: state resets — loadSession() clears _yoloEnabled and
 //     fetches the new session's state.
 let _yoloEnabled = false;
+
+// Nova YOLO is deliberately independent from the current chat session's YOLO
+// flag. It is a persisted autonomy override consumed by Nova's Entity Kernel.
+let _novaYoloEnabled = false;
+
+function _updateNovaYoloButton() {
+  const button = $('btnNovaYoloToggle');
+  if (!button) return;
+  button.classList.toggle('active', _novaYoloEnabled);
+  button.setAttribute('aria-pressed', _novaYoloEnabled ? 'true' : 'false');
+  button.setAttribute('aria-label', _novaYoloEnabled ? 'Nova YOLO autonomy active' : 'Enable Nova YOLO autonomy');
+  button.title = _novaYoloEnabled ? 'Nova YOLO active: policy and boundaries are bypassed' : 'Enable Nova YOLO autonomy';
+}
+
+async function fetchNovaYoloMode() {
+  try {
+    const data = await api('/api/nova/yolo');
+    _novaYoloEnabled = !!data.enabled;
+    _updateNovaYoloButton();
+    return _novaYoloEnabled;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function toggleNovaYoloMode() {
+  const enabled = !_novaYoloEnabled;
+  try {
+    const data = await api('/api/nova/yolo', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    });
+    _novaYoloEnabled = !!data.enabled;
+    _updateNovaYoloButton();
+    showToast(_novaYoloEnabled ? 'Nova YOLO autonomy enabled' : 'Nova YOLO autonomy disabled');
+  } catch (error) {
+    showToast('Nova YOLO: ' + (error && error.message ? error.message : 'update failed'));
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => { void fetchNovaYoloMode(); }, { once: true });
+} else {
+  void fetchNovaYoloMode();
+}
 
 async function _fetchYoloState(sid) {
   try {
