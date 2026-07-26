@@ -401,6 +401,7 @@ def _payload(
     action: str,
     message: str,
     state: Any = None,
+    session_id: str = "",
     space_slug: str | None = None,
     error: str | None = None,
     kickoff_prompt: str | None = None,
@@ -412,7 +413,7 @@ def _payload(
         "ok": bool(ok),
         "action": action,
         "message": message,
-        "goal": _state_payload(state, space_slug=space_slug),
+        "goal": _state_payload(state, session_id=session_id, space_slug=space_slug),
     }
     if error:
         body["error"] = error
@@ -612,7 +613,8 @@ def goal_command_payload(
     Mirrors the gateway command semantics:
     - /goal or /goal status shows status
     - /goal pause pauses
-    - /goal resume resumes without auto-starting a turn
+    - /goal resume resumes and can return a kickoff_prompt so the caller can
+      continue immediately when the session is idle
     - /goal clear|stop|done clears
     - /goal <text> sets a new active goal and returns kickoff_prompt so the
       caller can start the first normal user-role turn immediately.
@@ -623,7 +625,7 @@ def goal_command_payload(
 
     mgr = _manager(sid, profile_home=profile_home, space_slug=space_slug)
     if mgr is None:
-        return _payload(ok=False, action="error", error="unavailable", message="Goals unavailable on this session.", space_slug=space_slug)
+        return _payload(ok=False, action="error", error="unavailable", message="Goals unavailable on this session.", session_id=sid, space_slug=space_slug)
 
     text = str(args or "").strip()
     lower = text.lower()
@@ -633,7 +635,7 @@ def goal_command_payload(
         status_payload = _goal_status_payload(state)
         state_status = str(getattr(state, "status", "") or "").strip()
         visible_state = None if state_status == "cleared" else state
-        return _payload(action="status", state=visible_state, space_slug=space_slug, **status_payload)
+        return _payload(action="status", state=visible_state, session_id=sid, space_slug=space_slug, **status_payload)
 
     if lower == "pause":
         state = mgr.pause(reason="user-paused")
@@ -644,6 +646,7 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal set.",
                 message_key="goal_no_goal",
+                session_id=sid,
                 space_slug=space_slug,
             )
         return _payload(
@@ -652,6 +655,7 @@ def goal_command_payload(
             message_key="goal_paused",
             message_args=[str(state.goal)],
             state=state,
+            session_id=sid,
             space_slug=space_slug,
         )
 
@@ -664,6 +668,7 @@ def goal_command_payload(
                 error="no_goal",
                 message="No goal to resume.",
                 message_key="goal_no_goal",
+                session_id=sid,
                 space_slug=space_slug,
             )
         if str(getattr(state, "status", "") or "").strip() != "active":
@@ -674,17 +679,21 @@ def goal_command_payload(
                 message_key=status_payload.get("message_key"),
                 message_args=status_payload.get("message_args"),
                 state=state,
+                session_id=sid,
                 space_slug=space_slug,
             )
+        kickoff_prompt = None if stream_running else mgr.next_continuation_prompt()
         return _payload(
             action="resume",
             message=(
                 f"▶ Goal resumed: {state.goal}\n"
-                "Send a new message, or type continue, to kick it off."
+                "Continuing now."
             ),
             message_key="goal_resumed",
             message_args=[str(state.goal)],
             state=state,
+            session_id=sid,
+            kickoff_prompt=kickoff_prompt,
             space_slug=space_slug,
         )
 
@@ -696,6 +705,7 @@ def goal_command_payload(
             message="Goal cleared." if had else "No active goal.",
             message_key="goal_cleared" if had else "goal_no_goal",
             state=getattr(mgr, "state", None),
+            session_id=sid,
             space_slug=space_slug,
         )
 
@@ -708,13 +718,14 @@ def goal_command_payload(
                 "Agent is running — use /goal status / pause / clear mid-run, "
                 "or /stop before setting a new goal."
             ),
+            session_id=sid,
             space_slug=space_slug,
         )
 
     try:
         state = mgr.set(text, max_turns=max_turns, unlimited=unlimited)
     except ValueError as exc:
-        return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}", space_slug=space_slug)
+        return _payload(ok=False, action="set", error="invalid_goal", message=f"Invalid goal: {exc}", session_id=sid, space_slug=space_slug)
 
     budget_label = "unlimited runs" if getattr(state, "max_turns", None) is None else f"{state.max_turns} runs"
     followup = (
@@ -731,6 +742,7 @@ def goal_command_payload(
             "Controls: /goal status · /goal pause · /goal resume · /goal clear"
         ),
         state=state,
+        session_id=sid,
         kickoff_prompt=state.goal,
         space_slug=space_slug,
     )

@@ -129,6 +129,77 @@ def _webui_browser_enabled(*, require_control: bool) -> bool:
     return bool(session_id and base_url)
 
 
+def _webui_browser_agent_context_hint(
+    base_url: str,
+    session_id: str,
+    *,
+    include_recommended: bool = True,
+    include_control_recommended: bool = False,
+) -> str:
+    try:
+        response = requests.get(
+            f"{base_url}/api/browser/agent-context",
+            params={"session_id": session_id},
+            timeout=8,
+        )
+        data = response.json()
+        context = data.get("context") if isinstance(data, dict) else {}
+        if not isinstance(context, dict):
+            return ""
+        permission = context.get("permission") if isinstance(context.get("permission"), dict) else {}
+        recommended = str(context.get("recommended_action") or "").strip()
+        control_recommended = str(context.get("control_recommended_action") or "").strip()
+        blocked = context.get("blocked_reasons") if isinstance(context.get("blocked_reasons"), list) else []
+        blocked_text = ", ".join(str(item) for item in blocked[:4] if str(item or "").strip())
+        parts = []
+        if include_recommended and recommended:
+            parts.append(f"recommended_action={recommended}")
+        if include_control_recommended and control_recommended:
+            parts.append(f"control_recommended_action={control_recommended}")
+        if permission:
+            parts.append(f"permission_mode={permission.get('mode') or 'none'}")
+            parts.append(f"can_watch={bool(permission.get('can_watch'))}")
+            parts.append(f"can_control={bool(permission.get('can_control'))}")
+        if blocked_text:
+            parts.append(f"blocked={blocked_text}")
+        return "; ".join(parts)
+    except Exception:
+        return ""
+
+
+def _webui_browser_error_text(data: Any, *, base_url: str, session_id: str) -> str:
+    if not isinstance(data, dict):
+        return str(data)
+    message = data.get("error") or json.dumps(data, ensure_ascii=False)
+    if data.get("code") == "browser_permission_required":
+        required = str(data.get("required_mode") or "").strip()
+        suggested = str(data.get("suggested_action") or "").strip()
+        steps = data.get("permission_steps") if isinstance(data.get("permission_steps"), list) else []
+        step_labels = data.get("permission_step_labels") if isinstance(data.get("permission_step_labels"), list) else []
+        permission = data.get("permission") if isinstance(data.get("permission"), dict) else {}
+        hint = _webui_browser_agent_context_hint(
+            base_url,
+            session_id,
+            include_recommended=not bool(suggested),
+            include_control_recommended=required == "control",
+        )
+        details = []
+        if required:
+            details.append(f"required_mode={required}")
+        if suggested:
+            details.append(f"suggested_action={suggested}")
+        label_values = [str(step) for step in (step_labels or steps) if str(step or "").strip()]
+        if label_values:
+            details.append("permission_steps=" + " -> ".join(label_values))
+        if permission:
+            details.append(f"current_mode={permission.get('mode') or 'none'}")
+        if hint:
+            details.append(hint)
+        if details:
+            message = f"{message} ({'; '.join(details)})"
+    return str(message)
+
+
 def _webui_browser_post(action: str, payload: Optional[dict] = None, *, require_control: bool = True) -> Optional[str]:
     if not _webui_browser_enabled(require_control=require_control):
         return None
@@ -144,7 +215,7 @@ def _webui_browser_post(action: str, payload: Optional[dict] = None, *, require_
     except Exception as exc:
         return f"WebUI browser bridge failed: {exc}"
     if not response.ok or data.get("ok") is False:
-        return data.get("error") or json.dumps(data, ensure_ascii=False)
+        return _webui_browser_error_text(data, base_url=base_url, session_id=session_id)
     return data.get("text") or json.dumps(data.get("state") or data, ensure_ascii=False)
 
 
@@ -152,18 +223,21 @@ def _webui_browser_action_post(payload: Optional[dict] = None, *, require_contro
     if not _webui_browser_enabled(require_control=require_control):
         return None
     session_id, base_url, token = _webui_browser_context()
-    body = {"session_id": session_id}
+    payload = dict(payload or {})
+    body = {
+        "session_id": session_id,
+        "action": str(payload.get("action") or payload.get("name") or payload.get("type") or "action_v1"),
+    }
     if token:
         body["permission_token"] = token
-    if payload:
-        body.update(payload)
+    body.update(payload)
     try:
-        response = requests.post(f"{base_url}/api/browser/action", json=body, timeout=max(_get_command_timeout(), 30))
+        response = requests.post(f"{base_url}/api/browser/agent-control", json=body, timeout=max(_get_command_timeout(), 30))
         data = response.json()
     except Exception as exc:
         return f"WebUI browser bridge failed: {exc}"
     if not response.ok or data.get("ok") is False:
-        return data.get("error") or json.dumps(data, ensure_ascii=False)
+        return _webui_browser_error_text(data, base_url=base_url, session_id=session_id)
     return json.dumps(data, ensure_ascii=False)
 
 

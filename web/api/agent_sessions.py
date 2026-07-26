@@ -583,6 +583,8 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
         elif 'role' in message_cols:
             sql = """
@@ -601,6 +603,8 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
         elif 'timestamp' in message_cols:
             sql = """
@@ -619,6 +623,8 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
         else:
             sql = """
@@ -637,11 +643,12 @@ def read_importable_agent_session_rows(
                 FROM sessions s
                 LEFT JOIN message_stats ms ON ms.session_id = s.id
                 WHERE s.source IS NOT NULL
+                  AND s.source NOT IN (SELECT value FROM json_each(?))
+                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC
             """
-        if exclude_clause:
-            sql += "\n                " + exclude_clause
-        sql += "\n                ORDER BY COALESCE(ms.last_activity, s.started_at) DESC"
 
+        if not normalized_excludes:
+            sql = sql.replace("AND s.source NOT IN (SELECT value FROM json_each(?))", "")
         cur.execute(sql, params)
         return _finalize([
             _with_session_defaults(dict(row), session_cols) for row in cur.fetchall()

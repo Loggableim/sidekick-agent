@@ -2631,6 +2631,21 @@ function workflowHeaderMenuSearchKeydown(event){
   }
 }
 
+function _workflowHeaderStatusSummaryText(){
+  const badge=$('workflowStatusBadge');
+  return String((badge&&badge.getAttribute('aria-label'))||'Workflow status overview').trim();
+}
+
+function _workflowSetHeaderMenuSummary(summaryText){
+  const summary=$('workflowHeaderMenuSummary');
+  if(!summary) return;
+  const label=String(summaryText||'Workflow status overview').trim();
+  summary.textContent=label;
+  summary.title=label;
+  summary.setAttribute('aria-label',label);
+  summary.dataset.tooltip=label;
+}
+
 function syncWorkflowChip(){
   const badge=$('workflowStatusBadge');
   const value=$('workflowStatusValue');
@@ -2662,6 +2677,7 @@ function syncWorkflowChip(){
   const label='Workflow: approval '+approval+', reasoning '+reasoning+', '+researchLabel+', '+_workflowMcpLabel(mcp)+', '+webBackend.label+', '+reviewLabel+', '+subagents+', model '+model+', browser '+browser+'. Click to show workflow status. Cmd/Ctrl+K opens the palette.';
   badge.removeAttribute('title');
   badge.setAttribute('aria-label',label);
+  _workflowSetHeaderMenuSummary(_workflowHeaderStatusSummaryText());
   workflowRefreshMcpBadge();
   workflowRefreshSubagentBadge();
   workflowRefreshResearchBadge();

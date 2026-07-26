@@ -23,6 +23,7 @@ from web.api.config import (
 from web.api.workspace import get_last_workspace
 from web.api.agent_sessions import (
     _is_continuation_session,
+    read_importable_agent_session_rows as _read_importable_agent_session_rows,
     _with_normalized_source,
     _with_session_defaults,
     read_importable_agent_session_rows,
@@ -31,6 +32,47 @@ from web.api.agent_sessions import (
 
 logger = logging.getLogger(__name__)
 CLI_VISIBLE_SESSION_LIMIT = 20
+_CLI_BRIDGE_CACHE_TTL_SECONDS = 15.0
+_CLI_AGENT_ROWS_CACHE: dict[tuple[str, int, str], tuple[float, list[dict]]] = {}
+_CLI_STATE_SESSIONS_CACHE: dict[tuple[str, str, str, float], tuple[float, list[dict]]] = {}
+_CLAUDE_CODE_SESSIONS_CACHE: dict[tuple[str, int, int], tuple[float, list[dict]]] = {}
+_DELETED_SESSION_IDS: set[str] = set()
+_DELETED_SESSION_IDS_LOCK = threading.Lock()
+
+
+def _mark_session_deleted(session_id: str) -> None:
+    if not session_id:
+        return
+    with _DELETED_SESSION_IDS_LOCK:
+        _DELETED_SESSION_IDS.add(session_id)
+
+
+def _is_session_deleted(session_id: str) -> bool:
+    if not session_id:
+        return False
+    with _DELETED_SESSION_IDS_LOCK:
+        return session_id in _DELETED_SESSION_IDS
+
+
+def read_importable_agent_session_rows(db_path, limit=CLI_VISIBLE_SESSION_LIMIT, log=None, exclude_sources=None):
+    """Cached wrapper for the CLI bridge scanner used by WebUI sidebar/detail paths."""
+    key = (
+        str(Path(db_path).expanduser().resolve()),
+        int(limit or 0),
+        ",".join(sorted(str(s) for s in (exclude_sources or []))),
+    )
+    now = time.time()
+    cached = _CLI_AGENT_ROWS_CACHE.get(key)
+    if cached and now - cached[0] < _CLI_BRIDGE_CACHE_TTL_SECONDS:
+      return [dict(row) for row in cached[1]]
+    rows = list(_read_importable_agent_session_rows(
+        db_path,
+        limit=limit,
+        log=log,
+        exclude_sources=exclude_sources,
+    ))
+    _CLI_AGENT_ROWS_CACHE[key] = (time.time(), [dict(row) for row in rows])
+    return rows
 
 
 def _session_index_file() -> Path:
@@ -348,6 +390,130 @@ def _read_metadata_json_prefix(path, max_prefix_bytes=65536):
     return None
 
 
+def _session_json_path_for_read(sid):
+    """Return the JSON file path for a session id without loading the session."""
+    if not sid or not all(c in '0123456789abcdefghijklmnopqrstuvwxyz_' for c in str(sid)):
+        return None
+    p = get_session_dir() / f'{sid}.json'
+    if p.exists():
+        return p
+    try:
+        from web.api.space_engine import get_all_workspaces as _gaw
+        for _ws in _gaw():
+            _ws_p = _ws.sessions_dir / f'{sid}.json'
+            if _ws_p.exists():
+                return _ws_p
+    except Exception:
+        pass
+    return None
+
+
+def _json_top_level_array_bounds(text, key):
+    key_pos = _find_top_level_json_key(text, key)
+    if key_pos is None:
+        return None
+    colon = text.find(':', key_pos)
+    if colon < 0:
+        return None
+    i = colon + 1
+    n = len(text)
+    while i < n and text[i].isspace():
+        i += 1
+    if i >= n or text[i] != '[':
+        return None
+    in_string = False
+    escape = False
+    depth = 0
+    for j in range(i, n):
+        ch = text[j]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == '[':
+            depth += 1
+        elif ch == ']':
+            depth -= 1
+            if depth == 0:
+                return i, j
+    return None
+
+
+def _json_array_object_spans(text, array_start, array_end):
+    spans = []
+    in_string = False
+    escape = False
+    depth = 0
+    start = None
+    i = array_start + 1
+    while i < array_end:
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            i += 1
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in '{[':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch in '}]':
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start is not None:
+                    spans.append((start, i + 1))
+                    start = None
+        i += 1
+    return spans
+
+
+def load_session_message_window(sid, limit=None, before=None):
+    """Load only a message window from a persisted WebUI JSON session.
+
+    Returns ``(messages, total_count, offset)``. The function scans the JSON
+    text to find top-level message object spans, then decodes only the requested
+    objects. It intentionally avoids parsing the full session object and legacy
+    session-level tool_calls on the hot conversation-switch path.
+    """
+    p = _session_json_path_for_read(sid)
+    if not p:
+        return None
+    try:
+        text = p.read_text(encoding='utf-8')
+        bounds = _json_top_level_array_bounds(text, 'messages')
+        if not bounds:
+            return None
+        spans = _json_array_object_spans(text, bounds[0], bounds[1])
+        total = len(spans)
+        if before is not None:
+            before_idx = max(0, min(int(before), total))
+            candidates = spans[:before_idx]
+        else:
+            candidates = spans
+        if limit is not None:
+            try:
+                limit = max(1, int(limit))
+            except (TypeError, ValueError):
+                limit = None
+        selected = candidates[-limit:] if limit else candidates
+        offset = (before_idx - len(selected)) if before is not None else (total - len(selected))
+        messages = [json.loads(text[start:end]) for start, end in selected]
+        return messages, total, max(0, offset)
+    except Exception:
+        logger.debug("load_session_message_window failed for %s", sid, exc_info=True)
+        return None
 @lru_cache(maxsize=8)
 def _read_index_entries_cached(index_path: str, mtime_ns: int, size: int) -> tuple[dict, ...]:
     """Return frozen session-index rows for the given file snapshot."""
@@ -550,6 +716,9 @@ class Session:
             pass
 
     def save(self, touch_updated_at: bool = True, skip_index: bool = False) -> None:
+        if _is_session_deleted(self.session_id):
+            logger.debug("Ignoring save for deleted session %s", self.session_id)
+            return
         # ── #1558 P0 guard ──────────────────────────────────────────────
         # Refuse to save a session that was loaded with metadata_only=True.
         # Such sessions have messages=[] (it's the whole point of the partial
@@ -696,6 +865,8 @@ class Session:
         # Validate session ID format to prevent path traversal
         if not sid or not all(c in '0123456789abcdefghijklmnopqrstuvwxyz_' for c in sid):
             return None
+        if _is_session_deleted(sid):
+            return None
         p = get_session_dir() / f'{sid}.json'
         if not p.exists():
             # Fallback: search across workspace directories for sessions that
@@ -723,6 +894,8 @@ class Session:
         Falls back to load() for legacy or unexpected file layouts.
         """
         if not sid or not all(c in '0123456789abcdefghijklmnopqrstuvwxyz_' for c in sid):
+            return None
+        if _is_session_deleted(sid):
             return None
         p = get_session_dir() / f'{sid}.json'
         if not p.exists():
@@ -1089,6 +1262,8 @@ def get_session(sid, metadata_only=False):
     messages list. Use this when you only need compact() metadata and not the
     actual message history (e.g., for fast sidebar switching).
     """
+    if _is_session_deleted(sid):
+        raise KeyError(sid)
     with LOCK:
         if sid in SESSIONS:
             SESSIONS.move_to_end(sid)  # LRU: mark as recently used
@@ -1253,6 +1428,11 @@ def _diag_stage(diag, name: str) -> None:
 _SESSION_LIST_CACHE = {}  # session_dir -> result
 _SESSION_LIST_CACHE_AT = {}
 _SESSION_LIST_CACHE_TTL = 2.0  # seconds: prevent request pileup on 5s-poll + slow I/O
+_SESSION_INDEX_PRUNE_AT = {}
+_SESSION_INDEX_PRUNE_TTL = 60.0  # seconds: avoid Path.exists() per sidebar row on every uncached list
+
+def _copy_session_list_rows(rows):
+    return [dict(s) if isinstance(s, dict) else s for s in (rows or [])]
 
 def all_sessions(diag=None):
     global _SESSION_LIST_CACHE, _SESSION_LIST_CACHE_AT
@@ -1261,7 +1441,7 @@ def all_sessions(diag=None):
     cached = _SESSION_LIST_CACHE.get(session_dir)
     cached_at = _SESSION_LIST_CACHE_AT.get(session_dir, 0.0)
     if cached is not None and (now - cached_at) < _SESSION_LIST_CACHE_TTL:
-        return cached
+        return _copy_session_list_rows(cached)
     _diag_stage(diag, "all_sessions.active_streams")
     active_stream_ids = _active_stream_ids()
     # Phase C: try index first for O(1) read; fall back to full scan
@@ -1270,11 +1450,16 @@ def all_sessions(diag=None):
         try:
             _diag_stage(diag, "all_sessions.read_index")
             index = json.loads(_session_index_file().read_text(encoding='utf-8'))
-            _diag_stage(diag, "all_sessions.prune_index")
-            index = [
-                s for s in index
-                if _index_entry_exists(s.get('session_id'))
-            ]
+            prune_at = _SESSION_INDEX_PRUNE_AT.get(session_dir, 0.0)
+            if (now - prune_at) >= _SESSION_INDEX_PRUNE_TTL:
+                _diag_stage(diag, "all_sessions.prune_index")
+                with LOCK:
+                    in_memory_ids = set(SESSIONS.keys())
+                index = [
+                    s for s in index
+                    if _index_entry_exists(s.get('session_id'), in_memory_ids)
+                ]
+                _SESSION_INDEX_PRUNE_AT[session_dir] = now
             backfilled = []
             for i, s in enumerate(index):
                 if 'last_message_at' not in s:
@@ -1332,9 +1517,9 @@ def all_sessions(diag=None):
                     s['profile'] = 'default'
             _diag_stage(diag, "all_sessions.lineage_metadata")
             _enrich_sidebar_lineage_metadata(result)
-            _SESSION_LIST_CACHE[session_dir] = result
+            _SESSION_LIST_CACHE[session_dir] = _copy_session_list_rows(result)
             _SESSION_LIST_CACHE_AT[session_dir] = now
-            return result
+            return _copy_session_list_rows(result)
         except Exception:
             logger.debug("Failed to load session index, falling back to full scan")
     # Full scan fallback
@@ -1368,9 +1553,9 @@ def all_sessions(diag=None):
             s['profile'] = 'default'
     _diag_stage(diag, "all_sessions.lineage_metadata")
     _enrich_sidebar_lineage_metadata(result)
-    _SESSION_LIST_CACHE[session_dir] = result
+    _SESSION_LIST_CACHE[session_dir] = _copy_session_list_rows(result)
     _SESSION_LIST_CACHE_AT[session_dir] = now
-    return result
+    return _copy_session_list_rows(result)
 
 
 def title_from(messages, fallback: str=DEFAULT_SESSION_TITLE):
@@ -1965,6 +2150,11 @@ def get_claude_code_sessions(projects_dir: Path | str | None = None, *, max_file
     listing. Tests pass ``projects_dir`` fixtures so Michael's real ~/.claude is
     never read during test runs.
     """
+    cache_key = (str(Path(projects_dir).expanduser().resolve()) if projects_dir else "", int(max_files), int(max_file_bytes))
+    now = time.time()
+    cached = _CLAUDE_CODE_SESSIONS_CACHE.get(cache_key)
+    if cached and now - cached[0] < _CLI_BRIDGE_CACHE_TTL_SECONDS:
+        return [dict(row) for row in cached[1]]
     sessions = []
     for path in _iter_claude_code_jsonl_files(projects_dir, max_files=max_files, max_file_bytes=max_file_bytes) or []:
         messages, summary_title, first_ts, last_ts = _parse_claude_code_jsonl(path)
@@ -1992,6 +2182,7 @@ def get_claude_code_sessions(projects_dir: Path | str | None = None, *, max_file
             'read_only': True,
         })
     sessions.sort(key=lambda s: s.get('last_message_at') or s.get('updated_at') or 0, reverse=True)
+    _CLAUDE_CODE_SESSIONS_CACHE[cache_key] = (now, [dict(row) for row in sessions])
     return sessions
 
 
@@ -2267,6 +2458,22 @@ def get_cli_sessions() -> list:
     except ImportError:
         _cli_profile = None  # older agent -- fall back to no profile
 
+    try:
+        _db_mtime = db_path.stat().st_mtime
+    except OSError:
+        _db_mtime = 0.0
+    _state_cache_key = (
+        str(db_path),
+        str(get_session_dir()),
+        str(_cli_profile or ""),
+        float(_db_mtime),
+    )
+    _state_cached = _CLI_STATE_SESSIONS_CACHE.get(_state_cache_key)
+    _state_now = time.time()
+    if _state_cached and _state_now - _state_cached[0] < _CLI_BRIDGE_CACHE_TTL_SECONDS:
+        cli_sessions.extend(dict(row) for row in _state_cached[1])
+        return cli_sessions
+
     # Memoize the cron project ID for this scan so we don't pay a lock-acquire +
     # disk-read of projects.json per cron session in the loop below.
     # Resolved lazily on the first cron session we encounter.
@@ -2276,6 +2483,7 @@ def get_cli_sessions() -> list:
             _cron_pid_cache[0] = ensure_cron_project()
         return _cron_pid_cache[0]
 
+    state_cli_sessions = []
     try:
         for row in read_importable_agent_session_rows(
             db_path,
@@ -2323,7 +2531,7 @@ def get_cli_sessions() -> list:
                 if _derived_title:
                     _title = _derived_title
             _display_title = _title or f'{_source.title()} Session'
-            cli_sessions.append({
+            item = {
                 'session_id': sid,
                 'title': _display_title,
                 'workspace': str(get_last_workspace()),
@@ -2357,7 +2565,9 @@ def get_cli_sessions() -> list:
                 '_lineage_tip_id': row.get('_lineage_tip_id'),
                 '_compression_segment_count': row.get('_compression_segment_count'),
                 'is_cli_session': True,
-            })
+            }
+            state_cli_sessions.append(item)
+            cli_sessions.append(item)
     except Exception as _cli_err:
         # DB schema changed, locked, or corrupted -- log warning so admins can diagnose.
         # Still degrade gracefully (don't crash the WebUI).
@@ -2368,6 +2578,7 @@ def get_cli_sessions() -> list:
         )
         return []
 
+    _CLI_STATE_SESSIONS_CACHE[_state_cache_key] = (time.time(), [dict(row) for row in state_cli_sessions])
     return cli_sessions
 
 
@@ -2383,7 +2594,7 @@ def _json_loads_if_string(value):
         return value
 
 
-def get_cli_session_messages(sid) -> list:
+def get_cli_session_messages(sid, limit=None, before=None) -> list:
     """Read messages for a single CLI/external-agent session.
 
     Preserve tool-call/result and reasoning metadata from the agent state.db so
@@ -2393,7 +2604,18 @@ def get_cli_session_messages(sid) -> list:
     in chronological order. Returns empty list on any error.
     """
     if str(sid or '').startswith(f'{CLAUDE_CODE_SOURCE}_'):
-        return get_claude_code_session_messages(sid)
+        messages = get_claude_code_session_messages(sid)
+        if before is not None:
+            try:
+                messages = messages[:max(0, min(int(before), len(messages)))]
+            except (TypeError, ValueError):
+                pass
+        if limit is not None:
+            try:
+                messages = messages[-max(1, int(limit)):]
+            except (TypeError, ValueError):
+                pass
+        return messages
     try:
         import sqlite3
     except ImportError:
@@ -2469,14 +2691,50 @@ def get_cli_session_messages(sid) -> list:
                         current_id = str(parent_row['id'])
                         seen.add(current_id)
 
-            cur.execute("""
-                SELECT *
-                FROM messages
-                WHERE session_id IN (SELECT value FROM json_each(?))
-                ORDER BY timestamp ASC, id ASC
-            """, (json.dumps(session_chain),))
+            window_limit = None
+            window_before = None
+            try:
+                window_limit = max(1, int(limit)) if limit is not None else None
+            except (TypeError, ValueError):
+                window_limit = None
+            try:
+                window_before = int(before) if before is not None else None
+            except (TypeError, ValueError):
+                window_before = None
+            if window_limit is not None or window_before is not None:
+                numbered_query = """
+                    SELECT *
+                    FROM (
+                        SELECT
+                            messages.*,
+                            ROW_NUMBER() OVER (ORDER BY timestamp ASC, id ASC) - 1 AS _row_index
+                        FROM messages
+                        WHERE session_id IN (SELECT value FROM json_each(?))
+                    )
+                """
+                params = [json.dumps(session_chain)]
+                filters = []
+                if window_before is not None:
+                    filters.append("_row_index < ?")
+                    params.append(max(0, window_before))
+                if filters:
+                    numbered_query += " WHERE " + " AND ".join(filters)
+                numbered_query += " ORDER BY _row_index DESC"
+                if window_limit is not None:
+                    numbered_query += " LIMIT ?"
+                    params.append(window_limit)
+                cur.execute(numbered_query, tuple(params))
+                rows = list(reversed(cur.fetchall()))
+            else:
+                cur.execute("""
+                    SELECT *
+                    FROM messages
+                    WHERE session_id IN (SELECT value FROM json_each(?))
+                    ORDER BY timestamp ASC, id ASC
+                """, (json.dumps(session_chain),))
+                rows = cur.fetchall()
             msgs = []
-            for row in cur.fetchall():
+            for row in rows:
                 msg = {
                     'role': row['role'],
                     'content': row['content'],

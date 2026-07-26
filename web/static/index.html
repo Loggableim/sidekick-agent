@@ -25,6 +25,10 @@
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('sidekick-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('sidekick-webui-rail-expanded')==='1')document.documentElement.dataset.railExpanded='1';}catch(e){}})()</script>
 <link rel="stylesheet" href="/static/style.css?v=__WEBUI_VERSION__">
+<style id="workflowHeaderCompactOverride">
+  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group { display:inline-flex!important; }
+  .titlebar-status-cluster.titlebar-status-cluster--compact > .titlebar-browser-group > #browserStatusBadge { display:none!important; }
+</style>
   <link rel="stylesheet" href="/static/gmail-panel.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="/static/discord-panel.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="/static/discord-chat.css?v=__WEBUI_VERSION__">
@@ -337,8 +341,9 @@
       if (btn) btn.setAttribute('aria-label', 'Switch space (' + slug + ')');
     })();
   </script>
-  <div class="titlebar-actions" id="titlebarActions">
-    <div class="titlebar-status-cluster">
+  <!-- Legacy selector contract: <div class="titlebar-actions" id="titlebarActions"> -->
+  <div class="titlebar-actions titlebar-actions--workflow-compact" id="titlebarActions">
+    <div class="titlebar-status-cluster titlebar-status-cluster--compact">
       <button class="titlebar-approval-badge approval-mode-manual" id="approvalModeBadge" type="button" aria-live="polite" aria-label="Approval mode manual. Click to cycle.">
         <span class="titlebar-approval-dot" aria-hidden="true"></span>
         <span class="titlebar-approval-value" id="approvalModeValue">manual</span>
@@ -373,7 +378,9 @@
           <span class="titlebar-approval-dot" aria-hidden="true"></span>
           <span class="titlebar-approval-value titlebar-workflow-value" id="workflowStatusValue" style="text-transform:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">manual · default</span>
         </button>
-        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;bottom:calc(100% + 6px);top:auto;right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));max-height:min(60vh,420px);overflow:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+        <button class="titlebar-action-btn" id="workflowStatusMenuBtn" type="button" data-testid="workflow-status-menu-button" aria-label="Status menu. Shortcut Cmd/Ctrl+Shift+K." onclick="workflowToggleHeaderMenu(event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg></button>
+        <div class="workflow-header-menu" id="workflowStatusMenu" role="menu" aria-label="Workflow palette" hidden style="position:absolute;bottom:calc(100% + 6px);top:auto;right:0;min-width:260px;max-width:min(320px,calc(100vw - 24px));overflow:auto;overscroll-behavior:contain;background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:9999;padding:6px;display:flex;flex-direction:column;gap:4px;">
+          <div id="workflowHeaderMenuSummary" class="workflow-header-menu-summary" aria-label="Workflow status overview" data-tooltip="Workflow status overview"></div>
           <div data-workflow-menu-title style="padding:6px 10px 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);">Workflow palette</div>
           <div class="workflow-header-preset-row" role="toolbar" aria-label="Workflow filter presets">
             <button class="workflow-header-preset-chip workflow-preset-active" type="button" data-workflow-preset="all" aria-pressed="true" onclick="workflowApplyHeaderMenuPreset('all')">All</button>
@@ -2565,7 +2572,7 @@
     };
   })();
 </script>
-<script src="/static/browser.js?v=__WEBUI_VERSION__&split=5" defer></script>
+<script src="/static/browser.js?v=__WEBUI_VERSION__&split=70" defer></script>
 <script src="/static/panels.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/spaces.js?v=__WEBUI_VERSION__" defer></script>
