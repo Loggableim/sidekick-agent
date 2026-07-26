@@ -5,8 +5,15 @@ import json
 from pathlib import Path
 from urllib import request as urllib_request
 
+import pytest
+
 
 MODULE_PATH = Path("C:/sidekick/home/spaces/nova/dream_narrator.py")
+
+pytestmark = pytest.mark.skipif(
+    not MODULE_PATH.exists(),
+    reason="Nova dream narrator belongs to an optional local Space",
+)
 
 
 def _load_module():

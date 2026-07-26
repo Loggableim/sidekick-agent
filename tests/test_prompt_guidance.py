@@ -1,7 +1,7 @@
 """Regression tests for Sidekick's model-independent prompt baseline."""
 
 from cli.default_soul import DEFAULT_SOUL_MD
-import run_agent
+from run_agent import AIAgent
 from runtime.prompt_builder import CORE_WORK_GUIDANCE
 
 
@@ -17,8 +17,8 @@ def test_core_work_guidance_covers_evidence_scope_and_verification():
 
 
 def test_agent_injects_core_work_guidance_for_custom_souls_too(monkeypatch):
-    monkeypatch.setattr(run_agent, "load_soul_md", lambda: "custom persona")
-    agent = run_agent.AIAgent(
+    monkeypatch.setitem(AIAgent._build_system_prompt_parts.__globals__, "load_soul_md", lambda: "custom persona")
+    agent = AIAgent(
         model="prompt-guidance-test",
         enabled_toolsets=[],
         quiet_mode=True,

@@ -4086,6 +4086,39 @@ async def get_usage_analytics(days: int = 30):
     db = SessionDB()
     try:
         cutoff = time.time() - (days * 86400)
+        session_columns = {
+            str(row[1]) for row in db._conn.execute("PRAGMA table_info(sessions)").fetchall()
+        }
+        required_columns = {
+            "started_at", "input_tokens", "output_tokens", "cache_read_tokens",
+            "reasoning_tokens", "estimated_cost_usd", "actual_cost_usd",
+            "api_call_count", "model",
+        }
+        if not required_columns.issubset(session_columns):
+            return {
+                "daily": [],
+                "by_model": [],
+                "totals": {
+                    "total_input": 0,
+                    "total_output": 0,
+                    "total_cache_read": 0,
+                    "total_reasoning": 0,
+                    "total_estimated_cost": 0,
+                    "total_actual_cost": 0,
+                    "total_sessions": 0,
+                    "total_api_calls": 0,
+                },
+                "period_days": days,
+                "skills": {
+                    "summary": {
+                        "total_skill_loads": 0,
+                        "total_skill_edits": 0,
+                        "total_skill_actions": 0,
+                        "distinct_skills_used": 0,
+                    },
+                    "top_skills": [],
+                },
+            }
         cur = db._conn.execute("""
             SELECT date(started_at, 'unixepoch') as day,
                    SUM(input_tokens) as input_tokens,

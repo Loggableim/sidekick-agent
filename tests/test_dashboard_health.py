@@ -2727,6 +2727,8 @@ def test_appstore_imap_mail_manifest_matches_auto_setup_contract():
     from web.api._home import get_webui_home
 
     manifest_path = get_webui_home() / "appstore" / "imap-mail.json"
+    if not manifest_path.exists():
+        pytest.skip("imap-mail manifest belongs to an optional local appstore installation")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     assert manifest["key"] == "imap-mail"

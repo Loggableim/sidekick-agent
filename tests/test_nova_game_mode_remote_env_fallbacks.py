@@ -5,9 +5,16 @@ import json
 from pathlib import Path
 from urllib import request as urllib_request
 
+import pytest
+
 
 NOVA_MIND_PATH = Path("C:/sidekick/home/spaces/nova/nova_mind.py")
 LOCAL_LLM_BRIDGE_PATH = Path("C:/sidekick/home/spaces/nova/local_llm_bridge.py")
+
+pytestmark = pytest.mark.skipif(
+    not NOVA_MIND_PATH.exists() or not LOCAL_LLM_BRIDGE_PATH.exists(),
+    reason="Nova remote bridge scripts belong to an optional local Space",
+)
 
 
 def _load_module(path: Path, name: str):

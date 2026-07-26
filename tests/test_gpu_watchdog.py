@@ -4,8 +4,15 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 
 WATCHDOG_PATH = Path(r"C:\sidekick\home\scripts\gpu_watchdog.py")
+
+pytestmark = pytest.mark.skipif(
+    not WATCHDOG_PATH.exists(),
+    reason="GPU watchdog is an optional local Sidekick home script",
+)
 
 
 def _load_watchdog_module():

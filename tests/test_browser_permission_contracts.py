@@ -276,10 +276,21 @@ def test_browser_agent_context_url_is_exposed_to_agent_and_ui():
     assert "parts.push('active goal: ' + activeGoalText);" in browser_js
 
 
-def test_browser_agent_context_guides_permission_escalation():
+def test_browser_agent_context_guides_permission_escalation(monkeypatch):
     from web.api import browser_runtime
 
     sid = "agent-context-contract-session"
+    monkeypatch.setattr(
+        browser_runtime,
+        "browser_state",
+        lambda session_id: {
+            "session_id": session_id,
+            "status": "idle",
+            "url": "about:blank",
+            "error": "",
+            "frame_rev": 0,
+        },
+    )
     browser_runtime.browser_permission_revoke(sid)
 
     locked = browser_runtime.browser_agent_context(sid)

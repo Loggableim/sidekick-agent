@@ -3,11 +3,18 @@ from __future__ import annotations
 import py_compile
 from pathlib import Path
 
+import pytest
+
 
 LAUNCHERS = [
     Path(r"C:\sidekick\home\scripts\dashboard_launcher.py"),
     Path(r"C:\sidekick\home\scripts\dashboard_launcher_debug.py"),
 ]
+
+pytestmark = pytest.mark.skipif(
+    not all(launcher.exists() for launcher in LAUNCHERS),
+    reason="Nova hub launchers belong to an optional local Sidekick home",
+)
 
 
 def test_hub_launchers_are_valid_python():

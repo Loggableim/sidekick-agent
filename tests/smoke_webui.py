@@ -430,6 +430,11 @@ def run_smoke() -> Result:
                     _mark(result, "desktop browser layout", ok and topbar_clean and composer_clean and "browser browser" not in workflow_before.lower() and "browser browser" not in workflow_open.lower() and "browser browser" not in workflow_restored.lower() and "browser closed" in workflow_before.lower() and "browser open" in workflow_open.lower() and "browser closed" in workflow_restored.lower() and queue_empty_hidden and browser_empty_ok and busy_visible and busy_hidden and bool(busy_text.strip()) and "is-loading" in busy_loading, detail)
                     _mark(result, "theme toggle restores state", dark_after != dark_before and dark_restored == dark_before, f"before={dark_before} after={dark_after} restored={dark_restored}")
 
+                    onboarding_skip = page.locator("#onboardingSkipBtn").first
+                    if onboarding_skip.is_visible():
+                        onboarding_skip.click()
+                        page.wait_for_timeout(150)
+
                     navigation_errors: list[str] = []
                     page.on("pageerror", lambda error: navigation_errors.append(str(error)))
                     page.on(
