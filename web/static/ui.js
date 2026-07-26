@@ -629,6 +629,7 @@ let _castLoading=false;
 let _castAvailable=false;
 let _castStatusTimer=null;
 let _castConnectPromise=null;
+let _castStatusPromise=null;
 let _castInteractiveRequested=false;
 let _castLastError='';
 let _castConfigured=true;
@@ -746,12 +747,34 @@ function _ensureHubCastConnected({interactive=false}={}){
   return _castConnectPromise;
 }
 
+function _refreshHubCastStatus(){
+  if(_castConnectPromise)return _castConnectPromise;
+  if(_castStatusPromise)return _castStatusPromise;
+  _castStatusPromise=(async()=>{
+    try{
+      const r=await _castFetch('/api/cast/status');
+      const s=await r.json().catch(()=>({}));
+      _applyCastResponse(r,s);
+      return _castActive;
+    }catch(e){
+      _castAvailable=false;
+      _castActive=false;
+      _castLastError=e&&e.name==='AbortError'?'Hub Timeout':'Hub nicht erreichbar';
+      return false;
+    }finally{
+      _castStatusPromise=null;
+      _applyCastUI();
+    }
+  })();
+  return _castStatusPromise;
+}
+
 function _startHubCastMonitor(){
   const btn=document.getElementById('btnCastToggle');
   if(btn)btn.style.display='';
-  _ensureHubCastConnected({interactive:false});
+  _refreshHubCastStatus();
   if(_castStatusTimer)clearInterval(_castStatusTimer);
-  _castStatusTimer=setInterval(()=>_ensureHubCastConnected({interactive:false}),CAST_RECONNECT_INTERVAL_MS);
+  _castStatusTimer=setInterval(_refreshHubCastStatus,CAST_RECONNECT_INTERVAL_MS);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_startHubCastMonitor,{once:true});
 else _startHubCastMonitor();
