@@ -11,7 +11,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from .config import initialize_project
-from .types import SwarmEvent, SwarmRun
+from .types import ApprovalRecord, SwarmEvent, SwarmRun
 
 
 class ProjectSwarmStore:
@@ -34,16 +34,27 @@ class ProjectSwarmStore:
     ) -> SwarmRun:
         run_id = run_id or str(uuid4())
         now = _utc_now()
-        metadata_json = json.dumps(dict(metadata or {}), sort_keys=True)
+        metadata_data = dict(metadata or {})
+        metadata_data.setdefault(
+            "autonomy",
+            initialize_project(self.project_root).default_autonomy,
+        )
+        metadata_json = json.dumps(metadata_data, sort_keys=True)
         with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO runs (run_id, status, created_at, updated_at, metadata_json)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (run_id, status, _timestamp_text(now), _timestamp_text(now), metadata_json),
+                (
+                    run_id,
+                    status,
+                    _timestamp_text(now),
+                    _timestamp_text(now),
+                    metadata_json,
+                ),
             )
-        return SwarmRun(run_id, status, now, now, dict(metadata or {}))
+        return SwarmRun(run_id, status, now, now, metadata_data)
 
     def get_run(self, run_id: str) -> SwarmRun | None:
         with self._connection() as connection:
@@ -68,9 +79,12 @@ class ProjectSwarmStore:
         timestamp = _utc_now()
         payload_data = dict(payload or {})
         with self._connection() as connection:
-            if connection.execute(
-                "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
-            ).fetchone() is None:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                is None
+            ):
                 raise KeyError(f"Unknown Swarm run: {run_id}")
             cursor = connection.execute(
                 """
@@ -118,6 +132,112 @@ class ProjectSwarmStore:
     def resume_run(self, run_id: str) -> SwarmRun:
         return self.set_run_status(run_id, "running")
 
+    def record_approval(
+        self,
+        run_id: str,
+        proposal_id: str,
+        proposal_digest: str,
+        approval_type: str,
+        approver_id: str,
+        *,
+        approved: bool = True,
+        model_family: str | None = None,
+        evidence_refs: tuple[str, ...] = (),
+    ) -> ApprovalRecord:
+        approval_id = str(uuid4())
+        created_at = _utc_now()
+        with self._connection() as connection:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                is None
+            ):
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            cursor = connection.execute(
+                """
+                INSERT INTO approvals (
+                    approval_id, run_id, proposal_id, proposal_digest,
+                    approval_type, approver_id, approved, model_family,
+                    evidence_refs_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    approval_id,
+                    run_id,
+                    proposal_id,
+                    proposal_digest,
+                    approval_type,
+                    approver_id,
+                    int(approved),
+                    model_family,
+                    json.dumps(list(evidence_refs), sort_keys=True),
+                    _timestamp_text(created_at),
+                ),
+            )
+            sequence = int(cursor.lastrowid)
+        return ApprovalRecord(
+            approval_id=approval_id,
+            sequence=sequence,
+            run_id=run_id,
+            proposal_id=proposal_id,
+            proposal_digest=proposal_digest,
+            approval_type=approval_type,
+            approver_id=approver_id,
+            approved=approved,
+            model_family=model_family,
+            evidence_refs=evidence_refs,
+            created_at=created_at,
+        )
+
+    def list_approvals(
+        self,
+        run_id: str,
+        *,
+        proposal_id: str | None = None,
+    ) -> list[ApprovalRecord]:
+        query = """
+            SELECT sequence, approval_id, run_id, proposal_id, proposal_digest,
+                   approval_type, approver_id, approved, model_family,
+                   evidence_refs_json, created_at
+            FROM approvals WHERE run_id = ?
+        """
+        parameters: tuple[str, ...] = (run_id,)
+        if proposal_id is not None:
+            query += " AND proposal_id = ?"
+            parameters = (run_id, proposal_id)
+        query += " ORDER BY sequence ASC"
+        with self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [_row_to_approval(row) for row in rows]
+
+    def claim_execution(
+        self,
+        run_id: str,
+        proposal_id: str,
+        proposal_digest: str,
+    ) -> bool:
+        try:
+            with self._connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO action_executions (
+                        run_id, proposal_id, proposal_digest, claimed_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        proposal_id,
+                        proposal_digest,
+                        _timestamp_text(_utc_now()),
+                    ),
+                )
+        except sqlite3.IntegrityError:
+            return False
+        return True
+
     def _ensure_schema(self) -> None:
         with self._connection() as connection:
             connection.executescript(
@@ -140,6 +260,28 @@ class ProjectSwarmStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_run_sequence
                     ON events(run_id, sequence);
+                CREATE TABLE IF NOT EXISTS approvals (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    approval_id TEXT NOT NULL UNIQUE,
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    proposal_id TEXT NOT NULL,
+                    proposal_digest TEXT NOT NULL,
+                    approval_type TEXT NOT NULL,
+                    approver_id TEXT NOT NULL,
+                    approved INTEGER NOT NULL,
+                    model_family TEXT,
+                    evidence_refs_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_approvals_run_proposal
+                    ON approvals(run_id, proposal_id, sequence);
+                CREATE TABLE IF NOT EXISTS action_executions (
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    proposal_id TEXT NOT NULL,
+                    proposal_digest TEXT NOT NULL,
+                    claimed_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, proposal_digest)
+                );
                 """
             )
 
@@ -194,4 +336,20 @@ def _row_to_event(row: sqlite3.Row) -> SwarmEvent:
         run_id=row["run_id"],
         payload=json.loads(row["payload_json"]),
         visibility=row["visibility"],
+    )
+
+
+def _row_to_approval(row: sqlite3.Row) -> ApprovalRecord:
+    return ApprovalRecord(
+        approval_id=row["approval_id"],
+        sequence=row["sequence"],
+        run_id=row["run_id"],
+        proposal_id=row["proposal_id"],
+        proposal_digest=row["proposal_digest"],
+        approval_type=row["approval_type"],
+        approver_id=row["approver_id"],
+        approved=bool(row["approved"]),
+        model_family=row["model_family"],
+        evidence_refs=tuple(json.loads(row["evidence_refs_json"])),
+        created_at=datetime.fromisoformat(row["created_at"]),
     )
