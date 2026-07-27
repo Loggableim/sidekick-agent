@@ -5,6 +5,7 @@ from .events import SwarmEventBus
 from .policy import PolicyDecision, PolicyGate, PolicyStatus
 from .store import ProjectSwarmStore
 from .types import (
+    ActionCapabilities,
     ActionProposal,
     RequestedToolAction,
     SwarmConfig,
@@ -14,6 +15,7 @@ from .types import (
 
 __all__ = [
     "ProjectSwarmStore",
+    "ActionCapabilities",
     "ActionProposal",
     "PolicyDecision",
     "PolicyGate",

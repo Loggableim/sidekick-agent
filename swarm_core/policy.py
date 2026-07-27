@@ -10,7 +10,13 @@ from typing import Any
 
 from .config import initialize_project
 from .store import ProjectSwarmStore
-from .types import ActionProposal, ApprovalRecord, SwarmRun, thaw_json_value
+from .types import (
+    ActionCapabilities,
+    ActionProposal,
+    ApprovalRecord,
+    SwarmRun,
+    thaw_json_value,
+)
 
 
 class PolicyStatus(str, Enum):
@@ -56,8 +62,71 @@ class PolicyGate:
         self,
         proposal: ActionProposal,
         run: SwarmRun,
+        capabilities: ActionCapabilities | None = None,
     ) -> PolicyDecision:
         durable_run = self.store.get_run(run.run_id)
+        approvals = self._matching_approvals(proposal, run)
+        return self._evaluate_canonical(
+            proposal,
+            durable_run,
+            approvals,
+            capabilities or proposal.declared_capabilities(),
+        )
+
+    def authorize_and_claim(
+        self,
+        proposal: ActionProposal,
+        run: SwarmRun,
+        capabilities: ActionCapabilities,
+    ) -> PolicyDecision:
+        """Atomically re-evaluate canonical policy state and claim one execution."""
+        digest = proposal_digest(proposal)
+
+        def authorize(
+            durable_run: SwarmRun | None,
+            approvals: list[ApprovalRecord],
+        ) -> tuple[PolicyDecision, bool]:
+            decision = self._evaluate_canonical(
+                proposal,
+                durable_run,
+                [
+                    approval
+                    for approval in approvals
+                    if approval.proposal_digest == digest
+                ],
+                capabilities,
+            )
+            return decision, decision.status is PolicyStatus.ALLOWED
+
+        decision, claimed = self.store.authorize_and_claim(
+            run.run_id,
+            proposal.proposal_id,
+            digest,
+            authorize,
+        )
+        if decision.status is not PolicyStatus.ALLOWED:
+            return decision
+        if not claimed:
+            return self._decision(
+                proposal,
+                PolicyStatus.BLOCKED,
+                "execution_already_claimed",
+            )
+        return decision
+
+    def _evaluate_canonical(
+        self,
+        proposal: ActionProposal,
+        durable_run: SwarmRun | None,
+        approvals: list[ApprovalRecord],
+        capabilities: ActionCapabilities,
+    ) -> PolicyDecision:
+        if capabilities != proposal.declared_capabilities():
+            return self._decision(
+                proposal,
+                PolicyStatus.BLOCKED,
+                "untrusted_action_capabilities_mismatch",
+            )
         if durable_run is None:
             return self._decision(proposal, PolicyStatus.BLOCKED, "unknown_run")
         if durable_run.status != "running":
@@ -71,7 +140,6 @@ class PolicyGate:
         if autonomy == "observe":
             return self._decision(proposal, PolicyStatus.BLOCKED, "observe_only")
 
-        approvals = self._matching_approvals(proposal, run)
         if any(not approval.approved for approval in approvals):
             return self._decision(proposal, PolicyStatus.BLOCKED, "approval_denied")
 
@@ -80,7 +148,9 @@ class PolicyGate:
             for approval in approvals
         )
         sensitive = (
-            proposal.external or not proposal.reversible or proposal.cost_increasing
+            capabilities.external
+            or not capabilities.reversible
+            or capabilities.cost_increasing
         )
         if sensitive and not human_approved:
             return self._decision(
@@ -92,7 +162,7 @@ class PolicyGate:
             return self._decision(
                 proposal, PolicyStatus.ALLOWED, "human_approval_recorded"
             )
-        if proposal.category not in self._LOCAL_REVERSIBLE_CATEGORIES:
+        if capabilities.category not in self._LOCAL_REVERSIBLE_CATEGORIES:
             return self._decision(
                 proposal, PolicyStatus.BLOCKED, "unclassified_action_category"
             )
@@ -204,7 +274,7 @@ def proposal_digest(proposal: ActionProposal) -> str:
         "evidence_refs": list(proposal.evidence_refs),
         "requested_action": {
             "name": proposal.requested_action.name,
-            "workspace": str(proposal.requested_action.workspace.resolve()),
+            "workspace": str(proposal.requested_action.workspace),
             "arguments": thaw_json_value(proposal.requested_action.arguments),
             "use_worktree": proposal.requested_action.use_worktree,
         },

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from swarm_core.config import initialize_project
@@ -126,6 +127,18 @@ def test_paused_run_can_be_resumed(tmp_path: Path):
     assert paused.status == "paused"
     assert resumed.status == "running"
     assert store.get_run(run.run_id).status == "running"
+
+
+def test_terminal_run_cannot_be_resumed(tmp_path: Path):
+    """Catches terminal run state being reopened as if it were a pause."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="terminal")
+    store.set_run_status(run.run_id, "completed")
+
+    with pytest.raises(ValueError, match="Only paused"):
+        store.resume_run(run.run_id)
+
+    assert store.get_run(run.run_id).status == "completed"
 
 
 def test_reopening_store_restores_persisted_run_and_events(tmp_path: Path):
