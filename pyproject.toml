@@ -89,6 +89,7 @@ include = [
     "runtime.gateway", "runtime.gateway.*",
     "shared", "shared.*",
     "sidekick_cli", "sidekick_cli.*",
+    "swarm_core", "swarm_core.*",
     "tests", "tests.*",
     "tools", "tools.*", "tools.environments", "tools.environments.*",
     "tools.web_providers", "tools.web_providers.*",

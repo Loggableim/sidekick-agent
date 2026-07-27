@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from swarm_core.config import initialize_project
+from swarm_core.events import SwarmEventBus
+from swarm_core.store import ProjectSwarmStore
+
+
+def test_initialize_project_creates_versionable_default_configuration(tmp_path: Path):
+    """Catches a missing project-local layout or incorrect provider defaults."""
+    config = initialize_project(tmp_path)
+
+    config_path = tmp_path / ".swarm" / "swarm.yaml"
+    assert config_path.is_file()
+    assert yaml.safe_load(config_path.read_text(encoding="utf-8")) == {
+        "version": 1,
+        "default_provider": "ollama-cloud",
+        "default_model": "deepseek-v4-flash",
+    }
+    assert config.project_root == tmp_path
+    assert config.default_provider == "ollama-cloud"
+    assert config.default_model == "deepseek-v4-flash"
+
+
+def test_initialize_project_keeps_runtime_state_ignored_but_creates_its_directory(tmp_path: Path):
+    """Catches runtime state becoming versionable alongside swarm.yaml."""
+    initialize_project(tmp_path)
+
+    swarm_dir = tmp_path / ".swarm"
+    assert (swarm_dir / "runtime").is_dir()
+    assert (swarm_dir / ".gitignore").read_text(encoding="utf-8") == "runtime/\n"
+    assert (swarm_dir / "swarm.yaml").is_file()
+
+
+def test_events_are_returned_in_monotonic_sequence_order(tmp_path: Path):
+    """Catches event order being based on unstable timestamps or insertion order."""
+    initialize_project(tmp_path)
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="event-order")
+
+    first = store.append_event(
+        run.run_id,
+        "task.created",
+        {"task": "design"},
+        visibility="project",
+    )
+    second = store.append_event(
+        run.run_id,
+        "task.started",
+        {"task": "design"},
+        visibility="project",
+    )
+
+    events = store.list_events(run.run_id)
+    assert [event.sequence for event in events] == [1, 2]
+    assert [event.event_type for event in events] == ["task.created", "task.started"]
+    assert [event.event_id for event in events] == [first.event_id, second.event_id]
+    assert events[0].timestamp.tzinfo is not None
+    assert events[1].payload == {"task": "design"}
+    assert events[1].visibility == "project"
+
+
+def test_event_bus_publishes_events_through_the_project_store(tmp_path: Path):
+    """Catches the event bus bypassing durable project-local event storage."""
+    initialize_project(tmp_path)
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="bus-run")
+
+    published = SwarmEventBus(store).publish(
+        run.run_id, "run.notified", {"message": "ready"}, visibility="owner"
+    )
+
+    assert published.sequence == 1
+    assert store.list_events(run.run_id) == [published]
+
+
+def test_paused_run_can_be_resumed(tmp_path: Path):
+    """Catches resume leaving a paused run unavailable to later routing."""
+    initialize_project(tmp_path)
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="resume-me")
+
+    paused = store.set_run_status(run.run_id, "paused")
+    resumed = store.resume_run(run.run_id)
+
+    assert paused.status == "paused"
+    assert resumed.status == "running"
+    assert store.get_run(run.run_id).status == "running"
+
+
+def test_reopening_store_restores_persisted_run_and_events(tmp_path: Path):
+    """Catches state being held only in process memory instead of swarm.sqlite."""
+    initialize_project(tmp_path)
+    first_store = ProjectSwarmStore(tmp_path)
+    created = first_store.create_run(run_id="persisted", metadata={"goal": "ship"})
+    first_store.append_event(created.run_id, "run.created", {"source": "test"})
+
+    reopened_store = ProjectSwarmStore(tmp_path)
+    restored = reopened_store.get_run("persisted")
+
+    assert (tmp_path / ".swarm" / "runtime" / "swarm.sqlite").is_file()
+    assert restored is not None
+    assert restored.run_id == "persisted"
+    assert restored.metadata == {"goal": "ship"}
+    assert restored.created_at == created.created_at
+    assert [event.event_type for event in reopened_store.list_events("persisted")] == ["run.created"]
