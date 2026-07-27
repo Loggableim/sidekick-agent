@@ -14,6 +14,15 @@ _DEFAULT_CONFIG = {
     "version": 1,
     "default_provider": "ollama-cloud",
     "default_model": "deepseek-v4-flash",
+    "default_autonomy": "reviewed_execution",
+}
+
+_AUTONOMY_LEVELS = {
+    "observe",
+    "suggest",
+    "execute_safe",
+    "reviewed_execution",
+    "autonomous",
 }
 
 
@@ -36,6 +45,11 @@ def initialize_project(project_root: Path) -> SwarmConfig:
     raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     if not isinstance(raw_config, dict):
         raise ValueError(f"Swarm configuration must be a mapping: {config_path}")
+    if "default_autonomy" not in raw_config:
+        raw_config["default_autonomy"] = _DEFAULT_CONFIG["default_autonomy"]
+        config_path.write_text(
+            yaml.safe_dump(raw_config, sort_keys=False), encoding="utf-8"
+        )
     return _to_config(project_root, config_path, raw_config)
 
 
@@ -55,12 +69,18 @@ def _to_config(
     project_root: Path, config_path: Path, raw_config: dict[str, Any]
 ) -> SwarmConfig:
     try:
+        default_autonomy = str(
+            raw_config.get("default_autonomy", _DEFAULT_CONFIG["default_autonomy"])
+        )
+        if default_autonomy not in _AUTONOMY_LEVELS:
+            raise ValueError(f"Unsupported Swarm autonomy level: {default_autonomy}")
         return SwarmConfig(
             project_root=project_root,
             config_path=config_path,
             version=int(raw_config["version"]),
             default_provider=str(raw_config["default_provider"]),
             default_model=str(raw_config["default_model"]),
+            default_autonomy=default_autonomy,
         )
     except KeyError as exc:
         raise ValueError(f"Missing Swarm configuration value: {exc.args[0]}") from exc

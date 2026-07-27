@@ -19,13 +19,17 @@ def test_initialize_project_creates_versionable_default_configuration(tmp_path: 
         "version": 1,
         "default_provider": "ollama-cloud",
         "default_model": "deepseek-v4-flash",
+        "default_autonomy": "reviewed_execution",
     }
     assert config.project_root == tmp_path
     assert config.default_provider == "ollama-cloud"
     assert config.default_model == "deepseek-v4-flash"
+    assert config.default_autonomy == "reviewed_execution"
 
 
-def test_initialize_project_keeps_runtime_state_ignored_but_creates_its_directory(tmp_path: Path):
+def test_initialize_project_keeps_runtime_state_ignored_but_creates_its_directory(
+    tmp_path: Path,
+):
     """Catches runtime state becoming versionable alongside swarm.yaml."""
     initialize_project(tmp_path)
 
@@ -33,6 +37,29 @@ def test_initialize_project_keeps_runtime_state_ignored_but_creates_its_director
     assert (swarm_dir / "runtime").is_dir()
     assert (swarm_dir / ".gitignore").read_text(encoding="utf-8") == "runtime/\n"
     assert (swarm_dir / "swarm.yaml").is_file()
+
+
+def test_initialize_project_persists_default_autonomy_into_older_config(
+    tmp_path: Path,
+):
+    """Catches upgraded projects using an implicit, non-versioned autonomy default."""
+    swarm_dir = tmp_path / ".swarm"
+    swarm_dir.mkdir()
+    config_path = swarm_dir / "swarm.yaml"
+    config_path.write_text(
+        "version: 1\n"
+        "default_provider: ollama-cloud\n"
+        "default_model: deepseek-v4-flash\n",
+        encoding="utf-8",
+    )
+
+    config = initialize_project(tmp_path)
+
+    assert config.default_autonomy == "reviewed_execution"
+    assert (
+        yaml.safe_load(config_path.read_text(encoding="utf-8"))["default_autonomy"]
+        == "reviewed_execution"
+    )
 
 
 def test_store_constructor_keeps_direct_runtime_state_ignored(tmp_path: Path):
@@ -114,6 +141,11 @@ def test_reopening_store_restores_persisted_run_and_events(tmp_path: Path):
     assert (tmp_path / ".swarm" / "runtime" / "swarm.sqlite").is_file()
     assert restored is not None
     assert restored.run_id == "persisted"
-    assert restored.metadata == {"goal": "ship"}
+    assert restored.metadata == {
+        "autonomy": "reviewed_execution",
+        "goal": "ship",
+    }
     assert restored.created_at == created.created_at
-    assert [event.event_type for event in reopened_store.list_events("persisted")] == ["run.created"]
+    assert [event.event_type for event in reopened_store.list_events("persisted")] == [
+        "run.created"
+    ]
