@@ -13,7 +13,7 @@ from swarm_core.policy import PolicyGate, PolicyStatus
 from swarm_core.sidekick_adapter import SidekickToolAdapter
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.tools import ActionNotAllowed, GatedToolExecutor
-from swarm_core.types import ActionProposal, RequestedToolAction
+from swarm_core.types import ActionCapabilities, ActionProposal, RequestedToolAction
 
 
 def _proposal(
@@ -401,8 +401,20 @@ def test_unknown_local_action_category_is_blocked(tmp_path: Path):
 
 
 class _RecordingAdapter:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        capabilities: ActionCapabilities | None = None,
+    ) -> None:
         self.executed: list[RequestedToolAction] = []
+        self.capabilities = capabilities or ActionCapabilities(
+            category="project",
+            reversible=True,
+            external=False,
+            cost_increasing=False,
+        )
+
+    def classify(self, action: RequestedToolAction) -> ActionCapabilities:
+        return self.capabilities
 
     def preview(self, action: RequestedToolAction) -> dict[str, str]:
         return {"preview": action.name}
@@ -410,6 +422,135 @@ class _RecordingAdapter:
     def execute(self, action: RequestedToolAction) -> dict[str, str]:
         self.executed.append(action)
         return {"result": action.name}
+
+
+@pytest.mark.parametrize("interleave", ["pause", "denial"])
+def test_atomic_authorization_blocks_state_committed_at_claim_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    interleave: str,
+):
+    """Catches a stale read authorizing an adapter after a new pause or denial."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "autonomous"})
+    proposal = _proposal(tmp_path, proposal_id=f"atomic-{interleave}")
+    gate = PolicyGate(store)
+    adapter = _RecordingAdapter()
+    original = getattr(store, "authorize_and_claim", None)
+
+    def commit_state_then_authorize(*args: Any, **kwargs: Any):
+        if interleave == "pause":
+            store.set_run_status(run.run_id, "paused")
+        else:
+            gate.record_approval(
+                proposal,
+                run,
+                approval_type="human",
+                approver_id="owner",
+                approved=False,
+            )
+        assert original is not None
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        store,
+        "authorize_and_claim",
+        commit_state_then_authorize,
+        raising=False,
+    )
+
+    with pytest.raises(ActionNotAllowed) as raised:
+        GatedToolExecutor(gate, adapter).execute(proposal, run)
+
+    assert raised.value.decision.reason in {"run_not_running", "approval_denied"}
+    assert adapter.executed == []
+
+
+def test_proposal_freezes_evidence_and_workspace_before_cwd_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    """Catches approval for one evidence/path snapshot dispatching a later one."""
+    first_cwd = tmp_path / "first"
+    second_cwd = tmp_path / "second"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+    raw_evidence = ["evidence:first"]
+    monkeypatch.chdir(first_cwd)
+    proposal = ActionProposal(
+        proposal_id="frozen-proposal",
+        category="project",
+        reversible=True,
+        external=False,
+        cost_increasing=False,
+        evidence_refs=raw_evidence,
+        requested_action=RequestedToolAction(
+            name="write_project_file",
+            workspace=Path("workspace"),
+            arguments={"path": "result.txt"},
+        ),
+    )
+    raw_evidence[0] = "evidence:second"
+    monkeypatch.chdir(second_cwd)
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    gate = PolicyGate(store)
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="verifier",
+        approver_id="local-verifier",
+        evidence_refs=("evidence:first",),
+    )
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="model",
+        approver_id="review-a",
+        model_family="glm",
+    )
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="model",
+        approver_id="review-b",
+        model_family="kimi",
+    )
+    adapter = _RecordingAdapter()
+
+    GatedToolExecutor(gate, adapter).execute(proposal, run)
+
+    assert proposal.evidence_refs == ("evidence:first",)
+    assert adapter.executed == [proposal.requested_action]
+    assert adapter.executed[0].workspace == first_cwd / "workspace"
+
+
+def test_trusted_capabilities_block_a_mislabeled_external_payment(tmp_path: Path):
+    """Catches caller flags downgrading an externally costly adapter action."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "execute_safe"})
+    proposal = _proposal(tmp_path)
+    proposal = replace(
+        proposal,
+        requested_action=replace(
+            proposal.requested_action,
+            name="send_external_payment",
+        ),
+    )
+    adapter = _RecordingAdapter(
+        ActionCapabilities(
+            category="external",
+            reversible=False,
+            external=True,
+            cost_increasing=True,
+        )
+    )
+
+    with pytest.raises(ActionNotAllowed) as raised:
+        GatedToolExecutor(PolicyGate(store), adapter).execute(proposal, run)
+
+    assert raised.value.decision.reason == "untrusted_action_capabilities_mismatch"
+    assert adapter.executed == []
 
 
 def test_gated_executor_never_invokes_adapter_before_required_approvals(
@@ -543,6 +684,12 @@ def test_action_arguments_are_snapshotted_before_approval_and_execution(
     adapter = SidekickToolAdapter(
         trusted_workspace_resolver=lambda workspace: Path(workspace),
         action_executor=lambda _name, _workspace, arguments: captured.append(arguments),
+        action_classifier=lambda _action: ActionCapabilities(
+            category="project",
+            reversible=True,
+            external=True,
+            cost_increasing=False,
+        ),
     )
 
     GatedToolExecutor(gate, adapter).execute(proposal, run)
@@ -573,13 +720,13 @@ def test_sidekick_adapter_uses_injected_trusted_workspace_and_worktree(
     tmp_path: Path,
 ):
     """Catches direct imports or skipping injected worktree handling."""
-    trusted = tmp_path / "trusted"
+    trusted = tmp_path
     worktree = tmp_path / "worktree"
     calls: list[tuple[Any, ...]] = []
 
     def resolve(workspace: str | Path) -> Path:
         calls.append(("resolve", Path(workspace)))
-        return trusted if Path(workspace) == tmp_path else Path(workspace)
+        return Path(workspace)
 
     def create_workspace(resolved: Path) -> dict[str, str]:
         calls.append(("worktree", resolved))
@@ -597,6 +744,8 @@ def test_sidekick_adapter_uses_injected_trusted_workspace_and_worktree(
         trusted_workspace_resolver=resolve,
         action_executor=execute_action,
         worktree_creator=create_workspace,
+        worktree_validator=lambda source, target: source == trusted
+        and target == worktree,
     )
 
     result = adapter.execute(_proposal(tmp_path, use_worktree=True).requested_action)
@@ -615,14 +764,41 @@ def test_sidekick_adapter_uses_injected_trusted_workspace_and_worktree(
     ]
 
 
+def test_sidekick_adapter_rejects_worktree_from_another_trusted_project(
+    tmp_path: Path,
+):
+    """Catches a valid-but-unrelated worktree replacing the approved source."""
+    source = tmp_path / "source"
+    unrelated = tmp_path / "unrelated"
+    executed: list[tuple[Any, ...]] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *args: executed.append(args),
+        worktree_creator=lambda _source: {"path": str(unrelated)},
+        worktree_validator=lambda expected, created: expected == source
+        and created == source,
+    )
+    action = RequestedToolAction(
+        name="write_project_file",
+        workspace=source,
+        arguments={"path": "result.txt"},
+        use_worktree=True,
+    )
+
+    with pytest.raises(ValueError, match="not bound"):
+        adapter.execute(action)
+
+    assert executed == []
+
+
 def test_sidekick_adapter_preview_never_creates_a_worktree(tmp_path: Path):
     """Catches a supposedly read-only preview causing worktree mutation."""
-    trusted = tmp_path / "trusted"
+    trusted = tmp_path
     calls: list[tuple[Any, ...]] = []
 
     def resolve(workspace: str | Path) -> Path:
         calls.append(("resolve", Path(workspace)))
-        return trusted
+        return Path(workspace)
 
     def create_workspace(resolved: Path) -> dict[str, str]:
         calls.append(("worktree", resolved))

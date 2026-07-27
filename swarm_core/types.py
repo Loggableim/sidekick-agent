@@ -49,11 +49,36 @@ class RequestedToolAction:
     use_worktree: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("Tool action name must be a non-empty string")
+        if not isinstance(self.use_worktree, bool):
+            raise TypeError("use_worktree must be a bool")
         object.__setattr__(
             self,
             "arguments",
             _freeze_json_value(dict(self.arguments)),
         )
+        object.__setattr__(
+            self,
+            "workspace",
+            Path(self.workspace).expanduser().resolve(),
+        )
+
+
+@dataclass(frozen=True)
+class ActionCapabilities:
+    """Trusted, immutable risk classification for a named adapter action."""
+
+    category: str
+    reversible: bool
+    external: bool
+    cost_increasing: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "category", _normalized_category(self.category))
+        for field_name in ("reversible", "external", "cost_increasing"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be a bool")
 
 
 @dataclass(frozen=True)
@@ -67,6 +92,29 @@ class ActionProposal:
     cost_increasing: bool
     evidence_refs: tuple[str, ...]
     requested_action: RequestedToolAction
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.proposal_id, str) or not self.proposal_id.strip():
+            raise ValueError("Proposal id must be a non-empty string")
+        object.__setattr__(self, "category", _normalized_category(self.category))
+        for field_name in ("reversible", "external", "cost_increasing"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"{field_name} must be a bool")
+        evidence_refs = tuple(self.evidence_refs)
+        if any(
+            not isinstance(reference, str) or not reference
+            for reference in evidence_refs
+        ):
+            raise ValueError("Evidence references must be non-empty strings")
+        object.__setattr__(self, "evidence_refs", evidence_refs)
+
+    def declared_capabilities(self) -> ActionCapabilities:
+        return ActionCapabilities(
+            category=self.category,
+            reversible=self.reversible,
+            external=self.external,
+            cost_increasing=self.cost_increasing,
+        )
 
 
 @dataclass(frozen=True)
@@ -114,3 +162,9 @@ def _freeze_json_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return tuple(_freeze_json_value(item) for item in value)
     raise TypeError(f"Unsupported tool argument value: {type(value).__name__}")
+
+
+def _normalized_category(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Action category must be a non-empty string")
+    return value.strip().lower()

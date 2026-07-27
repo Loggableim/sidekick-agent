@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Callable, Iterator, Mapping, TypeVar
 from uuid import uuid4
 
 from .config import initialize_project
 from .types import ApprovalRecord, SwarmEvent, SwarmRun
+
+
+AuthorizationResult = TypeVar("AuthorizationResult")
 
 
 class ProjectSwarmStore:
@@ -130,7 +133,25 @@ class ProjectSwarmStore:
         return run
 
     def resume_run(self, run_id: str) -> SwarmRun:
-        return self.set_run_status(run_id, "running")
+        updated_at = _utc_now()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE runs SET status = ?, updated_at = ?
+                WHERE run_id = ? AND status = ?
+                """,
+                ("running", _timestamp_text(updated_at), run_id, "paused"),
+            )
+            if cursor.rowcount != 1:
+                exists = connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                if exists is None:
+                    raise KeyError(f"Unknown Swarm run: {run_id}")
+                raise ValueError("Only paused Swarm runs can be resumed")
+        run = self.get_run(run_id)
+        assert run is not None
+        return run
 
     def record_approval(
         self,
@@ -238,6 +259,60 @@ class ProjectSwarmStore:
             return False
         return True
 
+    def authorize_and_claim(
+        self,
+        run_id: str,
+        proposal_id: str,
+        proposal_digest: str,
+        authorize: Callable[
+            [SwarmRun | None, list[ApprovalRecord]], tuple[AuthorizationResult, bool]
+        ],
+    ) -> tuple[AuthorizationResult, bool]:
+        """Read policy inputs and claim execution under one SQLite write lock."""
+        with self._immediate_connection() as connection:
+            run_row = connection.execute(
+                """
+                SELECT run_id, status, created_at, updated_at, metadata_json
+                FROM runs WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            run = _row_to_run(run_row) if run_row is not None else None
+            approval_rows = connection.execute(
+                """
+                SELECT sequence, approval_id, run_id, proposal_id, proposal_digest,
+                       approval_type, approver_id, approved, model_family,
+                       evidence_refs_json, created_at
+                FROM approvals WHERE run_id = ? AND proposal_id = ?
+                ORDER BY sequence ASC
+                """,
+                (run_id, proposal_id),
+            ).fetchall()
+            result, approved = authorize(
+                run,
+                [_row_to_approval(row) for row in approval_rows],
+            )
+            if not approved:
+                return result, False
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO action_executions (
+                        run_id, proposal_id, proposal_digest, claimed_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        proposal_id,
+                        proposal_digest,
+                        _timestamp_text(_utc_now()),
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                return result, False
+            return result, True
+
     def _ensure_schema(self) -> None:
         with self._connection() as connection:
             connection.executescript(
@@ -290,6 +365,21 @@ class ProjectSwarmStore:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         return _ConnectionContext(connection)
+
+    @contextmanager
+    def _immediate_connection(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.db_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            yield connection
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
 
 class _ConnectionContext:
