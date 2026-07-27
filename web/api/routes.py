@@ -4094,6 +4094,17 @@ def handle_get(handler, parsed) -> bool:
             return True
         finally:
             _teardown_workspace_context()
+    if parsed.path.startswith("/api/swarm/"):
+        from web.api.swarm import handle_swarm_get
+
+        _setup_workspace_from_request(handler, parsed)
+        try:
+            result = handle_swarm_get(handler, parsed)
+            if result is False:
+                return _kanban_unknown_endpoint(handler, parsed, "GET")
+            return True
+        finally:
+            _teardown_workspace_context()
     if parsed.path == "/api/wiki/status":
         return _handle_llm_wiki_status(handler, parsed)
     if parsed.path == "/api/logs":
@@ -6065,6 +6076,18 @@ def handle_post(handler, parsed) -> bool:
         _setup_workspace_from_request(handler, parsed)
         try:
             result = handle_kanban_post(handler, parsed, body)
+            if result is False:
+                return _kanban_unknown_endpoint(handler, parsed, "POST")
+            return True
+        finally:
+            _teardown_workspace_context()
+
+    if parsed.path.startswith("/api/swarm/"):
+        from web.api.swarm import handle_swarm_post
+
+        _setup_workspace_from_request(handler, parsed)
+        try:
+            result = handle_swarm_post(handler, parsed, body)
             if result is False:
                 return _kanban_unknown_endpoint(handler, parsed, "POST")
             return True

@@ -5079,6 +5079,7 @@ def test_sse_paths_allow_eventsource_authentication():
         "/api/nova/events",
         "/api/gmail/ai/summary/stream?id=m1",
         "/api/kanban/events/stream?board=default",
+        "/api/swarm/runs/events/stream?run_id=run-1",
         "/api/agents/workspace/stream/s1",
     ]
 
