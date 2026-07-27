@@ -20,6 +20,7 @@ from swarm_core.types import (
     ActionProposal,
     RequestedToolAction,
     SwarmRun,
+    thaw_json_value,
 )
 
 
@@ -108,7 +109,7 @@ class NovaSwarmAdapter:
         adapter, Swarm policy result, malformed Nova governance result or Nova
         policy denial all return without calling ``EntityKernel.act``.
         """
-        proposal, intent, spec = self._prepare(suggestion)
+        proposal, _intent, spec = self._prepare(suggestion)
         if not self.enabled:
             return NovaSwarmExecution(
                 proposal=proposal,
@@ -132,7 +133,15 @@ class NovaSwarmAdapter:
                 reason=swarm_decision.reason,
             )
 
-        nova_decision = self._kernel.govern(intent)
+        # The kernel must see the exact immutable intent that was included in
+        # the policy-bound proposal digest, not a mutable nested object from
+        # the original suggestion.
+        canonical_intent = thaw_json_value(
+            proposal.requested_action.arguments["intent"]
+        )
+        if not isinstance(canonical_intent, dict):  # defensive type boundary
+            raise RuntimeError("Swarm-bound Nova intent is malformed")
+        nova_decision = self._kernel.govern(canonical_intent)
         policy = (
             nova_decision.get("policy") if isinstance(nova_decision, Mapping) else None
         )
