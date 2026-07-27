@@ -1,0 +1,7 @@
+id: release-audit
+description: Audit release readiness against explicit evidence and approvals.
+workflow: release-audit
+roles:
+  scout: Gather release inputs and required checks.
+  auditor: Assess release evidence and outstanding risks.
+  reviewer: Independently review release readiness.

@@ -1,0 +1,7 @@
+id: bug-hunt
+description: Investigate a reproducible defect with scoped evidence.
+workflow: bug-hunt
+roles:
+  scout: Capture reproduction facts and affected boundaries.
+  investigator: Isolate likely causes from evidence.
+  verifier: Confirm the reported behavior and evidence.

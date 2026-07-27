@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .models import ModelRegistry
+from .packs import PackRegistry
 from .router import ModelRouter
 from .store import ProjectSwarmStore
 from .transport import ModelTransport
@@ -50,9 +51,8 @@ class SwarmEngine:
         project_root: Path,
         pack: str = "coding-team",
     ) -> RunSummary:
-        if pack != "coding-team":
-            raise ValueError(f"Unknown Swarm pack: {pack}")
         project_root = Path(project_root).resolve()
+        pack_definition = PackRegistry(project_root).get(pack)
         store = ProjectSwarmStore(project_root)
         run = store.create_run(
             metadata={
@@ -66,6 +66,27 @@ class SwarmEngine:
             "run.started",
             {"goal": goal, "pack": pack},
         )
+        if pack_definition.pack_id != "coding-team":
+            store.set_run_status(run.run_id, "paused")
+            store.append_event(
+                run.run_id,
+                "run.paused",
+                {
+                    "attempted_models": [],
+                    "reason": "pack_workflow_not_implemented",
+                    "role": "pack",
+                },
+            )
+            events = tuple(store.list_events(run.run_id))
+            return RunSummary(
+                run_id=run.run_id,
+                status="paused",
+                call_count=0,
+                evidence={},
+                decision=None,
+                pause_reason="pack_workflow_not_implemented",
+                events=events,
+            )
         executor = ModelExecutor(
             ModelRouter(self.registry),
             self.transport,
