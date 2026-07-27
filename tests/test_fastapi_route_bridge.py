@@ -90,6 +90,69 @@ def test_swarm_get_skips_workspace_setup_in_fastapi_bridge(monkeypatch):
     assert response.json() == {"ok": True}
 
 
+def test_swarm_get_skips_global_webui_bootstrap_in_fastapi_bridge(monkeypatch):
+    """Catches a pure Swarm read initializing the global Agent/WebUI state."""
+    from cli import web_server
+    from web.api import fastapi_bridge, swarm
+
+    def unexpected_bootstrap():
+        raise AssertionError("Swarm GET must not bootstrap the WebUI runtime")
+
+    def fake_swarm_get(handler, parsed):
+        assert parsed.path == "/api/swarm/runs"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(b'{"ok":true}')
+        return True
+
+    monkeypatch.setattr(
+        fastapi_bridge, "_prepare_webui_runtime", unexpected_bootstrap
+    )
+    monkeypatch.setattr(swarm, "handle_swarm_get", fake_swarm_get)
+
+    response = TestClient(web_server.app).get(
+        "/api/swarm/runs?project_path=C%3A%2Ftrusted",
+        headers=_headers(web_server),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_non_swarm_post_keeps_webui_bootstrap(monkeypatch):
+    """The pure-read exemption must not change normal write-route lifecycle."""
+    from cli import web_server
+    from web.api import fastapi_bridge, routes
+
+    bootstraps: list[None] = []
+
+    def fake_post(handler, parsed):
+        assert parsed.path == "/api/bridge-bootstrap"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(b'{"ok":true}')
+        return True
+
+    monkeypatch.setattr(
+        fastapi_bridge, "_prepare_webui_runtime", lambda: bootstraps.append(None)
+    )
+    monkeypatch.setattr(routes, "_setup_workspace_from_request", lambda *_: None)
+    monkeypatch.setattr(routes, "_teardown_workspace_context", lambda: None)
+    monkeypatch.setattr(routes, "handle_post", fake_post)
+
+    response = TestClient(web_server.app).post(
+        "/api/bridge-bootstrap",
+        headers=_headers(web_server),
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert bootstraps == [None]
+
+
 def test_swarm_approval_actor_comes_from_dashboard_session_not_profile_cookie(
     monkeypatch,
     tmp_path,
