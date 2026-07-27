@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, ContextManager, Mapping, Protocol
 
 from .models import ModelRequest, ModelResponse, OLLAMA_CLOUD_PROVIDER
 
@@ -20,16 +21,24 @@ class OllamaCloudTransport:
     imports neither Sidekick runtime modules nor a direct Ollama client.
     """
 
-    def __init__(self, call_llm: Callable[..., Any]) -> None:
+    def __init__(
+        self,
+        call_llm: Callable[..., Any],
+        *,
+        call_guard: Callable[[ModelRequest], ContextManager[None]] | None = None,
+    ) -> None:
         self._call_llm = call_llm
+        self._call_guard = call_guard
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        raw_response = self._call_llm(
-            task="swarm",
-            provider=OLLAMA_CLOUD_PROVIDER,
-            model=request.model,
-            messages=[{"role": "user", "content": request.render_prompt()}],
-        )
+        guard = self._call_guard(request) if self._call_guard is not None else nullcontext()
+        with guard:
+            raw_response = self._call_llm(
+                task="swarm",
+                provider=OLLAMA_CLOUD_PROVIDER,
+                model=request.model,
+                messages=[{"role": "user", "content": request.render_prompt()}],
+            )
         content = _response_content(raw_response)
         return ModelResponse(
             model=request.model,
