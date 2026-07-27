@@ -10,6 +10,7 @@ import sqlite3
 from typing import Any, Mapping
 from uuid import uuid4
 
+from .config import initialize_project
 from .types import SwarmEvent, SwarmRun
 
 
@@ -18,6 +19,7 @@ class ProjectSwarmStore:
 
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root.resolve()
+        initialize_project(self.project_root)
         self.runtime_dir = self.project_root / ".swarm" / "runtime"
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.runtime_dir / "swarm.sqlite"
