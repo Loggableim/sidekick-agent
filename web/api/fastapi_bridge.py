@@ -29,6 +29,20 @@ _RUNTIME_INIT_LOCK = threading.Lock()
 _RUNTIME_STATE_DIR: str | None = None
 
 
+def _is_pure_swarm_get(method: str, path: str) -> bool:
+    """True for Swarm reads that must not initialize a WebUI Space."""
+    return method.upper() == "GET" and path.startswith("/api/swarm/")
+
+
+def _is_swarm_approval_post(method: str, path: str) -> bool:
+    """True for the one HTTP path that records a human Swarm decision."""
+    return (
+        method.upper() == "POST"
+        and path.startswith("/api/swarm/runs/")
+        and path.endswith("/approve")
+    )
+
+
 def _prepare_webui_runtime() -> None:
     """Initialize file-backed route state for the current Sidekick home.
 
@@ -162,14 +176,25 @@ class _RouteExecution:
             "DELETE": handle_delete,
         }
         parsed = urlparse(self.handler.path)
+        pure_swarm_get = _is_pure_swarm_get(self.handler.command, parsed.path)
+        workspace_context_attempted = False
         try:
-            cookie_profile = get_profile_cookie(self.handler)
-            if cookie_profile:
-                set_request_profile(cookie_profile)
-            _setup_workspace_from_request(self.handler, parsed)
+            if not pure_swarm_get:
+                cookie_profile = get_profile_cookie(self.handler)
+                if cookie_profile:
+                    set_request_profile(cookie_profile)
+                # Preserve normal route cleanup even if setup raises midway.
+                workspace_context_attempted = True
+                _setup_workspace_from_request(self.handler, parsed)
 
             if not check_auth(self.handler, parsed):
                 return
+            if _is_swarm_approval_post(self.handler.command, parsed.path):
+                from cli.web_server import dashboard_session_principal
+
+                actor_id = dashboard_session_principal(self.request)
+                if actor_id is not None:
+                    self.handler.swarm_host_actor = actor_id
             route = route_for_method.get(self.handler.command)
             if route is None:
                 j(self.handler, {"error": "method not allowed"}, status=405)
@@ -187,7 +212,8 @@ class _RouteExecution:
                     pass
         finally:
             clear_request_profile()
-            _teardown_workspace_context()
+            if workspace_context_attempted:
+                _teardown_workspace_context()
             if not self.handler.headers_ready.is_set():
                 self.handler.send_response(204)
                 self.handler.end_headers()

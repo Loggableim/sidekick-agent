@@ -20,7 +20,6 @@ from cli.swarm import get_swarm_service
 from swarm_core.config import load_project_config
 from swarm_core.store import ProjectSwarmStore
 from web.api.helpers import bad, j
-from web.api.profiles import get_active_profile_name
 from web.api.space_engine import resolve_active_space
 from web.api.workspace import resolve_trusted_workspace
 
@@ -43,7 +42,7 @@ def handle_swarm_get(handler, parsed) -> bool | None:
     } and not path.startswith(_RUNS_PREFIX):
         return False
     try:
-        project_root = _resolve_project_path(parsed)
+        project_root = _resolve_project_path(parsed, require_explicit=True)
         if path == "/api/swarm/packs":
             # Packs are versioned config metadata, not runtime state.  They
             # remain readable immediately after `swarm init`, before a first
@@ -176,12 +175,12 @@ def _record_human_approval(
         deny = body.get("deny", False)
         if not isinstance(deny, bool):
             raise ValueError("deny must be a bool")
-        profile = str(get_active_profile_name() or "default").strip() or "default"
+        actor_id = _require_host_approval_actor(handler)
         approval = get_swarm_service().record_human_approval(
             project_root,
             run_id,
             proposal_id,
-            actor_id=f"webui:{profile}",
+            actor_id=actor_id,
             approved=not deny,
         )
         return j(handler, {"approval": _jsonable(approval)}) or True
@@ -189,6 +188,8 @@ def _record_human_approval(
         return bad(handler, str(exc), status=404)
     except KeyError as exc:
         return bad(handler, str(exc), status=404)
+    except PermissionError as exc:
+        return bad(handler, str(exc), status=403)
     except (TypeError, ValueError) as exc:
         return bad(handler, str(exc), status=400)
     except RuntimeError as exc:
@@ -223,7 +224,12 @@ def _change_status(
         return bad(handler, str(exc), status=409)
 
 
-def _resolve_project_path(parsed, body: Mapping[str, Any] | None = None) -> Path:
+def _resolve_project_path(
+    parsed,
+    body: Mapping[str, Any] | None = None,
+    *,
+    require_explicit: bool = False,
+) -> Path:
     """Resolve an explicit project path, or the active Space's project dir.
 
     ``workspace`` remains a Space slug handled by the surrounding WebUI request
@@ -238,11 +244,28 @@ def _resolve_project_path(parsed, body: Mapping[str, Any] | None = None) -> Path
         if not isinstance(candidate, str):
             raise ValueError("project_path must be a string")
         return Path(resolve_trusted_workspace(candidate)).resolve()
+    if require_explicit:
+        raise ValueError("project_path is required for Swarm GET")
     space = resolve_active_space()
     project_dir = space.get_project_dir()
     if not project_dir:
         raise LookupError("Active Space has no configured project directory")
     return Path(resolve_trusted_workspace(project_dir)).resolve()
+
+
+def _require_host_approval_actor(handler) -> str:
+    """Return the bridge-supplied dashboard principal or fail closed.
+
+    Profile cookies select a local UI context but are not an authentication
+    identity.  Only the FastAPI bridge may attach this value after it has
+    verified the ephemeral dashboard session token.
+    """
+    actor_id = getattr(handler, "swarm_host_actor", None)
+    if not isinstance(actor_id, str) or not actor_id.startswith("dashboard:"):
+        raise PermissionError("A trusted dashboard approval principal is required")
+    if not actor_id[len("dashboard:") :].strip():
+        raise PermissionError("A trusted dashboard approval principal is required")
+    return actor_id
 
 
 def _handle_events_sse_stream(handler, parsed, reader, run_id: str) -> bool:
