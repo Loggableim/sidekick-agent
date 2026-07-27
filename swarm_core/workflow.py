@@ -144,7 +144,7 @@ class ModelExecutor:
         calls = tuple(calls)
         responses: list[ModelResponse | None] = [None] * len(calls)
         failures: list[list[ModelAttemptFailure]] = [[] for _call in calls]
-        first_error: BaseException | None = None
+        errors: list[BaseException | None] = [None] * len(calls)
         with ThreadPoolExecutor(max_workers=self.max_concurrent) as pool:
             futures = {
                 pool.submit(
@@ -160,8 +160,7 @@ class ModelExecutor:
                 try:
                     response = future.result()
                 except BaseException as exc:
-                    if first_error is None:
-                        first_error = exc
+                    errors[index] = exc
                     continue
                 responses[index] = response
         for index, call_failures in enumerate(failures):
@@ -171,8 +170,9 @@ class ModelExecutor:
             response = responses[index]
             if response is not None and on_success is not None:
                 on_success(calls[index], response)
-        if first_error is not None:
-            raise first_error
+        for error in errors:
+            if error is not None:
+                raise error
         return [response for response in responses if response is not None]
 
 
