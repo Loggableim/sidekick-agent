@@ -42,6 +42,11 @@ class AutonomyPolicyTests(unittest.TestCase):
         self.assertTrue(decision["allowed"])
         self.assertEqual(decision["tier"], "internal")
 
+    def test_action_tier_exposes_the_configured_canonical_tier(self):
+        """Adapter integrations must not reimplement or override the Space policy tier."""
+        self.assertEqual(self.policy.action_tier("reflection"), "internal")
+        self.assertEqual(self.policy.action_tier("unknown_action"), "risky")
+
     def test_notify_requires_reason_and_respects_daily_limit(self):
         history = [
             {"action": "telegram_message", "timestamp": "2026-07-05T09:00:00"},

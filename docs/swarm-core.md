@@ -74,6 +74,14 @@ pausing or rewriting the Swarm run.
 Nova startup path and defaults to `enabled=False`. Importing it does not create
 a kernel or touch the live Nova deployment.
 
+The initial adapter registry is deliberately narrow: `agenda_update`,
+`mind_diary` and `prioritize_thread` are direct project-local actions;
+`blog_draft` retains Nova's `external` tier and therefore always needs a human
+Swarm approval. Script-backed actions such as `inner_voice` are not enabled in
+this first slice. A later activation also requires the supplied
+`EntityKernel.space_dir` to be the exact Swarm project root, and the kernel's
+configured policy tier is used without adapter-side downgrades.
+
 Before any later activation, verify all of the following in a separate,
 explicit rollout:
 
