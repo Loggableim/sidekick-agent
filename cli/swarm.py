@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 import json
 from pathlib import Path
@@ -209,7 +209,13 @@ def _emit_error(message: str, *, json_output: bool) -> None:
 
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value):
-        return _jsonable(asdict(value))
+        # Pack definitions retain role metadata in MappingProxyType.  Avoid
+        # ``asdict`` here because it deep-copies that intentionally immutable
+        # mapping before this serializer can normalize it.
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, datetime):
