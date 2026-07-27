@@ -156,7 +156,13 @@ class _RouteExecution:
         self.thread.start()
 
     def _run(self) -> None:
-        _prepare_webui_runtime()
+        # A Swarm read has its own project-local, read-only initialization
+        # contract.  Classify it before the legacy WebUI bootstrap, which
+        # initializes global Agent/Space state and can create files.
+        parsed = urlparse(self.handler.path)
+        pure_swarm_get = _is_pure_swarm_get(self.handler.command, parsed.path)
+        if not pure_swarm_get:
+            _prepare_webui_runtime()
         from web.api.auth import check_auth
         from web.api.helpers import get_profile_cookie, j
         from web.api.profiles import clear_request_profile, set_request_profile
@@ -175,8 +181,6 @@ class _RouteExecution:
             "PATCH": handle_patch,
             "DELETE": handle_delete,
         }
-        parsed = urlparse(self.handler.path)
-        pure_swarm_get = _is_pure_swarm_get(self.handler.command, parsed.path)
         workspace_context_attempted = False
         try:
             if not pure_swarm_get:
