@@ -377,6 +377,10 @@
   }
 
   function stopSwarmStream() {
+    // A panel exit can happen while a run-detail GET is pending.  Advance the
+    // epoch even without an active EventSource so that stale completions cannot
+    // reopen a stream after this explicit stop.
+    _swarmLoadSequence += 1;
     if (_swarmEventSource) {
       try { _swarmEventSource.close(); } catch (_) {}
     }

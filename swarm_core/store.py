@@ -144,6 +144,89 @@ class ProjectSwarmStore:
             event_id, sequence, timestamp, event_type, run_id, payload_data, visibility
         )
 
+    def append_event_once(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: Mapping[str, Any] | None = None,
+        *,
+        idempotency_key: str,
+        visibility: str = "project",
+    ) -> tuple[SwarmEvent, bool]:
+        """Atomically append one event for a stable integration-side key.
+
+        The key is scoped to a run and event type.  A retry returns the
+        original durable event and ``False`` instead of recording an
+        indistinguishable second fact.
+        """
+        if not idempotency_key.strip():
+            raise ValueError("event idempotency_key is required")
+
+        with self._immediate_connection() as connection:
+            existing = connection.execute(
+                """
+                SELECT events.sequence, events.event_id, events.timestamp,
+                       events.event_type, events.run_id, events.payload_json,
+                       events.visibility
+                FROM event_idempotency_keys
+                JOIN events ON events.event_id = event_idempotency_keys.event_id
+                WHERE event_idempotency_keys.run_id = ?
+                  AND event_idempotency_keys.event_type = ?
+                  AND event_idempotency_keys.idempotency_key = ?
+                """,
+                (run_id, event_type, idempotency_key),
+            ).fetchone()
+            if existing is not None:
+                return _row_to_event(existing), False
+
+            if (
+                connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                is None
+            ):
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+
+            event_id = str(uuid4())
+            timestamp = _utc_now()
+            payload_data = dict(payload or {})
+            cursor = connection.execute(
+                """
+                INSERT INTO events (event_id, timestamp, event_type, run_id, payload_json, visibility)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    _timestamp_text(timestamp),
+                    event_type,
+                    run_id,
+                    json.dumps(payload_data, sort_keys=True),
+                    visibility,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO event_idempotency_keys (
+                    run_id, event_type, idempotency_key, event_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (run_id, event_type, idempotency_key, event_id),
+            )
+            sequence = int(cursor.lastrowid)
+
+        return (
+            SwarmEvent(
+                event_id,
+                sequence,
+                timestamp,
+                event_type,
+                run_id,
+                payload_data,
+                visibility,
+            ),
+            True,
+        )
+
     def list_events(self, run_id: str) -> list[SwarmEvent]:
         with self._connection() as connection:
             rows = connection.execute(
@@ -964,6 +1047,13 @@ class ProjectSwarmStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_run_sequence
                     ON events(run_id, sequence);
+                CREATE TABLE IF NOT EXISTS event_idempotency_keys (
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    event_type TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    event_id TEXT NOT NULL UNIQUE REFERENCES events(event_id),
+                    PRIMARY KEY (run_id, event_type, idempotency_key)
+                );
                 CREATE TABLE IF NOT EXISTS approvals (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     approval_id TEXT NOT NULL UNIQUE,

@@ -102,6 +102,30 @@ def test_events_are_returned_in_monotonic_sequence_order(tmp_path: Path):
     assert events[1].visibility == "project"
 
 
+def test_idempotent_event_append_returns_the_first_durable_event(tmp_path: Path):
+    """Catches optional integrations recording the same durable event twice."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="once-only")
+
+    first, first_created = store.append_event_once(
+        run.run_id,
+        "sidekick.kanban_projection_created",
+        {"kanban_task_id": "task-first"},
+        idempotency_key="kanban-projection",
+    )
+    second, second_created = ProjectSwarmStore(tmp_path).append_event_once(
+        run.run_id,
+        "sidekick.kanban_projection_created",
+        {"kanban_task_id": "task-duplicate"},
+        idempotency_key="kanban-projection",
+    )
+
+    assert first_created is True
+    assert second_created is False
+    assert second == first
+    assert ProjectSwarmStore(tmp_path).list_events(run.run_id) == [first]
+
+
 def test_read_only_store_never_initializes_a_missing_project(tmp_path: Path):
     """Catches status/SSE reads silently creating versioned or runtime state."""
     missing_project = tmp_path / "missing"

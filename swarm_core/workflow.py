@@ -80,6 +80,7 @@ class ModelExecutor:
         *,
         call_budget: CallBudget | None = None,
         max_concurrent: int = 3,
+        before_model_call: Callable[[], None] | None = None,
     ) -> None:
         if not 1 <= max_concurrent <= 3:
             raise ValueError("Swarm concurrency must be between 1 and 3")
@@ -87,6 +88,7 @@ class ModelExecutor:
         self.transport = transport
         self.call_budget = call_budget or CallBudget()
         self.max_concurrent = max_concurrent
+        self.before_model_call = before_model_call
 
     def complete(
         self,
@@ -105,6 +107,8 @@ class ModelExecutor:
             ) from exc
         attempted: list[str] = []
         for model in selection.models:
+            if self.before_model_call is not None:
+                self.before_model_call()
             self.call_budget.claim(role=call.role, attempted_models=attempted)
             attempted.append(model)
             request = ModelRequest(

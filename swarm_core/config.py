@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import tempfile
+import threading
+import time
 from typing import Any
 
 import yaml
@@ -24,6 +28,9 @@ _AUTONOMY_LEVELS = {
     "reviewed_execution",
     "autonomous",
 }
+
+_CONFIG_INITIALIZATION_LOCK = threading.RLock()
+_REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2)
 
 
 class SwarmProjectNotInitializedError(FileNotFoundError):
@@ -58,23 +65,57 @@ def initialize_project(project_root: Path) -> SwarmConfig:
     config_path = swarm_dir / "swarm.yaml"
     ignore_path = swarm_dir / ".gitignore"
 
-    runtime_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_runtime_is_ignored(ignore_path)
+    # The lock prevents two threads in one Sidekick process from interleaving
+    # setup and replacement.  Once an initial config exists, atomic replacement
+    # gives other processes/readers either the old complete document or the new
+    # one; a read before first publish remains a pure not-initialized result.
+    with _CONFIG_INITIALIZATION_LOCK:
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_runtime_is_ignored(ignore_path)
 
-    if not config_path.exists():
-        config_path.write_text(
-            yaml.safe_dump(_DEFAULT_CONFIG, sort_keys=False), encoding="utf-8"
-        )
+        if not config_path.exists():
+            _write_project_config(
+                config_path,
+                _DEFAULT_CONFIG,
+            )
 
-    raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw_config, dict):
-        raise ValueError(f"Swarm configuration must be a mapping: {config_path}")
-    if "default_autonomy" not in raw_config:
-        raw_config["default_autonomy"] = _DEFAULT_CONFIG["default_autonomy"]
-        config_path.write_text(
-            yaml.safe_dump(raw_config, sort_keys=False), encoding="utf-8"
-        )
-    return _to_config(project_root, config_path, raw_config)
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        if not isinstance(raw_config, dict):
+            raise ValueError(f"Swarm configuration must be a mapping: {config_path}")
+        if "default_autonomy" not in raw_config:
+            raw_config["default_autonomy"] = _DEFAULT_CONFIG["default_autonomy"]
+            _write_project_config(config_path, raw_config)
+        return _to_config(project_root, config_path, raw_config)
+
+
+def _write_project_config(config_path: Path, raw_config: dict[str, Any]) -> None:
+    """Publish a complete YAML document in one filesystem replacement."""
+    document = yaml.safe_dump(raw_config, sort_keys=False)
+    descriptor, temporary_path = tempfile.mkstemp(
+        dir=config_path.parent,
+        prefix=f".{config_path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(document)
+            stream.flush()
+            os.fsync(stream.fileno())
+        for delay in (*_REPLACE_RETRY_DELAYS, None):
+            try:
+                os.replace(temporary_path, config_path)
+                break
+            except PermissionError:
+                if delay is None:
+                    raise
+                time.sleep(delay)
+    except BaseException:
+        try:
+            Path(temporary_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _ensure_runtime_is_ignored(ignore_path: Path) -> None:

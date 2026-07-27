@@ -18,6 +18,7 @@ from swarm_core.learning import (
     assess_golden_results,
 )
 from swarm_core.memory import ProjectMemory
+from swarm_core.models import ModelResponse
 from swarm_core.packs import PackRegistry
 from swarm_core.store import ProjectSwarmStore
 from swarm_core import store as swarm_store_module
@@ -961,18 +962,26 @@ def test_pack_registry_rejects_malformed_or_unsafe_project_yaml(
         PackRegistry(tmp_path)
 
 
-def test_known_non_coding_pack_pauses_without_a_model_call(tmp_path: Path):
-    """Catches recognized packs silently executing the coding-team workflow."""
+def test_known_non_coding_pack_runs_the_reviewed_workflow(tmp_path: Path):
+    """Catches a selectable pack still pausing instead of doing its reviewed work."""
 
-    class CountingTransport:
+    class PackTransport:
         def __init__(self) -> None:
             self.requests: list[object] = []
 
-        def complete(self, request: object) -> object:
+        def complete(self, request) -> ModelResponse:
             self.requests.append(request)
-            raise AssertionError("A non-coding pack must not call a model")
+            return ModelResponse(
+                model=request.model,
+                content="reviewed pack work",
+                data={
+                    "work": f"{request.role} work",
+                    "evidence": [f"{request.role}:evidence"],
+                    "decision": "continue",
+                },
+            )
 
-    transport = CountingTransport()
+    transport = PackTransport()
 
     summary = SwarmEngine(transport).run(
         "Investigate the regression.",
@@ -980,9 +989,9 @@ def test_known_non_coding_pack_pauses_without_a_model_call(tmp_path: Path):
         pack="bug-hunt",
     )
 
-    assert summary.status == "paused"
-    assert summary.pause_reason == "pack_workflow_not_implemented"
-    assert summary.call_count == 0
-    assert transport.requests == []
-    assert summary.events[-1].event_type == "run.paused"
-    assert summary.events[-1].payload["reason"] == "pack_workflow_not_implemented"
+    assert summary.status == "completed"
+    assert summary.pause_reason is None
+    assert summary.call_count == 8
+    assert len(transport.requests) == 8
+    assert all("Pack: bug-hunt" in request.prompt for request in transport.requests)
+    assert summary.events[-1].event_type == "run.completed"

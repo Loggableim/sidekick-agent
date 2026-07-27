@@ -8,10 +8,12 @@ established trusted-workspace resolver.
 
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import datetime
 import json
+import logging
 from pathlib import Path
+import threading
 import time
 from typing import Any, Mapping
 from urllib.parse import parse_qs, unquote
@@ -30,6 +32,21 @@ _SSE_PATH = "/api/swarm/runs/events/stream"
 _SSE_BATCH_LIMIT = 100
 _SSE_POLL_SECONDS = 0.5
 _SSE_HEARTBEAT_SECONDS = 15.0
+_BACKGROUND_RUNS_LOCK = threading.RLock()
+_LOG = logging.getLogger(__name__)
+
+
+@dataclass
+class _BackgroundRun:
+    """In-memory ownership state for one process-local worker."""
+
+    thread: threading.Thread | None = None
+    state: str = "starting"
+    start_gate: threading.Event = field(default_factory=threading.Event)
+    cancelled: threading.Event = field(default_factory=threading.Event)
+
+
+_BACKGROUND_RUNS: dict[tuple[str, str], _BackgroundRun] = {}
 
 
 def handle_swarm_get(handler, parsed) -> bool | None:
@@ -139,8 +156,22 @@ def _create_run(handler, parsed, body: Mapping[str, Any]) -> bool | None:
         pack = str(body.get("pack") or "coding-team").strip()
         if not pack:
             raise ValueError("pack must be non-empty")
-        summary = get_swarm_service().run(goal, project_root, pack=pack)
-        return j(handler, {"run": _jsonable(summary)}, status=201) or True
+        service = get_swarm_service()
+        run = service.start_run(goal, project_root, pack=pack)
+        execution = _launch_background_execution(service, project_root, run.run_id)
+        try:
+            response = j(handler, {"run": _jsonable(run)}, status=201)
+        except Exception as exc:
+            _cancel_unpublished_background_execution(
+                project_root, run.run_id, execution, exc
+            )
+            raise
+        # The worker is deliberately started first so a thread-start failure
+        # becomes a durable paused run before returning 201.  Its gate keeps
+        # the response snapshot deterministic: execution cannot change it
+        # before the handler has written the response body.
+        execution.start_gate.set()
+        return response or True
     except FileNotFoundError as exc:
         return bad(handler, str(exc), status=404)
     except (TypeError, ValueError) as exc:
@@ -211,11 +242,17 @@ def _change_status(
         project_root = _resolve_project_path(parsed, body)
         _reject_unknown_keys(body, {"project_path"})
         service = get_swarm_service()
-        run = (
-            service.pause(project_root, run_id)
-            if pause
-            else service.resume(project_root, run_id)
-        )
+        if pause:
+            run = service.pause(project_root, run_id)
+        else:
+            existing = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
+            if existing is None:
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            run = (
+                _resume_waiting_background_execution(service, project_root, run_id)
+                if existing.status == "paused"
+                else service.resume(project_root, run_id)
+            )
         return j(handler, {"run": _jsonable(run)}) or True
     except FileNotFoundError as exc:
         return bad(handler, str(exc), status=404)
@@ -225,6 +262,151 @@ def _change_status(
         return bad(handler, str(exc), status=400)
     except RuntimeError as exc:
         return bad(handler, str(exc), status=409)
+
+
+def _launch_background_execution(
+    service, project_root: Path, run_id: str
+) -> _BackgroundRun:
+    """Launch at most one tracked worker for one durable run.
+
+    The worker is deliberately process-local.  A stopped Sidekick process does
+    not pretend to resume a possibly costly workflow from an incomplete memory
+    checkpoint; its durable run remains observable and paused/running for a
+    human to inspect.
+    """
+    project_root = Path(project_root).resolve()
+    key = (str(project_root), run_id)
+    with _BACKGROUND_RUNS_LOCK:
+        existing = _BACKGROUND_RUNS.get(key)
+        if (
+            existing is not None
+            and existing.thread is not None
+            and existing.thread.is_alive()
+        ):
+            raise RuntimeError("Swarm execution is already active for this run")
+        if existing is not None:
+            _BACKGROUND_RUNS.pop(key, None)
+
+        execution = _BackgroundRun()
+
+        def execute() -> None:
+            try:
+                execution.start_gate.wait()
+                if execution.cancelled.is_set():
+                    return
+                _set_background_run_state(key, execution, "executing")
+                service.execute_run(
+                    project_root,
+                    run_id,
+                    on_pause_wait=lambda: _set_background_run_state(
+                        key, execution, "waiting_for_resume"
+                    ),
+                    on_resume=lambda: _set_background_run_state(
+                        key, execution, "executing"
+                    ),
+                )
+            except Exception as exc:
+                _record_background_execution_failure(project_root, run_id, exc)
+            finally:
+                with _BACKGROUND_RUNS_LOCK:
+                    if _BACKGROUND_RUNS.get(key) is execution:
+                        execution.state = "finished"
+                        _BACKGROUND_RUNS.pop(key, None)
+
+        thread = threading.Thread(
+            target=execute,
+            name=f"sidekick-swarm-{run_id[:8]}",
+            daemon=True,
+        )
+        execution.thread = thread
+        _BACKGROUND_RUNS[key] = execution
+        try:
+            thread.start()
+        except Exception as exc:
+            _BACKGROUND_RUNS.pop(key, None)
+            _record_background_execution_failure(project_root, run_id, exc)
+            raise RuntimeError(
+                "Could not start the Swarm background execution"
+            ) from exc
+    return execution
+
+
+def _cancel_unpublished_background_execution(
+    project_root: Path,
+    run_id: str,
+    execution: _BackgroundRun,
+    exc: Exception,
+) -> None:
+    """Release a pre-publication worker without leaving a durable false run."""
+    execution.cancelled.set()
+    _record_background_execution_failure(project_root, run_id, exc)
+    execution.start_gate.set()
+
+
+def _resume_waiting_background_execution(service, project_root: Path, run_id: str):
+    """Atomically hand a human resume to a worker blocked at a safe boundary."""
+    key = (str(Path(project_root).resolve()), run_id)
+    with _BACKGROUND_RUNS_LOCK:
+        execution = _BACKGROUND_RUNS.get(key)
+        if (
+            execution is None
+            or execution.thread is None
+            or not execution.thread.is_alive()
+            or execution.state != "waiting_for_resume"
+        ):
+            if execution is not None and (
+                execution.thread is None or not execution.thread.is_alive()
+            ):
+                _BACKGROUND_RUNS.pop(key, None)
+            raise RuntimeError(
+                "Swarm execution is not waiting at a resumable boundary in this "
+                "Sidekick process; create a new run instead of resuming it"
+            )
+        return service.resume(project_root, run_id)
+
+
+def _set_background_run_state(
+    key: tuple[str, str],
+    execution: _BackgroundRun,
+    state: str,
+) -> None:
+    """Update worker state only while this exact worker owns the run key."""
+    with _BACKGROUND_RUNS_LOCK:
+        if _BACKGROUND_RUNS.get(key) is execution:
+            execution.state = state
+
+
+def _record_background_execution_failure(
+    project_root: Path,
+    run_id: str,
+    exc: Exception,
+) -> None:
+    """Make an unexpected worker failure visible without storing error text."""
+    try:
+        store = ProjectSwarmStore(project_root)
+        run = store.get_run(run_id)
+        if run is None or run.status == "completed":
+            return
+        if run.status == "running":
+            try:
+                store.set_run_status(run_id, "paused")
+            except (RuntimeError, ValueError):
+                # A concurrent human pause wins the durable state transition.
+                pass
+        run = store.get_run(run_id)
+        if run is not None and run.status != "completed":
+            store.append_event(
+                run_id,
+                "run.execution_failed",
+                {"error_type": type(exc).__name__},
+            )
+    except Exception as record_error:
+        # Do not emit untrusted model/provider text into logs.  The type is
+        # enough for an operator to see that durable failure recording failed.
+        _LOG.error(
+            "Could not record Swarm background failure: error_type=%s",
+            type(record_error).__name__,
+        )
 
 
 def _project_to_kanban(
@@ -411,8 +593,7 @@ def _jsonable(value: Any) -> Any:
         # not picklable/deep-copyable.  Walk the declared fields directly so
         # read-only API serialization preserves that immutability boundary.
         return {
-            field.name: _jsonable(getattr(value, field.name))
-            for field in fields(value)
+            field.name: _jsonable(getattr(value, field.name)) for field in fields(value)
         }
     if isinstance(value, Path):
         return str(value)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import textwrap
 from pathlib import Path
 
 
@@ -45,6 +48,83 @@ def test_swarm_client_uses_explicit_project_paths_and_stops_its_stream_on_panel_
     assert "swarm: 'tab_swarm'" in panels_js
     assert "'swarm'" in panels_js
     assert "main.main.showing-swarm > #mainSwarm" in style_css
+
+
+def test_swarm_panel_exit_invalidates_a_pending_detail_load_before_it_can_reopen_sse():
+    """A delayed detail GET must not recreate EventSource after the user leaves Swarm."""
+    node = shutil.which("node")
+    if node is None:
+        # The dashboard build itself requires Node; retain a clear local skip for
+        # stripped-down Python-only test environments.
+        import pytest
+
+        pytest.skip(
+            "Node.js is required to execute the Swarm browser lifecycle regression"
+        )
+
+    swarm_js = Path("web/static/swarm.js").resolve()
+    harness = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+        let resolveDetail;
+        const openedStreams = [];
+        const elements = {
+          swarmRunList: {innerHTML: '', onclick: null},
+          swarmMain: {innerHTML: '', onclick: null},
+        };
+        global.window = {
+          _activeSpaceConfig: {project_dir: 'C:/swarm-project'},
+          _activeSpace: '',
+          _spacesCache: [],
+        };
+        global.document = {getElementById: (id) => elements[id] || null};
+        global._eventSourceUrl = (url) => url;
+        global.api = (path) => {
+          if (path.includes('/api/swarm/runs/run-1?')) {
+            return new Promise((resolve) => { resolveDetail = resolve; });
+          }
+          if (path.includes('/api/swarm/runs?')) {
+            return Promise.resolve({runs: [{run_id: 'run-1', status: 'paused', metadata: {}}]});
+          }
+          if (path.includes('/api/swarm/packs?')) return Promise.resolve({packs: []});
+          if (path.includes('/api/swarm/models?')) return Promise.resolve({catalog: null});
+          throw new Error('unexpected request: ' + path);
+        };
+        global.EventSource = class FakeEventSource {
+          constructor(url) { openedStreams.push(url); }
+          addEventListener() {}
+          close() {}
+        };
+        vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'), {filename: process.argv[1]});
+        async function flushMicrotasks() {
+          for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
+        }
+        (async () => {
+          const loading = window.loadSwarm();
+          await flushMicrotasks();
+          if (typeof resolveDetail !== 'function') throw new Error('detail request was not started');
+          window.stopSwarmStream();
+          resolveDetail({run: {run_id: 'run-1', status: 'paused', metadata: {}}, events: [], approvals: []});
+          await loading;
+          if (openedStreams.length !== 0) {
+            throw new Error('panel exit reopened EventSource: ' + openedStreams.join(', '));
+          }
+        })().catch((error) => {
+          console.error(error && error.stack || error);
+          process.exitCode = 1;
+        });
+        """
+    )
+    result = subprocess.run(
+        [node, "-e", harness, str(swarm_js)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_swarm_client_keeps_every_observation_read_only_until_an_explicit_control():

@@ -13,6 +13,7 @@ from dataclasses import replace
 import os
 from pathlib import Path
 import threading
+import time
 from typing import Any, Callable, ContextManager, Iterator, Mapping
 
 from swarm_core.engine import RunSummary, SwarmEngine
@@ -37,6 +38,7 @@ from swarm_core.types import (
 CatalogRefresher = Callable[[], ModelCatalogSnapshot]
 ProviderSlot = Callable[[str, str], ContextManager[None]]
 ActionClassifier = Callable[[RequestedToolAction], ActionCapabilities]
+PauseObserver = Callable[[], None]
 
 _FALLBACK_SLOT_LOCK = threading.Lock()
 _FALLBACK_SLOTS: dict[int, threading.BoundedSemaphore] = {}
@@ -89,6 +91,7 @@ class SidekickSwarmService:
         catalog_refresher: CatalogRefresher | None = None,
         provider_slot: ProviderSlot | None = None,
         action_classifier: ActionClassifier | None = None,
+        pause_poll_seconds: float = 0.05,
     ) -> None:
         # Constructor purity matters: GET route handlers may construct a
         # service for dependency injection, but must never create `.swarm`.
@@ -96,6 +99,9 @@ class SidekickSwarmService:
         self._catalog_refresher = catalog_refresher or _refresh_ollama_catalog
         self._provider_slot = provider_slot or _sidekick_ollama_provider_slot
         self._action_classifier = action_classifier or _conservative_classifier
+        if pause_poll_seconds <= 0:
+            raise ValueError("pause_poll_seconds must be positive")
+        self._pause_poll_seconds = float(pause_poll_seconds)
 
     def refresh_models(self, project_root: Path) -> ModelCatalogSnapshot:
         """Perform the only catalog refresh path and persist its safe snapshot."""
@@ -113,7 +119,50 @@ class SidekickSwarmService:
         *,
         pack: str = "coding-team",
     ) -> RunSummary:
-        """Start a run using only an already persisted healthy cloud catalog.
+        """Synchronously run the same durable lifecycle used by the CLI."""
+        run = self.start_run(goal, project_root, pack=pack)
+        return self.execute_run(project_root, run.run_id)
+
+    def start_run(
+        self,
+        goal: str,
+        project_root: Path,
+        *,
+        pack: str = "coding-team",
+    ) -> SwarmRun:
+        """Persist a running Swarm identity without starting a model call."""
+        project_root = Path(project_root).resolve()
+        engine, _snapshot, _store = self._engine_for(project_root)
+        return engine.start_run(goal, project_root, pack=pack)
+
+    def execute_run(
+        self,
+        project_root: Path,
+        run_id: str,
+        *,
+        on_pause_wait: PauseObserver | None = None,
+        on_resume: PauseObserver | None = None,
+    ) -> RunSummary:
+        """Continue a durable run, waiting at model boundaries while paused."""
+        project_root = Path(project_root).resolve()
+        engine, snapshot, store = self._engine_for(project_root)
+        summary = engine.execute_run(
+            run_id,
+            project_root,
+            checkpoint=lambda: self._wait_for_running(
+                project_root,
+                run_id,
+                on_pause_wait=on_pause_wait,
+                on_resume=on_resume,
+            ),
+        )
+        return self._record_catalog_unavailable(summary, snapshot, store)
+
+    def _engine_for(
+        self,
+        project_root: Path,
+    ) -> tuple[SwarmEngine, ModelCatalogSnapshot | None, ProjectSwarmStore]:
+        """Build from the only persisted healthy cloud catalog.
 
         No discovery happens here.  With no healthy explicit snapshot the core
         sees an empty catalog and records its normal durable pause rather than
@@ -135,10 +184,21 @@ class SidekickSwarmService:
                 request.run_id, request.provider
             ),
         )
-        summary = SwarmEngine(
-            transport,
-            registry=ModelRegistry(catalog=catalog),
-        ).run(goal, project_root, pack=pack)
+        return (
+            SwarmEngine(
+                transport,
+                registry=ModelRegistry(catalog=catalog),
+            ),
+            snapshot,
+            store,
+        )
+
+    @staticmethod
+    def _record_catalog_unavailable(
+        summary: RunSummary,
+        snapshot: ModelCatalogSnapshot | None,
+        store: ProjectSwarmStore,
+    ) -> RunSummary:
         if summary.pause_reason == "no_eligible_model":
             store.append_event(
                 summary.run_id,
@@ -157,6 +217,32 @@ class SidekickSwarmService:
                 events=tuple(store.list_events(summary.run_id)),
             )
         return summary
+
+    def _wait_for_running(
+        self,
+        project_root: Path,
+        run_id: str,
+        *,
+        on_pause_wait: PauseObserver | None = None,
+        on_resume: PauseObserver | None = None,
+    ) -> None:
+        """Cooperatively honor a durable human pause without holding a model slot."""
+        waiting = False
+        while True:
+            run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
+            if run is None:
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            if run.status == "running":
+                if waiting and on_resume is not None:
+                    on_resume()
+                return
+            if run.status == "paused":
+                if not waiting and on_pause_wait is not None:
+                    on_pause_wait()
+                waiting = True
+                time.sleep(self._pause_poll_seconds)
+                continue
+            raise RuntimeError("Cannot execute a completed Swarm run")
 
     def list_runs(self, project_root: Path) -> list[SwarmRun]:
         return ProjectSwarmStore.open_read_only(project_root).list_runs()
