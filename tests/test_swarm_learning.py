@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from importlib import resources
 from pathlib import Path
 import sqlite3
@@ -56,6 +56,36 @@ def test_memory_persists_each_kind_with_source_and_evidence_references(
     assert restored[3].evidence_refs == ("evidence:evidence",)
 
 
+def test_exact_memory_retry_merges_new_provenance_without_losing_prior_refs(
+    tmp_path: Path,
+):
+    """Catches exact-claim retry dedupe silently discarding new provenance."""
+    memory = ProjectMemory(ProjectSwarmStore(tmp_path))
+    first = memory.remember(
+        "fact",
+        "The release was verified.",
+        claim_key="release-verification",
+        source_refs=("source:first",),
+        evidence_refs=("evidence:first",),
+    )
+
+    merged = memory.remember(
+        "fact",
+        "The release was verified.",
+        claim_key="release-verification",
+        source_refs=("source:second",),
+        evidence_refs=("evidence:second",),
+    )
+
+    assert merged.item_id == first.item_id
+    assert merged.source_refs == ("source:first", "source:second")
+    assert merged.evidence_refs == ("evidence:first", "evidence:second")
+    restored = ProjectMemory(ProjectSwarmStore(tmp_path)).get(merged.item_id)
+    assert restored is not None
+    assert restored.source_refs == ("source:first", "source:second")
+    assert restored.evidence_refs == ("evidence:first", "evidence:second")
+
+
 def test_memory_lifecycle_hides_stale_and_expired_items_without_deleting_evidence(
     tmp_path: Path,
 ):
@@ -85,6 +115,122 @@ def test_memory_lifecycle_hides_stale_and_expired_items_without_deleting_evidenc
     assert memory.list(audit=True) == [expired]
     assert expired.statement == "Verifier output confirms the migration."
     assert expired.evidence_refs == ("evidence:verifier-17",)
+
+
+def test_memory_deadlines_derive_stale_and_expired_reads_without_mutating_storage(
+    tmp_path: Path,
+):
+    """Catches deadline-driven stale/expired state being missing or read-side writes."""
+    memory = ProjectMemory(ProjectSwarmStore(tmp_path))
+    start = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    item = memory.remember(
+        "evidence",
+        "A deadline-governed verifier result.",
+        claim_key="deadline-evidence",
+        source_refs=("run:deadline",),
+        evidence_refs=("evidence:deadline",),
+        revalidate_after=start + timedelta(hours=1),
+        expires_at=start + timedelta(hours=2),
+    )
+    stored_before_read = memory.get(item.item_id, now=start)
+    assert stored_before_read is not None
+
+    assert [entry.item_id for entry in memory.list(now=start)] == [item.item_id]
+    assert memory.list(now=start + timedelta(hours=1)) == []
+    stale = memory.list(audit=True, now=start + timedelta(hours=1))[0]
+    assert stale.lifecycle == "stale"
+    expired = memory.list(audit=True, now=start + timedelta(hours=3))[0]
+    assert expired.lifecycle == "expired"
+    assert expired.evidence_refs == ("evidence:deadline",)
+    assert (
+        memory.get(item.item_id, now=start).updated_at == stored_before_read.updated_at
+    )
+
+    revalidated = memory.revalidate(
+        item.item_id,
+        revalidate_after=start + timedelta(hours=5),
+        expires_at=start + timedelta(hours=6),
+    )
+
+    assert revalidated.evidence_refs == ("evidence:deadline",)
+    reopened = ProjectMemory(ProjectSwarmStore(tmp_path))
+    assert (
+        reopened.get(item.item_id, now=start + timedelta(hours=4)).lifecycle == "active"
+    )
+    assert (
+        reopened.get(item.item_id, now=start + timedelta(hours=5)).lifecycle == "stale"
+    )
+    assert (
+        reopened.get(item.item_id, now=start + timedelta(hours=7)).lifecycle
+        == "expired"
+    )
+
+
+def test_memory_deadline_columns_migrate_an_existing_task4_memory_table(
+    tmp_path: Path,
+):
+    """Catches deadline migration breaking existing Task4 memory records."""
+    database_dir = tmp_path / ".swarm" / "runtime"
+    database_dir.mkdir(parents=True)
+    database_path = database_dir / "swarm.sqlite"
+    created_at = datetime(2026, 7, 27, tzinfo=timezone.utc).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE memory_items (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL,
+                claim_key TEXT NOT NULL,
+                statement TEXT NOT NULL,
+                source_refs_json TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                lifecycle TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                revalidated_at TEXT,
+                lesson_opt_in INTEGER NOT NULL DEFAULT 0,
+                redacted_statement TEXT,
+                UNIQUE (kind, claim_key, statement)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO memory_items (
+                item_id, kind, claim_key, statement, source_refs_json,
+                evidence_refs_json, lifecycle, created_at, updated_at,
+                revalidated_at, lesson_opt_in, redacted_statement
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-memory",
+                "fact",
+                "legacy-key",
+                "Preserve this legacy memory.",
+                '["source:legacy"]',
+                '["evidence:legacy"]',
+                "active",
+                created_at,
+                created_at,
+                None,
+                0,
+                None,
+            ),
+        )
+
+    store = ProjectSwarmStore(tmp_path)
+    migrated = ProjectMemory(store).get("legacy-memory")
+    with sqlite3.connect(store.db_path) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(memory_items)")
+        }
+
+    assert {"revalidate_after", "expires_at"} <= columns
+    assert migrated is not None
+    assert migrated.statement == "Preserve this legacy memory."
+    assert migrated.evidence_refs == ("evidence:legacy",)
 
 
 def test_conflicting_same_kind_claim_creates_one_durable_clarification_and_event(
@@ -189,6 +335,91 @@ def test_reputation_is_role_capability_scoped_persistent_and_reference_deduplica
     ) == pytest.approx(0.7)
 
 
+def test_reputation_keeps_verifier_and_golden_results_with_the_same_reference(
+    tmp_path: Path,
+):
+    """Catches source kind being omitted from reputation-result identity."""
+    ledger = ReputationLedger(ProjectSwarmStore(tmp_path))
+
+    ledger.record_outcome(
+        "builder",
+        "coding",
+        GoldenResult("shared:reference", score=0.2, safety_passed=True),
+        source_kind="verifier",
+    )
+    ledger.record_outcome(
+        "builder",
+        "coding",
+        GoldenResult("shared:reference", score=0.8, safety_passed=True),
+        source_kind="golden",
+    )
+    ledger.record_outcome(
+        "builder",
+        "coding",
+        GoldenResult("shared:reference", score=1.0, safety_passed=True),
+        source_kind="verifier",
+    )
+
+    assert [record.source_kind for record in ledger.list("builder", "coding")] == [
+        "verifier",
+        "golden",
+    ]
+    assert ledger.score("builder", "coding") == pytest.approx(0.5)
+
+
+def test_reputation_v2_migration_preserves_legacy_results_and_allows_source_kinds(
+    tmp_path: Path,
+):
+    """Catches v2 identity migration losing Task4 reputation data."""
+    database_dir = tmp_path / ".swarm" / "runtime"
+    database_dir.mkdir(parents=True)
+    database_path = database_dir / "swarm.sqlite"
+    created_at = datetime(2026, 7, 27, tzinfo=timezone.utc).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE reputation_results (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                result_id TEXT NOT NULL UNIQUE,
+                role TEXT NOT NULL,
+                capability TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_ref TEXT NOT NULL,
+                score REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
+                created_at TEXT NOT NULL,
+                UNIQUE (role, capability, source_ref)
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO reputation_results VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                "legacy-result",
+                "builder",
+                "coding",
+                "verifier",
+                "shared:legacy",
+                0.4,
+                created_at,
+            ),
+        )
+
+    ledger = ReputationLedger(ProjectSwarmStore(tmp_path))
+    ledger.record_outcome(
+        "builder",
+        "coding",
+        GoldenResult("shared:legacy", score=0.8, safety_passed=True),
+        source_kind="golden",
+    )
+
+    assert ledger.score("builder", "coding") == pytest.approx(0.6)
+    assert [record.source_kind for record in ledger.list("builder", "coding")] == [
+        "verifier",
+        "golden",
+    ]
+
+
 @pytest.mark.parametrize("score", [float("nan"), float("inf"), -0.01, 1.01])
 def test_learning_rejects_non_finite_or_out_of_range_scores(score: float):
     """Catches malformed verifier or golden scores entering durable reputation."""
@@ -248,6 +479,99 @@ def test_prompt_candidate_needs_golden_eligibility_and_human_approval_to_promote
     assert candidates.promote(created.candidate_id).status == "promoted"
 
 
+def test_prompt_approval_requires_a_current_passing_assessment_and_resets_on_reassessment(
+    tmp_path: Path,
+):
+    """Catches approvals being reusable after a failed or replaced assessment."""
+    candidates = PromptCandidates(ProjectSwarmStore(tmp_path))
+    candidate = candidates.create(
+        "assessment-bound",
+        "A candidate with approval bound to a passing assessment.",
+        baseline_quality=0.7,
+    )
+
+    with pytest.raises(PermissionError, match="eligible"):
+        candidates.approve(candidate.candidate_id, approver_id="owner")
+
+    candidates.evaluate(
+        candidate.candidate_id,
+        (GoldenResult("pass:first", score=0.8, safety_passed=True),),
+    )
+    approved = candidates.approve(candidate.candidate_id, approver_id="owner")
+    assert approved.human_approver_id == "owner"
+
+    failed = candidates.evaluate(
+        candidate.candidate_id,
+        (GoldenResult("fail:second", score=1.0, safety_passed=False),),
+    )
+    passed_again = candidates.evaluate(
+        candidate.candidate_id,
+        (GoldenResult("pass:third", score=0.8, safety_passed=True),),
+    )
+
+    assert failed.human_approver_id is None
+    assert passed_again.human_approver_id is None
+    with pytest.raises(PermissionError, match="human approval"):
+        candidates.promote(candidate.candidate_id)
+    candidates.approve(candidate.candidate_id, approver_id="owner")
+    assert candidates.promote(candidate.candidate_id).status == "promoted"
+
+
+def test_prompt_assessment_migration_invalidates_unbound_legacy_approval(
+    tmp_path: Path,
+):
+    """Catches a Task4 approval surviving without an assessment revision/digest."""
+    database_dir = tmp_path / ".swarm" / "runtime"
+    database_dir.mkdir(parents=True)
+    database_path = database_dir / "swarm.sqlite"
+    created_at = datetime(2026, 7, 27, tzinfo=timezone.utc).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE prompt_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                prompt_text TEXT NOT NULL,
+                baseline_quality REAL NOT NULL,
+                status TEXT NOT NULL,
+                assessed_quality REAL,
+                safety_passed INTEGER,
+                assessment_refs_json TEXT,
+                human_approver_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO prompt_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "legacy-candidate",
+                "Legacy candidate prompt.",
+                0.7,
+                "eligible",
+                0.8,
+                1,
+                '["legacy:assessment"]',
+                "legacy-owner",
+                created_at,
+                created_at,
+            ),
+        )
+
+    candidates = PromptCandidates(ProjectSwarmStore(tmp_path))
+    migrated = candidates.get("legacy-candidate")
+
+    assert migrated.human_approver_id is None
+    with pytest.raises(PermissionError, match="human approval"):
+        candidates.promote(migrated.candidate_id)
+    candidates.evaluate(
+        migrated.candidate_id,
+        (GoldenResult("legacy:replacement", score=0.8, safety_passed=True),),
+    )
+    candidates.approve(migrated.candidate_id, approver_id="owner")
+    assert candidates.promote(migrated.candidate_id).status == "promoted"
+
+
 def test_prompt_candidate_cannot_promote_when_safety_or_quality_fails(tmp_path: Path):
     """Catches human approval bypassing failed golden safety or quality checks."""
     candidates = PromptCandidates(ProjectSwarmStore(tmp_path))
@@ -260,9 +584,10 @@ def test_prompt_candidate_cannot_promote_when_safety_or_quality_fails(tmp_path: 
         candidate.candidate_id,
         (GoldenResult("safety:failed", score=1.0, safety_passed=False),),
     )
-    candidates.approve(candidate.candidate_id, approver_id="owner")
 
     assert assessed.status == "candidate"
+    with pytest.raises(PermissionError, match="eligible"):
+        candidates.approve(candidate.candidate_id, approver_id="owner")
     with pytest.raises(PermissionError, match="eligible"):
         candidates.promote(candidate.candidate_id)
 
@@ -281,9 +606,10 @@ def test_prompt_candidate_cannot_promote_below_its_stated_quality_baseline(
         candidate.candidate_id,
         (GoldenResult("quality:below-baseline", score=0.8, safety_passed=True),),
     )
-    candidates.approve(candidate.candidate_id, approver_id="owner")
 
     assert assessed.status == "candidate"
+    with pytest.raises(PermissionError, match="eligible"):
+        candidates.approve(candidate.candidate_id, approver_id="owner")
     with pytest.raises(PermissionError, match="eligible"):
         candidates.promote(candidate.candidate_id)
 
@@ -306,7 +632,11 @@ def test_lesson_exports_only_opted_in_redacted_statements(tmp_path: Path):
         "Redact project-specific details before sharing a verified lesson.",
     )
 
-    exports = LessonExporter(memory).export()
+    with pytest.raises(PermissionError, match="opt-in"):
+        LessonExporter(memory).export()
+    with pytest.raises(PermissionError, match="opt-in"):
+        LessonExporter(memory).export(opt_in=False)
+    exports = LessonExporter(memory).export(opt_in=True)
 
     assert [(lesson.kind, lesson.statement) for lesson in exports] == [
         ("fact", "Redact project-specific details before sharing a verified lesson.")

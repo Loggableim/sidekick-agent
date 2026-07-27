@@ -329,6 +329,8 @@ class ProjectSwarmStore:
         statement: str,
         source_refs: tuple[str, ...],
         evidence_refs: tuple[str, ...],
+        revalidate_after: datetime | None = None,
+        expires_at: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Persist one immutable memory statement and detect a durable conflict."""
         with self._immediate_connection() as connection:
@@ -340,6 +342,37 @@ class ProjectSwarmStore:
                 (kind, claim_key, statement),
             ).fetchone()
             if existing is not None:
+                existing_data = _row_to_memory_data(existing)
+                merged_source_refs = _merge_references(
+                    existing_data["source_refs"],
+                    source_refs,
+                )
+                merged_evidence_refs = _merge_references(
+                    existing_data["evidence_refs"],
+                    evidence_refs,
+                )
+                if (
+                    merged_source_refs != existing_data["source_refs"]
+                    or merged_evidence_refs != existing_data["evidence_refs"]
+                ):
+                    connection.execute(
+                        """
+                        UPDATE memory_items
+                        SET source_refs_json = ?, evidence_refs_json = ?, updated_at = ?
+                        WHERE item_id = ?
+                        """,
+                        (
+                            json.dumps(list(merged_source_refs), sort_keys=True),
+                            json.dumps(list(merged_evidence_refs), sort_keys=True),
+                            _timestamp_text(_utc_now()),
+                            existing_data["item_id"],
+                        ),
+                    )
+                    existing = connection.execute(
+                        "SELECT * FROM memory_items WHERE item_id = ?",
+                        (existing_data["item_id"],),
+                    ).fetchone()
+                    assert existing is not None
                 return _row_to_memory_data(existing), False
 
             item_id = str(uuid4())
@@ -349,9 +382,10 @@ class ProjectSwarmStore:
                 INSERT INTO memory_items (
                     item_id, kind, claim_key, statement, source_refs_json,
                     evidence_refs_json, lifecycle, created_at, updated_at,
-                    revalidated_at, lesson_opt_in, redacted_statement
+                    revalidated_at, revalidate_after, expires_at, lesson_opt_in,
+                    redacted_statement
                 )
-                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, 0, NULL)
+                VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, ?, 0, NULL)
                 """,
                 (
                     item_id,
@@ -362,6 +396,12 @@ class ProjectSwarmStore:
                     json.dumps(list(evidence_refs), sort_keys=True),
                     _timestamp_text(now),
                     _timestamp_text(now),
+                    (
+                        _timestamp_text(revalidate_after)
+                        if revalidate_after is not None
+                        else None
+                    ),
+                    (_timestamp_text(expires_at) if expires_at is not None else None),
                 ),
             )
             row = connection.execute(
@@ -471,6 +511,43 @@ class ProjectSwarmStore:
         assert row is not None
         return _row_to_memory_data(row)
 
+    def revalidate_memory_item(
+        self,
+        item_id: str,
+        *,
+        revalidate_after: datetime | None,
+        expires_at: datetime | None,
+    ) -> dict[str, Any]:
+        """Explicitly restore a claim and replace its persisted deadline state."""
+        now = _utc_now()
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE memory_items
+                SET lifecycle = 'active', updated_at = ?, revalidated_at = ?,
+                    revalidate_after = ?, expires_at = ?
+                WHERE item_id = ?
+                """,
+                (
+                    _timestamp_text(now),
+                    _timestamp_text(now),
+                    (
+                        _timestamp_text(revalidate_after)
+                        if revalidate_after is not None
+                        else None
+                    ),
+                    (_timestamp_text(expires_at) if expires_at is not None else None),
+                    item_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Unknown memory item: {item_id}")
+            row = connection.execute(
+                "SELECT * FROM memory_items WHERE item_id = ?", (item_id,)
+            ).fetchone()
+        assert row is not None
+        return _row_to_memory_data(row)
+
     def mark_memory_lesson_opt_in(
         self,
         item_id: str,
@@ -534,10 +611,11 @@ class ProjectSwarmStore:
         with self._immediate_connection() as connection:
             existing = connection.execute(
                 """
-                SELECT * FROM reputation_results
-                WHERE role = ? AND capability = ? AND source_ref = ?
+                SELECT * FROM reputation_results_v2
+                WHERE role = ? AND capability = ?
+                  AND source_kind = ? AND source_ref = ?
                 """,
-                (role, capability, source_ref),
+                (role, capability, source_kind, source_ref),
             ).fetchone()
             if existing is not None:
                 return _row_to_reputation_data(existing), False
@@ -545,7 +623,7 @@ class ProjectSwarmStore:
             created_at = _utc_now()
             connection.execute(
                 """
-                INSERT INTO reputation_results (
+                INSERT INTO reputation_results_v2 (
                     result_id, role, capability, source_kind, source_ref, score,
                     created_at
                 )
@@ -562,7 +640,8 @@ class ProjectSwarmStore:
                 ),
             )
             row = connection.execute(
-                "SELECT * FROM reputation_results WHERE result_id = ?", (result_id,)
+                "SELECT * FROM reputation_results_v2 WHERE result_id = ?",
+                (result_id,),
             ).fetchone()
         assert row is not None
         return _row_to_reputation_data(row), True
@@ -576,7 +655,7 @@ class ProjectSwarmStore:
         with self._connection() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM reputation_results
+                SELECT * FROM reputation_results_v2
                 WHERE role = ? AND capability = ?
                 ORDER BY sequence ASC
                 """,
@@ -599,9 +678,12 @@ class ProjectSwarmStore:
                     INSERT INTO prompt_candidates (
                         candidate_id, prompt_text, baseline_quality, status,
                         assessed_quality, safety_passed, assessment_refs_json,
-                        human_approver_id, created_at, updated_at
+                        assessment_revision, assessment_digest, human_approver_id,
+                        approved_assessment_revision, approved_assessment_digest,
+                        created_at, updated_at
                     )
-                    VALUES (?, ?, ?, 'candidate', NULL, NULL, NULL, NULL, ?, ?)
+                    VALUES (?, ?, ?, 'candidate', NULL, NULL, NULL, 0, NULL, NULL,
+                            NULL, NULL, ?, ?)
                     """,
                     (
                         candidate_id,
@@ -638,6 +720,7 @@ class ProjectSwarmStore:
         safety_passed: bool,
         references: tuple[str, ...],
         eligible: bool,
+        assessment_digest: str,
     ) -> dict[str, Any]:
         now = _utc_now()
         with self._connection() as connection:
@@ -654,7 +737,13 @@ class ProjectSwarmStore:
                 """
                 UPDATE prompt_candidates
                 SET status = ?, assessed_quality = ?, safety_passed = ?,
-                    assessment_refs_json = ?, updated_at = ?
+                    assessment_refs_json = ?,
+                    assessment_revision = assessment_revision + 1,
+                    assessment_digest = ?,
+                    human_approver_id = NULL,
+                    approved_assessment_revision = NULL,
+                    approved_assessment_digest = NULL,
+                    updated_at = ?
                 WHERE candidate_id = ?
                 """,
                 (
@@ -662,6 +751,7 @@ class ProjectSwarmStore:
                     quality,
                     int(safety_passed),
                     json.dumps(list(references), sort_keys=True),
+                    assessment_digest,
                     _timestamp_text(now),
                     candidate_id,
                 ),
@@ -678,10 +768,10 @@ class ProjectSwarmStore:
         candidate_id: str,
         *,
         approver_id: str,
-    ) -> dict[str, Any]:
-        with self._connection() as connection:
+    ) -> tuple[dict[str, Any], bool]:
+        with self._immediate_connection() as connection:
             existing = connection.execute(
-                "SELECT human_approver_id FROM prompt_candidates WHERE candidate_id = ?",
+                "SELECT * FROM prompt_candidates WHERE candidate_id = ?",
                 (candidate_id,),
             ).fetchone()
             if existing is None:
@@ -694,22 +784,29 @@ class ProjectSwarmStore:
             connection.execute(
                 """
                 UPDATE prompt_candidates
-                SET human_approver_id = ?, updated_at = ?
+                SET human_approver_id = ?,
+                    approved_assessment_revision = assessment_revision,
+                    approved_assessment_digest = assessment_digest,
+                    updated_at = ?
                 WHERE candidate_id = ?
+                  AND status = 'eligible'
+                  AND assessment_revision > 0
+                  AND assessment_digest IS NOT NULL
                 """,
                 (approver_id, _timestamp_text(_utc_now()), candidate_id),
             )
+            approved = connection.execute("SELECT changes()").fetchone()[0] == 1
             row = connection.execute(
                 "SELECT * FROM prompt_candidates WHERE candidate_id = ?",
                 (candidate_id,),
             ).fetchone()
         assert row is not None
-        return _row_to_prompt_candidate_data(row)
+        return _row_to_prompt_candidate_data(row), approved
 
     def promote_prompt_candidate(
         self, candidate_id: str
     ) -> tuple[dict[str, Any], bool]:
-        with self._connection() as connection:
+        with self._immediate_connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE prompt_candidates
@@ -717,6 +814,9 @@ class ProjectSwarmStore:
                 WHERE candidate_id = ?
                   AND status = 'eligible'
                   AND human_approver_id IS NOT NULL
+                  AND assessment_digest IS NOT NULL
+                  AND approved_assessment_revision = assessment_revision
+                  AND approved_assessment_digest = assessment_digest
                 """,
                 (_timestamp_text(_utc_now()), candidate_id),
             )
@@ -784,6 +884,8 @@ class ProjectSwarmStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     revalidated_at TEXT,
+                    revalidate_after TEXT,
+                    expires_at TEXT,
                     lesson_opt_in INTEGER NOT NULL DEFAULT 0,
                     redacted_statement TEXT,
                     UNIQUE (kind, claim_key, statement)
@@ -822,6 +924,19 @@ class ProjectSwarmStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_reputation_role_capability
                     ON reputation_results(role, capability, sequence);
+                CREATE TABLE IF NOT EXISTS reputation_results_v2 (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    result_id TEXT NOT NULL UNIQUE,
+                    role TEXT NOT NULL,
+                    capability TEXT NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    source_ref TEXT NOT NULL,
+                    score REAL NOT NULL CHECK (score >= 0.0 AND score <= 1.0),
+                    created_at TEXT NOT NULL,
+                    UNIQUE (role, capability, source_kind, source_ref)
+                );
+                CREATE INDEX IF NOT EXISTS idx_reputation_v2_role_capability
+                    ON reputation_results_v2(role, capability, sequence);
                 CREATE TABLE IF NOT EXISTS prompt_candidates (
                     candidate_id TEXT PRIMARY KEY,
                     prompt_text TEXT NOT NULL,
@@ -831,12 +946,82 @@ class ProjectSwarmStore:
                     assessed_quality REAL,
                     safety_passed INTEGER,
                     assessment_refs_json TEXT,
+                    assessment_revision INTEGER NOT NULL DEFAULT 0,
+                    assessment_digest TEXT,
                     human_approver_id TEXT,
+                    approved_assessment_revision INTEGER,
+                    approved_assessment_digest TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
                 """
             )
+            self._ensure_memory_deadline_columns(connection)
+            self._ensure_prompt_assessment_columns(connection)
+            self._migrate_reputation_results(connection)
+
+    @staticmethod
+    def _ensure_memory_deadline_columns(connection: sqlite3.Connection) -> None:
+        columns = _table_columns(connection, "memory_items")
+        if "revalidate_after" not in columns:
+            connection.execute(
+                "ALTER TABLE memory_items ADD COLUMN revalidate_after TEXT"
+            )
+        if "expires_at" not in columns:
+            connection.execute("ALTER TABLE memory_items ADD COLUMN expires_at TEXT")
+
+    @staticmethod
+    def _ensure_prompt_assessment_columns(connection: sqlite3.Connection) -> None:
+        columns = _table_columns(connection, "prompt_candidates")
+        if "assessment_revision" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE prompt_candidates
+                ADD COLUMN assessment_revision INTEGER NOT NULL DEFAULT 0
+                """
+            )
+        if "assessment_digest" not in columns:
+            connection.execute(
+                "ALTER TABLE prompt_candidates ADD COLUMN assessment_digest TEXT"
+            )
+        if "approved_assessment_revision" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE prompt_candidates
+                ADD COLUMN approved_assessment_revision INTEGER
+                """
+            )
+        if "approved_assessment_digest" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE prompt_candidates
+                ADD COLUMN approved_assessment_digest TEXT
+                """
+            )
+        connection.execute(
+            """
+            UPDATE prompt_candidates
+            SET human_approver_id = NULL,
+                approved_assessment_revision = NULL,
+                approved_assessment_digest = NULL
+            WHERE assessment_digest IS NULL
+            """
+        )
+
+    @staticmethod
+    def _migrate_reputation_results(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO reputation_results_v2 (
+                result_id, role, capability, source_kind, source_ref, score,
+                created_at
+            )
+            SELECT result_id, role, capability, source_kind, source_ref, score,
+                   created_at
+            FROM reputation_results
+            ORDER BY sequence ASC
+            """
+        )
 
     def _connection(self):
         connection = sqlite3.connect(self.db_path)
@@ -883,6 +1068,24 @@ def _utc_now() -> datetime:
 
 def _timestamp_text(timestamp: datetime) -> str:
     return timestamp.isoformat()
+
+
+def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    return {
+        str(row["name"])
+        for row in connection.execute(f"PRAGMA table_info({table_name})")
+    }
+
+
+def _merge_references(
+    existing: object,
+    incoming: tuple[str, ...],
+) -> tuple[str, ...]:
+    merged: list[str] = []
+    for reference in (*tuple(existing), *incoming):  # type: ignore[arg-type]
+        if reference not in merged:
+            merged.append(reference)
+    return tuple(merged)
 
 
 def _row_to_run(row: sqlite3.Row) -> SwarmRun:
@@ -938,6 +1141,14 @@ def _row_to_memory_data(row: sqlite3.Row) -> dict[str, Any]:
             datetime.fromisoformat(row["revalidated_at"])
             if row["revalidated_at"]
             else None
+        ),
+        "revalidate_after": (
+            datetime.fromisoformat(row["revalidate_after"])
+            if row["revalidate_after"]
+            else None
+        ),
+        "expires_at": (
+            datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None
         ),
         "lesson_opt_in": bool(row["lesson_opt_in"]),
         "redacted_statement": row["redacted_statement"],
@@ -996,7 +1207,11 @@ def _row_to_prompt_candidate_data(row: sqlite3.Row) -> dict[str, Any]:
             if row["assessment_refs_json"] is not None
             else ()
         ),
+        "assessment_revision": int(row["assessment_revision"]),
+        "assessment_digest": row["assessment_digest"],
         "human_approver_id": row["human_approver_id"],
+        "approved_assessment_revision": row["approved_assessment_revision"],
+        "approved_assessment_digest": row["approved_assessment_digest"],
         "created_at": datetime.fromisoformat(row["created_at"]),
         "updated_at": datetime.fromisoformat(row["updated_at"]),
     }
