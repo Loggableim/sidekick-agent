@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from urllib.parse import urlencode
 import zipfile
 
+import pytest
+
 
 def test_list_dir_handles_file_deleted_between_is_file_and_stat(monkeypatch, tmp_path):
     from web.api.workspace import list_dir
@@ -69,6 +71,168 @@ def test_clean_workspace_list_filters_other_profile_directories(monkeypatch, tmp
     assert cleaned == [
         {"path": str(keep_path.resolve()), "name": "shared"},
     ]
+
+
+def test_read_only_workspace_trust_excludes_another_profile_without_rewriting(
+    monkeypatch,
+    tmp_path,
+):
+    """A stale profile entry must not disclose another profile through Swarm GET."""
+    from web.api import profiles, workspace
+
+    sidekick_home = tmp_path / "sidekick"
+    active_home = sidekick_home / "profiles" / "alice"
+    foreign_project = sidekick_home / "profiles" / "bob" / "project"
+    foreign_project.mkdir(parents=True)
+    workspace_file = active_home / "webui_state" / "workspaces.json"
+    workspace_file.parent.mkdir(parents=True)
+    workspace_file.write_text(
+        '[{"path": "' + str(foreign_project).replace("\\", "\\\\") + '"}]',
+        encoding="utf-8",
+    )
+    before = workspace_file.read_bytes()
+    global_workspace_file = tmp_path / "global-workspaces.json"
+    global_workspace_file.write_text(
+        '[{"path": "' + str(foreign_project).replace("\\", "\\\\") + '"}]',
+        encoding="utf-8",
+    )
+    safe_home = tmp_path / "home"
+    safe_home.mkdir()
+    profile_home_calls: list[object] = []
+
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "alice")
+    monkeypatch.setattr(
+        profiles,
+        "get_active_profile_home",
+        lambda: profile_home_calls.append(object()) or active_home,
+    )
+    monkeypatch.setattr(profiles, "_DEFAULT_SIDEKICK_HOME", sidekick_home)
+    monkeypatch.setattr(profiles, "_root_profile_name_cache", {"default"})
+    monkeypatch.setattr(profiles, "_root_profile_name_cache_loaded", False)
+    monkeypatch.setattr(workspace._cfg, "WORKSPACES_FILE", global_workspace_file)
+    monkeypatch.setattr(
+        workspace.Path,
+        "home",
+        classmethod(lambda _cls: safe_home),
+    )
+
+    assert workspace._read_only_saved_workspace_paths() == set()
+    with pytest.raises(ValueError, match="outside the user home directory"):
+        workspace.resolve_trusted_workspace_read_only(str(foreign_project))
+    assert workspace_file.read_bytes() == before
+    assert profile_home_calls == []
+    assert profiles._root_profile_name_cache == {"default"}
+    assert profiles._root_profile_name_cache_loaded is False
+
+
+def test_read_only_workspace_trust_fails_closed_for_an_unknown_profile_alias(
+    monkeypatch,
+    tmp_path,
+):
+    """A non-default profile without its local directory cannot borrow saved trust."""
+    from web.api import profiles, workspace
+
+    sidekick_home = tmp_path / "sidekick"
+    shared_project = tmp_path / "shared-project"
+    shared_project.mkdir()
+    global_workspace_file = tmp_path / "global-workspaces.json"
+    global_workspace_file.write_text(
+        '[{"path": "' + str(shared_project).replace("\\", "\\\\") + '"}]',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "root-alias")
+    monkeypatch.setattr(profiles, "_DEFAULT_SIDEKICK_HOME", sidekick_home)
+    monkeypatch.setattr(workspace._cfg, "WORKSPACES_FILE", global_workspace_file)
+
+    assert workspace._read_only_saved_workspace_paths() == set()
+
+
+def test_read_only_default_profile_never_trusts_a_named_profile_workspace(
+    monkeypatch,
+    tmp_path,
+):
+    """The root/default profile must not inherit a named profile's saved path."""
+    from web.api import profiles, workspace
+
+    sidekick_home = tmp_path / "sidekick"
+    foreign_project = sidekick_home / "profiles" / "bob" / "project"
+    foreign_project.mkdir(parents=True)
+    global_workspace_file = tmp_path / "global-workspaces.json"
+    global_workspace_file.write_text(
+        '[{"path": "' + str(foreign_project).replace("\\", "\\\\") + '"}]',
+        encoding="utf-8",
+    )
+    safe_home = tmp_path / "home"
+    safe_home.mkdir()
+
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+    monkeypatch.setattr(profiles, "_DEFAULT_SIDEKICK_HOME", sidekick_home)
+    monkeypatch.setattr(workspace._cfg, "WORKSPACES_FILE", global_workspace_file)
+    monkeypatch.setattr(
+        workspace.Path,
+        "home",
+        classmethod(lambda _cls: safe_home),
+    )
+
+    assert workspace._read_only_saved_workspace_paths() == set()
+    with pytest.raises(ValueError, match="outside the user home directory"):
+        workspace.resolve_trusted_workspace_read_only(str(foreign_project))
+
+
+def test_clean_workspace_list_excludes_named_profiles_for_default_root(
+    monkeypatch,
+    tmp_path,
+):
+    """Write-capable workspace gates must share the default-profile isolation."""
+    from web.api import profiles, workspace
+
+    sidekick_home = tmp_path / "sidekick"
+    foreign_project = sidekick_home / "profiles" / "bob" / "project"
+    foreign_project.mkdir(parents=True)
+
+    monkeypatch.setattr(profiles, "_profiles_root", lambda: sidekick_home / "profiles")
+    monkeypatch.setattr(profiles, "get_active_profile_home", lambda: sidekick_home)
+
+    assert workspace._clean_workspace_list(
+        [{"path": str(foreign_project), "name": "Bob project"}]
+    ) == []
+
+
+def test_default_profile_write_resolver_rejects_a_named_profile_saved_workspace(
+    monkeypatch,
+    tmp_path,
+):
+    """Swarm POST must not regain cross-profile trust via the normal resolver."""
+    from web.api import profiles, workspace
+
+    sidekick_home = tmp_path / "sidekick"
+    foreign_project = sidekick_home / "profiles" / "bob" / "project"
+    foreign_project.mkdir(parents=True)
+    global_workspace_file = tmp_path / "global-workspaces.json"
+    global_workspace_file.write_text(
+        '[{"path": "' + str(foreign_project).replace("\\", "\\\\") + '"}]',
+        encoding="utf-8",
+    )
+    safe_home = tmp_path / "home"
+    safe_home.mkdir()
+    safe_default = tmp_path / "safe-default"
+    safe_default.mkdir()
+
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+    monkeypatch.setattr(profiles, "_profiles_root", lambda: sidekick_home / "profiles")
+    monkeypatch.setattr(profiles, "get_active_profile_home", lambda: sidekick_home)
+    monkeypatch.setattr(workspace._cfg, "WORKSPACES_FILE", global_workspace_file)
+    monkeypatch.setattr(workspace, "_current_default_workspace", lambda: safe_default)
+    monkeypatch.setattr(workspace, "_trusted_space_project_roots", lambda: [])
+    monkeypatch.setattr(
+        workspace.Path,
+        "home",
+        classmethod(lambda _cls: safe_home),
+    )
+
+    with pytest.raises(ValueError, match="outside the user home directory"):
+        workspace.resolve_trusted_workspace(str(foreign_project))
 
 
 def test_list_dir_rejects_windows_alternate_data_stream_name(monkeypatch, tmp_path):

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import hashlib
 import json
-from typing import Any
+from typing import Any, Mapping
 
 from .config import initialize_project
 from .store import ProjectSwarmStore
@@ -15,7 +15,13 @@ from .types import (
     ActionProposal,
     ApprovalRecord,
     SwarmRun,
+    WorkflowRoleCheckpoint,
     thaw_json_value,
+)
+from .verifier import (
+    InvalidVerifierResult,
+    is_positive_verification_decision,
+    verification_result_from_checkpoint_data,
 )
 
 
@@ -44,6 +50,14 @@ class PolicyGate:
         "reviewed_execution",
         "autonomous",
     }
+    # These are workflow identities, not caller-provided approval labels.
+    # A reviewed-execution quorum is intentionally locked to the two routed
+    # independent review roles and their expected distinct model families.
+    _REQUIRED_REVIEW_MODELS = {
+        "review_a": ("glm-5.2", "glm-5"),
+        "review_b": ("kimi-k2.7-code", "kimi-k2"),
+    }
+    _APPROVING_REVIEW_DECISIONS = frozenset({"approve", "approved"})
 
     def __init__(
         self,
@@ -66,10 +80,12 @@ class PolicyGate:
     ) -> PolicyDecision:
         durable_run = self.store.get_run(run.run_id)
         approvals = self._matching_approvals(proposal, run)
+        checkpoints = self.store.get_workflow_role_checkpoints(run.run_id)
         return self._evaluate_canonical(
             proposal,
             durable_run,
             approvals,
+            checkpoints,
             capabilities or proposal.declared_capabilities(),
         )
 
@@ -85,6 +101,7 @@ class PolicyGate:
         def authorize(
             durable_run: SwarmRun | None,
             approvals: list[ApprovalRecord],
+            checkpoints: Mapping[str, WorkflowRoleCheckpoint],
         ) -> tuple[PolicyDecision, bool]:
             decision = self._evaluate_canonical(
                 proposal,
@@ -94,6 +111,7 @@ class PolicyGate:
                     for approval in approvals
                     if approval.proposal_digest == digest
                 ],
+                checkpoints,
                 capabilities,
             )
             return decision, decision.status is PolicyStatus.ALLOWED
@@ -119,6 +137,7 @@ class PolicyGate:
         proposal: ActionProposal,
         durable_run: SwarmRun | None,
         approvals: list[ApprovalRecord],
+        checkpoints: Mapping[str, WorkflowRoleCheckpoint],
         capabilities: ActionCapabilities,
     ) -> PolicyDecision:
         if durable_run is None:
@@ -181,43 +200,111 @@ class PolicyGate:
         if autonomy in {"suggest", "execute_safe", "autonomous"}:
             return self._decision(proposal, PolicyStatus.ALLOWED, "policy_satisfied")
 
-        verified = any(
-            approval.approval_type == "verifier"
-            and approval.approved
-            and bool(set(approval.evidence_refs) & set(proposal.evidence_refs))
-            for approval in approvals
-        )
-        model_approvals = [
-            approval
-            for approval in approvals
-            if approval.approval_type == "model"
-            and approval.approved
-            and approval.model_family
-        ]
-        families_by_approver: dict[str, set[str]] = {}
-        for approval in model_approvals:
-            families_by_approver.setdefault(approval.approver_id, set()).add(
-                str(approval.model_family).strip().lower()
-            )
-        unambiguous_approvals = [
-            (approver_id, next(iter(families)))
-            for approver_id, families in families_by_approver.items()
-            if len(families) == 1
-        ]
-        independent_pair = any(
-            first_approver != second_approver and first_family != second_family
-            for index, (first_approver, first_family) in enumerate(
-                unambiguous_approvals
-            )
-            for second_approver, second_family in unambiguous_approvals[index + 1 :]
-        )
-        if not verified or not independent_pair:
+        if not self._has_durable_review_quorum(proposal, checkpoints):
             return self._decision(
                 proposal,
                 PolicyStatus.NEEDS_MODEL_QUORUM,
                 "verifier_and_independent_model_quorum_required",
             )
         return self._decision(proposal, PolicyStatus.ALLOWED, "policy_satisfied")
+
+    @classmethod
+    def _has_durable_review_quorum(
+        cls,
+        proposal: ActionProposal,
+        checkpoints: Mapping[str, WorkflowRoleCheckpoint],
+    ) -> bool:
+        """Verify run-local verifier and independent review outcomes directly.
+
+        Generic approval rows are intentionally not inputs here: their role,
+        approver and model-family labels can be chosen by a caller.  Checkpoint
+        rows are created only by the workflow's atomic completion path and are
+        read under the same SQLite transaction as an execution claim.
+        """
+        verifier = checkpoints.get("verifier")
+        if verifier is None or verifier.model is not None:
+            return False
+        verifier_evidence = cls._verified_local_verifier_evidence(verifier)
+        if not verifier_evidence or not (
+            verifier_evidence & set(proposal.evidence_refs)
+        ):
+            return False
+
+        observed_families: set[str] = set()
+        for role, (expected_model, expected_family) in cls._REQUIRED_REVIEW_MODELS.items():
+            checkpoint = checkpoints.get(role)
+            if (
+                checkpoint is None
+                or checkpoint.model != expected_model
+                or not cls._valid_checkpoint_evidence(checkpoint)
+                or not cls._has_positive_review_vote(checkpoint)
+            ):
+                return False
+            # The model name is an exact workflow route; the paired family is
+            # fixed policy metadata rather than an approval payload supplied
+            # by a browser, model, or adapter.
+            observed_families.add(expected_family)
+        return len(observed_families) == len(cls._REQUIRED_REVIEW_MODELS)
+
+    @staticmethod
+    def _verified_local_verifier_evidence(
+        checkpoint: WorkflowRoleCheckpoint,
+    ) -> set[str]:
+        """Return evidence only from an available, local verifier result.
+
+        The default verifier intentionally records an auditable unavailable
+        state when no read-only inspection adapter is configured.  Its marker
+        is useful for diagnostics, but it must never unlock a project write.
+        Reconstructing the typed result also requires local read-only
+        provenance and verifier-owned assessment bindings rather than trusting
+        a hand-assembled generic checkpoint dictionary.
+        """
+        try:
+            result = verification_result_from_checkpoint_data(checkpoint.data)
+        except InvalidVerifierResult:
+            return set()
+        if not is_positive_verification_decision(result.decision):
+            return set()
+        return set(result.evidence)
+
+    @classmethod
+    def _has_positive_review_vote(cls, checkpoint: WorkflowRoleCheckpoint) -> bool:
+        """Accept only an explicit, unambiguous positive review verdict.
+
+        The checkpoint's evidence and decision fields are useful audit data,
+        but merely having a non-empty decision is not a vote to execute.  The
+        producer must persist both a boolean approval and one of the canonical
+        positive decision values; negative, ambiguous, legacy free-text, and
+        type-confused values fail closed.
+        """
+        data = checkpoint.data
+        decision = data.get("decision")
+        return (
+            data.get("approved") is True
+            and isinstance(decision, str)
+            and decision.strip().lower() in cls._APPROVING_REVIEW_DECISIONS
+        )
+
+    @staticmethod
+    def _valid_checkpoint_evidence(
+        checkpoint: WorkflowRoleCheckpoint,
+    ) -> set[str]:
+        """Return evidence refs only from a complete, string-addressable result."""
+        data = checkpoint.data
+        work = data.get("work")
+        decision = data.get("decision")
+        evidence = data.get("evidence")
+        if (
+            not isinstance(work, str)
+            or not work.strip()
+            or not isinstance(decision, str)
+            or not decision.strip()
+            or not isinstance(evidence, list)
+            or not evidence
+            or any(not isinstance(ref, str) or not ref.strip() for ref in evidence)
+        ):
+            return set()
+        return {ref.strip() for ref in evidence}
 
     def record_approval(
         self,

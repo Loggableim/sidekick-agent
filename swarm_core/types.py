@@ -40,6 +40,17 @@ class SwarmEvent:
 
 
 @dataclass(frozen=True)
+class WorkflowRoleCheckpoint:
+    """One fully recorded role result that is safe to reuse after restart."""
+
+    run_id: str
+    role: str
+    model: str | None
+    data: dict[str, Any]
+    completed_at: datetime
+
+
+@dataclass(frozen=True)
 class RequestedToolAction:
     """One adapter action requested by a policy-governed proposal."""
 

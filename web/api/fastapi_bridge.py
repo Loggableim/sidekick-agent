@@ -34,12 +34,12 @@ def _is_pure_swarm_get(method: str, path: str) -> bool:
     return method.upper() == "GET" and path.startswith("/api/swarm/")
 
 
-def _is_swarm_approval_post(method: str, path: str) -> bool:
-    """True for the one HTTP path that records a human Swarm decision."""
+def _is_swarm_human_actor_post(method: str, path: str) -> bool:
+    """True when a Swarm write requires the trusted dashboard principal."""
     return (
         method.upper() == "POST"
         and path.startswith("/api/swarm/runs/")
-        and path.endswith("/approve")
+        and path.endswith(("/approve", "/recover", "/kanban-projection"))
     )
 
 
@@ -92,6 +92,10 @@ class _ResponseWriter:
 
     def close(self) -> None:
         self._closed.set()
+
+    def is_closed(self) -> bool:
+        """Expose ASGI disconnect state to long-lived compatibility routes."""
+        return self._closed.is_set()
 
     def finish(self) -> None:
         self._chunks.put(_END)
@@ -183,17 +187,21 @@ class _RouteExecution:
         }
         workspace_context_attempted = False
         try:
+            # Swarm GET/SSE skips the legacy workspace/bootstrap path, but its
+            # project trust resolver is still profile-aware.  Setting only
+            # this thread-local context is pure: it neither creates profile
+            # state nor changes the process-wide active profile.
+            cookie_profile = get_profile_cookie(self.handler)
+            if cookie_profile:
+                set_request_profile(cookie_profile)
             if not pure_swarm_get:
-                cookie_profile = get_profile_cookie(self.handler)
-                if cookie_profile:
-                    set_request_profile(cookie_profile)
                 # Preserve normal route cleanup even if setup raises midway.
                 workspace_context_attempted = True
                 _setup_workspace_from_request(self.handler, parsed)
 
-            if not check_auth(self.handler, parsed):
+            if not check_auth(self.handler, parsed, read_only=pure_swarm_get):
                 return
-            if _is_swarm_approval_post(self.handler.command, parsed.path):
+            if _is_swarm_human_actor_post(self.handler.command, parsed.path):
                 from cli.web_server import dashboard_session_principal
 
                 actor_id = dashboard_session_principal(self.request)

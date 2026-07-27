@@ -8,6 +8,7 @@ import hmac
 import http.cookies
 import json
 import logging
+import math
 import os
 import secrets
 import tempfile
@@ -245,6 +246,78 @@ def _signing_key():
     return key
 
 
+def _read_signing_key_read_only() -> bytes | None:
+    """Read the persisted signing key without creating state on failure."""
+    try:
+        raw = (_state_dir() / '.signing_key').read_bytes()
+    except Exception:
+        return None
+    return raw[:32] if len(raw) >= 32 else None
+
+
+def _is_auth_enabled_read_only() -> bool:
+    """Resolve password auth without loading defaults or creating state.
+
+    ``load_settings()`` resolves a default workspace and the normal password
+    path can create a signing key.  Project-local Swarm reads deliberately
+    bypass those side effects.  If an existing settings file cannot be read,
+    treat that uncertainty as authentication enabled so the read fails closed.
+    """
+    if _get_password_env_value():
+        return True
+
+    try:
+        raw = (_state_dir() / 'settings.json').read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
+    try:
+        settings = json.loads(raw)
+    except Exception:
+        return True
+    if not isinstance(settings, dict):
+        return True
+    return bool(settings.get('password_hash'))
+
+
+def _load_sessions_read_only() -> dict[str, float]:
+    """Load sessions for a pure read without pruning or changing memory."""
+    try:
+        data = json.loads((_state_dir() / '.sessions.json').read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    sessions: dict[str, float] = {}
+    for token, expiry in data.items():
+        if not isinstance(token, str) or not isinstance(expiry, (int, float)):
+            continue
+        try:
+            normalized_expiry = float(expiry)
+        except (OverflowError, ValueError):
+            continue
+        if math.isfinite(normalized_expiry):
+            sessions[token] = normalized_expiry
+    return sessions
+
+
+def verify_session_read_only(cookie_value) -> bool:
+    """Verify a persisted session without pruning, writing, or key creation."""
+    if not cookie_value or '.' not in cookie_value:
+        return False
+    token, sig = cookie_value.rsplit('.', 1)
+    key = _read_signing_key_read_only()
+    if key is None:
+        return False
+    expected_sig = hmac.new(key, token.encode(), hashlib.sha256).hexdigest()[:32]
+    if not hmac.compare_digest(sig, expected_sig):
+        return False
+    expiry = _load_sessions_read_only().get(token)
+    return expiry is not None and time.time() <= expiry
+
+
 def _hash_password(password):
     """PBKDF2-SHA256 with 600k iterations (OWASP recommendation).
     Salt is the persisted random signing key, which is secret and unique per
@@ -341,17 +414,24 @@ def parse_cookie(handler) -> str | None:
     return morsel.value if morsel else None
 
 
-def check_auth(handler, parsed) -> bool:
+def check_auth(handler, parsed, *, read_only: bool = False) -> bool:
     """Check if request is authorized. Returns True if OK.
-    If not authorized, sends 401 (API) or 302 redirect (page) and returns False."""
-    if not is_auth_enabled():
+    If not authorized, sends 401 (API) or 302 redirect (page) and returns False.
+
+    ``read_only`` is for project-local Swarm GET/SSE routes.  It refuses to
+    repair auth state: missing keys, unreadable settings, missing sessions, and
+    expired sessions all fail closed rather than creating keys or pruning rows.
+    """
+    auth_enabled = _is_auth_enabled_read_only() if read_only else is_auth_enabled()
+    if not auth_enabled:
         return True
     # Public paths don't require auth
     if parsed.path in PUBLIC_PATHS or parsed.path.startswith('/static/') or parsed.path.startswith('/session/static/'):
         return True
     # Check session cookie
     cookie_val = parse_cookie(handler)
-    if cookie_val and verify_session(cookie_val):
+    verify = verify_session_read_only if read_only else verify_session
+    if cookie_val and verify(cookie_val):
         return True
     # Not authorized
     if parsed.path.startswith('/api/'):

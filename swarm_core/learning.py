@@ -7,7 +7,7 @@ from datetime import datetime
 import hashlib
 import json
 import math
-from typing import Iterable
+from typing import Iterable, Protocol, runtime_checkable
 
 from .memory import ProjectMemory
 from .store import ProjectSwarmStore
@@ -31,6 +31,49 @@ class GoldenResult:
         _validate_score(self.score, "Golden score")
         if not isinstance(self.safety_passed, bool):
             raise TypeError("Golden safety result must be a bool")
+
+
+@dataclass(frozen=True)
+class VerificationAssessment:
+    """One explicit, local verifier assessment eligible for reputation learning.
+
+    This value is intentionally distinct from a model response.  Callers must
+    construct it from a trusted local verifier result; no workflow or model
+    output is converted to reputation automatically.
+    """
+
+    role: str
+    capability: str
+    source_ref: str
+    score: float
+    safety_passed: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "role", _require_text(self.role, "Role"))
+        object.__setattr__(
+            self,
+            "capability",
+            _require_text(self.capability, "Capability"),
+        )
+        object.__setattr__(
+            self,
+            "source_ref",
+            _require_text(self.source_ref, "Verifier source reference"),
+        )
+        _validate_score(self.score, "Verifier score")
+        if not isinstance(self.safety_passed, bool):
+            raise TypeError("Verifier safety result must be a bool")
+
+
+@runtime_checkable
+class _LocalVerifierAssessment(Protocol):
+    """Structural adapter boundary for the core verifier's assessment value."""
+
+    role: str
+    capability: str
+    source_ref: str
+    score: float
+    safety_passed: bool
 
 
 @dataclass(frozen=True)
@@ -116,6 +159,39 @@ class ReputationLedger:
             score=result.score,
         )
         return _to_reputation_record(data)
+
+    def record_local_verifier_assessment(
+        self,
+        assessment: _LocalVerifierAssessment,
+    ) -> ReputationRecord:
+        """Persist an explicitly supplied local verifier result.
+
+        The method accepts the structural output of the core-only verifier
+        without importing that module, but rejects mappings and arbitrary
+        model response data.  An unsafe assessment records a zero score so it
+        can never increase the market's local reputation signal.
+        """
+        if not isinstance(assessment, _LocalVerifierAssessment):
+            raise TypeError(
+                "Reputation requires an explicit local verifier assessment"
+            )
+        normalized = VerificationAssessment(
+            role=assessment.role,
+            capability=assessment.capability,
+            source_ref=assessment.source_ref,
+            score=assessment.score,
+            safety_passed=assessment.safety_passed,
+        )
+        return self.record_outcome(
+            normalized.role,
+            normalized.capability,
+            GoldenResult(
+                normalized.source_ref,
+                score=normalized.score if normalized.safety_passed else 0.0,
+                safety_passed=normalized.safety_passed,
+            ),
+            source_kind="verifier",
+        )
 
     def list(self, role: str, capability: str) -> list[ReputationRecord]:
         return [

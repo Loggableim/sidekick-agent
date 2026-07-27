@@ -10,9 +10,9 @@ from urllib.parse import urlparse
 
 import pytest
 
-from cli.swarm_host import SidekickSwarmService
+from cli.swarm_host import OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE, SidekickSwarmService
 from swarm_core.models import ModelCatalogSnapshot
-from swarm_core.packs import PackDefinition
+from swarm_core.packs import PackDefinition, PackRegistry
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.config import initialize_project
 from web.api import swarm as swarm_api
@@ -40,6 +40,23 @@ class _DisconnectAfterEvents(io.BytesIO):
         result = super().write(payload)
         if b"event: events" in payload:
             raise BrokenPipeError("test stream disconnect")
+        return result
+
+
+class _CloseAfterSseHello(io.BytesIO):
+    """Compatibility writer that exposes a FastAPI-style disconnect probe."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._closed_for_sse = False
+
+    def is_closed(self) -> bool:
+        return self._closed_for_sse
+
+    def write(self, payload: bytes) -> int:
+        result = super().write(payload)
+        if b"event: hello" in payload:
+            self._closed_for_sse = True
         return result
 
 
@@ -478,6 +495,69 @@ def test_http_resume_rejects_a_worker_that_is_not_waiting_at_a_pause_boundary(
             assert execution_finished.wait(timeout=1)
 
 
+def test_http_resume_relaunches_a_durable_paused_run_after_process_restart(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a restart-paused run being rejected because no old thread exists."""
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ProjectSwarmStore(project)
+    run = store.create_run(
+        run_id="run-restart",
+        metadata={
+            "goal": "Continue only pending roles",
+            "pack": "coding-team",
+            "project_root": str(project.resolve()),
+        },
+    )
+    store.append_event(run.run_id, "run.started", {"goal": "Continue"})
+    store.set_run_status(run.run_id, "paused")
+    store.append_event(
+        run.run_id,
+        "run.paused",
+        {"reason": "model_chain_exhausted", "role": "builder"},
+    )
+    executed = threading.Event()
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def resume(self, project_root, run_id):
+            calls.append(("resume", run_id))
+            return ProjectSwarmStore(project_root).resume_run(run_id)
+
+        def execute_run(self, project_root, run_id, **_callbacks):
+            calls.append(("execute", run_id))
+            ProjectSwarmStore(project_root).set_run_status(run_id, "completed")
+            executed.set()
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+    key = (str(project.resolve()), run.run_id)
+    with swarm_api._BACKGROUND_RUNS_LOCK:
+        swarm_api._BACKGROUND_RUNS.pop(key, None)
+    handler = _Handler()
+
+    assert (
+        swarm_api.handle_swarm_post(
+            handler,
+            urlparse(f"/api/swarm/runs/{run.run_id}/resume"),
+            {"project_path": str(project)},
+        )
+        is True
+    )
+    assert handler.status_code == 200
+    assert _response_json(handler)["run"]["status"] == "running"
+    assert executed.wait(timeout=1)
+    assert calls == [("resume", run.run_id), ("execute", run.run_id)]
+    assert (
+        ProjectSwarmStore.open_read_only(project).get_run(run.run_id).status
+        == "completed"
+    )
+
+
 def test_http_resume_continues_a_real_worker_waiting_at_a_human_pause_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -502,7 +582,8 @@ def test_http_resume_continues_a_real_worker_waiting_at_a_human_pause_boundary(
                             {
                                 "work": "bounded work",
                                 "evidence": ["test:evidence"],
-                                "decision": "continue",
+                                "decision": "approve",
+                                "approved": True,
                             }
                         )
                     }
@@ -524,7 +605,7 @@ def test_http_resume_continues_a_real_worker_waiting_at_a_human_pause_boundary(
                 "nemotron-3-super",
             ),
             healthy=True,
-            source="test",
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
         ),
         pause_poll_seconds=0.005,
     )
@@ -646,6 +727,71 @@ def test_http_read_on_missing_project_is_pure_and_returns_not_found(
     assert not (project / ".swarm").exists()
 
 
+def test_http_get_and_sse_use_a_non_mutating_explicit_project_trust_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches read routes using the profile-cleanup resolver that can write state."""
+    from web.api import workspace as workspace_api
+
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ProjectSwarmStore(project)
+    run = store.create_run(run_id="read-pure")
+    store.append_event(run.run_id, "run.started", {"goal": "inspect"})
+
+    def unexpected_mutating_resolver(*_args, **_kwargs):
+        raise AssertionError("Swarm GET/SSE must not enter a mutating profile resolver")
+
+    # Make the test project intrinsically trusted without falling through to
+    # saved-workspace/default-space paths.  Those legacy helpers may create a
+    # profile state directory or rewrite a cleaned workspace list.
+    monkeypatch.setattr(
+        workspace_api.Path,
+        "home",
+        classmethod(lambda _cls: tmp_path),
+    )
+    monkeypatch.setattr(
+        swarm_api,
+        "resolve_trusted_workspace",
+        unexpected_mutating_resolver,
+    )
+    monkeypatch.setattr(
+        workspace_api,
+        "load_workspaces",
+        unexpected_mutating_resolver,
+    )
+    monkeypatch.setattr(
+        workspace_api,
+        "_current_default_workspace",
+        unexpected_mutating_resolver,
+    )
+
+    runs = _Handler()
+    assert (
+        swarm_api.handle_swarm_get(
+            runs,
+            urlparse(f"/api/swarm/runs?project_path={project}"),
+        )
+        is True
+    )
+    assert _response_json(runs)["runs"][0]["run_id"] == run.run_id
+
+    writer = _DisconnectAfterEvents()
+    stream = _Handler(writer=writer)
+    assert (
+        swarm_api.handle_swarm_get(
+            stream,
+            urlparse(
+                "/api/swarm/runs/events/stream"
+                f"?project_path={project}&run_id={run.run_id}"
+            ),
+        )
+        is True
+    )
+    assert "event: events" in writer.getvalue().decode("utf-8")
+
+
 def test_swarm_get_requires_explicit_project_path_without_space_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -753,6 +899,50 @@ def test_http_packs_reads_initialized_config_without_creating_runtime_database(
     assert not (project / ".swarm" / "runtime" / "swarm.sqlite").exists()
 
 
+def test_http_packs_rejects_an_external_project_pack_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """GET pack metadata must never read through an escaping `.swarm/packs` link."""
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    initialize_project(project)
+    (outside / "coding-team.yaml").write_text(
+        "description: EXTERNAL PACK SECRET\n",
+        encoding="utf-8",
+    )
+    try:
+        (project / ".swarm" / "packs").symlink_to(
+            outside,
+            target_is_directory=True,
+        )
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable in this test environment: {exc}")
+    monkeypatch.setattr(
+        swarm_api,
+        "resolve_trusted_workspace_read_only",
+        lambda _value: project.resolve(),
+    )
+
+    class RealPackService:
+        def list_packs(self, project_root):
+            return PackRegistry(project_root).list()
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: RealPackService())
+    handler = _Handler()
+
+    result = swarm_api.handle_swarm_get(
+        handler,
+        urlparse(f"/api/swarm/packs?project_path={project}"),
+    )
+
+    assert result is None
+    assert handler.status_code == 400
+    assert "EXTERNAL PACK SECRET" not in handler.wfile.getvalue().decode("utf-8")
+
+
 def test_http_approval_rejects_forged_model_fields_and_derives_human_actor(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -826,6 +1016,119 @@ def test_http_approval_rejects_forged_model_fields_and_derives_human_actor(
     ]
 
 
+def test_http_recover_execution_lease_requires_a_dashboard_actor_and_never_relaunches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Recovery is a separately audited human handoff, never an implicit resume."""
+    project = tmp_path / "project"
+    project.mkdir()
+    calls: list[tuple[Path, str, str]] = []
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def recover_execution_lease(self, project_root, run_id, *, actor_id):
+            calls.append((project_root, run_id, actor_id))
+            return {"run_id": run_id, "status": "paused"}
+
+        def resume(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("lease recovery must not resume a run")
+
+        def execute_run(self, *_args, **_kwargs):  # pragma: no cover - must not run
+            raise AssertionError("lease recovery must not launch a worker")
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+
+    forged = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            forged,
+            urlparse("/api/swarm/runs/run-1/recover"),
+            {"project_path": str(project), "actor_id": "dashboard:forged"},
+        )
+        is None
+    )
+    assert forged.status_code == 400
+    assert calls == []
+
+    missing_actor = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            missing_actor,
+            urlparse("/api/swarm/runs/run-1/recover"),
+            {"project_path": str(project)},
+        )
+        is None
+    )
+    assert missing_actor.status_code == 403
+    assert calls == []
+
+    accepted = _Handler()
+    accepted.swarm_host_actor = "dashboard:trusted-test-principal"
+    assert (
+        swarm_api.handle_swarm_post(
+            accepted,
+            urlparse("/api/swarm/runs/run-1/recover"),
+            {"project_path": str(project)},
+        )
+        is True
+    )
+    assert accepted.status_code == 200
+    assert calls == [
+        (project.resolve(), "run-1", "dashboard:trusted-test-principal")
+    ]
+    assert _response_json(accepted) == {"run": {"run_id": "run-1", "status": "paused"}}
+
+
+def test_http_recover_execution_lease_rejects_a_live_local_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A manual handoff cannot steal a worker that this Sidekick still owns."""
+    project = tmp_path / "project"
+    project.mkdir()
+    calls: list[object] = []
+    release_worker = threading.Event()
+    worker = threading.Thread(target=release_worker.wait, daemon=True)
+    execution = swarm_api._BackgroundRun(thread=worker, state="executing")
+    key = (str(project.resolve()), "run-live")
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def recover_execution_lease(self, *_args, **_kwargs):
+            calls.append(object())
+            raise AssertionError("live local workers must be rejected before recovery")
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+    worker.start()
+    try:
+        with swarm_api._BACKGROUND_RUNS_LOCK:
+            swarm_api._BACKGROUND_RUNS[key] = execution
+        handler = _Handler()
+        handler.swarm_host_actor = "dashboard:trusted-test-principal"
+
+        assert (
+            swarm_api.handle_swarm_post(
+                handler,
+                urlparse("/api/swarm/runs/run-live/recover"),
+                {"project_path": str(project)},
+            )
+            is None
+        )
+        assert handler.status_code == 409
+        assert calls == []
+    finally:
+        release_worker.set()
+        worker.join(timeout=1)
+        with swarm_api._BACKGROUND_RUNS_LOCK:
+            if swarm_api._BACKGROUND_RUNS.get(key) is execution:
+                swarm_api._BACKGROUND_RUNS.pop(key)
+
+
 def test_http_existing_run_write_does_not_initialize_an_absent_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -858,6 +1161,7 @@ def test_http_kanban_projection_accepts_only_an_explicit_trusted_project_path(
     """Catches the optional Kanban write accepting a client board, Space slug, or untrusted path."""
     project = tmp_path / "project"
     project.mkdir()
+    ProjectSwarmStore(project).create_run(run_id="run-1")
     trusted_values: list[str] = []
     calls: list[tuple[Path, str]] = []
 
@@ -905,7 +1209,20 @@ def test_http_kanban_projection_accepts_only_an_explicit_trusted_project_path(
     assert missing_path.status_code == 400
     assert calls == []
 
+    missing_actor = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            missing_actor,
+            urlparse("/api/swarm/runs/run-1/kanban-projection"),
+            {"project_path": str(project)},
+        )
+        is None
+    )
+    assert missing_actor.status_code == 403
+    assert calls == []
+
     accepted = _Handler()
+    accepted.swarm_host_actor = "dashboard:trusted-test-principal"
     assert (
         swarm_api.handle_swarm_post(
             accepted,
@@ -915,8 +1232,11 @@ def test_http_kanban_projection_accepts_only_an_explicit_trusted_project_path(
         is True
     )
     assert accepted.status_code == 201
-    assert trusted_values == [str(project), str(project)]
+    assert trusted_values == [str(project), str(project), str(project)]
     assert calls == [(project.resolve(), "run-1")]
+    audit = ProjectSwarmStore(project).list_events("run-1")
+    assert audit[-1].event_type == "sidekick.kanban_projection_requested_by_human"
+    assert audit[-1].payload == {"actor_id": "dashboard:trusted-test-principal"}
     assert _response_json(accepted) == {
         "projection": {
             "task_id": "task-1",
@@ -924,6 +1244,35 @@ def test_http_kanban_projection_accepts_only_an_explicit_trusted_project_path(
             "space_slug": "project-space",
         }
     }
+
+
+def test_sse_stops_before_polling_when_the_response_writer_closed_after_hello():
+    """An idle browser disconnect must release the route without a heartbeat wait."""
+
+    class Reader:
+        calls = 0
+
+        def list_events_after(self, *_args, **_kwargs):
+            self.calls += 1
+            raise AssertionError("a closed writer must not be polled")
+
+    writer = _CloseAfterSseHello()
+    handler = _Handler(writer=writer)
+    reader = Reader()
+    started = time.monotonic()
+
+    assert (
+        swarm_api._handle_events_sse_stream(
+            handler,
+            urlparse("/api/swarm/runs/events/stream?run_id=stream-run"),
+            reader,
+            "stream-run",
+        )
+        is True
+    )
+
+    assert reader.calls == 0
+    assert time.monotonic() - started < swarm_api._SSE_POLL_SECONDS
 
 
 def test_sse_reads_ordered_cursor_tail_without_mutating_a_run(

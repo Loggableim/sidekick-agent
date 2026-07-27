@@ -315,6 +315,10 @@ class ModelRegistry:
         except KeyError as exc:
             raise KeyError(f"Unknown Swarm model: {name}") from exc
 
+    def all_models(self) -> tuple[ModelSpec, ...]:
+        """Return immutable known-model metadata without changing any route."""
+        return tuple(self._models[spec.name] for spec in _MODEL_SPECS)
+
     def is_available(self, name: str) -> bool:
         if name not in self._models:
             return False

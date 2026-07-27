@@ -127,6 +127,78 @@ def test_swarm_panel_exit_invalidates_a_pending_detail_load_before_it_can_reopen
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_swarm_panel_exit_ignores_a_queued_callback_from_its_closed_sse_stream():
+    """A stale EventSource event must not reopen the Swarm lifecycle after exit."""
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+
+        pytest.skip("Node.js is required to execute the Swarm browser lifecycle regression")
+
+    swarm_js = Path("web/static/swarm.js").resolve()
+    harness = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+        const streams = [];
+        const elements = {
+          swarmRunList: {innerHTML: '', onclick: null},
+          swarmMain: {innerHTML: '', onclick: null},
+        };
+        global.window = {
+          _activeSpaceConfig: {project_dir: 'C:/swarm-project'},
+          _activeSpace: '',
+          _spacesCache: [],
+        };
+        global.document = {getElementById: (id) => elements[id] || null};
+        global._eventSourceUrl = (url) => url;
+        global.api = (path) => {
+          if (path.includes('/api/swarm/runs/run-1?')) {
+            return Promise.resolve({run: {run_id: 'run-1', status: 'running', metadata: {}}, events: [], approvals: []});
+          }
+          if (path.includes('/api/swarm/runs?')) return Promise.resolve({runs: [{run_id: 'run-1', status: 'running', metadata: {}}]});
+          if (path.includes('/api/swarm/packs?')) return Promise.resolve({packs: []});
+          if (path.includes('/api/swarm/models?')) return Promise.resolve({catalog: null});
+          throw new Error('unexpected request: ' + path);
+        };
+        global.EventSource = class FakeEventSource {
+          constructor(url) { this.url = url; this.listeners = {}; streams.push(this); }
+          addEventListener(kind, callback) { this.listeners[kind] = callback; }
+          close() { this.closed = true; }
+        };
+        vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'), {filename: process.argv[1]});
+        async function flushMicrotasks() {
+          for (let turn = 0; turn < 16; turn += 1) await Promise.resolve();
+        }
+        (async () => {
+          await window.loadSwarm();
+          if (streams.length !== 1 || typeof streams[0].listeners.events !== 'function') {
+            throw new Error('initial SSE stream/listener was not created');
+          }
+          const staleEvents = streams[0].listeners.events;
+          window.stopSwarmStream();
+          staleEvents({data: '{"cursor": 1, "events": []}'});
+          await flushMicrotasks();
+          if (streams.length !== 1) {
+            throw new Error('stale closed SSE event reopened stream: ' + streams.length);
+          }
+        })().catch((error) => {
+          console.error(error && error.stack || error);
+          process.exitCode = 1;
+        });
+        """
+    )
+    result = subprocess.run(
+        [node, "-e", harness, str(swarm_js)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_swarm_client_keeps_every_observation_read_only_until_an_explicit_control():
     """Catches initial load, polling, or SSE handlers mutating Swarm or refreshing a catalog."""
     swarm_js = Path("web/static/swarm.js").read_text(encoding="utf-8")
@@ -152,3 +224,88 @@ def test_swarm_client_keeps_every_observation_read_only_until_an_explicit_contro
     assert "actor_id" not in swarm_js
     assert "model_family" not in swarm_js
     assert "confirm(" in swarm_js
+
+
+def test_swarm_client_counts_durable_model_attempts_while_running_or_paused():
+    """The persisted pre-dispatch marker must be visible before any reply arrives."""
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+
+        pytest.skip("Node.js is required to execute the Swarm budget regression")
+
+    swarm_js = Path("web/static/swarm.js").resolve()
+    harness = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+        let status = 'running';
+        const main = {innerHTML: '', onclick: null};
+        const sidebar = {innerHTML: '', onclick: null};
+        global.window = {
+          _activeSpaceConfig: {project_dir: 'C:/swarm-project'},
+          _activeSpace: '',
+          _spacesCache: [],
+        };
+        global.document = {getElementById: (id) => id === 'swarmMain' ? main : (id === 'swarmRunList' ? sidebar : null)};
+        global.EventSource = undefined;
+        global.api = (path) => {
+          if (path.includes('/api/swarm/runs/run-1?')) {
+            return Promise.resolve({
+              run: {run_id: 'run-1', status: status, metadata: {goal: 'Budget regression'}},
+              events: [
+                {event_type: 'model.attempt_started', payload: {role: 'scout'}},
+                {event_type: 'model.attempt_started', payload: {role: 'planner'}},
+              ],
+              approvals: [],
+            });
+          }
+          if (path.includes('/api/swarm/runs?')) return Promise.resolve({runs: [{run_id: 'run-1', status: status, metadata: {goal: 'Budget regression'}}]});
+          if (path.includes('/api/swarm/packs?')) return Promise.resolve({packs: []});
+          if (path.includes('/api/swarm/models?')) return Promise.resolve({catalog: null});
+          throw new Error('unexpected request: ' + path);
+        };
+        vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'), {filename: process.argv[1]});
+        (async () => {
+          for (const nextStatus of ['running', 'paused']) {
+            status = nextStatus;
+            await window.loadSwarm({resetSelection: true});
+            if (!main.innerHTML.includes('<dd>2 / 48</dd>')) {
+              throw new Error(nextStatus + ' run did not render durable attempt budget: ' + main.innerHTML);
+            }
+          }
+        })().catch((error) => {
+          console.error(error && error.stack || error);
+          process.exitCode = 1;
+        });
+        """
+    )
+    result = subprocess.run(
+        [node, "-e", harness, str(swarm_js)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_swarm_client_makes_lease_recovery_an_explicit_non_resuming_handoff():
+    """A crash recovery control must not silently restart a possibly stale run."""
+    swarm_js = Path("web/static/swarm.js").read_text(encoding="utf-8")
+    recover_start = swarm_js.index("async function swarmRecoverExecutionLease")
+    recover_end = swarm_js.index("async function swarmDecideApproval", recover_start)
+    recover_body = swarm_js[recover_start:recover_end]
+
+    assert 'data-swarm-action="recover"' in swarm_js
+    assert "async function swarmRecoverExecutionLease" in swarm_js
+    assert "/recover" in recover_body
+    assert "confirm(" in recover_body
+    assert "previous Sidekick host has stopped" in recover_body
+    assert "authorizes a retry" in recover_body
+    assert "does not resume" in recover_body
+    assert "project_path: projectPath" in recover_body
+    assert "swarmResumeRun(" not in recover_body
+    assert "window.swarmRecoverExecutionLease" in swarm_js
+    assert "actor_id" not in swarm_js

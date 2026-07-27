@@ -142,6 +142,14 @@ def _clean_workspace_list(workspaces: list) -> list:
             try:
                 from web.api.profiles import get_active_profile_home
                 own_profile_dir = get_active_profile_home().resolve()
+                # The root/default profile home is the parent of ``profiles/``.
+                # That ancestor relation is not ownership of every named
+                # profile below it: retaining those entries would let a stale
+                # global workspace list authorize another profile's project.
+                # A named profile instead has a child home (profiles/alice),
+                # so its own entries continue through the normal check below.
+                if _is_within(sidekick_profiles, own_profile_dir):
+                    continue
                 p.relative_to(own_profile_dir)
                 # p is under our own profile dir — keep it
             except (ValueError, Exception):
@@ -662,6 +670,277 @@ def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
     )
 
 
+
+def resolve_trusted_workspace_read_only(path: str | Path) -> Path:
+    """Validate an explicit workspace path without touching profile state.
+
+    ``resolve_trusted_workspace`` is intentionally allowed to normalize old
+    profile data: its normal ``load_workspaces`` path can create a profile
+    state directory or rewrite a cleaned workspace list.  That is appropriate
+    for write-capable workspace controls, but not for Swarm GET/SSE requests.
+    This variant reads only existing configuration files and never calls the
+    mutating workspace/default/Space helpers.
+
+    The trust rules mirror the normal resolver as closely as possible: home,
+    exact saved workspace, a configured default workspace, and configured
+    Space project roots.  Missing or malformed metadata merely grants no
+    additional trust; it is never repaired by a read request.
+    """
+    if path in (None, ""):
+        raise ValueError("An explicit workspace path is required for read-only access")
+
+    candidate = Path(path).expanduser().resolve()
+    access_error = _workspace_access_error(candidate)
+    if access_error:
+        raise ValueError(access_error)
+
+    home = Path.home().resolve()
+    if home != Path("/") and _is_within(candidate, home):
+        return candidate
+
+    if _is_blocked_workspace_path(candidate, path):
+        raise ValueError(f"Path points to a system directory: {candidate}")
+
+    profile_context = _read_only_profile_context()
+    if candidate in _read_only_saved_workspace_paths(profile_context):
+        return candidate
+
+    for default_workspace in _read_only_default_workspaces():
+        if _is_within(candidate, default_workspace):
+            return candidate
+
+    for project_root in _read_only_space_project_roots(profile_context):
+        if _is_within(candidate, project_root):
+            return candidate
+
+    raise ValueError(
+        f"Path is outside the user home directory, not in the saved workspace "
+        f"list, not under the default workspace, and not a Space project_dir: {candidate}. "
+        f"Add it via Settings → Workspaces first."
+    )
+
+
+def _read_only_saved_workspace_paths(
+    profile_context: tuple[Path, Path, bool] | None = None,
+) -> set[Path]:
+    """Read saved workspace paths without profile initialization or cleanup."""
+    if profile_context is None:
+        profile_context = _read_only_profile_context()
+    if profile_context is None:
+        return set()
+    active_profile_home, _profiles_root, is_default_profile = profile_context
+    files: list[Path] = []
+    if not is_default_profile:
+        files.append(active_profile_home / "webui_state" / "workspaces.json")
+    files.append(_cfg.WORKSPACES_FILE)
+
+    saved: set[Path] = set()
+    for workspace_file in files:
+        try:
+            raw = json.loads(workspace_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(raw, list):
+            continue
+        for item in raw:
+            if not isinstance(item, dict) or not item.get("path"):
+                continue
+            try:
+                workspace = Path(str(item["path"])).expanduser().resolve()
+            except (OSError, RuntimeError):
+                continue
+            if (
+                workspace.is_dir()
+                and not _is_blocked_workspace_path(workspace, item["path"])
+                and _read_only_workspace_belongs_to_active_profile(
+                    workspace,
+                    profile_context,
+                )
+            ):
+                saved.add(workspace)
+    return saved
+
+
+def _read_only_profile_context() -> tuple[Path, Path, bool] | None:
+    """Derive active profile ownership without profile-home cache mutation."""
+    try:
+        from web.api import profiles
+
+        profile_name = profiles.get_active_profile_name()
+        base_home = Path(profiles._DEFAULT_SIDEKICK_HOME).expanduser().resolve()
+        profiles_root = (base_home / "profiles").resolve()
+        if not base_home.is_dir():
+            return None
+        if profile_name == "default":
+            return base_home, profiles_root, True
+        if (
+            not isinstance(profile_name, str)
+            or not profiles._PROFILE_ID_RE.fullmatch(profile_name)
+        ):
+            return None
+        active_profile_home = (profiles_root / profile_name).resolve()
+        if (
+            not active_profile_home.is_dir()
+            or not _is_within(active_profile_home, profiles_root)
+        ):
+            return None
+        return active_profile_home, profiles_root, False
+    except Exception:
+        return None
+
+
+def _read_only_workspace_belongs_to_active_profile(
+    workspace: Path,
+    profile_context: tuple[Path, Path, bool],
+) -> bool:
+    """Apply the normal cross-profile exclusion without cleaning saved state."""
+    active_profile_home, profiles_root, is_default_profile = profile_context
+    if not _is_within(workspace, profiles_root):
+        return True
+    if is_default_profile:
+        # The root/default profile owns ``base_home``, not the named-profile
+        # tree below ``base_home/profiles``.  Treating that ancestor relation
+        # as ownership would let a stale global workspaces.json grant root
+        # access to (for example) ``profiles/bob/project`` during a read-only
+        # Swarm request.  There is no default-profile child in this layout, so
+        # fail closed for every path below the named-profile root.
+        return False
+    return _is_within(workspace, active_profile_home)
+
+
+def _read_only_default_workspaces() -> tuple[Path, ...]:
+    """Return existing configured defaults without ``resolve_default_workspace``."""
+    values: list[object] = [os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE", "")]
+    try:
+        settings = json.loads(_cfg.SETTINGS_FILE.read_text(encoding="utf-8"))
+        if isinstance(settings, dict):
+            values.append(settings.get("default_workspace"))
+    except (OSError, ValueError, TypeError):
+        pass
+    # This import-time constant may have been initialized by the server, but
+    # reading it here cannot create a directory during an observation request.
+    values.append(getattr(_cfg, "DEFAULT_WORKSPACE", None))
+
+    defaults: list[Path] = []
+    for value in values:
+        if value in (None, ""):
+            continue
+        try:
+            candidate = Path(str(value)).expanduser().resolve()
+        except (OSError, RuntimeError):
+            continue
+        if (
+            candidate.is_dir()
+            and not _is_blocked_workspace_path(candidate, value)
+            and candidate not in defaults
+        ):
+            defaults.append(candidate)
+    return tuple(defaults)
+
+
+def _read_only_space_project_roots(
+    profile_context: tuple[Path, Path, bool] | None = None,
+) -> tuple[Path, ...]:
+    """Inspect existing Space YAML files without read-time migrations."""
+    try:
+        import yaml
+        from web.api import space_engine
+    except Exception:
+        return ()
+
+    roots: list[Path] = []
+    for spaces_root in _read_only_space_roots(space_engine, profile_context):
+        try:
+            children = tuple(spaces_root.iterdir()) if spaces_root.is_dir() else ()
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir():
+                continue
+            config_path = next(
+                (
+                    path
+                    for path in (child / "space.yaml", child / "workspace.yaml")
+                    if path.is_file()
+                ),
+                None,
+            )
+            if config_path is None:
+                continue
+            try:
+                raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            except (OSError, ValueError, TypeError, yaml.YAMLError):
+                continue
+            project_dir = raw.get("project_dir") if isinstance(raw, dict) else None
+            if not isinstance(project_dir, str) or not project_dir.strip():
+                continue
+            try:
+                project_root = Path(project_dir).expanduser().resolve()
+            except (OSError, RuntimeError):
+                continue
+            if (
+                project_root.is_dir()
+                and not _is_blocked_workspace_path(project_root, project_dir)
+                and project_root not in roots
+            ):
+                roots.append(project_root)
+    return tuple(roots)
+
+
+def _read_only_space_roots(
+    space_engine,
+    profile_context: tuple[Path, Path, bool] | None,
+) -> tuple[Path, ...]:
+    """Mirror Space root selection without resolving a mutating profile home."""
+    if profile_context is None:
+        profile_context = _read_only_profile_context()
+    active_home = profile_context[0] if profile_context is not None else None
+
+    def choose_root(
+        environment_name: str,
+        environment_key_name: str,
+        default_root_name: str,
+        runtime_root_name: str,
+        leaf: str,
+    ) -> Path | None:
+        configured = os.getenv(environment_name) or os.getenv(
+            getattr(space_engine, environment_key_name, ""),
+        )
+        if configured:
+            try:
+                return Path(configured).expanduser().resolve()
+            except (OSError, RuntimeError):
+                return None
+        configured_root = getattr(space_engine, runtime_root_name, None)
+        default_root = getattr(space_engine, default_root_name, None)
+        if configured_root is not None and configured_root != default_root:
+            try:
+                return Path(configured_root).expanduser().resolve()
+            except (OSError, RuntimeError):
+                return None
+        return active_home / leaf if active_home is not None else None
+
+    selected = (
+        choose_root(
+            "SIDEKICK_WEBUI_SPACES_DIR",
+            "_SPACES_ROOT_KEY",
+            "_DEFAULT_SPACES_ROOT",
+            "SPACES_ROOT",
+            "spaces",
+        ),
+        choose_root(
+            "SIDEKICK_WEBUI_WORKSPACES_DIR",
+            "_OLD_WORKSPACES_KEY",
+            "_DEFAULT_OLD_ROOT",
+            "_OLD_ROOT",
+            "workspaces",
+        ),
+    )
+    roots: list[Path] = []
+    for root in selected:
+        if root is not None and root not in roots:
+            roots.append(root)
+    return tuple(roots)
 
 
 def _strip_surrounding_quotes(path: str) -> str:

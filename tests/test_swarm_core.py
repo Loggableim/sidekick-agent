@@ -147,7 +147,7 @@ def test_read_only_store_reads_only_cursor_tail_and_catalog_snapshot(tmp_path: P
         provider="ollama-cloud",
         models=("deepseek-v4-flash", "minimax-m3"),
         healthy=True,
-        source="ollama-cloud-live",
+        source="ollama-cloud-api-live-verified",
     )
     store.save_model_catalog_snapshot(snapshot)
 

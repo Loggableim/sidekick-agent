@@ -12,6 +12,12 @@ _ROLE_CHAINS = {
     "default": ("deepseek-v4-flash",),
     "scout": ("deepseek-v4-flash",),
     "planner": ("deepseek-v4-pro", "kimi-k2.6"),
+    # Kimi is an independently dispatched challenger only when the workflow
+    # records an explicit conflict.  It is not called on a successful normal
+    # planner result; the same Kimi entry after Pro remains the permitted
+    # provider/schema fallback chain.
+    "planner_challenger": ("kimi-k2.6",),
+    "planner_arbitrator": ("deepseek-v4-pro", "kimi-k2.6"),
     "builder": ("minimax-m3",),
     "critic": ("minimax-m3",),
     "coding": ("glm-5.2",),
