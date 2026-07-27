@@ -660,7 +660,8 @@ def test_reassessment_cannot_overwrite_a_concurrently_promoted_candidate(
         lambda: InterceptingContext(original_connection()),
     )
 
-    with pytest.raises(ValueError, match="Promoted"):
+    rejection: ValueError | None = None
+    try:
         reassessor.record_prompt_assessment(
             candidate.candidate_id,
             quality=0.0,
@@ -669,6 +670,8 @@ def test_reassessment_cannot_overwrite_a_concurrently_promoted_candidate(
             eligible=False,
             assessment_digest="stale-assessment",
         )
+    except ValueError as error:
+        rejection = error
 
     terminal = PromptCandidates(ProjectSwarmStore(tmp_path)).get(candidate.candidate_id)
     assert triggered is True
@@ -676,6 +679,8 @@ def test_reassessment_cannot_overwrite_a_concurrently_promoted_candidate(
     assert terminal.human_approver_id == "owner"
     assert terminal.approved_assessment_revision == terminal.assessment_revision
     assert terminal.approved_assessment_digest == terminal.assessment_digest
+    assert rejection is not None
+    assert "Promoted" in str(rejection)
 
 
 def test_prompt_assessment_migration_invalidates_unbound_legacy_approval(
