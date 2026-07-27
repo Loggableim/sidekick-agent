@@ -2,13 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 import json
+import math
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 
 OLLAMA_CLOUD_PROVIDER = "ollama-cloud"
+MODEL_HEALTH_HEALTHY = "healthy"
+MODEL_HEALTH_UNAVAILABLE = "unavailable"
+MODEL_HEALTH_UNVERIFIED = "unverified"
+_MODEL_HEALTH_VALUES = frozenset(
+    {
+        MODEL_HEALTH_HEALTHY,
+        MODEL_HEALTH_UNAVAILABLE,
+        MODEL_HEALTH_UNVERIFIED,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -51,13 +63,105 @@ class ModelCatalogSnapshot:
 
 @dataclass(frozen=True)
 class ModelSpec:
+    """Immutable provider metadata for a routeable Ollama Cloud model.
+
+    Static capabilities and context budgets are conservative provider-declared
+    limits.  ``health`` is derived only from an explicitly supplied catalog;
+    ``role_quality`` is a routing-policy baseline, not learned reputation.
+    """
+
     name: str
     family: str
     capabilities: frozenset[str]
     provider: str = OLLAMA_CLOUD_PROVIDER
+    tools: bool = False
+    vision: bool = False
+    thinking: bool = False
+    json_capable: bool = False
+    context_budget: int | None = None
+    health: str = MODEL_HEALTH_UNVERIFIED
+    role_quality: Mapping[str, float] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        name = str(self.name).strip()
+        family = str(self.family).strip()
+        provider = str(self.provider).strip().lower()
+        if not name:
+            raise ValueError("Model name must be non-empty")
+        if not family:
+            raise ValueError("Model family must be non-empty")
+        if not provider:
+            raise ValueError("Model provider must be non-empty")
+
+        capabilities = frozenset(
+            str(capability).strip().lower()
+            for capability in self.capabilities
+            if str(capability).strip()
+        )
+        if not capabilities:
+            raise ValueError("Model capabilities must be non-empty")
+        for field_name in ("tools", "vision", "thinking", "json_capable"):
+            if not isinstance(getattr(self, field_name), bool):
+                raise TypeError(f"Model {field_name} must be a bool")
+
+        context_budget = self.context_budget
+        if context_budget is not None and (
+            isinstance(context_budget, bool)
+            or not isinstance(context_budget, int)
+            or context_budget <= 0
+        ):
+            raise ValueError("Model context budget must be a positive integer")
+
+        health = str(self.health).strip().lower()
+        if health not in _MODEL_HEALTH_VALUES:
+            raise ValueError(f"Unknown model health: {self.health!r}")
+
+        quality: dict[str, float] = {}
+        for role, score in self.role_quality.items():
+            normalized_role = str(role).strip().lower()
+            if not normalized_role:
+                raise ValueError("Model role quality role must be non-empty")
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                raise TypeError("Model role quality must be numeric")
+            normalized_score = float(score)
+            if (
+                not math.isfinite(normalized_score)
+                or not 0.0 <= normalized_score <= 1.0
+            ):
+                raise ValueError("Model role quality must be between 0 and 1")
+            quality[normalized_role] = normalized_score
+
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "family", family)
+        object.__setattr__(self, "provider", provider)
+        object.__setattr__(self, "capabilities", capabilities)
+        object.__setattr__(self, "health", health)
+        object.__setattr__(
+            self,
+            "role_quality",
+            MappingProxyType(dict(sorted(quality.items()))),
+        )
 
     def supports(self, requirements: Iterable[str]) -> bool:
-        return set(requirements).issubset(self.capabilities)
+        return all(
+            self._supports_requirement(requirement) for requirement in requirements
+        )
+
+    def quality_for(self, role: str) -> float | None:
+        """Return the immutable routing baseline for one role, if configured."""
+        return self.role_quality.get(str(role).strip().lower())
+
+    def _supports_requirement(self, requirement: object) -> bool:
+        normalized = str(requirement).strip().lower()
+        if normalized == "tools":
+            return self.tools
+        if normalized == "vision":
+            return self.vision
+        if normalized == "thinking":
+            return self.thinking
+        if normalized in {"json", "json-output", "structured-output"}:
+            return self.json_capable or normalized in self.capabilities
+        return normalized in self.capabilities
 
 
 @dataclass(frozen=True)
@@ -90,46 +194,96 @@ _MODEL_SPECS = (
         "deepseek-v4-flash",
         "deepseek-v4",
         frozenset({"reasoning", "scouting", "structured-output"}),
+        tools=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=1_000_000,
+        role_quality={"default": 1.0, "scout": 1.0},
     ),
     ModelSpec(
         "deepseek-v4-pro",
         "deepseek-v4",
         frozenset({"reasoning", "planning", "structured-output"}),
+        tools=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=1_000_000,
+        role_quality={"planner": 1.0},
     ),
     ModelSpec(
         "kimi-k2.6",
         "kimi-k2",
-        frozenset({"reasoning", "planning", "structured-output"}),
+        frozenset({"reasoning", "planning", "structured-output", "vision"}),
+        tools=True,
+        vision=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=256_000,
+        role_quality={"planner": 0.9},
     ),
     ModelSpec(
         "minimax-m3",
         "minimax-m3",
-        frozenset({"building", "critique", "reasoning", "structured-output"}),
+        frozenset({"building", "critique", "reasoning", "structured-output", "vision"}),
+        tools=True,
+        vision=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=512_000,
+        role_quality={"builder": 1.0, "critic": 1.0},
     ),
     ModelSpec(
         "glm-5.2",
         "glm-5",
         frozenset({"coding", "review", "reasoning", "structured-output"}),
+        tools=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=976_000,
+        role_quality={"coding": 1.0, "review_a": 1.0},
     ),
     ModelSpec(
         "kimi-k2.7-code",
         "kimi-k2",
-        frozenset({"coding", "review", "reasoning", "structured-output"}),
+        frozenset({"coding", "review", "reasoning", "structured-output", "vision"}),
+        tools=True,
+        vision=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=256_000,
+        role_quality={"review_b": 1.0},
     ),
     ModelSpec(
         "nemotron-3-super",
         "nemotron-3",
         frozenset({"integration", "referee", "reasoning", "structured-output"}),
+        tools=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=256_000,
+        role_quality={"integrator": 1.0, "referee": 1.0},
     ),
     ModelSpec(
         "qwen3.5",
         "qwen3",
         frozenset({"vision", "reasoning", "structured-output"}),
+        tools=True,
+        vision=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=256_000,
+        role_quality={"vision": 1.0},
     ),
     ModelSpec(
         "gemma4:31b",
         "gemma4",
         frozenset({"vision", "reasoning", "structured-output"}),
+        tools=True,
+        vision=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=256_000,
+        role_quality={"vision": 0.9},
     ),
 )
 
@@ -138,8 +292,22 @@ class ModelRegistry:
     """Describe known models and optionally constrain them to a live catalog."""
 
     def __init__(self, catalog: Iterable[str] | None = None) -> None:
-        self._models = {spec.name: spec for spec in _MODEL_SPECS}
-        self._catalog = None if catalog is None else frozenset(catalog)
+        self._catalog = (
+            None
+            if catalog is None
+            else frozenset(str(name).strip() for name in catalog if str(name).strip())
+        )
+        self._models = {
+            spec.name: replace(spec, health=self._health_for(spec.name))
+            for spec in _MODEL_SPECS
+        }
+
+    def _health_for(self, name: str) -> str:
+        if self._catalog is None:
+            return MODEL_HEALTH_UNVERIFIED
+        if name in self._catalog:
+            return MODEL_HEALTH_HEALTHY
+        return MODEL_HEALTH_UNAVAILABLE
 
     def get(self, name: str) -> ModelSpec:
         try:

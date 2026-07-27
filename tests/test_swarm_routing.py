@@ -94,6 +94,56 @@ def test_registry_discovers_only_available_models_with_required_capabilities():
     assert [model.name for model in coding] == ["glm-5.2"]
 
 
+def test_registry_exposes_immutable_cloud_capability_metadata():
+    """Catches a catalog losing documented model capabilities or context limits."""
+    expected = {
+        "deepseek-v4-flash": (1_000_000, False, "scout"),
+        "deepseek-v4-pro": (1_000_000, False, "planner"),
+        "kimi-k2.6": (256_000, True, "planner"),
+        "minimax-m3": (512_000, True, "builder"),
+        "glm-5.2": (976_000, False, "coding"),
+        "kimi-k2.7-code": (256_000, True, "review_b"),
+        "nemotron-3-super": (256_000, False, "referee"),
+        "qwen3.5": (256_000, True, "vision"),
+        "gemma4:31b": (256_000, True, "vision"),
+    }
+    registry = ModelRegistry(catalog=set(expected))
+
+    for name, (context_budget, vision, role) in expected.items():
+        spec = registry.get(name)
+        assert (spec.tools, spec.vision, spec.thinking, spec.json_capable) == (
+            True,
+            vision,
+            True,
+            True,
+        )
+        assert spec.context_budget == context_budget
+        assert spec.health == "healthy"
+        assert spec.quality_for(role) is not None
+
+    scout = registry.get("deepseek-v4-flash")
+    assert scout.family == "deepseek-v4"
+    assert scout.supports({"tools", "thinking", "json", "structured-output"})
+    assert not scout.supports({"vision"})
+    with pytest.raises(TypeError):
+        scout.role_quality["scout"] = 0.0
+
+
+def test_registry_derives_model_health_and_role_quality_from_the_catalog():
+    """Catches stale health metadata or a planner fallback losing its lower rank."""
+    registry = ModelRegistry(catalog={"deepseek-v4-pro", "kimi-k2.6"})
+
+    primary = registry.get("deepseek-v4-pro")
+    fallback = registry.get("kimi-k2.6")
+    unavailable = registry.get("glm-5.2")
+
+    assert primary.health == fallback.health == "healthy"
+    assert unavailable.health == "unavailable"
+    assert ModelRegistry().get("deepseek-v4-pro").health == "unverified"
+    assert primary.role_quality["planner"] > fallback.role_quality["planner"]
+    assert primary.quality_for("unknown-role") is None
+
+
 def test_ollama_transport_invokes_only_the_injected_call_with_explicit_route():
     """Catches core transport importing a live client or omitting provider/model."""
     calls: list[dict[str, Any]] = []
