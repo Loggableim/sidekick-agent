@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import pytest
 
+from swarm_core.packs import PackDefinition
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.config import initialize_project
 from web.api import swarm as swarm_api
@@ -217,7 +218,14 @@ def test_http_packs_reads_initialized_config_without_creating_runtime_database(
     class FakeService:
         def list_packs(self, project_root):
             assert project_root == project.resolve()
-            return [{"id": "coding-team"}]
+            return [
+                PackDefinition(
+                    pack_id="coding-team",
+                    description="Coding workflow",
+                    workflow="scout -> builder",
+                    roles={"scout": "discover"},
+                )
+            ]
 
     monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
     handler = _Handler()
@@ -230,7 +238,16 @@ def test_http_packs_reads_initialized_config_without_creating_runtime_database(
         is True
     )
     assert handler.status_code == 200
-    assert _response_json(handler) == {"packs": [{"id": "coding-team"}]}
+    assert _response_json(handler) == {
+        "packs": [
+            {
+                "pack_id": "coding-team",
+                "description": "Coding workflow",
+                "workflow": "scout -> builder",
+                "roles": {"scout": "discover"},
+            }
+        ]
+    }
     assert not (project / ".swarm" / "runtime" / "swarm.sqlite").exists()
 
 
