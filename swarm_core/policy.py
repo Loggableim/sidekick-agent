@@ -121,14 +121,20 @@ class PolicyGate:
         approvals: list[ApprovalRecord],
         capabilities: ActionCapabilities,
     ) -> PolicyDecision:
+        if durable_run is None:
+            return self._decision(proposal, PolicyStatus.BLOCKED, "unknown_run")
+        if proposal.requested_action.workspace != self.store.project_root:
+            return self._decision(
+                proposal,
+                PolicyStatus.BLOCKED,
+                "proposal_workspace_outside_project",
+            )
         if capabilities != proposal.declared_capabilities():
             return self._decision(
                 proposal,
                 PolicyStatus.BLOCKED,
                 "untrusted_action_capabilities_mismatch",
             )
-        if durable_run is None:
-            return self._decision(proposal, PolicyStatus.BLOCKED, "unknown_run")
         if durable_run.status != "running":
             return self._decision(proposal, PolicyStatus.BLOCKED, "run_not_running")
 

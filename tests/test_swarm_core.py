@@ -141,6 +141,29 @@ def test_terminal_run_cannot_be_resumed(tmp_path: Path):
     assert store.get_run(run.run_id).status == "completed"
 
 
+def test_terminal_run_cannot_directly_transition_back_to_running(tmp_path: Path):
+    """Catches direct status writes reopening a terminal run behind resume_run."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="direct-terminal")
+    store.set_run_status(run.run_id, "completed")
+
+    with pytest.raises(ValueError, match="transition"):
+        store.set_run_status(run.run_id, "running")
+
+    assert store.get_run(run.run_id).status == "completed"
+
+
+def test_set_run_status_rejects_unknown_status(tmp_path: Path):
+    """Catches arbitrary status labels entering durable run state."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="known-states")
+
+    with pytest.raises(ValueError, match="Unsupported"):
+        store.set_run_status(run.run_id, "teleporting")
+
+    assert store.get_run(run.run_id).status == "running"
+
+
 def test_reopening_store_restores_persisted_run_and_events(tmp_path: Path):
     """Catches state being held only in process memory instead of swarm.sqlite."""
     initialize_project(tmp_path)
