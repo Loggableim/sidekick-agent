@@ -7,6 +7,7 @@ import yaml
 
 from swarm_core.config import initialize_project
 from swarm_core.events import SwarmEventBus
+from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.store import ProjectSwarmStore
 
 
@@ -99,6 +100,45 @@ def test_events_are_returned_in_monotonic_sequence_order(tmp_path: Path):
     assert events[0].timestamp.tzinfo is not None
     assert events[1].payload == {"task": "design"}
     assert events[1].visibility == "project"
+
+
+def test_read_only_store_never_initializes_a_missing_project(tmp_path: Path):
+    """Catches status/SSE reads silently creating versioned or runtime state."""
+    missing_project = tmp_path / "missing"
+    missing_project.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="Swarm.*not initialized"):
+        ProjectSwarmStore.open_read_only(missing_project)
+
+    assert not (missing_project / ".swarm").exists()
+
+
+def test_read_only_store_reads_only_cursor_tail_and_catalog_snapshot(tmp_path: Path):
+    """Catches SSE/catalog reads migrating or replaying an entire project store."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(run_id="read-tail")
+    first = store.append_event(run.run_id, "run.started", {"goal": "inspect"})
+    second = store.append_event(run.run_id, "run.paused", {"reason": "awaiting"})
+    snapshot = ModelCatalogSnapshot(
+        provider="ollama-cloud",
+        models=("deepseek-v4-flash", "minimax-m3"),
+        healthy=True,
+        source="ollama-cloud-live",
+    )
+    store.save_model_catalog_snapshot(snapshot)
+
+    runtime_dir = tmp_path / ".swarm" / "runtime"
+    before = sorted(path.name for path in runtime_dir.iterdir())
+    reader = ProjectSwarmStore.open_read_only(tmp_path)
+
+    assert reader.get_run(run.run_id) == run
+    assert reader.list_events_after(run.run_id, first.sequence) == [second]
+    assert reader.list_runs() == [run]
+    restored = reader.get_model_catalog_snapshot("ollama-cloud")
+    assert restored is not None
+    assert restored.models == snapshot.models
+    assert restored.healthy is True
+    assert sorted(path.name for path in runtime_dir.iterdir()) == before
 
 
 def test_event_bus_publishes_events_through_the_project_store(tmp_path: Path):

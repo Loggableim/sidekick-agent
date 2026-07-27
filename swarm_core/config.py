@@ -26,6 +26,30 @@ _AUTONOMY_LEVELS = {
 }
 
 
+class SwarmProjectNotInitializedError(FileNotFoundError):
+    """Raised when a read-only caller targets a project without Swarm state."""
+
+
+def load_project_config(project_root: Path) -> SwarmConfig:
+    """Load an existing project config without creating or upgrading anything.
+
+    Status pages and SSE consumers must be safe to call against an arbitrary
+    trusted project.  Unlike :func:`initialize_project`, this path never makes
+    a ``.swarm`` directory, updates an old YAML document, or creates runtime
+    state.
+    """
+    project_root = project_root.resolve()
+    config_path = project_root / ".swarm" / "swarm.yaml"
+    if not config_path.is_file():
+        raise SwarmProjectNotInitializedError(
+            f"Swarm project is not initialized: {project_root}"
+        )
+    raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw_config, dict):
+        raise ValueError(f"Swarm configuration must be a mapping: {config_path}")
+    return _to_config(project_root, config_path, raw_config)
+
+
 def initialize_project(project_root: Path) -> SwarmConfig:
     """Create (or load) the versionable layout for one project."""
     project_root = project_root.resolve()

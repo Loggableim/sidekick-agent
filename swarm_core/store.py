@@ -11,7 +11,12 @@ import threading
 from typing import Any, Callable, Iterator, Mapping, TypeVar
 from uuid import uuid4
 
-from .config import initialize_project
+from .config import (
+    SwarmProjectNotInitializedError,
+    initialize_project,
+    load_project_config,
+)
+from .models import ModelCatalogSnapshot
 from .types import ApprovalRecord, SwarmEvent, SwarmRun
 
 
@@ -36,6 +41,16 @@ class ProjectSwarmStore:
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.runtime_dir / "swarm.sqlite"
         self._ensure_schema()
+
+    @classmethod
+    def open_read_only(cls, project_root: Path) -> "ReadOnlyProjectSwarmStore":
+        """Open only already-persisted state without initializing or migrating.
+
+        This is the sole store entry point intended for status pages, SSE, and
+        other externally triggered read paths.  Keeping it a separate object
+        makes an accidental write/migration API unavailable to those callers.
+        """
+        return ReadOnlyProjectSwarmStore(project_root)
 
     def create_run(
         self,
@@ -80,6 +95,16 @@ class ProjectSwarmStore:
                 (run_id,),
             ).fetchone()
         return _row_to_run(row) if row is not None else None
+
+    def list_runs(self) -> list[SwarmRun]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id, status, created_at, updated_at, metadata_json
+                FROM runs ORDER BY created_at DESC, run_id ASC
+                """
+            ).fetchall()
+        return [_row_to_run(row) for row in rows]
 
     def append_event(
         self,
@@ -129,6 +154,49 @@ class ProjectSwarmStore:
                 (run_id,),
             ).fetchall()
         return [_row_to_event(row) for row in rows]
+
+    def list_events_after(
+        self,
+        run_id: str,
+        sequence: int,
+        *,
+        limit: int = 100,
+    ) -> list[SwarmEvent]:
+        return _list_events_after(self._connection, run_id, sequence, limit=limit)
+
+    def save_model_catalog_snapshot(self, snapshot: ModelCatalogSnapshot) -> None:
+        """Persist an explicitly refreshed provider catalog.
+
+        Callers must perform health discovery before invoking this write.  No
+        read/run path calls it, which prevents stale cached discovery from
+        silently changing a project's routing truth.
+        """
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO model_catalog_snapshots (
+                    provider, models_json, healthy, source, refreshed_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(provider) DO UPDATE SET
+                    models_json = excluded.models_json,
+                    healthy = excluded.healthy,
+                    source = excluded.source,
+                    refreshed_at = excluded.refreshed_at
+                """,
+                (
+                    snapshot.provider,
+                    json.dumps(list(snapshot.models), sort_keys=True),
+                    int(snapshot.healthy),
+                    snapshot.source,
+                    _timestamp_text(snapshot.refreshed_at),
+                ),
+            )
+
+    def get_model_catalog_snapshot(
+        self,
+        provider: str,
+    ) -> ModelCatalogSnapshot | None:
+        return _get_model_catalog_snapshot(self._connection, provider)
 
     def set_run_status(self, run_id: str, status: str) -> SwarmRun:
         if status not in _RUN_STATUSES:
@@ -911,6 +979,13 @@ class ProjectSwarmStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_approvals_run_proposal
                     ON approvals(run_id, proposal_id, sequence);
+                CREATE TABLE IF NOT EXISTS model_catalog_snapshots (
+                    provider TEXT PRIMARY KEY,
+                    models_json TEXT NOT NULL,
+                    healthy INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    refreshed_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS action_executions (
                     run_id TEXT NOT NULL REFERENCES runs(run_id),
                     proposal_id TEXT NOT NULL,
@@ -1104,6 +1179,101 @@ class ProjectSwarmStore:
             connection.close()
 
 
+class ReadOnlyProjectSwarmStore:
+    """Read-only view of an already initialized project Swarm database.
+
+    The constructor intentionally validates files before opening SQLite with
+    ``mode=ro``.  It never calls :func:`initialize_project`, makes a runtime
+    directory, applies migrations, or commits a connection.
+    """
+
+    def __init__(self, project_root: Path) -> None:
+        self.project_root = Path(project_root).resolve()
+        load_project_config(self.project_root)
+        self.runtime_dir = self.project_root / ".swarm" / "runtime"
+        self.db_path = self.runtime_dir / "swarm.sqlite"
+        if not self.db_path.is_file():
+            raise SwarmProjectNotInitializedError(
+                f"Swarm project is not initialized: {self.project_root}"
+            )
+
+    def get_run(self, run_id: str) -> SwarmRun | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT run_id, status, created_at, updated_at, metadata_json
+                FROM runs WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+        return _row_to_run(row) if row is not None else None
+
+    def list_runs(self) -> list[SwarmRun]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id, status, created_at, updated_at, metadata_json
+                FROM runs ORDER BY created_at DESC, run_id ASC
+                """
+            ).fetchall()
+        return [_row_to_run(row) for row in rows]
+
+    def list_events(self, run_id: str) -> list[SwarmEvent]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT sequence, event_id, timestamp, event_type, run_id,
+                       payload_json, visibility
+                FROM events WHERE run_id = ? ORDER BY sequence ASC
+                """,
+                (run_id,),
+            ).fetchall()
+        return [_row_to_event(row) for row in rows]
+
+    def list_events_after(
+        self,
+        run_id: str,
+        sequence: int,
+        *,
+        limit: int = 100,
+    ) -> list[SwarmEvent]:
+        return _list_events_after(self._connection, run_id, sequence, limit=limit)
+
+    def list_approvals(
+        self,
+        run_id: str,
+        *,
+        proposal_id: str | None = None,
+    ) -> list[ApprovalRecord]:
+        query = """
+            SELECT sequence, approval_id, run_id, proposal_id, proposal_digest,
+                   approval_type, approver_id, approved, model_family,
+                   evidence_refs_json, created_at
+            FROM approvals WHERE run_id = ?
+        """
+        parameters: tuple[str, ...] = (run_id,)
+        if proposal_id is not None:
+            query += " AND proposal_id = ?"
+            parameters = (run_id, proposal_id)
+        query += " ORDER BY sequence ASC"
+        with self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
+        return [_row_to_approval(row) for row in rows]
+
+    def get_model_catalog_snapshot(
+        self,
+        provider: str,
+    ) -> ModelCatalogSnapshot | None:
+        return _get_model_catalog_snapshot(self._connection, provider)
+
+    def _connection(self) -> "_ReadOnlyConnectionContext":
+        database_uri = f"{self.db_path.resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(database_uri, uri=True)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return _ReadOnlyConnectionContext(connection)
+
+
 class _ConnectionContext:
     """Commit successful operations and always close their SQLite connection."""
 
@@ -1119,6 +1289,79 @@ class _ConnectionContext:
                 connection.commit()
             else:
                 connection.rollback()
+
+
+class _ReadOnlyConnectionContext:
+    """Close an SQLite read-only connection without committing any state."""
+
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self._connection = connection
+
+    def __enter__(self) -> sqlite3.Connection:
+        return self._connection
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self._connection.close()
+
+
+def _list_events_after(
+    connection_factory: Callable[[], Any],
+    run_id: str,
+    sequence: int,
+    *,
+    limit: int,
+) -> list[SwarmEvent]:
+    if not isinstance(sequence, int) or sequence < 0:
+        raise ValueError("Event cursor must be a non-negative integer")
+    if not isinstance(limit, int) or not 1 <= limit <= 500:
+        raise ValueError("Event limit must be between 1 and 500")
+    with connection_factory() as connection:
+        rows = connection.execute(
+            """
+            SELECT sequence, event_id, timestamp, event_type, run_id,
+                   payload_json, visibility
+            FROM events
+            WHERE run_id = ? AND sequence > ?
+            ORDER BY sequence ASC
+            LIMIT ?
+            """,
+            (run_id, sequence, limit),
+        ).fetchall()
+    return [_row_to_event(row) for row in rows]
+
+
+def _get_model_catalog_snapshot(
+    connection_factory: Callable[[], Any],
+    provider: str,
+) -> ModelCatalogSnapshot | None:
+    normalized_provider = str(provider).strip().lower()
+    if not normalized_provider:
+        raise ValueError("Catalog provider must be non-empty")
+    try:
+        with connection_factory() as connection:
+            row = connection.execute(
+                """
+                SELECT provider, models_json, healthy, source, refreshed_at
+                FROM model_catalog_snapshots WHERE provider = ?
+                """,
+                (normalized_provider,),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        # A pre-catalog project may be observed through a read-only status
+        # route.  Returning no snapshot preserves read purity; migrations are
+        # reserved for an explicit write path.
+        if "no such table" in str(exc).lower():
+            return None
+        raise
+    if row is None:
+        return None
+    return ModelCatalogSnapshot(
+        provider=row["provider"],
+        models=tuple(json.loads(row["models_json"])),
+        healthy=bool(row["healthy"]),
+        source=row["source"],
+        refreshed_at=datetime.fromisoformat(row["refreshed_at"]),
+    )
 
 
 def _utc_now() -> datetime:

@@ -1,6 +1,6 @@
 """Project-local persistence primitives for Sidekick Swarm."""
 
-from .config import initialize_project
+from .config import initialize_project, load_project_config
 from .events import SwarmEventBus
 from .learning import (
     GoldenAssessment,
@@ -13,7 +13,8 @@ from .learning import (
 from .memory import ClarificationTask, MemoryItem, ProjectMemory
 from .packs import PackDefinition, PackRegistry
 from .policy import PolicyDecision, PolicyGate, PolicyStatus
-from .store import ProjectSwarmStore
+from .models import ModelCatalogSnapshot
+from .store import ProjectSwarmStore, ReadOnlyProjectSwarmStore
 from .types import (
     ActionCapabilities,
     ActionProposal,
@@ -25,6 +26,7 @@ from .types import (
 
 __all__ = [
     "ProjectSwarmStore",
+    "ReadOnlyProjectSwarmStore",
     "ActionCapabilities",
     "ActionProposal",
     "ClarificationTask",
@@ -32,6 +34,7 @@ __all__ = [
     "GoldenResult",
     "LessonExporter",
     "MemoryItem",
+    "ModelCatalogSnapshot",
     "PackDefinition",
     "PackRegistry",
     "PolicyDecision",
@@ -47,4 +50,5 @@ __all__ = [
     "SwarmRun",
     "assess_golden_results",
     "initialize_project",
+    "load_project_config",
 ]
