@@ -7,6 +7,7 @@
 | Dokument | Beschreibung |
 |----------|--------------|
 | [`README.md`](../README.md) | Übersicht, Installation, Quickstart |
+| [`swarm-core.md`](swarm-core.md) | Projektlokaler Ollama-Cloud-Schwarm, Packs und Freigaben |
 | [`morph-worker-integration.md`](morph-worker-integration.md) | Morph Worker Network — Fast Apply, WarpGrep, Compactor |
 | [`known-issues.md`](known-issues.md) | Bekannte Einschränkungen |
 
