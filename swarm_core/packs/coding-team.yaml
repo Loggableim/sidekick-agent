@@ -1,0 +1,13 @@
+id: coding-team
+description: Plan, build, verify, and independently review a coding change.
+workflow: coding-team
+roles:
+  scout: Gather project facts relevant to the goal.
+  planner: Produce an evidence-backed implementation plan.
+  builder: Implement the planned change.
+  critic: Identify risks and omissions before review.
+  verifier: Synthesize local evidence for independent review.
+  review_a: Perform the first independent review.
+  review_b: Perform the second independent review.
+  integrator: Reconcile verified findings into an outcome.
+  referee: Issue the final evidence-backed decision.

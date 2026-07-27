@@ -76,6 +76,7 @@ py-modules = ["run_agent", "sidekick_constants", "bootstrap", "model_tools", "to
 web = ["static/*", "static/**/*"]
 providers = ["bundled/*", "bundled/**/*"]
 nova = ["*.json"]
+swarm_core = ["packs/*.yaml"]
 
 [tool.setuptools.packages.find]
 include = [

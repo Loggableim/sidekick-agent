@@ -1,0 +1,7 @@
+id: research-team
+description: Gather, compare, and reconcile source-backed research.
+workflow: research-team
+roles:
+  scout: Find relevant project-local and supplied sources.
+  analyst: Compare claims and supporting evidence.
+  reviewer: Check source coverage and conflicts.
