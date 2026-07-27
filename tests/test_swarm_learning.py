@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from importlib import resources
 from pathlib import Path
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -18,6 +20,7 @@ from swarm_core.learning import (
 from swarm_core.memory import ProjectMemory
 from swarm_core.packs import PackRegistry
 from swarm_core.store import ProjectSwarmStore
+from swarm_core import store as swarm_store_module
 
 
 def test_memory_persists_each_kind_with_source_and_evidence_references(
@@ -164,6 +167,73 @@ def test_memory_deadlines_derive_stale_and_expired_reads_without_mutating_storag
         reopened.get(item.item_id, now=start + timedelta(hours=7)).lifecycle
         == "expired"
     )
+
+
+def test_exact_memory_retry_tightens_deadlines_and_persists_them_after_reopen(
+    tmp_path: Path,
+):
+    """Catches duplicate retry making a claim less bounded or dropping deadlines."""
+    memory = ProjectMemory(ProjectSwarmStore(tmp_path))
+    start = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    first = memory.remember(
+        "fact",
+        "The release scope is bounded.",
+        claim_key="bounded-release",
+    )
+
+    tightened = memory.remember(
+        "fact",
+        "The release scope is bounded.",
+        claim_key="bounded-release",
+        revalidate_after=start + timedelta(hours=1),
+        expires_at=start + timedelta(hours=2),
+    )
+    later_retry = memory.remember(
+        "fact",
+        "The release scope is bounded.",
+        claim_key="bounded-release",
+        revalidate_after=start + timedelta(hours=5),
+        expires_at=start + timedelta(hours=6),
+    )
+
+    assert tightened.item_id == first.item_id
+    assert tightened.revalidate_after == start + timedelta(hours=1)
+    assert tightened.expires_at == start + timedelta(hours=2)
+    assert later_retry.revalidate_after == start + timedelta(hours=1)
+    assert later_retry.expires_at == start + timedelta(hours=2)
+    reopened = ProjectMemory(ProjectSwarmStore(tmp_path))
+    assert reopened.list(now=start + timedelta(hours=3)) == []
+    assert (
+        reopened.get(
+            first.item_id,
+            now=start + timedelta(hours=3),
+        ).lifecycle
+        == "expired"
+    )
+
+
+def test_conflicting_merged_deadlines_fail_closed_as_expired(tmp_path: Path):
+    """Catches an invalid merged deadline order leaving a duplicate claim active."""
+    memory = ProjectMemory(ProjectSwarmStore(tmp_path))
+    start = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    memory.remember(
+        "fact",
+        "The verification window is finite.",
+        claim_key="finite-window",
+        revalidate_after=start + timedelta(hours=5),
+    )
+
+    merged = memory.remember(
+        "fact",
+        "The verification window is finite.",
+        claim_key="finite-window",
+        expires_at=start + timedelta(hours=2),
+    )
+
+    assert merged.revalidate_after == start + timedelta(hours=5)
+    assert merged.expires_at == start + timedelta(hours=2)
+    assert merged.lifecycle == "expired"
+    assert memory.list(now=start) == []
 
 
 def test_memory_deadline_columns_migrate_an_existing_task4_memory_table(
@@ -517,6 +587,97 @@ def test_prompt_approval_requires_a_current_passing_assessment_and_resets_on_rea
     assert candidates.promote(candidate.candidate_id).status == "promoted"
 
 
+def test_reassessment_cannot_overwrite_a_concurrently_promoted_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches promoted terminal state being overwritten after a stale assessment read."""
+    candidates = PromptCandidates(ProjectSwarmStore(tmp_path))
+    candidate = candidates.create(
+        "terminal-assessment",
+        "A candidate that can be promoted before a stale reassessment writes.",
+        baseline_quality=0.7,
+    )
+    candidates.evaluate(
+        candidate.candidate_id,
+        (GoldenResult("terminal:pass", score=0.8, safety_passed=True),),
+    )
+    candidates.approve(candidate.candidate_id, approver_id="owner")
+
+    reassessor = ProjectSwarmStore(tmp_path)
+    promoter = ProjectSwarmStore(tmp_path)
+    original_connection = reassessor._connection
+    triggered = False
+
+    class InterceptingCursor:
+        def __init__(self, cursor: sqlite3.Cursor) -> None:
+            self._cursor = cursor
+
+        def fetchone(self):  # type: ignore[no-untyped-def]
+            nonlocal triggered
+            row = self._cursor.fetchone()
+            # Complete the stale read before the other store commits.  This
+            # intentionally models an assessment that made its status decision
+            # just before a separate actor promoted the same candidate.
+            self._cursor.close()
+            if not triggered:
+                triggered = True
+                _promoted, claimed = promoter.promote_prompt_candidate(
+                    candidate.candidate_id
+                )
+                assert claimed is True
+            return row
+
+        def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+            return getattr(self._cursor, name)
+
+    class InterceptingConnection:
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            self._connection = connection
+
+        def execute(self, sql: str, parameters: tuple[object, ...] = ()):  # type: ignore[no-untyped-def]
+            cursor = self._connection.execute(sql, parameters)
+            if "SELECT status FROM prompt_candidates" in sql and not triggered:
+                return InterceptingCursor(cursor)
+            return cursor
+
+        def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+            return getattr(self._connection, name)
+
+    class InterceptingContext:
+        def __init__(self, context) -> None:  # type: ignore[no-untyped-def]
+            self._context = context
+
+        def __enter__(self) -> InterceptingConnection:
+            return InterceptingConnection(self._context.__enter__())
+
+        def __exit__(self, exc_type, exc_value, traceback) -> None:  # type: ignore[no-untyped-def]
+            self._context.__exit__(exc_type, exc_value, traceback)
+
+    monkeypatch.setattr(
+        reassessor,
+        "_connection",
+        lambda: InterceptingContext(original_connection()),
+    )
+
+    with pytest.raises(ValueError, match="Promoted"):
+        reassessor.record_prompt_assessment(
+            candidate.candidate_id,
+            quality=0.0,
+            safety_passed=False,
+            references=("terminal:stale",),
+            eligible=False,
+            assessment_digest="stale-assessment",
+        )
+
+    terminal = PromptCandidates(ProjectSwarmStore(tmp_path)).get(candidate.candidate_id)
+    assert triggered is True
+    assert terminal.status == "promoted"
+    assert terminal.human_approver_id == "owner"
+    assert terminal.approved_assessment_revision == terminal.assessment_revision
+    assert terminal.approved_assessment_digest == terminal.assessment_digest
+
+
 def test_prompt_assessment_migration_invalidates_unbound_legacy_approval(
     tmp_path: Path,
 ):
@@ -570,6 +731,105 @@ def test_prompt_assessment_migration_invalidates_unbound_legacy_approval(
     )
     candidates.approve(migrated.candidate_id, approver_id="owner")
     assert candidates.promote(migrated.candidate_id).status == "promoted"
+
+
+def test_concurrent_legacy_store_opens_migrate_columns_without_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches two v1 openers racing between PRAGMA and ADD COLUMN."""
+    database_dir = tmp_path / ".swarm" / "runtime"
+    database_dir.mkdir(parents=True)
+    database_path = database_dir / "swarm.sqlite"
+    created_at = datetime(2026, 7, 27, tzinfo=timezone.utc).isoformat()
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE memory_items (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL,
+                claim_key TEXT NOT NULL,
+                statement TEXT NOT NULL,
+                source_refs_json TEXT NOT NULL,
+                evidence_refs_json TEXT NOT NULL,
+                lifecycle TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                revalidated_at TEXT,
+                lesson_opt_in INTEGER NOT NULL DEFAULT 0,
+                redacted_statement TEXT,
+                UNIQUE (kind, claim_key, statement)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE prompt_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                prompt_text TEXT NOT NULL,
+                baseline_quality REAL NOT NULL,
+                status TEXT NOT NULL,
+                assessed_quality REAL,
+                safety_passed INTEGER,
+                assessment_refs_json TEXT,
+                human_approver_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO memory_items (
+                item_id, kind, claim_key, statement, source_refs_json,
+                evidence_refs_json, lifecycle, created_at, updated_at,
+                revalidated_at, lesson_opt_in, redacted_statement
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "concurrent-memory",
+                "fact",
+                "concurrent-key",
+                "Keep this memory during concurrent migration.",
+                "[]",
+                '["evidence:concurrent"]',
+                "active",
+                created_at,
+                created_at,
+                None,
+                0,
+                None,
+            ),
+        )
+
+    original_table_columns = swarm_store_module._table_columns
+    race_barrier = threading.Barrier(2)
+
+    def synchronized_table_columns(connection: sqlite3.Connection, table_name: str):
+        columns = original_table_columns(connection, table_name)
+        if table_name == "memory_items" and "revalidate_after" not in columns:
+            try:
+                race_barrier.wait(timeout=1)
+            except threading.BrokenBarrierError:
+                pass
+        return columns
+
+    monkeypatch.setattr(
+        swarm_store_module,
+        "_table_columns",
+        synchronized_table_columns,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(ProjectSwarmStore, tmp_path) for _ in range(2)]
+        stores = [future.result(timeout=5) for future in futures]
+
+    assert len(stores) == 2
+    migrated = ProjectMemory(ProjectSwarmStore(tmp_path)).get("concurrent-memory")
+    assert migrated is not None
+    assert migrated.evidence_refs == ("evidence:concurrent",)
 
 
 def test_prompt_candidate_cannot_promote_when_safety_or_quality_fails(tmp_path: Path):
