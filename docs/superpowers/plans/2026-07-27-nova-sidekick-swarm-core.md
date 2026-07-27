@@ -62,6 +62,7 @@
 
 **Files:**
 - Create: `swarm_core/policy.py`, `swarm_core/tools.py`, `swarm_core/sidekick_adapter.py`
+- Modify: `swarm_core/types.py`, `swarm_core/config.py`, `swarm_core/store.py`
 - Test: `tests/test_swarm_policy.py`
 
 **Interfaces:**
