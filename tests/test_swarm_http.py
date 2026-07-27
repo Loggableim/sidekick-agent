@@ -3,11 +3,15 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+import threading
+import time
 from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import pytest
 
+from cli.swarm_host import SidekickSwarmService
+from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.packs import PackDefinition
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.config import initialize_project
@@ -43,15 +47,17 @@ def _response_json(handler: _Handler) -> dict:
     return json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
-def test_http_write_resolves_active_space_project_not_workspace_slug(
+def test_http_run_start_returns_a_persisted_running_run_before_background_execution(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Catches a Space slug reaching the filesystem trust resolver as a path."""
+    """Catches the create response waiting for the whole model workflow."""
     project = tmp_path / "project"
     project.mkdir()
     trusted_values: list[str] = []
-    created: list[tuple] = []
+    execution_started = threading.Event()
+    execution_finished = threading.Event()
+    release_execution = threading.Event()
 
     monkeypatch.setattr(
         swarm_api,
@@ -66,23 +72,521 @@ def test_http_write_resolves_active_space_project_not_workspace_slug(
     monkeypatch.setattr(swarm_api, "resolve_trusted_workspace", resolve)
 
     class FakeService:
-        def run(self, goal, project_root, *, pack):
-            created.append((goal, project_root, pack))
-            return {"run_id": "run-1", "status": "paused"}
+        def run(self, *_args, **_kwargs):
+            # The old synchronous route calls this and therefore cannot expose
+            # a durable running run to the client.
+            return {"run_id": "legacy-sync-run", "status": "completed"}
+
+        def start_run(self, goal, project_root, *, pack):
+            run = ProjectSwarmStore(project_root).create_run(
+                run_id="run-async",
+                metadata={"goal": goal, "pack": pack},
+            )
+            ProjectSwarmStore(project_root).append_event(
+                run.run_id, "run.started", {"goal": goal, "pack": pack}
+            )
+            return run
+
+        def execute_run(self, project_root, run_id, **_callbacks):
+            execution_started.set()
+            try:
+                release_execution.wait(timeout=2)
+                store = ProjectSwarmStore(project_root)
+                if store.get_run(run_id).status == "running":
+                    store.set_run_status(run_id, "completed")
+            finally:
+                execution_finished.set()
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+    handler = _Handler()
+
+    try:
+        result = swarm_api.handle_swarm_post(
+            handler,
+            urlparse("/api/swarm/runs?workspace=marketing"),
+            {"goal": "inspect", "pack": "coding-team"},
+        )
+
+        assert result is True
+        assert handler.status_code == 201
+        assert trusted_values == [str(project)]
+        returned = _response_json(handler)["run"]
+        assert returned["run_id"] == "run-async"
+        assert returned["status"] == "running"
+        assert returned["metadata"] == {
+            "goal": "inspect",
+            "pack": "coding-team",
+            "autonomy": "reviewed_execution",
+        }
+        assert execution_started.wait(timeout=1)
+        observed = ProjectSwarmStore.open_read_only(project).get_run("run-async")
+        assert observed is not None
+        assert observed.status == "running"
+    finally:
+        release_execution.set()
+        if execution_started.is_set():
+            assert execution_finished.wait(timeout=1)
+
+
+def test_http_run_serializes_the_start_response_before_a_fast_worker_can_execute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a completed worker racing ahead of the durable start response."""
+    project = tmp_path / "project"
+    project.mkdir()
+    response_written = threading.Event()
+    execution_started = threading.Event()
+    execution_finished = threading.Event()
+    permit_execution = threading.Event()
+    execution_preceded_response: list[bool] = []
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class ResponseSignalWriter(io.BytesIO):
+        def write(self, payload: bytes) -> int:
+            response_written.set()
+            return super().write(payload)
+
+    class FakeService:
+        def start_run(self, goal, project_root, *, pack):
+            run = ProjectSwarmStore(project_root).create_run(
+                run_id="run-publication", metadata={"goal": goal, "pack": pack}
+            )
+            ProjectSwarmStore(project_root).append_event(
+                run.run_id, "run.started", {"goal": goal, "pack": pack}
+            )
+            return run
+
+        def execute_run(self, project_root, run_id, **_callbacks):
+            execution_started.set()
+            try:
+                assert permit_execution.wait(timeout=1)
+                execution_preceded_response.append(not response_written.is_set())
+                store = ProjectSwarmStore(project_root)
+                store.set_run_status(run_id, "completed")
+            finally:
+                execution_finished.set()
+
+    original_j = swarm_api.j
+
+    def delayed_response(handler, payload, status=200):
+        # On the old ordering this releases an already-started worker before
+        # the response writer runs.  With a start gate it simply times out,
+        # writes the 201, then lets the worker begin.
+        if execution_started.wait(timeout=0.05):
+            permit_execution.set()
+            assert execution_finished.wait(timeout=1)
+            return original_j(handler, payload, status=status)
+        result = original_j(handler, payload, status=status)
+        permit_execution.set()
+        return result
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+    monkeypatch.setattr(swarm_api, "j", delayed_response)
+    handler = _Handler(writer=ResponseSignalWriter())
+
+    try:
+        result = swarm_api.handle_swarm_post(
+            handler,
+            urlparse("/api/swarm/runs"),
+            {"goal": "inspect", "project_path": str(project)},
+        )
+
+        assert result is True
+        assert handler.status_code == 201
+        assert execution_started.wait(timeout=1)
+        assert execution_finished.wait(timeout=1)
+        assert execution_preceded_response == [False]
+        assert _response_json(handler)["run"]["status"] == "running"
+    finally:
+        permit_execution.set()
+        if execution_started.is_set():
+            assert execution_finished.wait(timeout=1)
+
+
+def test_http_background_execution_failure_becomes_a_durable_paused_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a daemon worker exception disappearing while the run stays running."""
+    project = tmp_path / "project"
+    project.mkdir()
+    failed = threading.Event()
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def start_run(self, goal, project_root, *, pack):
+            run = ProjectSwarmStore(project_root).create_run(
+                run_id="run-failure", metadata={"goal": goal, "pack": pack}
+            )
+            ProjectSwarmStore(project_root).append_event(
+                run.run_id, "run.started", {"goal": goal, "pack": pack}
+            )
+            return run
+
+        def execute_run(self, _project_root, _run_id, **_callbacks):
+            failed.set()
+            raise RuntimeError("provider response contained secret details")
 
     monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
     handler = _Handler()
 
     result = swarm_api.handle_swarm_post(
         handler,
-        urlparse("/api/swarm/runs?workspace=marketing"),
-        {"goal": "inspect", "pack": "coding-team"},
+        urlparse("/api/swarm/runs"),
+        {"goal": "inspect", "project_path": str(project)},
     )
 
     assert result is True
     assert handler.status_code == 201
-    assert trusted_values == [str(project)]
-    assert created == [("inspect", project.resolve(), "coding-team")]
+    assert failed.wait(timeout=1)
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        reader = ProjectSwarmStore.open_read_only(project)
+        events = reader.list_events("run-failure")
+        if any(event.event_type == "run.execution_failed" for event in events):
+            break
+        time.sleep(0.01)
+    persisted = ProjectSwarmStore.open_read_only(project).get_run("run-failure")
+    assert persisted is not None
+    assert persisted.status == "paused"
+    failure_events = [
+        event
+        for event in ProjectSwarmStore.open_read_only(project).list_events(
+            "run-failure"
+        )
+        if event.event_type == "run.execution_failed"
+    ]
+    assert len(failure_events) == 1
+    assert failure_events[0].payload == {"error_type": "RuntimeError"}
+
+
+def test_http_thread_start_failure_pauses_the_durable_run_without_returning_201(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a failed worker start being reported as a runnable 201 response."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def start_run(self, goal, project_root, *, pack):
+            run = ProjectSwarmStore(project_root).create_run(
+                run_id="run-start-failure", metadata={"goal": goal, "pack": pack}
+            )
+            ProjectSwarmStore(project_root).append_event(
+                run.run_id, "run.started", {"goal": goal, "pack": pack}
+            )
+            return run
+
+    def fail_thread_start(_thread):
+        raise RuntimeError("provider response contained secret details")
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+    monkeypatch.setattr(swarm_api.threading.Thread, "start", fail_thread_start)
+    handler = _Handler()
+
+    result = swarm_api.handle_swarm_post(
+        handler,
+        urlparse("/api/swarm/runs"),
+        {"goal": "inspect", "project_path": str(project)},
+    )
+
+    persisted = ProjectSwarmStore.open_read_only(project).get_run("run-start-failure")
+    events = ProjectSwarmStore.open_read_only(project).list_events("run-start-failure")
+    assert result is None
+    assert handler.status_code == 409
+    assert persisted is not None
+    assert persisted.status == "paused"
+    assert any(
+        event.event_type == "run.execution_failed"
+        and event.payload == {"error_type": "RuntimeError"}
+        for event in events
+    )
+    assert "secret details" not in handler.wfile.getvalue().decode("utf-8")
+
+
+def test_http_response_write_failure_releases_the_unpublished_worker_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a response failure leaving a cancelled daemon in the local registry."""
+    project = tmp_path / "project"
+    project.mkdir()
+    execution_called = threading.Event()
+    key = (str(project.resolve()), "run-response-error")
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def start_run(self, goal, project_root, *, pack):
+            run = ProjectSwarmStore(project_root).create_run(
+                run_id="run-response-error", metadata={"goal": goal, "pack": pack}
+            )
+            ProjectSwarmStore(project_root).append_event(
+                run.run_id, "run.started", {"goal": goal, "pack": pack}
+            )
+            return run
+
+        def execute_run(self, *_args, **_kwargs):
+            execution_called.set()
+
+    original_j = swarm_api.j
+
+    def fail_only_the_start_response(handler, payload, status=200, **kwargs):
+        if status == 201:
+            raise RuntimeError("synthetic response write failure")
+        return original_j(handler, payload, status=status, **kwargs)
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+    monkeypatch.setattr(swarm_api, "j", fail_only_the_start_response)
+    handler = _Handler()
+
+    try:
+        result = swarm_api.handle_swarm_post(
+            handler,
+            urlparse("/api/swarm/runs"),
+            {"goal": "inspect", "project_path": str(project)},
+        )
+
+        assert result is None
+        assert handler.status_code == 409
+        assert not execution_called.is_set()
+        persisted = ProjectSwarmStore.open_read_only(project).get_run(
+            "run-response-error"
+        )
+        events = ProjectSwarmStore.open_read_only(project).list_events(
+            "run-response-error"
+        )
+        assert persisted is not None
+        assert persisted.status == "paused"
+        assert any(
+            event.event_type == "run.execution_failed"
+            and event.payload == {"error_type": "RuntimeError"}
+            for event in events
+        )
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            with swarm_api._BACKGROUND_RUNS_LOCK:
+                if key not in swarm_api._BACKGROUND_RUNS:
+                    break
+            time.sleep(0.01)
+        with swarm_api._BACKGROUND_RUNS_LOCK:
+            assert key not in swarm_api._BACKGROUND_RUNS
+    finally:
+        # Keep a red regression isolated if it fails before the production
+        # cleanup is implemented.
+        with swarm_api._BACKGROUND_RUNS_LOCK:
+            lingering = swarm_api._BACKGROUND_RUNS.pop(key, None)
+        if lingering is not None:
+            lingering.cancelled.set()
+            lingering.start_gate.set()
+
+
+def test_http_resume_rejects_a_worker_that_is_not_waiting_at_a_pause_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches resume succeeding while a finishing worker has no continuation point."""
+    project = tmp_path / "project"
+    project.mkdir()
+    execution_started = threading.Event()
+    execution_finished = threading.Event()
+    release_execution = threading.Event()
+    resumed: list[str] = []
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+
+    class FakeService:
+        def start_run(self, goal, project_root, *, pack):
+            run = ProjectSwarmStore(project_root).create_run(
+                run_id="run-not-waiting", metadata={"goal": goal, "pack": pack}
+            )
+            ProjectSwarmStore(project_root).append_event(
+                run.run_id, "run.started", {"goal": goal, "pack": pack}
+            )
+            return run
+
+        def execute_run(self, _project_root, _run_id, **_callbacks):
+            execution_started.set()
+            try:
+                release_execution.wait(timeout=2)
+            finally:
+                execution_finished.set()
+
+        def pause(self, project_root, run_id):
+            store = ProjectSwarmStore(project_root)
+            run = store.set_run_status(run_id, "paused")
+            store.append_event(run_id, "run.paused_by_human", {})
+            return run
+
+        def resume(self, project_root, run_id):
+            resumed.append(run_id)
+            return ProjectSwarmStore(project_root).resume_run(run_id)
+
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: FakeService())
+
+    try:
+        created = _Handler()
+        assert (
+            swarm_api.handle_swarm_post(
+                created,
+                urlparse("/api/swarm/runs"),
+                {"goal": "inspect", "project_path": str(project)},
+            )
+            is True
+        )
+        assert execution_started.wait(timeout=1)
+
+        paused = _Handler()
+        assert (
+            swarm_api.handle_swarm_post(
+                paused,
+                urlparse("/api/swarm/runs/run-not-waiting/pause"),
+                {"project_path": str(project)},
+            )
+            is True
+        )
+
+        resume = _Handler()
+        assert (
+            swarm_api.handle_swarm_post(
+                resume,
+                urlparse("/api/swarm/runs/run-not-waiting/resume"),
+                {"project_path": str(project)},
+            )
+            is None
+        )
+        assert resume.status_code == 409
+        assert resumed == []
+        assert (
+            ProjectSwarmStore.open_read_only(project).get_run("run-not-waiting").status
+            == "paused"
+        )
+    finally:
+        release_execution.set()
+        if execution_started.is_set():
+            assert execution_finished.wait(timeout=1)
+
+
+def test_http_resume_continues_a_real_worker_waiting_at_a_human_pause_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches the safe-resume guard rejecting the worker that it was meant to wake."""
+    project = tmp_path / "project"
+    project.mkdir()
+    first_call_started = threading.Event()
+    release_first_call = threading.Event()
+    calls: list[dict] = []
+
+    def call_llm(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            first_call_started.set()
+            assert release_first_call.wait(timeout=2)
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "work": "bounded work",
+                                "evidence": ["test:evidence"],
+                                "decision": "continue",
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+    service = SidekickSwarmService(
+        call_llm=call_llm,
+        catalog_refresher=lambda: ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=(
+                "deepseek-v4-flash",
+                "deepseek-v4-pro",
+                "kimi-k2.6",
+                "minimax-m3",
+                "glm-5.2",
+                "kimi-k2.7-code",
+                "nemotron-3-super",
+            ),
+            healthy=True,
+            source="test",
+        ),
+        pause_poll_seconds=0.005,
+    )
+    service.refresh_models(project)
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+    monkeypatch.setattr(swarm_api, "get_swarm_service", lambda: service)
+
+    try:
+        created = _Handler()
+        assert (
+            swarm_api.handle_swarm_post(
+                created,
+                urlparse("/api/swarm/runs"),
+                {"goal": "inspect", "project_path": str(project)},
+            )
+            is True
+        )
+        run_id = _response_json(created)["run"]["run_id"]
+        assert first_call_started.wait(timeout=1)
+
+        paused = _Handler()
+        assert (
+            swarm_api.handle_swarm_post(
+                paused,
+                urlparse(f"/api/swarm/runs/{run_id}/pause"),
+                {"project_path": str(project)},
+            )
+            is True
+        )
+        release_first_call.set()
+
+        deadline = time.monotonic() + 1
+        resumed = None
+        while time.monotonic() < deadline:
+            candidate = _Handler()
+            result = swarm_api.handle_swarm_post(
+                candidate,
+                urlparse(f"/api/swarm/runs/{run_id}/resume"),
+                {"project_path": str(project)},
+            )
+            if result is True:
+                resumed = candidate
+                break
+            assert candidate.status_code == 409
+            time.sleep(0.01)
+        assert resumed is not None
+        assert _response_json(resumed)["run"]["status"] == "running"
+
+        while time.monotonic() < deadline + 2:
+            run = ProjectSwarmStore.open_read_only(project).get_run(run_id)
+            if run is not None and run.status == "completed":
+                break
+            time.sleep(0.01)
+        assert (
+            ProjectSwarmStore.open_read_only(project).get_run(run_id).status
+            == "completed"
+        )
+        assert len(calls) == 8
+    finally:
+        release_first_call.set()
 
 
 def test_http_write_rejects_untrusted_path_before_opening_swarm_state(
@@ -158,9 +662,7 @@ def test_swarm_get_requires_explicit_project_path_without_space_resolution(
         raise AssertionError("Swarm GET without project_path must fail first")
 
     monkeypatch.setattr(swarm_api, "resolve_active_space", unexpected_active_space)
-    monkeypatch.setattr(
-        swarm_api, "resolve_trusted_workspace", unexpected_trusted_path
-    )
+    monkeypatch.setattr(swarm_api, "resolve_trusted_workspace", unexpected_trusted_path)
     handler = _Handler()
 
     result = swarm_api.handle_swarm_get(handler, urlparse("/api/swarm/runs"))
@@ -369,12 +871,14 @@ def test_http_kanban_projection_accepts_only_an_explicit_trusted_project_path(
     monkeypatch.setattr(
         swarm_api,
         "project_swarm_run_to_kanban",
-        lambda project_root, run_id: calls.append((project_root, run_id))
-        or {
-            "task_id": "task-1",
-            "board": "default",
-            "space_slug": "project-space",
-        },
+        lambda project_root, run_id: (
+            calls.append((project_root, run_id))
+            or {
+                "task_id": "task-1",
+                "board": "default",
+                "space_slug": "project-space",
+            }
+        ),
     )
 
     forged = _Handler()

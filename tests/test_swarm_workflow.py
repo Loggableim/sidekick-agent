@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import threading
 import time
+from unittest.mock import patch
 
 from swarm_core.engine import SwarmEngine
 from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
@@ -111,6 +112,103 @@ def test_coding_team_runs_exact_stages_with_sharded_blackboard_context(tmp_path:
         "verification",
         "reviews",
     }
+
+
+def test_engine_executes_a_precreated_run_without_a_second_start_event(tmp_path: Path):
+    """Catches asynchronous hosts recreating a run after returning its id to the UI."""
+    engine = SwarmEngine(WorkflowTransport())
+    run = engine.start_run("Expose the durable run before execution", tmp_path)
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.run_id == run.run_id
+    assert summary.status == "completed"
+    assert [event.event_type for event in events].count("run.started") == 1
+    assert events[0].payload == {
+        "goal": "Expose the durable run before execution",
+        "pack": "coding-team",
+    }
+
+
+def test_engine_does_not_overwrite_a_human_pause_after_the_final_model_call(
+    tmp_path: Path,
+):
+    """Catches a pause racing the terminal transition becoming a false completion."""
+
+    class FinalPauseTransport(WorkflowTransport):
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            response = super().complete(request)
+            if request.role == "referee":
+                store = ProjectSwarmStore(tmp_path)
+                store.set_run_status(request.run_id, "paused")
+                store.append_event(request.run_id, "run.paused_by_human", {})
+            return response
+
+    engine = SwarmEngine(FinalPauseTransport())
+    run = engine.start_run("Honor an immediate final pause", tmp_path)
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    persisted = ProjectSwarmStore(tmp_path).get_run(run.run_id)
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "human_paused"
+    assert persisted is not None
+    assert persisted.status == "paused"
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
+def test_engine_preserves_a_model_pause_when_a_human_pause_wins_the_transition_race(
+    tmp_path: Path,
+):
+    """Catches a human pause turning a normal model pause into a worker failure."""
+
+    failure_seen = threading.Event()
+    human_pause_landed = threading.Event()
+
+    class FailingScoutTransport(WorkflowTransport):
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            with self._lock:
+                self.requests.append(request)
+            if request.role == "scout":
+                failure_seen.set()
+                raise RuntimeError("scout unavailable")
+            raise AssertionError("the scout failure must pause the workflow")
+
+    engine = SwarmEngine(FailingScoutTransport())
+    run = engine.start_run("Preserve the modeled pause", tmp_path)
+    original_get_run = ProjectSwarmStore.get_run
+
+    def get_run_after_human_pause(store: ProjectSwarmStore, run_id: str):
+        current = original_get_run(store, run_id)
+        if (
+            failure_seen.is_set()
+            and not human_pause_landed.is_set()
+            and current is not None
+            and current.status == "running"
+        ):
+            store.set_run_status(run_id, "paused")
+            store.append_event(run_id, "run.paused_by_human", {})
+            human_pause_landed.set()
+        return current
+
+    with patch.object(ProjectSwarmStore, "get_run", new=get_run_after_human_pause):
+        summary = engine.execute_run(run.run_id, tmp_path)
+
+    persisted = ProjectSwarmStore(tmp_path).get_run(run.run_id)
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert human_pause_landed.is_set()
+    assert persisted is not None
+    assert persisted.status == "paused"
+    assert summary.status == "paused"
+    assert summary.pause_reason == "model_chain_exhausted"
+    assert any(
+        event.event_type == "run.paused"
+        and event.payload["reason"] == "model_chain_exhausted"
+        for event in events
+    )
+    assert all(event.event_type != "run.execution_failed" for event in events)
 
 
 def test_engine_persists_structured_work_evidence_decision_and_verifier_events(

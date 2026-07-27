@@ -3,6 +3,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 import json
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
@@ -114,6 +116,73 @@ def test_explicit_refresh_persists_live_catalog_and_host_transport_is_slot_bound
     )
     assert restored is not None
     assert restored.models == _ROUTED_MODELS
+
+
+def test_started_run_waits_for_human_resume_at_a_model_boundary(tmp_path: Path):
+    """Catches a paused background run completing after its in-flight call returns."""
+    first_call_started = threading.Event()
+    release_first_call = threading.Event()
+    calls: list[dict] = []
+
+    def call_llm(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            first_call_started.set()
+            assert release_first_call.wait(timeout=2)
+        return _valid_response()
+
+    service = SidekickSwarmService(
+        call_llm=call_llm,
+        catalog_refresher=lambda: ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source="ollama-cloud-live",
+        ),
+    )
+    service.refresh_models(tmp_path)
+    run = service.start_run("pause at a safe boundary", tmp_path)
+    result: dict[str, object] = {}
+
+    def execute() -> None:
+        try:
+            result["summary"] = service.execute_run(tmp_path, run.run_id)
+        except Exception as exc:  # pragma: no cover - assertion below exposes it
+            result["error"] = exc
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    assert first_call_started.wait(timeout=1)
+
+    paused = service.pause(tmp_path, run.run_id)
+    assert paused.status == "paused"
+    release_first_call.set()
+
+    deadline = time.monotonic() + 1
+    while time.monotonic() < deadline:
+        events = ProjectSwarmStore.open_read_only(tmp_path).list_events(run.run_id)
+        if any(
+            event.event_type == "work.completed"
+            and event.payload.get("role") == "scout"
+            for event in events
+        ):
+            break
+        time.sleep(0.01)
+    assert (
+        ProjectSwarmStore.open_read_only(tmp_path).get_run(run.run_id).status
+        == "paused"
+    )
+    assert len(calls) == 1
+    assert worker.is_alive()
+
+    resumed = service.resume(tmp_path, run.run_id)
+    assert resumed.status == "running"
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert "error" not in result
+    assert result["summary"].status == "completed"
+    assert len(calls) == 8
 
 
 def test_human_approval_is_proposal_bound_and_cannot_execute_an_action(

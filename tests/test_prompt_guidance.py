@@ -17,7 +17,15 @@ def test_core_work_guidance_covers_evidence_scope_and_verification():
 
 
 def test_agent_injects_core_work_guidance_for_custom_souls_too(monkeypatch):
-    monkeypatch.setitem(AIAgent._build_system_prompt_parts.__globals__, "load_soul_md", lambda: "custom persona")
+    # ``cli.cli`` intentionally leaves a compatibility shim under the
+    # ``run_agent`` module name.  This test imports the real class during test
+    # collection, so patch the globals that its method actually resolves
+    # rather than resolving that mutable module alias a second time.
+    monkeypatch.setitem(
+        AIAgent._build_system_prompt_parts.__globals__,
+        "load_soul_md",
+        lambda: "custom persona",
+    )
     agent = AIAgent(
         model="gpt-4o-mini",
         provider="openai",
