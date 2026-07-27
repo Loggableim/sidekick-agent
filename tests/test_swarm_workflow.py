@@ -374,3 +374,48 @@ def test_parallel_pause_uses_role_order_when_both_siblings_fail_inverted(
     ]
     assert events[-1].event_type == "run.paused"
     assert events[-1].payload["role"] == "builder"
+
+
+def test_parallel_pause_stays_builder_first_when_builder_fails_immediately(
+    tmp_path: Path,
+):
+    """Catches deterministic selection reversing under the complementary timing."""
+
+    class ComplementaryFailureTransport(WorkflowTransport):
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            if request.role in {"builder", "critic"}:
+                with self._lock:
+                    self.requests.append(request)
+                if request.role == "critic":
+                    time.sleep(0.04)
+                raise RuntimeError(f"{request.role} unavailable")
+            return super().complete(request)
+
+    summary = SwarmEngine(ComplementaryFailureTransport()).run(
+        goal="Keep Builder first under complementary timing",
+        project_root=tmp_path,
+    )
+
+    events = ProjectSwarmStore(tmp_path).list_events(summary.run_id)
+    failures = [
+        event.payload
+        for event in events
+        if event.event_type == "model.attempt_failed"
+        and event.payload["role"] in {"builder", "critic"}
+    ]
+
+    assert summary.status == "paused"
+    assert failures == [
+        {
+            "model": "minimax-m3",
+            "reason": "call_error",
+            "role": "builder",
+        },
+        {
+            "model": "minimax-m3",
+            "reason": "call_error",
+            "role": "critic",
+        },
+    ]
+    assert events[-1].event_type == "run.paused"
+    assert events[-1].payload["role"] == "builder"
