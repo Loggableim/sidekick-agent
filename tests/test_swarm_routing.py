@@ -10,7 +10,12 @@ import pytest
 
 from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
 from swarm_core.router import ModelRouter
-from swarm_core.transport import ModelTransport, OllamaCloudTransport
+from swarm_core.transport import (
+    ModelProviderError,
+    ModelTimeoutError,
+    ModelTransport,
+    OllamaCloudTransport,
+)
 from swarm_core.workflow import (
     CallBudget,
     ModelExecutor,
@@ -69,6 +74,21 @@ def test_independent_review_pair_uses_distinct_required_model_families():
     assert (first.model, second.model) == ("glm-5.2", "kimi-k2.7-code")
     assert first.family != second.family
     assert first.provider == second.provider == "ollama-cloud"
+
+
+def test_planner_challenger_is_a_separate_kimi_route_not_normal_plan_work():
+    """Catches a successful Planner silently spending a Challenger call."""
+    router = ModelRouter(ModelRegistry())
+
+    assert router.select("planner", {"planning"}).models == (
+        "deepseek-v4-pro",
+        "kimi-k2.6",
+    )
+    assert router.select("planner_challenger", {"planning"}).models == ("kimi-k2.6",)
+    assert router.select("planner_arbitrator", {"planning"}).models == (
+        "deepseek-v4-pro",
+        "kimi-k2.6",
+    )
 
 
 def test_vision_route_uses_qwen_only_when_the_catalog_reports_it_available():
@@ -195,6 +215,54 @@ def test_ollama_transport_invokes_only_the_injected_call_with_explicit_route():
     assert response.data == {"work": "ok", "evidence": [], "decision": "go"}
 
 
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [
+        (TimeoutError("deadline"), ModelTimeoutError),
+        (ConnectionError("offline"), ModelProviderError),
+    ],
+)
+def test_ollama_transport_maps_only_known_retryable_cloud_failures(
+    raised: Exception,
+    expected: type[Exception],
+):
+    """Catches a raw provider timeout/connection error escaping its route."""
+
+    def failing_call(**_kwargs: Any) -> Any:
+        raise raised
+
+    transport = OllamaCloudTransport(failing_call)
+    request = ModelRequest(
+        run_id="transport-failure",
+        role="scout",
+        model="deepseek-v4-flash",
+        prompt="inspect",
+        context={},
+    )
+
+    with pytest.raises(expected):
+        transport.complete(request)
+
+
+def test_ollama_transport_propagates_an_unclassified_adapter_error():
+    """Catches an implementation error being mislabeled as a cloud failure."""
+
+    def broken_adapter(**_kwargs: Any) -> Any:
+        raise ValueError("adapter contract bug")
+
+    transport = OllamaCloudTransport(broken_adapter)
+    request = ModelRequest(
+        run_id="transport-bug",
+        role="scout",
+        model="deepseek-v4-flash",
+        prompt="inspect",
+        context={},
+    )
+
+    with pytest.raises(ValueError, match="adapter contract bug"):
+        transport.complete(request)
+
+
 @pytest.mark.parametrize("first_failure", ["schema", "error"])
 def test_executor_falls_back_within_the_planner_chain_on_schema_or_call_error(
     first_failure: str,
@@ -209,7 +277,7 @@ def test_executor_falls_back_within_the_planner_chain_on_schema_or_call_error(
             self.requests.append(request)
             if request.model == "deepseek-v4-pro":
                 if first_failure == "error":
-                    raise RuntimeError("cloud call failed")
+                    raise ModelProviderError("cloud call failed")
                 return ModelResponse(
                     model=request.model,
                     content="missing structured decision",
@@ -237,6 +305,61 @@ def test_executor_falls_back_within_the_planner_chain_on_schema_or_call_error(
     assert executor.call_budget.used == 2
 
 
+def test_executor_falls_back_after_an_empty_model_response():
+    """Catches an empty provider answer stopping instead of using the chain."""
+
+    class EmptyThenFallbackTransport(ModelTransport):
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.requests.append(request)
+            if request.model == "deepseek-v4-pro":
+                return ModelResponse(
+                    model=request.model,
+                    content="",
+                    data={"work": "valid shape", "evidence": [], "decision": "go"},
+                )
+            return _response(request)
+
+    failures = []
+    transport = EmptyThenFallbackTransport()
+    result = ModelExecutor(ModelRouter(ModelRegistry()), transport).complete(
+        RoleCall(role="planner", prompt="make a plan", context={}),
+        run_id="empty-response",
+        on_failure=failures.append,
+    )
+
+    assert result.model == "kimi-k2.6"
+    assert [(failure.model, failure.reason) for failure in failures] == [
+        ("deepseek-v4-pro", "empty_response")
+    ]
+
+
+def test_executor_propagates_an_unclassified_error_without_model_fallback():
+    """Catches a code/policy failure silently spending a second model call."""
+
+    class BrokenTransport(ModelTransport):
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.requests.append(request)
+            raise ValueError("policy callback bug")
+
+    transport = BrokenTransport()
+    executor = ModelExecutor(ModelRouter(ModelRegistry()), transport)
+
+    with pytest.raises(ValueError, match="policy callback bug"):
+        executor.complete(
+            RoleCall(role="planner", prompt="make a plan", context={}),
+            run_id="unclassified-error",
+        )
+
+    assert [request.model for request in transport.requests] == ["deepseek-v4-pro"]
+    assert executor.call_budget.used == 1
+
+
 def test_exhausted_role_chain_pauses_without_cross_provider_or_local_fallback():
     """Catches an exhausted Ollama role chain silently escaping to another route."""
 
@@ -246,7 +369,7 @@ def test_exhausted_role_chain_pauses_without_cross_provider_or_local_fallback():
 
         def complete(self, request: ModelRequest) -> ModelResponse:
             self.requests.append(request)
-            raise RuntimeError(f"{request.model} unavailable")
+            raise ModelProviderError(f"{request.model} unavailable")
 
     transport = FailingTransport()
     executor = ModelExecutor(ModelRouter(ModelRegistry()), transport)
@@ -287,6 +410,48 @@ def test_all_retries_count_toward_the_strict_48_call_ceiling():
     assert len(transport.requests) == 48
 
 
+def test_confirmed_prior_role_failure_skips_that_model_on_resume():
+    """Catches a restart replaying a provider attempt that already failed."""
+    transport = RecordingTransport()
+    executor = ModelExecutor(
+        ModelRouter(ModelRegistry()),
+        transport,
+        prior_failed_models={"planner": {"deepseek-v4-pro"}},
+    )
+
+    response = executor.complete(
+        RoleCall(role="planner", prompt="plan", context={}),
+        run_id="resume-confirmed-failure",
+    )
+
+    assert response.model == "kimi-k2.6"
+    assert [request.model for request in transport.requests] == ["kimi-k2.6"]
+    assert executor.call_budget.used == 1
+
+
+def test_parallel_batch_does_not_dispatch_a_sibling_after_known_builder_exhaustion():
+    """Catches Critic spending a call when Builder's only route already failed."""
+    transport = RecordingTransport()
+    executor = ModelExecutor(
+        ModelRouter(ModelRegistry()),
+        transport,
+        prior_failed_models={"builder": {"minimax-m3"}},
+    )
+
+    with pytest.raises(WorkflowPaused) as raised:
+        executor.complete_many(
+            (
+                RoleCall(role="builder", prompt="build", context={}),
+                RoleCall(role="critic", prompt="critic", context={}),
+            ),
+            run_id="parallel-known-builder-failure",
+        )
+
+    assert raised.value.role == "builder"
+    assert raised.value.reason == "model_chain_exhausted"
+    assert transport.requests == []
+
+
 def test_parallel_execution_never_exceeds_three_active_model_calls():
     """Catches worker fan-out bypassing the three-call concurrency ceiling."""
 
@@ -323,6 +488,64 @@ def test_parallel_execution_never_exceeds_three_active_model_calls():
     assert len(results) == 7
     assert Counter(response.model for response in results) == {"deepseek-v4-flash": 7}
     assert transport.max_active == 3
+
+
+def test_parallel_success_is_checkpointed_before_a_blocked_sibling_finishes():
+    """Catches complete_many deferring durable sibling success until the join."""
+
+    class BuilderFirstTransport(ModelTransport):
+        def __init__(self) -> None:
+            self.builder_returned = threading.Event()
+            self.release_critic = threading.Event()
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            if request.role == "builder":
+                self.builder_returned.set()
+                return _response(request)
+            assert request.role == "critic"
+            assert self.release_critic.wait(timeout=2)
+            return _response(request)
+
+    transport = BuilderFirstTransport()
+    executor = ModelExecutor(ModelRouter(ModelRegistry()), transport)
+    builder_checkpointed = threading.Event()
+    returned: list[ModelResponse] = []
+    failures: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            returned.extend(
+                executor.complete_many(
+                    (
+                        RoleCall(role="builder", prompt="build", context={}),
+                        RoleCall(role="critic", prompt="critic", context={}),
+                    ),
+                    run_id="checkpoint-before-join",
+                    on_success=lambda call, _response: (
+                        builder_checkpointed.set() if call.role == "builder" else None
+                    ),
+                )
+            )
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    try:
+        assert transport.builder_returned.wait(timeout=1)
+        # A process can crash while Critic remains in flight.  Builder must
+        # already have reached the durable callback at this point.
+        assert builder_checkpointed.wait(timeout=0.2)
+    finally:
+        transport.release_critic.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert failures == []
+    assert [response.data["work"] for response in returned] == [
+        "builder work",
+        "critic work",
+    ]
 
 
 def test_overlapping_executors_share_the_transport_call_concurrency_ceiling():

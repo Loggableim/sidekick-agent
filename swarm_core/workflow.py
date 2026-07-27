@@ -6,11 +6,20 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 import threading
+from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping
 
 from .models import ModelRequest, ModelResponse
 from .router import ModelRouter, NoEligibleModel
-from .transport import ModelTransport
+from .transport import ModelTransport, RetryableModelTransportError
+from .verifier import (
+    DefaultReadOnlyVerifier,
+    InvalidVerifierResult,
+    ReadOnlyVerifier,
+    VerificationRequest,
+    validate_independent_result,
+    verification_result_from_checkpoint_data,
+)
 
 
 _TRANSPORT_CALL_SLOTS = threading.BoundedSemaphore(3)
@@ -31,11 +40,13 @@ class WorkflowPaused(RuntimeError):
 
 
 class CallBudget:
-    def __init__(self, limit: int = 48) -> None:
+    def __init__(self, limit: int = 48, *, initial_used: int = 0) -> None:
         if limit < 1:
             raise ValueError("Call budget must be positive")
+        if not isinstance(initial_used, int) or initial_used < 0:
+            raise ValueError("Initial call budget use must be a non-negative integer")
         self.limit = limit
-        self._used = 0
+        self._used = initial_used
         self._lock = threading.Lock()
 
     @property
@@ -70,6 +81,14 @@ class ModelAttemptFailure:
     reason: str
 
 
+@dataclass(frozen=True)
+class ModelAttemptStarted:
+    """One provider call durably claimed before its transport dispatch."""
+
+    role: str
+    model: str
+
+
 class ModelExecutor:
     """Apply role routing, retries, schema checks, and global safety limits."""
 
@@ -81,6 +100,8 @@ class ModelExecutor:
         call_budget: CallBudget | None = None,
         max_concurrent: int = 3,
         before_model_call: Callable[[], None] | None = None,
+        on_model_attempt_started: Callable[[ModelAttemptStarted], None] | None = None,
+        prior_failed_models: Mapping[str, Iterable[str]] | None = None,
     ) -> None:
         if not 1 <= max_concurrent <= 3:
             raise ValueError("Swarm concurrency must be between 1 and 3")
@@ -89,6 +110,14 @@ class ModelExecutor:
         self.call_budget = call_budget or CallBudget()
         self.max_concurrent = max_concurrent
         self.before_model_call = before_model_call
+        self.on_model_attempt_started = on_model_attempt_started
+        self.prior_failed_models = {
+            str(role): frozenset(
+                str(model).strip() for model in models if str(model).strip()
+            )
+            for role, models in (prior_failed_models or {}).items()
+            if str(role).strip()
+        }
 
     def complete(
         self,
@@ -97,20 +126,25 @@ class ModelExecutor:
         run_id: str,
         on_failure: Callable[[ModelAttemptFailure], None] | None = None,
     ) -> ModelResponse:
-        try:
-            selection = self.router.select(call.role, call.requirements)
-        except NoEligibleModel as exc:
-            raise WorkflowPaused(
-                "no_eligible_model",
-                role=call.role,
-                attempted_models=(),
-            ) from exc
+        selection = self._selection_for(call)
         attempted: list[str] = []
         for model in selection.models:
+            if model in self.prior_failed_models.get(call.role, frozenset()):
+                # This exact role/model attempt is already durably known to
+                # have failed before a host restart.  It remains part of the
+                # explanatory chain, but must not consume another provider
+                # slot or call-budget unit by being replayed.
+                attempted.append(model)
+                continue
             if self.before_model_call is not None:
                 self.before_model_call()
             self.call_budget.claim(role=call.role, attempted_models=attempted)
             attempted.append(model)
+            if self.on_model_attempt_started is not None:
+                # This durable marker is intentionally synchronous and comes
+                # before the external provider call.  A process crash after
+                # dispatch cannot reset the run-wide call budget on resume.
+                self.on_model_attempt_started(ModelAttemptStarted(call.role, model))
             request = ModelRequest(
                 run_id=run_id,
                 role=call.role,
@@ -123,19 +157,42 @@ class ModelExecutor:
             try:
                 with _TRANSPORT_CALL_SLOTS:
                     response = self.transport.complete(request)
-            except Exception:
+            except RetryableModelTransportError:
                 if on_failure is not None:
                     on_failure(ModelAttemptFailure(call.role, model, "call_error"))
                 continue
-            if _valid_response(response, call.required_fields):
+            response_failure = _response_failure_reason(response, call.required_fields)
+            if response_failure is None:
                 return response
             if on_failure is not None:
-                on_failure(ModelAttemptFailure(call.role, model, "schema_invalid"))
+                on_failure(ModelAttemptFailure(call.role, model, response_failure))
         raise WorkflowPaused(
             "model_chain_exhausted",
             role=call.role,
             attempted_models=attempted,
         )
+
+    def _selection_for(self, call: RoleCall):
+        try:
+            return self.router.select(call.role, call.requirements)
+        except NoEligibleModel as exc:
+            raise WorkflowPaused(
+                "no_eligible_model",
+                role=call.role,
+                attempted_models=(),
+            ) from exc
+
+    def _ensure_call_has_unfailed_model(self, call: RoleCall) -> None:
+        selection = self._selection_for(call)
+        if all(
+            model in self.prior_failed_models.get(call.role, frozenset())
+            for model in selection.models
+        ):
+            raise WorkflowPaused(
+                "model_chain_exhausted",
+                role=call.role,
+                attempted_models=selection.models,
+            )
 
     def complete_many(
         self,
@@ -146,6 +203,12 @@ class ModelExecutor:
         on_failure: Callable[[ModelAttemptFailure], None] | None = None,
     ) -> list[ModelResponse]:
         calls = tuple(calls)
+        # Preflight the complete batch in role order.  If Builder's whole
+        # route is already durably exhausted, dispatching a still-pending
+        # Critic would spend a new provider call on a stage that cannot reach
+        # Verifier anyway.
+        for call in calls:
+            self._ensure_call_has_unfailed_model(call)
         responses: list[ModelResponse | None] = [None] * len(calls)
         failures: list[list[ModelAttemptFailure]] = [[] for _call in calls]
         errors: list[BaseException | None] = [None] * len(calls)
@@ -167,32 +230,50 @@ class ModelExecutor:
                     errors[index] = exc
                     continue
                 responses[index] = response
+                if on_success is not None:
+                    # Persist each successful sibling at the moment it
+                    # completes.  Waiting for the whole parallel batch here
+                    # creates a crash window in which Builder may have a
+                    # valid result while a slow Critic prevents its durable
+                    # checkpoint from being written.
+                    try:
+                        on_success(calls[index], response)
+                    except BaseException as exc:
+                        # Preserve the deterministic error selection below:
+                        # callbacks from a later-completing sibling must not
+                        # make its failure win over an earlier role.
+                        errors[index] = exc
         for index, call_failures in enumerate(failures):
             if on_failure is not None:
                 for failure in call_failures:
                     on_failure(failure)
-            response = responses[index]
-            if response is not None and on_success is not None:
-                on_success(calls[index], response)
         for error in errors:
             if error is not None:
                 raise error
         return [response for response in responses if response is not None]
 
 
-def _valid_response(response: ModelResponse, required_fields: Iterable[str]) -> bool:
+def _response_failure_reason(
+    response: ModelResponse,
+    required_fields: Iterable[str],
+) -> str | None:
+    """Classify only response states that may safely use a model fallback."""
+    if not isinstance(response.content, str) or not response.content.strip():
+        return "empty_response"
     data = response.data
     if not isinstance(data, Mapping):
-        return False
+        return "schema_invalid"
     if any(field not in data for field in required_fields):
-        return False
+        return "schema_invalid"
     if not isinstance(data.get("work"), str):
-        return False
+        return "schema_invalid"
     if not isinstance(data.get("evidence"), list):
-        return False
+        return "schema_invalid"
     if not isinstance(data.get("decision"), str):
-        return False
-    return True
+        return "schema_invalid"
+    if "approved" in required_fields and not isinstance(data.get("approved"), bool):
+        return "schema_invalid"
+    return None
 
 
 class Blackboard:
@@ -204,6 +285,144 @@ class Blackboard:
 
     def shard(self, *keys: str) -> dict[str, Any]:
         return {key: self._values[key] for key in keys}
+
+
+@dataclass(frozen=True)
+class WorkflowProfile:
+    """Static, non-executable role aliases for one shipped pack workflow."""
+
+    workflow: str
+    role_aliases: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "role_aliases",
+            MappingProxyType(dict(self.role_aliases)),
+        )
+
+    def alias_for(self, stage: str) -> str:
+        try:
+            return self.role_aliases[stage]
+        except KeyError as exc:  # pragma: no cover - protects shipped profiles
+            raise ValueError(
+                f"Workflow profile {self.workflow!r} has no alias for {stage!r}"
+            ) from exc
+
+
+_CORE_STAGES = (
+    "scout",
+    "planner",
+    "planner_challenger",
+    "planner_arbitrator",
+    "builder",
+    "critic",
+    "verifier",
+    "review_a",
+    "review_b",
+    "integrator",
+    "referee",
+)
+
+_WORKFLOW_PROFILES: Mapping[str, WorkflowProfile] = MappingProxyType(
+    {
+        "coding-team": WorkflowProfile(
+            "coding-team", {stage: stage for stage in _CORE_STAGES}
+        ),
+        "bug-hunt": WorkflowProfile(
+            "bug-hunt",
+            {
+                "scout": "scout",
+                "planner": "investigator",
+                "planner_challenger": "investigator",
+                "planner_arbitrator": "investigator",
+                "builder": "investigator",
+                "critic": "verifier",
+                "verifier": "verifier",
+                "review_a": "verifier",
+                "review_b": "verifier",
+                "integrator": "verifier",
+                "referee": "verifier",
+            },
+        ),
+        "research-team": WorkflowProfile(
+            "research-team",
+            {
+                "scout": "scout",
+                "planner": "analyst",
+                "planner_challenger": "analyst",
+                "planner_arbitrator": "analyst",
+                "builder": "analyst",
+                "critic": "reviewer",
+                "verifier": "reviewer",
+                "review_a": "reviewer",
+                "review_b": "reviewer",
+                "integrator": "analyst",
+                "referee": "reviewer",
+            },
+        ),
+        "release-audit": WorkflowProfile(
+            "release-audit",
+            {
+                "scout": "scout",
+                "planner": "auditor",
+                "planner_challenger": "auditor",
+                "planner_arbitrator": "auditor",
+                "builder": "auditor",
+                "critic": "reviewer",
+                "verifier": "reviewer",
+                "review_a": "reviewer",
+                "review_b": "reviewer",
+                "integrator": "auditor",
+                "referee": "reviewer",
+            },
+        ),
+    }
+)
+
+
+def workflow_profile_for(workflow: str) -> WorkflowProfile:
+    """Return the fixed safe alias profile for a declared pack workflow."""
+    normalized = str(workflow).strip()
+    try:
+        return _WORKFLOW_PROFILES[normalized]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported Swarm pack workflow: {workflow!r}") from exc
+
+
+_PLANNER_CONFLICT_DECISIONS = frozenset(
+    {"conflict", "conflict_detected", "needs_challenger"}
+)
+
+
+def _has_explicit_planner_conflict(*responses: ModelResponse) -> bool:
+    """Require an explicit structured conflict signal before extra model work.
+
+    Natural-language disagreement must not spend an extra Cloud call by
+    accident.  A producer must set ``conflict: true`` (directly or on a
+    structured evidence item) or use one of the exact decision enum values.
+    The complete response is checkpointed before this detector runs, making
+    the trigger stable across a resumed run.
+    """
+    for response in responses:
+        data = response.data
+        if not isinstance(data, Mapping):
+            continue
+        if data.get("conflict") is True:
+            return True
+        decision = data.get("decision")
+        if (
+            isinstance(decision, str)
+            and decision.strip().lower() in _PLANNER_CONFLICT_DECISIONS
+        ):
+            return True
+        evidence = data.get("evidence")
+        if isinstance(evidence, list) and any(
+            isinstance(item, Mapping) and item.get("conflict") is True
+            for item in evidence
+        ):
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -227,12 +446,16 @@ class CodingTeamWorkflow:
         self,
         *,
         pack_id: str = "coding-team",
+        workflow: str = "coding-team",
         pack_description: str = "",
         pack_roles: Mapping[str, str] | None = None,
+        verifier: ReadOnlyVerifier | None = None,
     ) -> None:
         self.pack_id = str(pack_id).strip() or "coding-team"
+        self.profile = workflow_profile_for(workflow)
         self.pack_description = str(pack_description).strip()
         self.pack_roles = dict(pack_roles or {})
+        self.verifier = verifier if verifier is not None else DefaultReadOnlyVerifier()
 
     def run(
         self,
@@ -242,11 +465,14 @@ class CodingTeamWorkflow:
         project_root: Path,
         executor: ModelExecutor,
         emit: EventEmitter,
+        completed_responses: Mapping[str, ModelResponse] | None = None,
+        record_response: Callable[[str, ModelResponse], ModelResponse] | None = None,
     ) -> WorkflowOutcome:
         board = Blackboard({"goal": goal, "project_root": str(project_root.resolve())})
         evidence: dict[str, list[Any]] = {}
+        completed = dict(completed_responses or {})
 
-        scout = self._complete_one(
+        scout = self._complete_or_restore_one(
             executor,
             run_id,
             RoleCall(
@@ -255,10 +481,12 @@ class CodingTeamWorkflow:
                 board.shard("goal", "project_root"),
             ),
             emit,
+            completed,
+            record_response,
         )
         self._record("scout", scout, "scout", board, evidence)
 
-        planner = self._complete_one(
+        planner = self._complete_or_restore_one(
             executor,
             run_id,
             RoleCall(
@@ -267,8 +495,55 @@ class CodingTeamWorkflow:
                 board.shard("goal", "scout"),
             ),
             emit,
+            completed,
+            record_response,
         )
         self._record("planner", planner, "plan", board, evidence)
+
+        # A challenger is deliberately not part of Planner's normal fallback
+        # chain.  It is additional independent work only when the durable
+        # Scout/Planner outputs carry an explicit structured conflict signal.
+        if _has_explicit_planner_conflict(scout, planner):
+            challenger = self._complete_or_restore_one(
+                executor,
+                run_id,
+                RoleCall(
+                    "planner_challenger",
+                    self._prompt(
+                        "planner_challenger",
+                        "Independently challenge the plan for the declared conflict.",
+                    ),
+                    board.shard("goal", "scout", "plan"),
+                    frozenset({"planning", "structured-output"}),
+                ),
+                emit,
+                completed,
+                record_response,
+            )
+            self._record(
+                "planner_challenger",
+                challenger,
+                "planner_challenge",
+                board,
+                evidence,
+            )
+            planner = self._complete_or_restore_one(
+                executor,
+                run_id,
+                RoleCall(
+                    "planner_arbitrator",
+                    self._prompt(
+                        "planner_arbitrator",
+                        "Arbitrate the primary plan and independent challenge into one plan.",
+                    ),
+                    board.shard("goal", "scout", "plan", "planner_challenge"),
+                    frozenset({"planning", "structured-output"}),
+                ),
+                emit,
+                completed,
+                record_response,
+            )
+            self._record("planner_arbitrator", planner, "plan", board, evidence)
 
         build_calls = (
             RoleCall(
@@ -282,34 +557,69 @@ class CodingTeamWorkflow:
                 board.shard("goal", "plan"),
             ),
         )
-        builder, critic = self._complete_parallel(executor, run_id, build_calls, emit)
+        builder, critic = self._complete_parallel(
+            executor,
+            run_id,
+            build_calls,
+            emit,
+            completed,
+            record_response,
+        )
         self._record("builder", builder, "build", board, evidence)
         self._record("critic", critic, "critique", board, evidence)
 
-        verification_context = board.shard("goal", "build", "critique")
-        emit(
-            "work.started",
-            {"role": "verifier", "context": verification_context},
+        verification_response = completed.get("verifier")
+        verification_request = VerificationRequest(
+            run_id=run_id,
+            goal=goal,
+            project_root=project_root,
+            builder=builder.data,
+            critic=critic.data,
         )
-        verification = {
-            "work": "Synthesized builder and critic evidence for review.",
-            "evidence": [
-                *list(builder.data["evidence"]),
-                *list(critic.data["evidence"]),
-            ],
-            "decision": "ready_for_independent_review",
-        }
+        if verification_response is None:
+            verification_context = board.shard("goal", "build", "critique")
+            emit(
+                "work.started",
+                {"role": "verifier", "context": verification_context},
+            )
+            try:
+                verification_result = validate_independent_result(
+                    self.verifier.verify(verification_request),
+                    verification_request,
+                )
+            except (InvalidVerifierResult, TypeError, ValueError) as exc:
+                raise WorkflowPaused(
+                    "invalid_verifier_result",
+                    role="verifier",
+                ) from exc
+            verification_response = ModelResponse(
+                model="",
+                content="local verifier completed",
+                data=verification_result.to_checkpoint_data(),
+            )
+            verification_response = self._persist_response(
+                "verifier",
+                verification_response,
+                emit,
+                record_response,
+            )
+            completed["verifier"] = verification_response
+        else:
+            try:
+                validate_independent_result(
+                    verification_result_from_checkpoint_data(
+                        verification_response.data
+                    ),
+                    verification_request,
+                )
+            except InvalidVerifierResult as exc:
+                raise WorkflowPaused(
+                    "invalid_verifier_result",
+                    role="verifier",
+                ) from exc
+        verification = dict(verification_response.data)
         board.put("verification", verification)
         evidence["verifier"] = list(verification["evidence"])
-        emit("work.completed", {"role": "verifier", "work": verification["work"]})
-        emit(
-            "evidence.recorded",
-            {"role": "verifier", "evidence": verification["evidence"]},
-        )
-        emit(
-            "decision.recorded",
-            {"role": "verifier", "decision": verification["decision"]},
-        )
 
         review_context = board.shard("goal", "build", "critique", "verification")
         review_a, review_b = self._complete_parallel(
@@ -318,18 +628,36 @@ class CodingTeamWorkflow:
             (
                 RoleCall(
                     "review_a",
-                    self._prompt("review_a", "Perform independent review A."),
+                    self._prompt(
+                        "review_a",
+                        (
+                            "Perform independent review A. Return an explicit JSON "
+                            "boolean `approved`; use decision `approve` or `approved` "
+                            "only when it is true, otherwise record a blocking decision."
+                        ),
+                    ),
                     review_context,
                     frozenset({"review", "structured-output"}),
+                    ("work", "evidence", "decision", "approved"),
                 ),
                 RoleCall(
                     "review_b",
-                    self._prompt("review_b", "Perform independent review B."),
+                    self._prompt(
+                        "review_b",
+                        (
+                            "Perform independent review B. Return an explicit JSON "
+                            "boolean `approved`; use decision `approve` or `approved` "
+                            "only when it is true, otherwise record a blocking decision."
+                        ),
+                    ),
                     review_context,
                     frozenset({"review", "structured-output"}),
+                    ("work", "evidence", "decision", "approved"),
                 ),
             ),
             emit,
+            completed,
+            record_response,
         )
         self._record("review_a", review_a, "review_a", board, evidence)
         self._record("review_b", review_b, "review_b", board, evidence)
@@ -338,7 +666,7 @@ class CodingTeamWorkflow:
             {"review_a": dict(review_a.data), "review_b": dict(review_b.data)},
         )
 
-        integrator = self._complete_one(
+        integrator = self._complete_or_restore_one(
             executor,
             run_id,
             RoleCall(
@@ -358,10 +686,12 @@ class CodingTeamWorkflow:
                 frozenset({"integration", "structured-output"}),
             ),
             emit,
+            completed,
+            record_response,
         )
         self._record("integrator", integrator, "integration", board, evidence)
 
-        referee = self._complete_one(
+        referee = self._complete_or_restore_one(
             executor,
             run_id,
             RoleCall(
@@ -371,6 +701,8 @@ class CodingTeamWorkflow:
                 frozenset({"referee", "structured-output"}),
             ),
             emit,
+            completed,
+            record_response,
         )
         self._record("referee", referee, "referee", board, evidence)
         return WorkflowOutcome(evidence=evidence, decision=referee.data["decision"])
@@ -378,8 +710,11 @@ class CodingTeamWorkflow:
     def _prompt(self, role: str, base: str) -> str:
         if self.pack_id == "coding-team":
             return base
-        role_focus = self.pack_roles.get(role)
+        alias = self.profile.alias_for(role)
+        role_focus = self.pack_roles.get(alias) or self.pack_roles.get(role)
         detail = f"\nPack: {self.pack_id}"
+        detail += f"\nWorkflow profile: {self.profile.workflow}"
+        detail += f"\nRole alias: {alias}"
         if self.pack_description:
             detail += f"\nPack purpose: {self.pack_description}"
         if role_focus:
@@ -387,12 +722,17 @@ class CodingTeamWorkflow:
         return base + detail
 
     @staticmethod
-    def _complete_one(
+    def _complete_or_restore_one(
         executor: ModelExecutor,
         run_id: str,
         call: RoleCall,
         emit: EventEmitter,
+        completed: dict[str, ModelResponse],
+        record_response: Callable[[str, ModelResponse], ModelResponse] | None,
     ) -> ModelResponse:
+        restored = completed.get(call.role)
+        if restored is not None:
+            return restored
         emit(
             "work.started",
             {"role": call.role, "context": dict(call.context)},
@@ -402,8 +742,14 @@ class CodingTeamWorkflow:
             run_id=run_id,
             on_failure=lambda failure: CodingTeamWorkflow._emit_failure(failure, emit),
         )
-        CodingTeamWorkflow._emit_response(call.role, response, emit)
-        return response
+        persisted = CodingTeamWorkflow._persist_response(
+            call.role,
+            response,
+            emit,
+            record_response,
+        )
+        completed[call.role] = persisted
+        return persisted
 
     @staticmethod
     def _complete_parallel(
@@ -411,26 +757,66 @@ class CodingTeamWorkflow:
         run_id: str,
         calls: tuple[RoleCall, ...],
         emit: EventEmitter,
+        completed: dict[str, ModelResponse],
+        record_response: Callable[[str, ModelResponse], ModelResponse] | None,
     ) -> list[ModelResponse]:
+        responses: dict[str, ModelResponse] = {}
+        pending: list[RoleCall] = []
         for call in calls:
+            restored = completed.get(call.role)
+            if restored is not None:
+                responses[call.role] = restored
+                continue
             emit(
                 "work.started",
                 {"role": call.role, "context": dict(call.context)},
             )
-        return executor.complete_many(
-            calls,
-            run_id=run_id,
-            on_success=lambda call, response: CodingTeamWorkflow._emit_response(
-                call.role, response, emit
-            ),
-            on_failure=lambda failure: CodingTeamWorkflow._emit_failure(failure, emit),
-        )
+            pending.append(call)
+        if pending:
+
+            def record_success(call: RoleCall, response: ModelResponse) -> None:
+                persisted = CodingTeamWorkflow._persist_response(
+                    call.role,
+                    response,
+                    emit,
+                    record_response,
+                )
+                completed[call.role] = persisted
+                responses[call.role] = persisted
+
+            executor.complete_many(
+                pending,
+                run_id=run_id,
+                on_success=record_success,
+                on_failure=lambda failure: CodingTeamWorkflow._emit_failure(
+                    failure, emit
+                ),
+            )
+        return [responses[call.role] for call in calls]
+
+    @staticmethod
+    def _persist_response(
+        role: str,
+        response: ModelResponse,
+        emit: EventEmitter,
+        record_response: Callable[[str, ModelResponse], ModelResponse] | None,
+    ) -> ModelResponse:
+        if record_response is not None:
+            return record_response(role, response)
+        CodingTeamWorkflow._emit_response(role, response, emit)
+        return response
 
     @staticmethod
     def _emit_response(role: str, response: ModelResponse, emit: EventEmitter) -> None:
+        work_payload: dict[str, Any] = {
+            "role": role,
+            "work": response.data["work"],
+        }
+        if response.model:
+            work_payload["model"] = response.model
         emit(
             "work.completed",
-            {"role": role, "model": response.model, "work": response.data["work"]},
+            work_payload,
         )
         emit(
             "evidence.recorded",

@@ -55,6 +55,15 @@ def build_parser(
     resume = actions.add_parser("resume", help="Resume a paused run")
     _add_common_arguments(resume)
     resume.add_argument("run_id")
+    recover = actions.add_parser(
+        "recover",
+        help=(
+            "Human-audit an abandoned execution lease; confirm the former host "
+            "has stopped before separately resuming"
+        ),
+    )
+    _add_common_arguments(recover)
+    recover.add_argument("run_id")
 
     models = actions.add_parser("models", help="Inspect or explicitly refresh models")
     _add_common_arguments(models)
@@ -159,7 +168,46 @@ def swarm_command(
             _emit(service.pause(project_root, args.run_id), json_output=json_output)
             return 0
         if action == "resume":
-            _emit(service.resume(project_root, args.run_id), json_output=json_output)
+            # Resume is an execution command, not merely a status toggle.  A
+            # prior Sidekick process may have stopped after a durable model
+            # pause, so there is no in-memory worker left to wake here.
+            service.resume(project_root, args.run_id)
+            try:
+                summary = service.execute_run(project_root, args.run_id)
+            except Exception as exc:
+                # The resume transition already made the run visible as
+                # ``running``.  A synchronous CLI continuation has no
+                # background worker to repair an unexpected failure, so make
+                # the run safely resumable again without persisting raw error
+                # text from providers or corrupt durable state.
+                try:
+                    service.record_execution_failure(
+                        project_root,
+                        args.run_id,
+                        error_type=type(exc).__name__,
+                    )
+                except Exception:
+                    pass
+                _emit_error(
+                    "Swarm execution failed; inspect durable run status",
+                    json_output=json_output,
+                )
+                return 1
+            _emit(
+                summary,
+                json_output=json_output,
+            )
+            return 0
+        if action == "recover":
+            actor_id = (actor_factory or get_cli_host_actor)()
+            _emit(
+                service.recover_execution_lease(
+                    project_root,
+                    args.run_id,
+                    actor_id=actor_id,
+                ),
+                json_output=json_output,
+            )
             return 0
         if action == "models":
             if getattr(args, "swarm_models_action", None) != "refresh":
@@ -213,8 +261,7 @@ def _jsonable(value: Any) -> Any:
         # ``asdict`` here because it deep-copies that intentionally immutable
         # mapping before this serializer can normalize it.
         return {
-            field.name: _jsonable(getattr(value, field.name))
-            for field in fields(value)
+            field.name: _jsonable(getattr(value, field.name)) for field in fields(value)
         }
     if isinstance(value, Path):
         return str(value)

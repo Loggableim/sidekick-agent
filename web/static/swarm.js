@@ -109,7 +109,10 @@
     }
     return events.filter(event => {
       const type = String(event && event.event_type || '');
-      return type === 'model.call' || type === 'model.completed' || type === 'model.response';
+      // The durable attempt marker is written before every provider dispatch,
+      // including retries.  Older persisted runs may only have completion
+      // records, so retain those legacy names as a fallback.
+      return type === 'model.attempt_started' || type === 'model.call' || type === 'model.completed' || type === 'model.response';
     }).length;
   }
 
@@ -263,6 +266,7 @@
       '<div class="swarm-run-actions">' +
       (run.status === 'running' ? '<button type="button" class="btn secondary" data-swarm-action="pause" data-run-id="' + swarmEsc(run.run_id) + '">Pause run</button>' : '') +
       (run.status === 'paused' ? '<button type="button" class="btn secondary" data-swarm-action="resume" data-run-id="' + swarmEsc(run.run_id) + '">Resume run</button>' : '') +
+      ((run.status === 'running' || run.status === 'paused') ? '<button type="button" class="btn secondary" data-swarm-action="recover" data-run-id="' + swarmEsc(run.run_id) + '">Recover stopped host</button>' : '') +
       '<button type="button" class="btn secondary" data-swarm-action="project-kanban" data-run-id="' + swarmEsc(run.run_id) + '">' + (projectionTask ? 'Kanban task ' + swarmEsc(projectionTask) : 'Project to Kanban triage') + '</button>' +
       '</div></section>' : '<section class="swarm-empty-state"><h2>No run selected</h2><p>Start a project-local run below, or choose one from the run list.</p></section>';
 
@@ -355,12 +359,17 @@
       _swarmEventSource = stream;
       _swarmStreamKey = key;
       stream.addEventListener('hello', function (event) {
+        if (_swarmEventSource !== stream || _swarmStreamKey !== key) return;
         try {
           const payload = JSON.parse(event.data || '{}');
           _swarmState.cursor = Math.max(_swarmState.cursor, Number(payload.cursor || 0));
         } catch (_) {}
       });
       stream.addEventListener('events', function (event) {
+        // Browsers may already have queued an EventSource callback when the
+        // panel closes.  Only the currently owned stream may refresh state;
+        // a detached stream must never reopen the panel's GET/SSE lifecycle.
+        if (_swarmEventSource !== stream || _swarmStreamKey !== key) return;
         try {
           const payload = JSON.parse(event.data || '{}');
           _swarmState.cursor = Math.max(_swarmState.cursor, Number(payload.cursor || 0));
@@ -414,6 +423,17 @@
     await _swarmWrite('/api/swarm/runs/' + encodeURIComponent(runId) + '/resume', {project_path: projectPath}, 'Swarm run resumed.');
   }
 
+  async function swarmRecoverExecutionLease(runId) {
+    const projectPath = swarmProjectPath();
+    if (!projectPath || !runId) return;
+    if (!confirm('Recover an abandoned execution lease only after you confirm the previous Sidekick host has stopped. This pauses the run, authorizes a retry of each exact uncertain provider attempt during a later separate resume, and does not resume it now.')) return;
+    await _swarmWrite(
+      '/api/swarm/runs/' + encodeURIComponent(runId) + '/recover',
+      {project_path: projectPath},
+      'Execution lease recovered and each exact uncertain provider retry is audit-authorized. Inspect the audit event, then resume separately.'
+    );
+  }
+
   async function swarmDecideApproval(runId, proposalId, deny) {
     const projectPath = swarmProjectPath();
     if (!projectPath || !runId || !proposalId) return;
@@ -463,6 +483,7 @@
     if (action === 'start') void swarmStartRun();
     if (action === 'pause') void swarmPauseRun(runId);
     if (action === 'resume') void swarmResumeRun(runId);
+    if (action === 'recover') void swarmRecoverExecutionLease(runId);
     if (action === 'approve') void swarmDecideApproval(runId, proposalId, false);
     if (action === 'deny') void swarmDecideApproval(runId, proposalId, true);
     if (action === 'refresh-catalog') void swarmRefreshCatalog();
@@ -474,6 +495,7 @@
   window.swarmStartRun = swarmStartRun;
   window.swarmPauseRun = swarmPauseRun;
   window.swarmResumeRun = swarmResumeRun;
+  window.swarmRecoverExecutionLease = swarmRecoverExecutionLease;
   window.swarmDecideApproval = swarmDecideApproval;
   window.swarmRefreshCatalog = swarmRefreshCatalog;
   window.swarmProjectToKanban = swarmProjectToKanban;

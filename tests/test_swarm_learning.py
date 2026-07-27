@@ -15,13 +15,17 @@ from swarm_core.learning import (
     LessonExporter,
     PromptCandidates,
     ReputationLedger,
+    VerificationAssessment,
     assess_golden_results,
 )
 from swarm_core.memory import ProjectMemory
 from swarm_core.models import ModelResponse
 from swarm_core.packs import PackRegistry
+from swarm_core.config import initialize_project
 from swarm_core.store import ProjectSwarmStore
+from swarm_core.verifier import VerifierAssessment, VerificationResult
 from swarm_core import store as swarm_store_module
+from swarm_core import config as swarm_config_module
 
 
 def test_memory_persists_each_kind_with_source_and_evidence_references(
@@ -436,6 +440,246 @@ def test_reputation_keeps_verifier_and_golden_results_with_the_same_reference(
         "golden",
     ]
     assert ledger.score("builder", "coding") == pytest.approx(0.5)
+
+
+def test_local_verifier_assessment_is_explicit_structured_and_safety_gated(
+    tmp_path: Path,
+):
+    """Catches model-shaped input or an unsafe verifier result boosting reputation."""
+    ledger = ReputationLedger(ProjectSwarmStore(tmp_path))
+
+    recorded = ledger.record_local_verifier_assessment(
+        VerificationAssessment(
+            role="builder",
+            capability="building",
+            source_ref="verifier:run-1:builder",
+            score=0.9,
+            safety_passed=True,
+        )
+    )
+    unsafe = ledger.record_local_verifier_assessment(
+        VerificationAssessment(
+            role="builder",
+            capability="building",
+            source_ref="verifier:run-2:builder",
+            score=1.0,
+            safety_passed=False,
+        )
+    )
+
+    assert recorded.source_kind == "verifier"
+    assert recorded.source_ref == "verifier:run-1:builder"
+    assert recorded.score == pytest.approx(0.9)
+    assert unsafe.score == 0.0
+    assert ledger.score("builder", "building") == pytest.approx(0.45)
+    with pytest.raises(TypeError, match="local verifier assessment"):
+        ledger.record_local_verifier_assessment(
+            {
+                "role": "builder",
+                "capability": "building",
+                "source_ref": "model:untrusted",
+                "score": 1.0,
+                "safety_passed": True,
+            }
+        )
+
+
+def test_run_completion_never_promotes_model_evidence_to_local_reputation(
+    tmp_path: Path,
+):
+    """Catches a workflow completion treating self-reported model evidence as verifier data."""
+
+    class ModelEvidenceTransport:
+        def complete(self, request) -> ModelResponse:
+            evidence: list[object] = [f"{request.role}:ordinary-evidence"]
+            if request.role == "builder":
+                evidence = [
+                    {
+                        "role": "builder",
+                        "capability": "building",
+                        "source_ref": "model-self-reported:builder",
+                        "score": 1.0,
+                        "safety_passed": True,
+                    }
+                ]
+            data: dict[str, object] = {
+                "work": f"{request.role} completed",
+                "evidence": evidence,
+                "decision": "continue",
+            }
+            if request.role in {"review_a", "review_b"}:
+                data["decision"] = "approved"
+                data["approved"] = True
+            return ModelResponse(
+                model=request.model,
+                content=f"{request.role} completed",
+                data=data,
+            )
+
+    summary = SwarmEngine(ModelEvidenceTransport()).run(
+        "Do not learn from self-reported model scores.",
+        tmp_path,
+    )
+
+    assert summary.status == "completed"
+    assert ReputationLedger(ProjectSwarmStore(tmp_path)).score(
+        "builder",
+        "building",
+    ) is None
+
+
+def test_ledger_accepts_the_core_verifier_assessment_shape_without_importing_it(
+    tmp_path: Path,
+):
+    """Catches Learning coupling to a verifier implementation or checkpoint type."""
+
+    class CoreVerifierAssessment:
+        role = "critic"
+        capability = "critique"
+        source_ref = "verifier:run-3:critic"
+        score = 0.75
+        safety_passed = True
+
+    record = ReputationLedger(ProjectSwarmStore(tmp_path)).record_local_verifier_assessment(
+        CoreVerifierAssessment()
+    )
+
+    assert (record.role, record.capability, record.source_ref, record.score) == (
+        "critic",
+        "critique",
+        "verifier:run-3:critic",
+        0.75,
+    )
+
+
+def test_completed_run_records_idempotent_local_verifier_assessments(
+    tmp_path: Path,
+):
+    """Catches Engine ignoring a valid local assessment or duplicating it on reuse."""
+
+    class CompletingTransport:
+        def complete(self, request) -> ModelResponse:
+            data: dict[str, object] = {
+                "work": f"{request.role} completed",
+                "evidence": [f"model:{request.role}:evidence"],
+                "decision": "continue",
+            }
+            if request.role in {"review_a", "review_b"}:
+                data["decision"] = "approved"
+                data["approved"] = True
+            return ModelResponse(
+                model=request.model,
+                content=f"{request.role} completed",
+                data=data,
+            )
+
+    assessment = VerifierAssessment(
+        role="builder",
+        capability="building",
+        score=0.8,
+        source_ref="verifier:local:builder-quality",
+        safety_passed=True,
+    )
+
+    class AssessingVerifier:
+        def verify(self, _request) -> VerificationResult:
+            return VerificationResult(
+                work="Local verifier completed the builder assessment.",
+                evidence=("verifier:local:builder-quality",),
+                decision="verified",
+                provenance={"adapter": "test-local", "mode": "read_only"},
+                assessments=(assessment,),
+            )
+
+    summary = SwarmEngine(
+        CompletingTransport(),
+        verifier=AssessingVerifier(),
+    ).run("Record only local verifier reputation.", tmp_path)
+
+    ledger = ReputationLedger(ProjectSwarmStore(tmp_path))
+    assert summary.status == "completed"
+    assert [
+        (record.source_ref, record.score)
+        for record in ledger.list("builder", "building")
+    ] == [("verifier:local:builder-quality", 0.8)]
+    ledger.record_local_verifier_assessment(assessment)
+    assert len(ledger.list("builder", "building")) == 1
+
+
+def test_invalid_durable_verifier_assessment_pauses_before_reputation_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a corrupted verifier checkpoint reaching the ledger or completion."""
+
+    class CompletingTransport:
+        def complete(self, request) -> ModelResponse:
+            data: dict[str, object] = {
+                "work": f"{request.role} completed",
+                "evidence": [f"model:{request.role}:evidence"],
+                "decision": "continue",
+            }
+            if request.role in {"review_a", "review_b"}:
+                data["decision"] = "approved"
+                data["approved"] = True
+            return ModelResponse(
+                model=request.model,
+                content=f"{request.role} completed",
+                data=data,
+            )
+
+    source_ref = "verifier:local:corrupted-assessment"
+
+    class AssessingVerifier:
+        def verify(self, _request) -> VerificationResult:
+            return VerificationResult(
+                work="Local verifier produced an assessment before corruption.",
+                evidence=(source_ref,),
+                decision="verified",
+                provenance={"adapter": "test-local", "mode": "read_only"},
+                assessments=(
+                    VerifierAssessment(
+                        role="builder",
+                        capability="building",
+                        score=0.8,
+                        source_ref=source_ref,
+                        safety_passed=True,
+                    ),
+                ),
+            )
+
+    original_checkpoint_data = VerificationResult.to_checkpoint_data
+
+    def corrupted_checkpoint_data(self: VerificationResult) -> dict[str, object]:
+        data = original_checkpoint_data(self)
+        data["assessments"] = [
+            {
+                "role": "builder",
+                "capability": "building",
+                "score": 1.5,
+                "source_ref": source_ref,
+                "safety_passed": True,
+            }
+        ]
+        return data
+
+    monkeypatch.setattr(
+        VerificationResult,
+        "to_checkpoint_data",
+        corrupted_checkpoint_data,
+    )
+
+    summary = SwarmEngine(
+        CompletingTransport(),
+        verifier=AssessingVerifier(),
+    ).run("Reject corrupted local verifier assessment.", tmp_path)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "invalid_verifier_result"
+    assert ReputationLedger(ProjectSwarmStore(tmp_path)).score(
+        "builder",
+        "building",
+    ) is None
 
 
 def test_reputation_v2_migration_preserves_legacy_results_and_allows_source_kinds(
@@ -962,6 +1206,127 @@ def test_pack_registry_rejects_malformed_or_unsafe_project_yaml(
         PackRegistry(tmp_path)
 
 
+def test_pack_registry_rejects_an_external_project_pack_link_before_reading_it(
+    tmp_path: Path,
+):
+    """A trusted project must not use `.swarm/packs` to read another project."""
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    initialize_project(project)
+    (outside / "coding-team.yaml").write_text(
+        "description: EXTERNAL PACK SECRET\n",
+        encoding="utf-8",
+    )
+    try:
+        (project / ".swarm" / "packs").symlink_to(
+            outside,
+            target_is_directory=True,
+        )
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable in this test environment: {exc}")
+
+    with pytest.raises(ValueError, match="Swarm.*outside.*project"):
+        PackRegistry(project)
+
+
+def test_engine_refuses_an_external_pack_link_before_any_model_prompt(
+    tmp_path: Path,
+):
+    """Pack metadata must not turn an escaping link into a cloud prompt leak."""
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    initialize_project(project)
+    (outside / "coding-team.yaml").write_text(
+        "description: EXTERNAL PACK SECRET\n",
+        encoding="utf-8",
+    )
+    try:
+        (project / ".swarm" / "packs").symlink_to(
+            outside,
+            target_is_directory=True,
+        )
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable in this test environment: {exc}")
+
+    class NoPromptTransport:
+        def complete(self, _request):
+            raise AssertionError("unsafe pack metadata reached model transport")
+
+    with pytest.raises(ValueError, match="Swarm.*outside.*project"):
+        SwarmEngine(NoPromptTransport()).run(
+            "Do not disclose external pack text.",
+            project,
+            pack="coding-team",
+        )
+
+
+def test_pack_registry_keeps_the_pinned_pack_directory_during_a_late_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A swap after the static path check must still yield only inside metadata."""
+    project = tmp_path / "project"
+    outside = tmp_path / "outside"
+    project.mkdir()
+    outside.mkdir()
+    initialize_project(project)
+    packs_dir = project / ".swarm" / "packs"
+    packs_dir.mkdir()
+    (packs_dir / "coding-team.yaml").write_text(
+        "description: Inside pack metadata\n",
+        encoding="utf-8",
+    )
+    (outside / "coding-team.yaml").write_text(
+        "description: EXTERNAL PACK SECRET\n",
+        encoding="utf-8",
+    )
+    saved_packs = project / ".swarm" / "saved-packs"
+    original_list_names = swarm_config_module._pinned_yaml_child_names
+    swapped = False
+    swap_blocked = False
+
+    def swap_after_pinning(directory):
+        nonlocal swapped, swap_blocked
+        if not swapped:
+            try:
+                packs_dir.rename(saved_packs)
+            except PermissionError:
+                # Held Windows directory handles deliberately reject the
+                # replacement; that is the secure equivalent outcome.
+                swap_blocked = True
+            else:
+                try:
+                    packs_dir.symlink_to(outside, target_is_directory=True)
+                except OSError as exc:
+                    saved_packs.rename(packs_dir)
+                    pytest.skip(
+                        f"directory symlinks are unavailable in this test environment: {exc}"
+                    )
+                swapped = True
+        return original_list_names(directory)
+
+    monkeypatch.setattr(
+        swarm_config_module,
+        "_pinned_yaml_child_names",
+        swap_after_pinning,
+    )
+    try:
+        overridden = PackRegistry(project).get("coding-team")
+    finally:
+        if packs_dir.is_symlink():
+            packs_dir.unlink()
+        if saved_packs.exists():
+            saved_packs.rename(packs_dir)
+
+    assert swapped or swap_blocked
+    assert overridden.description == "Inside pack metadata"
+    assert "EXTERNAL PACK SECRET" not in overridden.description
+
+
 def test_known_non_coding_pack_runs_the_reviewed_workflow(tmp_path: Path):
     """Catches a selectable pack still pausing instead of doing its reviewed work."""
 
@@ -971,14 +1336,18 @@ def test_known_non_coding_pack_runs_the_reviewed_workflow(tmp_path: Path):
 
         def complete(self, request) -> ModelResponse:
             self.requests.append(request)
+            data: dict[str, object] = {
+                "work": f"{request.role} work",
+                "evidence": [f"{request.role}:evidence"],
+                "decision": "continue",
+            }
+            if request.role in {"review_a", "review_b"}:
+                data["decision"] = "approved"
+                data["approved"] = True
             return ModelResponse(
                 model=request.model,
                 content="reviewed pack work",
-                data={
-                    "work": f"{request.role} work",
-                    "evidence": [f"{request.role}:evidence"],
-                    "decision": "continue",
-                },
+                data=data,
             )
 
     transport = PackTransport()

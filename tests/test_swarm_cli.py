@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from cli.swarm import build_parser, swarm_command
+from cli.swarm_host import SidekickSwarmService
+from swarm_core.engine import SwarmEngine
+from swarm_core.models import ModelRequest, ModelResponse
 from swarm_core.packs import PackDefinition
+from swarm_core.store import ProjectSwarmStore
+from swarm_core.transport import ModelTransport
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -160,6 +165,210 @@ def test_cli_models_refresh_and_packs_list_are_explicit_commands(
     assert calls == [f"refresh:{project.resolve()}", f"packs:{project.resolve()}"]
 
 
+def test_cli_resume_starts_the_durable_continuation_not_just_a_status_transition(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Catches `sidekick swarm resume` leaving a restart-paused run inert."""
+    project = tmp_path / "project"
+    project.mkdir()
+    calls: list[tuple[str, object]] = []
+
+    class FakeService:
+        def resume(self, project_root, run_id):
+            calls.append(("resume", (project_root, run_id)))
+            return {"run_id": run_id, "status": "running"}
+
+        def execute_run(self, project_root, run_id):
+            calls.append(("execute", (project_root, run_id)))
+            return {"run_id": run_id, "status": "completed", "call_count": 9}
+
+    args = _parse(
+        ["swarm", "--project", str(project), "--json", "resume", "run-restart"]
+    )
+
+    assert swarm_command(args, service=FakeService()) == 0
+    assert calls == [
+        ("resume", (project.resolve(), "run-restart")),
+        ("execute", (project.resolve(), "run-restart")),
+    ]
+    assert json.loads(capsys.readouterr().out) == {
+        "call_count": 9,
+        "run_id": "run-restart",
+        "status": "completed",
+    }
+
+
+def test_cli_resume_records_a_durable_pause_when_continuation_crashes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    """A failed continuation must not strand its run in the running state."""
+    project = tmp_path / "project"
+    project.mkdir()
+    calls: list[tuple[str, object]] = []
+
+    class FakeService:
+        def resume(self, project_root, run_id):
+            calls.append(("resume", (project_root, run_id)))
+            return {"run_id": run_id, "status": "running"}
+
+        def execute_run(self, project_root, run_id):
+            calls.append(("execute", (project_root, run_id)))
+            raise RuntimeError("corrupt durable history")
+
+        def record_execution_failure(self, project_root, run_id, *, error_type):
+            calls.append(("failure", (project_root, run_id, error_type)))
+            return {"run_id": run_id, "status": "paused"}
+
+    args = _parse(
+        ["swarm", "--project", str(project), "--json", "resume", "run-restart"]
+    )
+
+    assert swarm_command(args, service=FakeService()) == 1
+    assert calls == [
+        ("resume", (project.resolve(), "run-restart")),
+        ("execute", (project.resolve(), "run-restart")),
+        ("failure", (project.resolve(), "run-restart", "RuntimeError")),
+    ]
+    assert json.loads(capsys.readouterr().err) == {
+        "error": "Swarm execution failed; inspect durable run status",
+        "ok": False,
+    }
+
+
+def test_cli_resume_failure_writes_a_sanitized_durable_failure_event(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Catches CLI-only failures leaking provider text or stranding a run."""
+    project = tmp_path / "project"
+    project.mkdir()
+    store = ProjectSwarmStore(project)
+    run = store.create_run(
+        run_id="cli-durable-failure",
+        status="paused",
+        metadata={"goal": "resume", "pack": "coding-team"},
+    )
+
+    class FailingService(SidekickSwarmService):
+        def execute_run(self, _project_root, _run_id, **_callbacks):
+            raise RuntimeError("provider response contained secret details")
+
+    args = _parse(
+        ["swarm", "--project", str(project), "--json", "resume", run.run_id]
+    )
+
+    assert swarm_command(args, service=FailingService()) == 1
+
+    reader = ProjectSwarmStore.open_read_only(project)
+    persisted = reader.get_run(run.run_id)
+    assert persisted is not None
+    assert persisted.status == "paused"
+    assert [
+        event.payload
+        for event in reader.list_events(run.run_id)
+        if event.event_type == "run.execution_failed"
+    ] == [{"error_type": "RuntimeError"}]
+    output = capsys.readouterr()
+    assert "secret details" not in output.err
+
+
+def test_cli_recover_audits_a_stale_lease_then_separate_resume_executes(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Catches recovery auto-running or leaving the abandoned lease in place."""
+
+    class CompletingTransport(ModelTransport):
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.requests.append(request)
+            return ModelResponse(
+                model=request.model,
+                content=f"{request.role} completed",
+                data={
+                    "work": f"{request.role} completed",
+                    "evidence": [f"{request.role}:{request.model}"],
+                    "decision": "approve",
+                    "approved": True,
+                },
+            )
+
+    project = tmp_path / "project"
+    project.mkdir()
+    transport = CompletingTransport()
+    run = SwarmEngine(transport).start_run("Recover before a fresh resume", project)
+    store = ProjectSwarmStore(project)
+    abandoned_attempt = store.append_event(
+        run.run_id,
+        "model.attempt_started",
+        {"role": "scout", "model": "deepseek-v4-flash"},
+    )
+    assert store.claim_run_execution_lease(run.run_id, "abandoned-owner")
+
+    class RecoveryService(SidekickSwarmService):
+        def execute_run(self, project_root, run_id, **_callbacks):
+            return SwarmEngine(transport).execute_run(run_id, project_root)
+
+    service = RecoveryService()
+    recover = _parse(
+        ["swarm", "--project", str(project), "--json", "recover", run.run_id]
+    )
+
+    assert (
+        swarm_command(
+            recover,
+            service=service,
+            actor_factory=lambda: "os:uid:4242",
+        )
+        == 0
+    )
+    recovered = ProjectSwarmStore.open_read_only(project).get_run(run.run_id)
+    assert recovered is not None
+    assert recovered.status == "paused"
+    assert transport.requests == []
+    assert [
+        event.payload
+        for event in ProjectSwarmStore.open_read_only(project).list_events(run.run_id)
+        if event.event_type == "run.execution_lease_recovered_by_human"
+    ] == [{"actor_id": "os:uid:4242"}]
+    assert [
+        event.payload
+        for event in ProjectSwarmStore.open_read_only(project).list_events(run.run_id)
+        if event.event_type == "model.attempt_replay_authorized_by_human"
+    ] == [
+        {
+            "actor_id": "os:uid:4242",
+            "original_attempt_sequence": abandoned_attempt.sequence,
+            "role": "scout",
+            "model": "deepseek-v4-flash",
+        }
+    ]
+
+    resume = _parse(
+        ["swarm", "--project", str(project), "--json", "resume", run.run_id]
+    )
+    assert swarm_command(resume, service=service) == 0
+    resumed = ProjectSwarmStore.open_read_only(project).get_run(run.run_id)
+    assert resumed is not None
+    assert resumed.status == "completed"
+    assert [request.role for request in transport.requests].count("scout") == 1
+    scout_attempts = [
+        event
+        for event in ProjectSwarmStore.open_read_only(project).list_events(run.run_id)
+        if event.event_type == "model.attempt_started"
+        and event.payload == {"role": "scout", "model": "deepseek-v4-flash"}
+    ]
+    assert len(scout_attempts) == 2
+    assert scout_attempts[0].sequence == abandoned_attempt.sequence
+    payload = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert payload["status"] == "completed"
+    assert payload["call_count"] == 9
+
+
 def test_cli_packs_list_serializes_immutable_role_metadata(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -180,9 +389,7 @@ def test_cli_packs_list_serializes_immutable_role_metadata(
                 )
             ]
 
-    args = _parse(
-        ["swarm", "--project", str(project), "--json", "packs", "list"]
-    )
+    args = _parse(["swarm", "--project", str(project), "--json", "packs", "list"])
 
     assert swarm_command(args, service=FakeService()) == 0
     assert json.loads(capsys.readouterr().out) == [

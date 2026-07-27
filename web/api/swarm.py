@@ -24,7 +24,10 @@ from swarm_core.store import ProjectSwarmStore
 from web.api.helpers import bad, j
 from web.api.space_engine import resolve_active_space
 from web.api.swarm_kanban_projection import project_swarm_run_to_kanban
-from web.api.workspace import resolve_trusted_workspace
+from web.api.workspace import (
+    resolve_trusted_workspace,
+    resolve_trusted_workspace_read_only,
+)
 
 
 _RUNS_PREFIX = "/api/swarm/runs/"
@@ -60,7 +63,11 @@ def handle_swarm_get(handler, parsed) -> bool | None:
     } and not path.startswith(_RUNS_PREFIX):
         return False
     try:
-        project_root = _resolve_project_path(parsed, require_explicit=True)
+        project_root = _resolve_project_path(
+            parsed,
+            require_explicit=True,
+            read_only=True,
+        )
         if path == "/api/swarm/packs":
             # Packs are versioned config metadata, not runtime state.  They
             # remain readable immediately after `swarm init`, before a first
@@ -143,6 +150,8 @@ def handle_swarm_post(handler, parsed, body) -> bool | None:
         return _change_status(handler, parsed, body, run_id, pause=True)
     if action == "resume":
         return _change_status(handler, parsed, body, run_id, pause=False)
+    if action == "recover":
+        return _recover_execution_lease(handler, parsed, body, run_id)
     if action == "kanban-projection":
         return _project_to_kanban(handler, parsed, body, run_id)
     return False
@@ -248,16 +257,80 @@ def _change_status(
             existing = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
             if existing is None:
                 raise KeyError(f"Unknown Swarm run: {run_id}")
-            run = (
-                _resume_waiting_background_execution(service, project_root, run_id)
-                if existing.status == "paused"
-                else service.resume(project_root, run_id)
+            if existing.status == "paused":
+                run, launched = _resume_paused_execution(service, project_root, run_id)
+                try:
+                    response = j(handler, {"run": _jsonable(run)})
+                except Exception as exc:
+                    if launched is not None:
+                        _cancel_unpublished_background_execution(
+                            project_root, run_id, launched, exc
+                        )
+                    raise
+                # Preserve the same response-before-execution boundary used by
+                # run creation.  A restart-resume must expose its durable
+                # running state before the continuation can complete.
+                if launched is not None:
+                    launched.start_gate.set()
+                return response or True
+            run = service.resume(project_root, run_id)
+        return j(handler, {"run": _jsonable(run)}) or True
+    except FileNotFoundError as exc:
+        return bad(handler, str(exc), status=404)
+    except KeyError as exc:
+        return bad(handler, str(exc), status=404)
+    except (TypeError, ValueError) as exc:
+        return bad(handler, str(exc), status=400)
+    except RuntimeError as exc:
+        return bad(handler, str(exc), status=409)
+
+
+def _recover_execution_lease(
+    handler,
+    parsed,
+    body: Mapping[str, Any],
+    run_id: str,
+) -> bool | None:
+    """Audit a confirmed crashed host without resuming its workflow.
+
+    A durable lease cannot prove whether another *process* is still alive, so
+    the operator confirmation is intentionally explicit.  We can prove the
+    local case, though: keep the in-process worker lock while checking and
+    recovering so a live Sidekick worker is never manually taken over.
+    """
+    try:
+        project_root = _resolve_project_path(parsed, body)
+        _reject_unknown_keys(body, {"project_path"})
+        actor_id = _require_host_approval_actor(handler)
+        key = (str(Path(project_root).resolve()), run_id)
+        service = get_swarm_service()
+        with _BACKGROUND_RUNS_LOCK:
+            execution = _BACKGROUND_RUNS.get(key)
+            if (
+                execution is not None
+                and execution.thread is not None
+                and execution.thread.is_alive()
+            ):
+                raise RuntimeError(
+                    "Swarm execution is still active in this Sidekick process"
+                )
+            if execution is not None:
+                _BACKGROUND_RUNS.pop(key, None)
+            # Hold the registry lock through the short durable handoff.  A
+            # concurrent local resume/create cannot launch a new worker
+            # between the liveness proof and clearing the stale DB lease.
+            run = service.recover_execution_lease(
+                project_root,
+                run_id,
+                actor_id=actor_id,
             )
         return j(handler, {"run": _jsonable(run)}) or True
     except FileNotFoundError as exc:
         return bad(handler, str(exc), status=404)
     except KeyError as exc:
         return bad(handler, str(exc), status=404)
+    except PermissionError as exc:
+        return bad(handler, str(exc), status=403)
     except (TypeError, ValueError) as exc:
         return bad(handler, str(exc), status=400)
     except RuntimeError as exc:
@@ -343,26 +416,37 @@ def _cancel_unpublished_background_execution(
     execution.start_gate.set()
 
 
-def _resume_waiting_background_execution(service, project_root: Path, run_id: str):
-    """Atomically hand a human resume to a worker blocked at a safe boundary."""
+def _resume_paused_execution(
+    service,
+    project_root: Path,
+    run_id: str,
+) -> tuple[object, _BackgroundRun | None]:
+    """Resume a paused run at a safe live boundary or relaunch it durably.
+
+    A live worker may only be resumed while it is waiting before a model call.
+    If no worker exists (for example, a provider/model pause or a Sidekick
+    process restart), the durable run's staged checkpoint is resumed through a
+    newly tracked worker.  We never restart an in-flight worker or silently
+    create a second executor for the same run.
+    """
     key = (str(Path(project_root).resolve()), run_id)
     with _BACKGROUND_RUNS_LOCK:
         execution = _BACKGROUND_RUNS.get(key)
         if (
-            execution is None
-            or execution.thread is None
-            or not execution.thread.is_alive()
-            or execution.state != "waiting_for_resume"
+            execution is not None
+            and execution.thread is not None
+            and execution.thread.is_alive()
         ):
-            if execution is not None and (
-                execution.thread is None or not execution.thread.is_alive()
-            ):
-                _BACKGROUND_RUNS.pop(key, None)
+            if execution.state == "waiting_for_resume":
+                return service.resume(project_root, run_id), None
             raise RuntimeError(
                 "Swarm execution is not waiting at a resumable boundary in this "
-                "Sidekick process; create a new run instead of resuming it"
+                "Sidekick process"
             )
-        return service.resume(project_root, run_id)
+        if execution is not None:
+            _BACKGROUND_RUNS.pop(key, None)
+        run = service.resume(project_root, run_id)
+        return run, _launch_background_execution(service, project_root, run_id)
 
 
 def _set_background_run_state(
@@ -415,13 +499,25 @@ def _project_to_kanban(
     body: Mapping[str, Any],
     run_id: str,
 ) -> bool | None:
-    """Explicitly create a Sidekick-owned triage projection for one Swarm run."""
+    """Create one human-authorized Sidekick-owned triage projection."""
     try:
         # Unlike normal Swarm writes, this cross-surface projection must carry
         # an explicit filesystem path.  The host maps it to the active Space;
         # callers cannot select a board, dispatcher, or workspace identity.
         project_root = _resolve_project_path(parsed, body, require_explicit=True)
         _reject_unknown_keys(body, {"project_path"})
+        actor_id = _require_host_approval_actor(handler)
+        # A Kanban task is a cross-surface write.  Record the trusted human
+        # request before crossing that boundary, after a pure read confirms
+        # that the run exists so a typo cannot initialize a project.
+        reader = ProjectSwarmStore.open_read_only(project_root)
+        if reader.get_run(run_id) is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        ProjectSwarmStore(project_root).append_event(
+            run_id,
+            "sidekick.kanban_projection_requested_by_human",
+            {"actor_id": actor_id},
+        )
         projection = project_swarm_run_to_kanban(project_root, run_id)
         return j(handler, {"projection": _jsonable(projection)}, status=201) or True
     except FileNotFoundError as exc:
@@ -430,6 +526,11 @@ def _project_to_kanban(
         return bad(handler, str(exc), status=404)
     except LookupError as exc:
         return bad(handler, str(exc), status=409)
+    except PermissionError as exc:
+        # A Kanban projection is an explicit human-controlled cross-surface
+        # write.  Missing or invalid dashboard identity is an authorization
+        # failure, never an unhandled route exception.
+        return bad(handler, str(exc), status=403)
     except (TypeError, ValueError) as exc:
         return bad(handler, str(exc), status=400)
     except RuntimeError as exc:
@@ -441,6 +542,7 @@ def _resolve_project_path(
     body: Mapping[str, Any] | None = None,
     *,
     require_explicit: bool = False,
+    read_only: bool = False,
 ) -> Path:
     """Resolve an explicit project path, or the active Space's project dir.
 
@@ -455,7 +557,12 @@ def _resolve_project_path(
     if candidate not in (None, ""):
         if not isinstance(candidate, str):
             raise ValueError("project_path must be a string")
-        return Path(resolve_trusted_workspace(candidate)).resolve()
+        resolver = (
+            resolve_trusted_workspace_read_only
+            if read_only
+            else resolve_trusted_workspace
+        )
+        return Path(resolver(candidate)).resolve()
     if require_explicit:
         raise ValueError("project_path is required for Swarm GET")
     space = resolve_active_space()
@@ -493,9 +600,18 @@ def _handle_events_sse_stream(handler, parsed, reader, run_id: str) -> bool:
         f"event: hello\ndata: {json.dumps({'cursor': cursor, 'run_id': run_id})}\n\n",
     ):
         return True
+    if _sse_writer_is_closed(handler):
+        return True
     last_heartbeat = time.monotonic()
     try:
         while True:
+            # FastAPI's response writer marks itself closed as soon as the
+            # browser disconnects.  Poll that state independently of writes:
+            # an idle SSE stream otherwise discovers a disconnect only at the
+            # next heartbeat, keeping its read-only SQLite reader and route
+            # thread alive unnecessarily.
+            if _sse_writer_is_closed(handler):
+                return True
             events = reader.list_events_after(
                 run_id,
                 cursor,
@@ -518,6 +634,8 @@ def _handle_events_sse_stream(handler, parsed, reader, run_id: str) -> bool:
                 if not _write_sse(handler, ": keepalive\n\n"):
                     return True
                 last_heartbeat = time.monotonic()
+            if _sse_writer_is_closed(handler):
+                return True
             time.sleep(_SSE_POLL_SECONDS)
     except Exception:
         # A disconnect or a read-only database availability change must not
@@ -538,6 +656,18 @@ def _write_sse(handler, payload: str) -> bool:
         ValueError,
     ):
         return False
+
+
+def _sse_writer_is_closed(handler) -> bool:
+    """Check optional disconnect state without changing legacy writers."""
+    probe = getattr(handler.wfile, "is_closed", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe())
+    except Exception:
+        # A writer which cannot report its state is not safe to keep polling.
+        return True
 
 
 def _event_cursor(handler, parsed) -> int:

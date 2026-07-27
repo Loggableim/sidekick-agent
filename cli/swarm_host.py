@@ -15,6 +15,7 @@ from pathlib import Path
 import threading
 import time
 from typing import Any, Callable, ContextManager, Iterator, Mapping
+from urllib.parse import urlsplit
 
 from swarm_core.engine import RunSummary, SwarmEngine
 from swarm_core.models import (
@@ -25,7 +26,7 @@ from swarm_core.models import (
 from swarm_core.packs import PackRegistry
 from swarm_core.policy import proposal_digest
 from swarm_core.store import ProjectSwarmStore
-from swarm_core.transport import OllamaCloudTransport
+from swarm_core.transport import ModelProviderError, OllamaCloudTransport
 from swarm_core.types import (
     ActionCapabilities,
     ActionProposal,
@@ -39,6 +40,10 @@ CatalogRefresher = Callable[[], ModelCatalogSnapshot]
 ProviderSlot = Callable[[str, str], ContextManager[None]]
 ActionClassifier = Callable[[RequestedToolAction], ActionCapabilities]
 PauseObserver = Callable[[], None]
+
+OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE = "ollama-cloud-api-live-verified"
+OLLAMA_CLOUD_UNAVAILABLE_CATALOG_SOURCE = "ollama-cloud-api-live-unavailable"
+OLLAMA_CLOUD_CANONICAL_BASE_URL = "https://ollama.com/v1"
 
 _FALLBACK_SLOT_LOCK = threading.Lock()
 _FALLBACK_SLOTS: dict[int, threading.BoundedSemaphore] = {}
@@ -171,11 +176,14 @@ class SidekickSwarmService:
         project_root = Path(project_root).resolve()
         store = ProjectSwarmStore(project_root)
         snapshot = store.get_model_catalog_snapshot(OLLAMA_CLOUD_PROVIDER)
+        # The persisted snapshot proves the last explicit catalog refresh, not
+        # the mutable process environment.  Recheck the endpoint before every
+        # engine construction so a later OLLAMA_BASE_URL flip cannot route a
+        # supposedly Cloud-only run to a local or third-party server.
         catalog = (
             snapshot.models
-            if snapshot is not None
-            and snapshot.healthy
-            and snapshot.provider == OLLAMA_CLOUD_PROVIDER
+            if _is_verified_ollama_catalog(snapshot)
+            and _uses_canonical_ollama_cloud_endpoint()
             else ()
         )
         transport = OllamaCloudTransport(
@@ -207,6 +215,8 @@ class SidekickSwarmService:
                     "provider": OLLAMA_CLOUD_PROVIDER,
                     "snapshot_present": snapshot is not None,
                     "healthy": bool(snapshot and snapshot.healthy),
+                    "verified": _is_verified_ollama_catalog(snapshot),
+                    "endpoint_trusted": _uses_canonical_ollama_cloud_endpoint(),
                     "source": snapshot.source
                     if snapshot is not None
                     else "not_refreshed",
@@ -279,6 +289,61 @@ class SidekickSwarmService:
         run = store.resume_run(run_id)
         store.append_event(run_id, "run.resumed_by_human", {})
         return run
+
+    def recover_execution_lease(
+        self,
+        project_root: Path,
+        run_id: str,
+        *,
+        actor_id: str,
+    ) -> SwarmRun:
+        """Release an abandoned lease after an explicit human handoff.
+
+        This never resumes or relaunches a workflow.  The operator must first
+        confirm that the former host stopped, then separately use resume after
+        inspecting the durable recovery audit event.
+        """
+        actor_id = _validated_host_recovery_actor(actor_id)
+        project_root = Path(project_root).resolve()
+        ProjectSwarmStore.open_read_only(project_root)
+        return ProjectSwarmStore(project_root).recover_run_execution_lease(
+            run_id,
+            actor_id=actor_id,
+        )
+
+    def record_execution_failure(
+        self,
+        project_root: Path,
+        run_id: str,
+        *,
+        error_type: str,
+    ) -> SwarmRun:
+        """Pause a failed synchronous continuation without persisting error text."""
+        safe_error_type = _safe_execution_error_type(error_type)
+        project_root = Path(project_root).resolve()
+        store = ProjectSwarmStore(project_root)
+        run = store.get_run(run_id)
+        if run is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        if run.status == "completed":
+            return run
+        if run.status == "running":
+            try:
+                store.set_run_status(run_id, "paused")
+            except (RuntimeError, ValueError):
+                # A human pause may have won the state transition between the
+                # durable read and write.  It is already the desired result.
+                pass
+        current = store.get_run(run_id)
+        if current is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        if current.status != "completed":
+            store.append_event(
+                run_id,
+                "run.execution_failed",
+                {"error_type": safe_error_type},
+            )
+        return store.get_run(run_id) or current
 
     def record_human_approval(
         self,
@@ -387,8 +452,53 @@ def _conservative_classifier(_action: RequestedToolAction) -> ActionCapabilities
     )
 
 
+def _safe_execution_error_type(error_type: str) -> str:
+    """Keep a durable failure marker useful without accepting raw error text."""
+    if not isinstance(error_type, str):
+        raise TypeError("Swarm execution error_type must be a string")
+    cleaned = "".join(
+        character
+        for character in error_type.strip()
+        if character.isascii() and (character.isalnum() or character in {"_", "-"})
+    )
+    return (cleaned or "Exception")[:128]
+
+
+def _validated_host_recovery_actor(actor_id: str) -> str:
+    """Accept only a bounded principal from the CLI or trusted dashboard host."""
+    if not isinstance(actor_id, str):
+        raise TypeError("Swarm execution lease recovery actor must be a string")
+    actor = actor_id.strip()
+    if (
+        not actor.startswith(("os:", "dashboard:"))
+        or len(actor) > 256
+        or any(ord(character) < 32 or ord(character) == 127 for character in actor)
+    ):
+        raise ValueError("Swarm execution lease recovery requires a host actor")
+    prefix = "dashboard:" if actor.startswith("dashboard:") else "os:"
+    if not actor[len(prefix) :].strip():
+        raise ValueError("Swarm execution lease recovery requires a host actor")
+    return actor
+
+
+def _is_verified_ollama_catalog(snapshot: ModelCatalogSnapshot | None) -> bool:
+    """Return whether a snapshot carries an exact live API routing proof."""
+    return bool(
+        snapshot is not None
+        and snapshot.provider == OLLAMA_CLOUD_PROVIDER
+        and snapshot.healthy
+        and snapshot.source == OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE
+    )
+
+
 def _sidekick_call_llm(**kwargs: Any) -> Any:
     """Bind only Sidekick's existing auxiliary path, never a direct client."""
+    # ``runtime.auxiliary_client`` resolves OLLAMA_BASE_URL for each request.
+    # Check immediately before that hand-off too: an environment change after
+    # engine construction must fail closed before any local endpoint receives
+    # a Swarm prompt.
+    if not _uses_canonical_ollama_cloud_endpoint():
+        raise ModelProviderError("Swarm requires the canonical Ollama Cloud endpoint")
     from runtime.auxiliary_client import call_llm
 
     return call_llm(**kwargs)
@@ -396,24 +506,60 @@ def _sidekick_call_llm(**kwargs: Any) -> Any:
 
 def _refresh_ollama_catalog() -> ModelCatalogSnapshot:
     """Refresh Ollama Cloud only when an explicit write path asks for it."""
-    from cli.models import fetch_api_models, fetch_ollama_cloud_models
+    from cli.models import fetch_api_models
 
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
-    base_url = os.environ.get("OLLAMA_BASE_URL", "").strip() or "https://ollama.com/v1"
-    live_models = fetch_api_models(api_key, base_url, timeout=8.0) if api_key else None
-    # The Sidekick helper can expose a stale/models.dev list.  It is useful for
-    # the explicit UI catalog, but only a successful live probe marks it usable
-    # for a Swarm run.
-    models = fetch_ollama_cloud_models(
-        api_key=api_key or None,
-        base_url=base_url,
-        force_refresh=True,
+    base_url = _configured_ollama_cloud_base_url()
+    live_models = (
+        fetch_api_models(api_key, base_url, timeout=8.0)
+        if api_key and _uses_canonical_ollama_cloud_endpoint(base_url)
+        else None
     )
+    # The generic Sidekick picker may merge models.dev and stale cache entries.
+    # A Swarm snapshot is a routing proof, so it deliberately persists only the
+    # IDs returned by this successful live Ollama Cloud API probe.
+    models = tuple(live_models or ())
     return ModelCatalogSnapshot(
         provider=OLLAMA_CLOUD_PROVIDER,
-        models=tuple(models),
-        healthy=bool(live_models),
-        source="ollama-cloud-live" if live_models else "ollama-cloud-live-unavailable",
+        models=models,
+        healthy=bool(models),
+        source=(
+            OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE
+            if models
+            else OLLAMA_CLOUD_UNAVAILABLE_CATALOG_SOURCE
+        ),
+    )
+
+
+def _configured_ollama_cloud_base_url() -> str:
+    """Return the unredacted endpoint only for local validation/dispatch."""
+    return os.environ.get("OLLAMA_BASE_URL", "").strip() or OLLAMA_CLOUD_CANONICAL_BASE_URL
+
+
+def _uses_canonical_ollama_cloud_endpoint(base_url: str | None = None) -> bool:
+    """Accept only the public HTTPS Ollama Cloud API origin and v1 path.
+
+    The generic Sidekick provider supports user overrides, including local
+    Ollama.  Swarm's public contract is narrower: it must never treat such an
+    override as an Ollama Cloud fallback.  Do not broaden this to subdomains,
+    redirects, query strings, or arbitrary paths without a separate security
+    review and explicit routing proof.
+    """
+    candidate = _configured_ollama_cloud_base_url() if base_url is None else base_url
+    try:
+        parsed = urlsplit(candidate)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        parsed.scheme.lower() == "https"
+        and parsed.hostname == "ollama.com"
+        and port in {None, 443}
+        and parsed.path.rstrip("/") == "/v1"
+        and not parsed.query
+        and not parsed.fragment
+        and parsed.username is None
+        and parsed.password is None
     )
 
 

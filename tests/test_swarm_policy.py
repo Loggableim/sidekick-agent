@@ -48,6 +48,44 @@ def _run(tmp_path: Path, autonomy: str | None = None):
     return ProjectSwarmStore(tmp_path).create_run(metadata=metadata)
 
 
+def _record_durable_review_quorum(
+    store: ProjectSwarmStore,
+    run,
+    *,
+    evidence_refs: tuple[str, ...] = ("evidence:test",),
+    review_a_model: str = "glm-5.2",
+    review_b_model: str = "kimi-k2.7-code",
+) -> None:
+    """Persist the only workflow outcomes that can satisfy reviewed execution."""
+    for role, model in (
+        ("verifier", None),
+        ("review_a", review_a_model),
+        ("review_b", review_b_model),
+    ):
+        verifier_data = (
+            {
+                "decision": "verified",
+                "provenance": {
+                    "adapter": "test-local-verifier",
+                    "mode": "read_only",
+                    "operation": "unit_test",
+                },
+            }
+            if role == "verifier"
+            else {"decision": "approved", "approved": True}
+        )
+        store.record_workflow_role_checkpoint(
+            run.run_id,
+            role,
+            model=model,
+            data={
+                "work": f"{role} completed",
+                "evidence": list(evidence_refs),
+                **verifier_data,
+            },
+        )
+
+
 def test_reviewed_execution_is_the_versioned_project_default(tmp_path: Path):
     """Catches a fresh project silently defaulting to unreviewed execution."""
     config = initialize_project(tmp_path)
@@ -122,7 +160,7 @@ def test_run_snapshots_project_autonomy_when_it_is_created(tmp_path: Path):
     assert decision.status is PolicyStatus.ALLOWED
 
 
-def test_reviewed_execution_requires_verifier_evidence_and_two_model_families(
+def test_reviewed_execution_requires_durable_verifier_evidence_and_exact_review_routes(
     tmp_path: Path,
 ):
     """Catches same-family reviews or evidence-free verification forming quorum."""
@@ -170,8 +208,254 @@ def test_reviewed_execution_requires_verifier_evidence_and_two_model_families(
         approver_id="review-c",
         model_family="kimi",
     )
+    assert gate.evaluate(proposal, run).status is PolicyStatus.NEEDS_MODEL_QUORUM
+
+    _record_durable_review_quorum(store, run)
 
     assert gate.evaluate(proposal, run).status is PolicyStatus.ALLOWED
+
+
+def test_reviewed_execution_ignores_arbitrary_model_approval_ids_and_families(
+    tmp_path: Path,
+):
+    """Only exact durable review checkpoints, never caller labels, form quorum."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    proposal = _proposal(tmp_path)
+    gate = PolicyGate(store)
+
+    # These look like the former quorum but have no immutable role/checkpoint
+    # provenance.  A browser/model must not choose its own reviewers or
+    # model-family labels to unlock reviewed execution.
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="verifier",
+        approver_id="forged-verifier",
+        evidence_refs=("evidence:test",),
+    )
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="model",
+        approver_id="arbitrary-reviewer-a",
+        model_family="glm-5",
+    )
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="model",
+        approver_id="arbitrary-reviewer-b",
+        model_family="kimi-k2",
+    )
+
+    assert gate.evaluate(proposal, run).status is PolicyStatus.NEEDS_MODEL_QUORUM
+
+    _record_durable_review_quorum(store, run)
+
+    assert gate.evaluate(proposal, run).status is PolicyStatus.ALLOWED
+
+
+@pytest.mark.parametrize(
+    ("review_a_model", "review_b_model"),
+    [
+        ("kimi-k2.7-code", "glm-5.2"),
+        ("glm-5.2", "glm-5.2"),
+        ("unknown-reviewer", "kimi-k2.7-code"),
+    ],
+)
+def test_reviewed_execution_requires_the_expected_distinct_durable_review_routes(
+    tmp_path: Path,
+    review_a_model: str,
+    review_b_model: str,
+):
+    """Role labels cannot swap, duplicate, or spoof the GLM/Kimi review pair."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    _record_durable_review_quorum(
+        store,
+        run,
+        review_a_model=review_a_model,
+        review_b_model=review_b_model,
+    )
+
+    assert (
+        PolicyGate(store).evaluate(_proposal(tmp_path), run).status
+        is PolicyStatus.NEEDS_MODEL_QUORUM
+    )
+
+
+def test_reviewed_execution_requires_proposal_evidence_from_the_durable_verifier(
+    tmp_path: Path,
+):
+    """A review run cannot be reused for an unrelated evidence-backed action."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    _record_durable_review_quorum(
+        store,
+        run,
+        evidence_refs=("evidence:reviewed-work",),
+    )
+
+    proposal = _proposal(tmp_path, evidence_refs=("evidence:other-action",))
+
+    assert (
+        PolicyGate(store).evaluate(proposal, run).status
+        is PolicyStatus.NEEDS_MODEL_QUORUM
+    )
+
+
+def test_reviewed_execution_rejects_an_auditable_but_unavailable_default_verifier(
+    tmp_path: Path,
+):
+    """A no-I/O default verifier marker must never unlock a local write."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "verifier",
+        model=None,
+        data={
+            "work": "No inspection adapter was configured.",
+            "evidence": ["verifier:local:unavailable"],
+            "decision": "verification_unavailable",
+            "provenance": {
+                "adapter": "default-read-only",
+                "mode": "read_only",
+                "operation": "no_project_io",
+                "verification_state": "unavailable",
+            },
+            "assessments": [],
+        },
+    )
+    for role, model in (("review_a", "glm-5.2"), ("review_b", "kimi-k2.7-code")):
+        store.record_workflow_role_checkpoint(
+            run.run_id,
+            role,
+            model=model,
+            data={
+                "work": f"{role} says approve",
+                "evidence": [f"evidence:{role}"],
+                "decision": "approved",
+                "approved": True,
+            },
+        )
+
+    decision = PolicyGate(store).evaluate(
+        _proposal(tmp_path, evidence_refs=("verifier:local:unavailable",)),
+        run,
+    )
+
+    assert decision.status is PolicyStatus.NEEDS_MODEL_QUORUM
+
+
+def test_reviewed_execution_does_not_require_one_ref_shared_by_both_reviewers(
+    tmp_path: Path,
+):
+    """Each reviewer may support the verdict with different durable evidence."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "verifier",
+        model=None,
+        data={
+            "work": "verified proposal evidence",
+            "evidence": ["evidence:proposal"],
+            "decision": "verified",
+            "provenance": {
+                "adapter": "test-local-verifier",
+                "mode": "read_only",
+                "operation": "unit_test",
+            },
+        },
+    )
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "review_a",
+        model="glm-5.2",
+        data={
+            "work": "independent GLM review",
+            "evidence": ["evidence:review-a-only"],
+            "decision": "approve",
+            "approved": True,
+        },
+    )
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "review_b",
+        model="kimi-k2.7-code",
+        data={
+            "work": "independent Kimi review",
+            "evidence": ["evidence:review-b-only"],
+            "decision": "approve",
+            "approved": True,
+        },
+    )
+
+    proposal = _proposal(tmp_path, evidence_refs=("evidence:proposal",))
+
+    assert PolicyGate(store).evaluate(proposal, run).status is PolicyStatus.ALLOWED
+
+
+@pytest.mark.parametrize(
+    "review_a_vote",
+    (
+        {"approved": False, "decision": "approved"},
+        {"approved": True, "decision": "reject"},
+        {"approved": True, "decision": "needs_more_evidence"},
+        {"decision": "approved"},
+        {"approved": "true", "decision": "approved"},
+    ),
+)
+def test_reviewed_execution_fails_closed_without_each_explicit_positive_review_vote(
+    tmp_path: Path,
+    review_a_vote: dict[str, object],
+):
+    """Negative, vague, missing, and type-confused review votes never unlock work."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "verifier",
+        model=None,
+        data={
+            "work": "verified proposal evidence",
+            "evidence": ["evidence:test"],
+            "decision": "verified",
+            "provenance": {
+                "adapter": "test-local-verifier",
+                "mode": "read_only",
+                "operation": "unit_test",
+            },
+        },
+    )
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "review_a",
+        model="glm-5.2",
+        data={
+            "work": "independent GLM review",
+            "evidence": ["evidence:review-a"],
+            **review_a_vote,
+        },
+    )
+    store.record_workflow_role_checkpoint(
+        run.run_id,
+        "review_b",
+        model="kimi-k2.7-code",
+        data={
+            "work": "independent Kimi review",
+            "evidence": ["evidence:review-b"],
+            "decision": "approved",
+            "approved": True,
+        },
+    )
+
+    assert (
+        PolicyGate(store).evaluate(_proposal(tmp_path), run).status
+        is PolicyStatus.NEEDS_MODEL_QUORUM
+    )
 
 
 def test_policy_gate_rejects_a_run_owned_by_another_project_store(tmp_path: Path):
@@ -294,6 +578,7 @@ def test_approval_records_survive_reopening_the_project_store(tmp_path: Path):
         approver_id="review-b",
         model_family="kimi",
     )
+    _record_durable_review_quorum(first_store, run)
 
     reopened_gate = PolicyGate(ProjectSwarmStore(tmp_path))
 
@@ -516,6 +801,7 @@ def test_proposal_freezes_evidence_and_workspace_before_cwd_changes(
         approver_id="review-b",
         model_family="kimi",
     )
+    _record_durable_review_quorum(store, run, evidence_refs=("evidence:first",))
     adapter = _RecordingAdapter()
 
     GatedToolExecutor(gate, adapter).execute(proposal, run)
@@ -649,11 +935,37 @@ def test_gated_executor_invokes_adapter_only_after_persisted_quorum(tmp_path: Pa
         approver_id="review-b",
         model_family="kimi",
     )
+    _record_durable_review_quorum(store, run)
     adapter = _RecordingAdapter()
 
     result = GatedToolExecutor(gate, adapter).execute(proposal, run)
 
     assert result == {"result": "write_project_file"}
+    assert adapter.executed == [proposal.requested_action]
+
+
+def test_execution_claim_rechecks_review_quorum_from_its_atomic_store_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The effectful claim must not reuse an earlier or caller-supplied review view."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run()
+    proposal = _proposal(tmp_path)
+    _record_durable_review_quorum(store, run)
+    adapter = _RecordingAdapter()
+
+    def unexpected_read(*_args, **_kwargs):
+        raise AssertionError("authorize_and_claim must use its SQLite snapshot")
+
+    # Ordinary `evaluate` is a read-only observation.  The effectful path
+    # instead receives checkpoints selected under Store's BEGIN IMMEDIATE
+    # transaction, alongside the durable run and approval rows.
+    monkeypatch.setattr(store, "get_workflow_role_checkpoints", unexpected_read)
+
+    assert GatedToolExecutor(PolicyGate(store), adapter).execute(proposal, run) == {
+        "result": "write_project_file"
+    }
     assert adapter.executed == [proposal.requested_action]
 
 

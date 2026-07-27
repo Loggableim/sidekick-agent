@@ -12,12 +12,16 @@ from typing import Any, Callable, Iterator, Mapping, TypeVar
 from uuid import uuid4
 
 from .config import (
+    SwarmProjectPathError,
     SwarmProjectNotInitializedError,
+    PinnedSwarmDatabase,
     initialize_project,
     load_project_config,
+    pinned_swarm_database,
+    resolve_swarm_path,
 )
 from .models import ModelCatalogSnapshot
-from .types import ApprovalRecord, SwarmEvent, SwarmRun
+from .types import ApprovalRecord, SwarmEvent, SwarmRun, WorkflowRoleCheckpoint
 
 
 AuthorizationResult = TypeVar("AuthorizationResult")
@@ -37,9 +41,7 @@ class ProjectSwarmStore:
     def __init__(self, project_root: Path) -> None:
         self.project_root = project_root.resolve()
         initialize_project(self.project_root)
-        self.runtime_dir = self.project_root / ".swarm" / "runtime"
-        self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        self.db_path = self.runtime_dir / "swarm.sqlite"
+        self._refresh_runtime_paths()
         self._ensure_schema()
 
     @classmethod
@@ -226,6 +228,273 @@ class ProjectSwarmStore:
             ),
             True,
         )
+
+    def record_workflow_role_checkpoint(
+        self,
+        run_id: str,
+        role: str,
+        *,
+        model: str | None,
+        data: Mapping[str, Any],
+    ) -> tuple[WorkflowRoleCheckpoint, bool]:
+        """Atomically persist one completed role and its public evidence events.
+
+        A continuation only treats a role as complete after this single SQLite
+        transaction commits.  It therefore never replays a durable Scout,
+        Planner, Builder, Critic, Reviewer, Integrator, or Verifier result
+        merely because the Sidekick process exited between stages.
+        """
+        role = str(role).strip()
+        if not role:
+            raise ValueError("Workflow checkpoint role must be non-empty")
+        if model is not None:
+            model = str(model).strip() or None
+        checkpoint_data = _validated_workflow_checkpoint_data(data)
+        timestamp = _utc_now()
+
+        with self._immediate_connection() as connection:
+            existing = connection.execute(
+                """
+                SELECT run_id, role, model, data_json, completed_at
+                FROM workflow_role_checkpoints
+                WHERE run_id = ? AND role = ?
+                """,
+                (run_id, role),
+            ).fetchone()
+            if existing is not None:
+                return _row_to_workflow_role_checkpoint(existing), False
+            if (
+                connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                is None
+            ):
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+
+            connection.execute(
+                """
+                INSERT INTO workflow_role_checkpoints (
+                    run_id, role, model, data_json, completed_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    role,
+                    model,
+                    json.dumps(checkpoint_data, sort_keys=True, allow_nan=False),
+                    _timestamp_text(timestamp),
+                ),
+            )
+            work_payload: dict[str, Any] = {
+                "role": role,
+                "work": checkpoint_data["work"],
+            }
+            if model is not None:
+                work_payload["model"] = model
+            for event_type, payload in (
+                ("work.completed", work_payload),
+                (
+                    "evidence.recorded",
+                    {"role": role, "evidence": checkpoint_data["evidence"]},
+                ),
+                (
+                    "decision.recorded",
+                    {"role": role, "decision": checkpoint_data["decision"]},
+                ),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO events (
+                        event_id, timestamp, event_type, run_id, payload_json, visibility
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid4()),
+                        _timestamp_text(timestamp),
+                        event_type,
+                        run_id,
+                        json.dumps(payload, sort_keys=True, allow_nan=False),
+                        "project",
+                    ),
+                )
+
+        return (
+            WorkflowRoleCheckpoint(
+                run_id=run_id,
+                role=role,
+                model=model,
+                data=checkpoint_data,
+                completed_at=timestamp,
+            ),
+            True,
+        )
+
+    def get_workflow_role_checkpoints(
+        self,
+        run_id: str,
+    ) -> dict[str, WorkflowRoleCheckpoint]:
+        """Return the validated durable role outputs for one resumable run."""
+        with self._connection() as connection:
+            return _workflow_role_checkpoints_from_connection(connection, run_id)
+
+    def claim_run_execution_lease(self, run_id: str, owner_token: str) -> bool:
+        """Atomically reserve one run for a single executing host.
+
+        Leases deliberately have no expiry or takeover path.  A process that
+        dies without its ``finally`` cleanup leaves the row behind, so a new
+        host fails closed rather than replaying an action-producing workflow
+        that might still be running elsewhere.
+        """
+        owner_token = str(owner_token).strip()
+        if not owner_token:
+            raise ValueError("Swarm execution lease owner_token is required")
+        with self._immediate_connection() as connection:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
+                ).fetchone()
+                is None
+            ):
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO run_execution_leases (run_id, owner_token, claimed_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (run_id, owner_token, _timestamp_text(_utc_now())),
+                )
+            except sqlite3.IntegrityError:
+                return False
+        return True
+
+    def release_run_execution_lease(self, run_id: str, owner_token: str) -> bool:
+        """Release only the durable lease held by ``owner_token``."""
+        owner_token = str(owner_token).strip()
+        if not owner_token:
+            raise ValueError("Swarm execution lease owner_token is required")
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM run_execution_leases
+                WHERE run_id = ? AND owner_token = ?
+                """,
+                (run_id, owner_token),
+            )
+        return cursor.rowcount == 1
+
+    def recover_run_execution_lease(self, run_id: str, *, actor_id: str) -> SwarmRun:
+        """Human-audit an abandoned lease without automatically executing it.
+
+        This is intentionally an explicit recovery handoff, not lease expiry:
+        the caller must first confirm that the prior host stopped.  The run is
+        left paused so a separately authorized resume can inspect the audit
+        trail and decide whether it is safe to continue.
+        """
+        if not isinstance(actor_id, str):
+            raise TypeError("Swarm execution lease recovery actor must be a string")
+        actor_id = actor_id.strip()
+        if (
+            not actor_id
+            or len(actor_id) > 256
+            or any(
+                ord(character) < 32 or ord(character) == 127 for character in actor_id
+            )
+        ):
+            raise ValueError("Swarm execution lease recovery requires an actor")
+        timestamp = _utc_now()
+        with self._immediate_connection() as connection:
+            row = connection.execute(
+                """
+                SELECT run_id, status, created_at, updated_at, metadata_json
+                FROM runs WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            if row["status"] == "completed":
+                raise ValueError(
+                    "Completed Swarm runs cannot recover an execution lease"
+                )
+            lease = connection.execute(
+                "SELECT owner_token FROM run_execution_leases WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if lease is None:
+                raise ValueError("Swarm run has no execution lease to recover")
+            event_rows = connection.execute(
+                """
+                SELECT sequence, event_id, timestamp, event_type, run_id,
+                       payload_json, visibility
+                FROM events WHERE run_id = ? ORDER BY sequence ASC
+                """,
+                (run_id,),
+            ).fetchall()
+            unmatched_attempts = _unmatched_durable_model_attempts(
+                [_row_to_event(event_row) for event_row in event_rows]
+            )
+
+            connection.execute(
+                """
+                UPDATE runs SET status = ?, updated_at = ?
+                WHERE run_id = ?
+                """,
+                ("paused", _timestamp_text(timestamp), run_id),
+            )
+            connection.execute(
+                "DELETE FROM run_execution_leases WHERE run_id = ?",
+                (run_id,),
+            )
+            connection.execute(
+                """
+                INSERT INTO events (
+                    event_id, timestamp, event_type, run_id, payload_json, visibility
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid4()),
+                    _timestamp_text(timestamp),
+                    "run.execution_lease_recovered_by_human",
+                    run_id,
+                    json.dumps({"actor_id": actor_id}, sort_keys=True),
+                    "project",
+                ),
+            )
+            for original_sequence, role, model in unmatched_attempts:
+                connection.execute(
+                    """
+                    INSERT INTO events (
+                        event_id, timestamp, event_type, run_id, payload_json, visibility
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        str(uuid4()),
+                        _timestamp_text(timestamp),
+                        "model.attempt_replay_authorized_by_human",
+                        run_id,
+                        json.dumps(
+                            {
+                                "actor_id": actor_id,
+                                "original_attempt_sequence": original_sequence,
+                                "role": role,
+                                "model": model,
+                            },
+                            sort_keys=True,
+                        ),
+                        "project",
+                    ),
+                )
+            recovered = connection.execute(
+                """
+                SELECT run_id, status, created_at, updated_at, metadata_json
+                FROM runs WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+        if recovered is None:  # pragma: no cover - protected by the transaction
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        return _row_to_run(recovered)
 
     def list_events(self, run_id: str) -> list[SwarmEvent]:
         with self._connection() as connection:
@@ -426,7 +695,12 @@ class ProjectSwarmStore:
         proposal_id: str,
         proposal_digest: str,
         authorize: Callable[
-            [SwarmRun | None, list[ApprovalRecord]], tuple[AuthorizationResult, bool]
+            [
+                SwarmRun | None,
+                list[ApprovalRecord],
+                Mapping[str, WorkflowRoleCheckpoint],
+            ],
+            tuple[AuthorizationResult, bool],
         ],
     ) -> tuple[AuthorizationResult, bool]:
         """Read policy inputs and claim execution under one SQLite write lock."""
@@ -449,9 +723,14 @@ class ProjectSwarmStore:
                 """,
                 (run_id, proposal_id),
             ).fetchall()
+            checkpoints = _workflow_role_checkpoints_from_connection(
+                connection,
+                run_id,
+            )
             result, approved = authorize(
                 run,
                 [_row_to_approval(row) for row in approval_rows],
+                checkpoints,
             )
             if not approved:
                 return result, False
@@ -1047,6 +1326,19 @@ class ProjectSwarmStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_events_run_sequence
                     ON events(run_id, sequence);
+                CREATE TABLE IF NOT EXISTS workflow_role_checkpoints (
+                    run_id TEXT NOT NULL REFERENCES runs(run_id),
+                    role TEXT NOT NULL,
+                    model TEXT,
+                    data_json TEXT NOT NULL,
+                    completed_at TEXT NOT NULL,
+                    PRIMARY KEY (run_id, role)
+                );
+                CREATE TABLE IF NOT EXISTS run_execution_leases (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
+                    owner_token TEXT NOT NULL,
+                    claimed_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS event_idempotency_keys (
                     run_id TEXT NOT NULL REFERENCES runs(run_id),
                     event_type TEXT NOT NULL,
@@ -1247,26 +1539,48 @@ class ProjectSwarmStore:
             """
         )
 
-    def _connection(self):
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return _ConnectionContext(connection)
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        self._refresh_runtime_paths()
+        with pinned_swarm_database(self.project_root, read_only=False) as pinned:
+            connection = _open_pinned_swarm_database_connection(
+                pinned,
+                self.project_root,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            try:
+                yield connection
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
     @contextmanager
     def _immediate_connection(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            yield connection
-            connection.commit()
-        except BaseException:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        self._refresh_runtime_paths()
+        with pinned_swarm_database(self.project_root, read_only=False) as pinned:
+            connection = _open_pinned_swarm_database_connection(
+                pinned,
+                self.project_root,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                yield connection
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def _refresh_runtime_paths(self) -> None:
+        self.runtime_dir = resolve_swarm_path(self.project_root, "runtime")
+        self.db_path = resolve_swarm_path(self.project_root, "runtime", "swarm.sqlite")
 
 
 class ReadOnlyProjectSwarmStore:
@@ -1280,12 +1594,14 @@ class ReadOnlyProjectSwarmStore:
     def __init__(self, project_root: Path) -> None:
         self.project_root = Path(project_root).resolve()
         load_project_config(self.project_root)
-        self.runtime_dir = self.project_root / ".swarm" / "runtime"
-        self.db_path = self.runtime_dir / "swarm.sqlite"
-        if not self.db_path.is_file():
+        self._refresh_runtime_paths()
+        try:
+            with pinned_swarm_database(self.project_root, read_only=True):
+                pass
+        except FileNotFoundError:
             raise SwarmProjectNotInitializedError(
                 f"Swarm project is not initialized: {self.project_root}"
-            )
+            ) from None
 
     def get_run(self, run_id: str) -> SwarmRun | None:
         with self._connection() as connection:
@@ -1356,12 +1672,24 @@ class ReadOnlyProjectSwarmStore:
     ) -> ModelCatalogSnapshot | None:
         return _get_model_catalog_snapshot(self._connection, provider)
 
-    def _connection(self) -> "_ReadOnlyConnectionContext":
-        database_uri = f"{self.db_path.resolve().as_uri()}?mode=ro"
-        connection = sqlite3.connect(database_uri, uri=True)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return _ReadOnlyConnectionContext(connection)
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        self._refresh_runtime_paths()
+        with pinned_swarm_database(self.project_root, read_only=True) as pinned:
+            connection = _open_pinned_swarm_database_connection(
+                pinned,
+                self.project_root,
+            )
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys = ON")
+            try:
+                yield connection
+            finally:
+                connection.close()
+
+    def _refresh_runtime_paths(self) -> None:
+        self.runtime_dir = resolve_swarm_path(self.project_root, "runtime")
+        self.db_path = resolve_swarm_path(self.project_root, "runtime", "swarm.sqlite")
 
 
 class _ConnectionContext:
@@ -1392,6 +1720,70 @@ class _ReadOnlyConnectionContext:
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         self._connection.close()
+
+
+def _open_pinned_swarm_database_connection(
+    pinned: PinnedSwarmDatabase,
+    project_root: Path,
+) -> sqlite3.Connection:
+    """Open SQLite only while the direct runtime child retains its identity.
+
+    POSIX stock SQLite receives a pathname rather than our already-open file
+    descriptor.  The runtime directory is owner-only (the OS trust boundary),
+    and these checks bracket SQLite's one pathname open so a detected stale
+    same-UID child replacement cannot reach Swarm SQL or a transaction.
+    """
+    pinned.assert_database_identity()
+    connection = sqlite3.connect(pinned.database_path, uri=pinned.uri)
+    try:
+        # A test hook or same-UID process may replace the child exactly while
+        # SQLite opens its URI.  Check before the first SQL statement, then
+        # close without exposing or mutating the substituted database.
+        pinned.assert_database_identity()
+        _validate_pinned_database_connection(
+            connection,
+            project_root,
+            pinned.runtime_dir,
+        )
+    except BaseException:
+        connection.close()
+        raise
+    return connection
+
+
+def _validate_pinned_database_connection(
+    connection: sqlite3.Connection,
+    project_root: Path,
+    runtime_dir: Path,
+) -> None:
+    """Fail closed unless SQLite opened the database in the pinned runtime dir.
+
+    `pinned_swarm_database()` retains the runtime directory descriptor/handle
+    while SQLite opens its URI.  This proof must therefore use that pinned
+    parent reference, never process-global ``Path.cwd()``.
+    """
+    rows = connection.execute("PRAGMA database_list").fetchall()
+    database_file = next((row[2] for row in rows if row[1] == "main"), None)
+    if not isinstance(database_file, str) or not database_file:
+        raise SwarmProjectPathError("SQLite did not expose a canonical Swarm database")
+    candidate = Path(database_file)
+    try:
+        expected = (runtime_dir / "swarm.sqlite").resolve()
+        actual = (
+            candidate if candidate.is_absolute() else runtime_dir / candidate
+        ).resolve()
+        if actual != expected:
+            raise ValueError("SQLite opened a different Swarm database")
+        actual.relative_to(project_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SwarmProjectPathError(
+            "SQLite database resolves outside the trusted Swarm project: "
+            f"{database_file}"
+        ) from exc
+    if actual.name != "swarm.sqlite" or actual.parent != expected.parent:
+        raise SwarmProjectPathError(
+            f"SQLite database is not the pinned Swarm runtime file: {database_file}"
+        )
 
 
 def _list_events_after(
@@ -1523,6 +1915,66 @@ def _merge_references(
     return tuple(merged)
 
 
+def _validated_workflow_checkpoint_data(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the minimal structured response state safe for durable replay."""
+    if not isinstance(data, Mapping):
+        raise TypeError("Workflow checkpoint data must be a mapping")
+    try:
+        normalized = json.loads(json.dumps(dict(data), sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Workflow checkpoint data must be JSON-safe") from exc
+    if not isinstance(normalized.get("work"), str):
+        raise ValueError("Workflow checkpoint work must be a string")
+    if not isinstance(normalized.get("evidence"), list):
+        raise ValueError("Workflow checkpoint evidence must be a list")
+    if not isinstance(normalized.get("decision"), str):
+        raise ValueError("Workflow checkpoint decision must be a string")
+    return normalized
+
+
+def _workflow_role_checkpoints_from_connection(
+    connection: sqlite3.Connection,
+    run_id: str,
+) -> dict[str, WorkflowRoleCheckpoint]:
+    """Read one run's immutable role outputs within the caller's transaction."""
+    rows = connection.execute(
+        """
+        SELECT run_id, role, model, data_json, completed_at
+        FROM workflow_role_checkpoints
+        WHERE run_id = ?
+        ORDER BY completed_at ASC, role ASC
+        """,
+        (run_id,),
+    ).fetchall()
+    return {
+        checkpoint.role: checkpoint
+        for checkpoint in (_row_to_workflow_role_checkpoint(row) for row in rows)
+    }
+
+
+def _row_to_workflow_role_checkpoint(row: sqlite3.Row) -> WorkflowRoleCheckpoint:
+    role = row["role"]
+    if not isinstance(role, str) or not role.strip():
+        raise RuntimeError("Stored workflow checkpoint has an invalid role")
+    model = row["model"]
+    if model is not None:
+        if not isinstance(model, str) or not model.strip():
+            raise RuntimeError("Stored workflow checkpoint has an invalid model")
+        model = model.strip()
+    try:
+        data = _validated_workflow_checkpoint_data(json.loads(row["data_json"]))
+        completed_at = datetime.fromisoformat(row["completed_at"])
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Stored workflow checkpoint is invalid") from exc
+    return WorkflowRoleCheckpoint(
+        run_id=row["run_id"],
+        role=role,
+        model=model,
+        data=data,
+        completed_at=completed_at,
+    )
+
+
 def _row_to_run(row: sqlite3.Row) -> SwarmRun:
     return SwarmRun(
         run_id=row["run_id"],
@@ -1543,6 +1995,103 @@ def _row_to_event(row: sqlite3.Row) -> SwarmEvent:
         payload=json.loads(row["payload_json"]),
         visibility=row["visibility"],
     )
+
+
+def _unmatched_durable_model_attempts(
+    events: list[SwarmEvent],
+) -> tuple[tuple[int, str, str], ...]:
+    """Return exact attempts with no later terminal outcome or prior handoff.
+
+    The event stream predates an attempt-id column, so matching is deliberately
+    FIFO per ``(role, model)``.  A valid prior human replay authorization is a
+    handoff for its exact original sequence and is not reissued on a later
+    crash recovery; malformed/duplicate authorizations are left for Engine to
+    reject fail-closed.
+    """
+    pending: list[tuple[int, str, str]] = []
+    for event in sorted(events, key=lambda item: item.sequence):
+        identity = _durable_attempt_identity(event)
+        if event.event_type == "model.attempt_started":
+            if identity is not None:
+                pending.append((event.sequence, *identity))
+            continue
+        if event.event_type in {"model.attempt_failed", "work.completed"}:
+            if identity is not None:
+                _consume_durable_attempt(pending, *identity)
+            continue
+        if event.event_type == "model.attempt_replay_authorized_by_human":
+            authorization = _durable_replay_authorization_identity(event)
+            if authorization is None:
+                continue
+            original_sequence, role, model = authorization
+            if event.sequence <= original_sequence:
+                continue
+            for index, attempt in enumerate(pending):
+                if attempt == (original_sequence, role, model):
+                    pending.pop(index)
+                    break
+    return tuple(pending)
+
+
+def _durable_attempt_identity(event: SwarmEvent) -> tuple[str, str] | None:
+    role = event.payload.get("role")
+    model = event.payload.get("model")
+    if (
+        not isinstance(role, str)
+        or not role
+        or role != role.strip()
+        or not isinstance(model, str)
+        or not model
+        or model != model.strip()
+    ):
+        return None
+    return role, model
+
+
+def _durable_replay_authorization_identity(
+    event: SwarmEvent,
+) -> tuple[int, str, str] | None:
+    payload = event.payload
+    if set(payload) != {
+        "actor_id",
+        "original_attempt_sequence",
+        "role",
+        "model",
+    }:
+        return None
+    actor_id = payload.get("actor_id")
+    original_sequence = payload.get("original_attempt_sequence")
+    role = payload.get("role")
+    model = payload.get("model")
+    if (
+        not isinstance(actor_id, str)
+        or not actor_id.startswith(("os:", "dashboard:"))
+        or not actor_id.split(":", 1)[1].strip()
+        or len(actor_id) > 256
+        or any(ord(character) < 32 or ord(character) == 127 for character in actor_id)
+        or isinstance(original_sequence, bool)
+        or not isinstance(original_sequence, int)
+        or original_sequence < 1
+        or not isinstance(role, str)
+        or not role
+        or role != role.strip()
+        or not isinstance(model, str)
+        or not model
+        or model != model.strip()
+    ):
+        return None
+    return original_sequence, role, model
+
+
+def _consume_durable_attempt(
+    pending: list[tuple[int, str, str]],
+    role: str,
+    model: str,
+) -> None:
+    for index, (_sequence, candidate_role, candidate_model) in enumerate(pending):
+        if candidate_role == role and candidate_model == model:
+            pending.pop(index)
+            return
 
 
 def _row_to_approval(row: sqlite3.Row) -> ApprovalRecord:

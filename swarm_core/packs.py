@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 import yaml
 
+from .config import read_project_pack_override_texts
+
 
 DEFAULT_PACK_IDS = (
     "coding-team",
@@ -41,19 +43,14 @@ class PackRegistry:
             pack_id: _load_default_pack(pack_id) for pack_id in DEFAULT_PACK_IDS
         }
         if project_root is not None:
-            root = Path(project_root).resolve()
-            override_dir = root / ".swarm" / "packs"
-            if override_dir.exists():
-                if not override_dir.is_dir():
-                    raise ValueError("Swarm pack override path must be a directory")
-                for path in sorted(override_dir.glob("*.yaml")):
-                    pack_id = path.stem
-                    if pack_id not in definitions:
-                        raise ValueError(f"Unknown Swarm pack override: {pack_id}")
-                    definitions[pack_id] = _apply_project_override(
-                        definitions[pack_id],
-                        _load_yaml(path),
-                    )
+            for filename, document in read_project_pack_override_texts(project_root):
+                pack_id = Path(filename).stem
+                if pack_id not in definitions:
+                    raise ValueError(f"Unknown Swarm pack override: {pack_id}")
+                definitions[pack_id] = _apply_project_override(
+                    definitions[pack_id],
+                    _load_project_yaml(document, filename),
+                )
         self._definitions = definitions
 
     def list(self) -> tuple[PackDefinition, ...]:
@@ -86,12 +83,11 @@ def _load_default_pack(pack_id: str) -> PackDefinition:
     )
 
 
-def _load_yaml(path: Path) -> Any:
+def _load_project_yaml(document: str, filename: str) -> Any:
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle)
+        return yaml.safe_load(document)
     except yaml.YAMLError as exc:
-        raise ValueError(f"Malformed Swarm pack YAML: {path.name}") from exc
+        raise ValueError(f"Malformed Swarm pack YAML: {filename}") from exc
 
 
 def _apply_project_override(
