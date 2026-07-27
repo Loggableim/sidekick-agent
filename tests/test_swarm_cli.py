@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from cli.swarm import build_parser, swarm_command
+from swarm_core.packs import PackDefinition
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -157,6 +158,41 @@ def test_cli_models_refresh_and_packs_list_are_explicit_commands(
     assert swarm_command(refresh, service=FakeService()) == 0
     assert swarm_command(packs, service=FakeService()) == 0
     assert calls == [f"refresh:{project.resolve()}", f"packs:{project.resolve()}"]
+
+
+def test_cli_packs_list_serializes_immutable_role_metadata(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Catches CLI pack listing deep-copying MappingProxyType role metadata."""
+    project = tmp_path / "project"
+    project.mkdir()
+
+    class FakeService:
+        def list_packs(self, project_root):
+            assert project_root == project.resolve()
+            return [
+                PackDefinition(
+                    pack_id="coding-team",
+                    description="Coding workflow",
+                    workflow="scout -> builder",
+                    roles={"scout": "discover"},
+                )
+            ]
+
+    args = _parse(
+        ["swarm", "--project", str(project), "--json", "packs", "list"]
+    )
+
+    assert swarm_command(args, service=FakeService()) == 0
+    assert json.loads(capsys.readouterr().out) == [
+        {
+            "pack_id": "coding-team",
+            "description": "Coding workflow",
+            "workflow": "scout -> builder",
+            "roles": {"scout": "discover"},
+        }
+    ]
 
 
 def test_cli_shared_flags_work_before_or_after_the_action(tmp_path: Path):
