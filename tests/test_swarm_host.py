@@ -166,3 +166,15 @@ def test_human_approval_is_proposal_bound_and_cannot_execute_an_action(
             "unknown-proposal",
             actor_id="cli:alice",
         )
+
+
+def test_existing_run_controls_do_not_initialize_an_absent_project(tmp_path: Path):
+    """Catches pause/resume/approval typos creating a new empty .swarm tree."""
+    project = tmp_path / "uninitialized"
+    project.mkdir()
+    service = SidekickSwarmService()
+
+    with pytest.raises(FileNotFoundError, match="not initialized"):
+        service.pause(project, "unknown-run")
+
+    assert not (project / ".swarm").exists()

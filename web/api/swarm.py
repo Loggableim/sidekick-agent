@@ -49,10 +49,13 @@ def handle_swarm_get(handler, parsed) -> bool | None:
             # remain readable immediately after `swarm init`, before a first
             # SQLite-backed run, while still returning 404 for no `.swarm`.
             load_project_config(project_root)
-            return j(
-                handler,
-                {"packs": _jsonable(get_swarm_service().list_packs(project_root))},
-            ) or True
+            return (
+                j(
+                    handler,
+                    {"packs": _jsonable(get_swarm_service().list_packs(project_root))},
+                )
+                or True
+            )
         # This is intentionally the first Swarm operation for every GET.  It
         # opens an existing SQLite file with mode=ro and rejects uninitialized
         # projects without creating config, runtime state, or migrations.
@@ -60,10 +63,17 @@ def handle_swarm_get(handler, parsed) -> bool | None:
         if path == "/api/swarm/runs":
             return j(handler, {"runs": _jsonable(reader.list_runs())}) or True
         if path == "/api/swarm/models":
-            return j(
-                handler,
-                {"catalog": _jsonable(reader.get_model_catalog_snapshot("ollama-cloud"))},
-            ) or True
+            return (
+                j(
+                    handler,
+                    {
+                        "catalog": _jsonable(
+                            reader.get_model_catalog_snapshot("ollama-cloud")
+                        )
+                    },
+                )
+                or True
+            )
         if path == _SSE_PATH:
             run_id = _query_text(parsed, "run_id")
             if not run_id:
@@ -77,14 +87,17 @@ def handle_swarm_get(handler, parsed) -> bool | None:
         run = reader.get_run(run_id)
         if run is None:
             return bad(handler, "Swarm run not found", status=404)
-        return j(
-            handler,
-            {
-                "run": _jsonable(run),
-                "events": _jsonable(reader.list_events(run_id)),
-                "approvals": _jsonable(reader.list_approvals(run_id)),
-            },
-        ) or True
+        return (
+            j(
+                handler,
+                {
+                    "run": _jsonable(run),
+                    "events": _jsonable(reader.list_events(run_id)),
+                    "approvals": _jsonable(reader.list_approvals(run_id)),
+                },
+            )
+            or True
+        )
     except FileNotFoundError as exc:
         return bad(handler, str(exc), status=404)
     except LookupError as exc:
@@ -194,7 +207,11 @@ def _change_status(
         project_root = _resolve_project_path(parsed, body)
         _reject_unknown_keys(body, {"project_path"})
         service = get_swarm_service()
-        run = service.pause(project_root, run_id) if pause else service.resume(project_root, run_id)
+        run = (
+            service.pause(project_root, run_id)
+            if pause
+            else service.resume(project_root, run_id)
+        )
         return j(handler, {"run": _jsonable(run)}) or True
     except FileNotFoundError as exc:
         return bad(handler, str(exc), status=404)
@@ -238,8 +255,7 @@ def _handle_events_sse_stream(handler, parsed, reader, run_id: str) -> bool:
     handler.end_headers()
     if not _write_sse(
         handler,
-        "event: hello\n"
-        f"data: {json.dumps({'cursor': cursor, 'run_id': run_id})}\n\n",
+        f"event: hello\ndata: {json.dumps({'cursor': cursor, 'run_id': run_id})}\n\n",
     ):
         return True
     last_heartbeat = time.monotonic()
@@ -279,7 +295,13 @@ def _write_sse(handler, payload: str) -> bool:
         handler.wfile.write(payload.encode("utf-8"))
         handler.wfile.flush()
         return True
-    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError, OSError, ValueError):
+    except (
+        BrokenPipeError,
+        ConnectionAbortedError,
+        ConnectionResetError,
+        OSError,
+        ValueError,
+    ):
         return False
 
 

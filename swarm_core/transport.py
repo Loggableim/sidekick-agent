@@ -31,7 +31,9 @@ class OllamaCloudTransport:
         self._call_guard = call_guard
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        guard = self._call_guard(request) if self._call_guard is not None else nullcontext()
+        guard = (
+            self._call_guard(request) if self._call_guard is not None else nullcontext()
+        )
         with guard:
             raw_response = self._call_llm(
                 task="swarm",

@@ -15,7 +15,9 @@ from cli.swarm_host import SidekickSwarmService
 from swarm_core.config import initialize_project
 
 
-def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.ArgumentParser:
+def build_parser(
+    parent_subparsers: argparse._SubParsersAction,
+) -> argparse.ArgumentParser:
     """Attach ``sidekick swarm`` without leaking CLI concerns into Core."""
     parser = parent_subparsers.add_parser(
         "swarm",
@@ -36,7 +38,9 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     run.add_argument("goal", help="Bounded task goal")
     run.add_argument("--pack", default="coding-team", help="Swarm pack id")
 
-    status = actions.add_parser("status", help="Read project run status without mutation")
+    status = actions.add_parser(
+        "status", help="Read project run status without mutation"
+    )
     _add_common_arguments(status)
     status.add_argument("run_id", nargs="?", help="Optional exact run id")
 
@@ -64,7 +68,9 @@ def build_parser(parent_subparsers: argparse._SubParsersAction) -> argparse.Argu
     packs = actions.add_parser("packs", help="List declarative Swarm packs")
     _add_common_arguments(packs)
     packs_actions = packs.add_subparsers(dest="swarm_packs_action")
-    list_packs = packs_actions.add_parser("list", help="List shipped/project pack metadata")
+    list_packs = packs_actions.add_parser(
+        "list", help="List shipped/project pack metadata"
+    )
     _add_common_arguments(list_packs)
 
     parser.set_defaults(_swarm_parser=parser)
@@ -76,7 +82,9 @@ def get_swarm_service() -> SidekickSwarmService:
     return SidekickSwarmService()
 
 
-def _add_common_arguments(parser: argparse.ArgumentParser, *, defaults: bool = False) -> None:
+def _add_common_arguments(
+    parser: argparse.ArgumentParser, *, defaults: bool = False
+) -> None:
     """Accept shared output/project flags before or after a nested action."""
     parser.add_argument(
         "--project",

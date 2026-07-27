@@ -70,9 +70,7 @@ def test_cli_run_and_status_never_trigger_model_refresh(
     project.mkdir()
     service = FakeService()
 
-    run_args = _parse(
-        ["swarm", "--project", str(project), "--json", "run", "inspect"]
-    )
+    run_args = _parse(["swarm", "--project", str(project), "--json", "run", "inspect"])
     status_args = _parse(["swarm", "--project", str(project), "--json", "status"])
 
     assert swarm_command(run_args, service=service) == 0
@@ -126,9 +124,7 @@ def test_cli_approval_accepts_only_a_human_decision(
     )
 
     assert swarm_command(args, service=FakeService()) == 0
-    assert approvals == [
-        (project.resolve(), "run-1", "proposal-1", "cli:alice", False)
-    ]
+    assert approvals == [(project.resolve(), "run-1", "proposal-1", "cli:alice", False)]
 
 
 def test_cli_models_refresh_and_packs_list_are_explicit_commands(
@@ -148,9 +144,7 @@ def test_cli_models_refresh_and_packs_list_are_explicit_commands(
             calls.append(f"packs:{project_root}")
             return [{"id": "coding-team"}]
 
-    refresh = _parse(
-        ["swarm", "--project", str(project), "models", "refresh"]
-    )
+    refresh = _parse(["swarm", "--project", str(project), "models", "refresh"])
     packs = _parse(["swarm", "--project", str(project), "packs", "list"])
 
     assert swarm_command(refresh, service=FakeService()) == 0
