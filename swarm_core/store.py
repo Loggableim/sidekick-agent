@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
+import threading
 from typing import Any, Callable, Iterator, Mapping, TypeVar
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ _ALLOWED_TRANSITIONS = {
     "paused": frozenset({"running"}),
     "completed": frozenset(),
 }
+_SCHEMA_MIGRATION_LOCK = threading.RLock()
 
 
 class ProjectSwarmStore:
@@ -351,19 +353,48 @@ class ProjectSwarmStore:
                     existing_data["evidence_refs"],
                     evidence_refs,
                 )
+                merged_revalidate_after = _earliest_deadline(
+                    existing_data["revalidate_after"],
+                    revalidate_after,
+                )
+                merged_expires_at = _earliest_deadline(
+                    existing_data["expires_at"],
+                    expires_at,
+                )
+                merged_lifecycle = existing_data["lifecycle"]
+                if _deadlines_require_expiry(
+                    merged_revalidate_after,
+                    merged_expires_at,
+                ):
+                    # A retry must never make a claim more usable.  Retain the
+                    # contradictory evidence for audit, but fail closed rather
+                    # than leaving the claim active.
+                    merged_lifecycle = "expired"
                 if (
                     merged_source_refs != existing_data["source_refs"]
                     or merged_evidence_refs != existing_data["evidence_refs"]
+                    or merged_revalidate_after != existing_data["revalidate_after"]
+                    or merged_expires_at != existing_data["expires_at"]
+                    or merged_lifecycle != existing_data["lifecycle"]
                 ):
                     connection.execute(
                         """
                         UPDATE memory_items
-                        SET source_refs_json = ?, evidence_refs_json = ?, updated_at = ?
+                        SET source_refs_json = ?, evidence_refs_json = ?,
+                            revalidate_after = ?, expires_at = ?, lifecycle = ?,
+                            updated_at = ?
                         WHERE item_id = ?
                         """,
                         (
                             json.dumps(list(merged_source_refs), sort_keys=True),
                             json.dumps(list(merged_evidence_refs), sort_keys=True),
+                            _timestamp_text(merged_revalidate_after)
+                            if merged_revalidate_after is not None
+                            else None,
+                            _timestamp_text(merged_expires_at)
+                            if merged_expires_at is not None
+                            else None,
+                            merged_lifecycle,
                             _timestamp_text(_utc_now()),
                             existing_data["item_id"],
                         ),
@@ -733,7 +764,7 @@ class ProjectSwarmStore:
             if existing["status"] == "promoted":
                 raise ValueError("Promoted prompt candidates cannot be reassessed")
             status = "eligible" if eligible else "candidate"
-            connection.execute(
+            cursor = connection.execute(
                 """
                 UPDATE prompt_candidates
                 SET status = ?, assessed_quality = ?, safety_passed = ?,
@@ -745,6 +776,7 @@ class ProjectSwarmStore:
                     approved_assessment_digest = NULL,
                     updated_at = ?
                 WHERE candidate_id = ?
+                  AND status != 'promoted'
                 """,
                 (
                     status,
@@ -756,6 +788,16 @@ class ProjectSwarmStore:
                     candidate_id,
                 ),
             )
+            if cursor.rowcount != 1:
+                terminal = connection.execute(
+                    "SELECT status FROM prompt_candidates WHERE candidate_id = ?",
+                    (candidate_id,),
+                ).fetchone()
+                if terminal is None:
+                    raise KeyError(f"Unknown prompt candidate: {candidate_id}")
+                if terminal["status"] == "promoted":
+                    raise ValueError("Promoted prompt candidates cannot be reassessed")
+                raise RuntimeError("Prompt candidate changed during assessment")
             row = connection.execute(
                 "SELECT * FROM prompt_candidates WHERE candidate_id = ?",
                 (candidate_id,),
@@ -829,9 +871,13 @@ class ProjectSwarmStore:
         return _row_to_prompt_candidate_data(row), cursor.rowcount == 1
 
     def _ensure_schema(self) -> None:
-        with self._connection() as connection:
-            connection.executescript(
-                """
+        # The Python lock keeps same-process openers from racing their PRAGMA
+        # checks.  The immediate SQLite transaction below serializes migration
+        # work with other Sidekick processes using this project database.
+        with _SCHEMA_MIGRATION_LOCK:
+            with self._connection() as connection:
+                connection.executescript(
+                    """
                 CREATE TABLE IF NOT EXISTS runs (
                     run_id TEXT PRIMARY KEY,
                     status TEXT NOT NULL,
@@ -954,50 +1000,63 @@ class ProjectSwarmStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
-                """
-            )
-            self._ensure_memory_deadline_columns(connection)
-            self._ensure_prompt_assessment_columns(connection)
-            self._migrate_reputation_results(connection)
+                    """
+                )
+            with self._immediate_connection() as connection:
+                self._ensure_memory_deadline_columns(connection)
+                self._ensure_prompt_assessment_columns(connection)
+                self._migrate_reputation_results(connection)
 
     @staticmethod
     def _ensure_memory_deadline_columns(connection: sqlite3.Connection) -> None:
-        columns = _table_columns(connection, "memory_items")
-        if "revalidate_after" not in columns:
-            connection.execute(
-                "ALTER TABLE memory_items ADD COLUMN revalidate_after TEXT"
-            )
-        if "expires_at" not in columns:
-            connection.execute("ALTER TABLE memory_items ADD COLUMN expires_at TEXT")
+        _add_column_if_missing(
+            connection,
+            "memory_items",
+            "revalidate_after",
+            "ALTER TABLE memory_items ADD COLUMN revalidate_after TEXT",
+        )
+        _add_column_if_missing(
+            connection,
+            "memory_items",
+            "expires_at",
+            "ALTER TABLE memory_items ADD COLUMN expires_at TEXT",
+        )
 
     @staticmethod
     def _ensure_prompt_assessment_columns(connection: sqlite3.Connection) -> None:
-        columns = _table_columns(connection, "prompt_candidates")
-        if "assessment_revision" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE prompt_candidates
-                ADD COLUMN assessment_revision INTEGER NOT NULL DEFAULT 0
-                """
-            )
-        if "assessment_digest" not in columns:
-            connection.execute(
-                "ALTER TABLE prompt_candidates ADD COLUMN assessment_digest TEXT"
-            )
-        if "approved_assessment_revision" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE prompt_candidates
-                ADD COLUMN approved_assessment_revision INTEGER
-                """
-            )
-        if "approved_assessment_digest" not in columns:
-            connection.execute(
-                """
-                ALTER TABLE prompt_candidates
-                ADD COLUMN approved_assessment_digest TEXT
-                """
-            )
+        _add_column_if_missing(
+            connection,
+            "prompt_candidates",
+            "assessment_revision",
+            """
+            ALTER TABLE prompt_candidates
+            ADD COLUMN assessment_revision INTEGER NOT NULL DEFAULT 0
+            """,
+        )
+        _add_column_if_missing(
+            connection,
+            "prompt_candidates",
+            "assessment_digest",
+            "ALTER TABLE prompt_candidates ADD COLUMN assessment_digest TEXT",
+        )
+        _add_column_if_missing(
+            connection,
+            "prompt_candidates",
+            "approved_assessment_revision",
+            """
+            ALTER TABLE prompt_candidates
+            ADD COLUMN approved_assessment_revision INTEGER
+            """,
+        )
+        _add_column_if_missing(
+            connection,
+            "prompt_candidates",
+            "approved_assessment_digest",
+            """
+            ALTER TABLE prompt_candidates
+            ADD COLUMN approved_assessment_digest TEXT
+            """,
+        )
         connection.execute(
             """
             UPDATE prompt_candidates
@@ -1075,6 +1134,49 @@ def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
         str(row["name"])
         for row in connection.execute(f"PRAGMA table_info({table_name})")
     }
+
+
+def _add_column_if_missing(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    statement: str,
+) -> None:
+    """Add one legacy column without concealing non-race migration failures."""
+    if column_name in _table_columns(connection, table_name):
+        return
+    try:
+        connection.execute(statement)
+    except sqlite3.OperationalError as error:
+        # Another process may have passed its own older PRAGMA check immediately
+        # before this transaction.  Treat only a verified duplicate-column race
+        # as idempotent; all other SQLite errors remain visible to callers.
+        if "duplicate column name" not in str(error).lower():
+            raise
+        if column_name not in _table_columns(connection, table_name):
+            raise
+
+
+def _earliest_deadline(
+    existing: datetime | None,
+    incoming: datetime | None,
+) -> datetime | None:
+    if existing is None:
+        return incoming
+    if incoming is None:
+        return existing
+    return min(existing, incoming)
+
+
+def _deadlines_require_expiry(
+    revalidate_after: datetime | None,
+    expires_at: datetime | None,
+) -> bool:
+    return (
+        revalidate_after is not None
+        and expires_at is not None
+        and revalidate_after >= expires_at
+    )
 
 
 def _merge_references(
