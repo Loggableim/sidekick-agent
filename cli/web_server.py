@@ -10,6 +10,7 @@ Usage:
 """
 
 import asyncio
+import hashlib
 import hmac
 import importlib.util
 import json
@@ -320,6 +321,23 @@ def _has_valid_session_token(request: Request) -> bool:
     auth = request.headers.get("authorization", "")
     expected = f"Bearer {_SESSION_TOKEN}"
     return hmac.compare_digest(auth.encode(), expected.encode())
+
+
+def dashboard_session_principal(request: Request) -> str | None:
+    """Return a non-reversible principal for a validated dashboard session.
+
+    The ephemeral dashboard token is already required by API middleware.  A
+    Swarm human-approval record needs a durable actor identifier, but must not
+    store or log that raw bearer/header token.  This domain-separated digest is
+    stable only for the current dashboard process and cannot be chosen through
+    profile cookies or request JSON.
+    """
+    if not _has_valid_session_token(request):
+        return None
+    material = b"sidekick-swarm-dashboard-principal\0" + _SESSION_TOKEN.encode(
+        "utf-8"
+    )
+    return f"dashboard:{hashlib.sha256(material).hexdigest()}"
 
 
 def _require_token(request: Request) -> None:

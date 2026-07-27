@@ -4295,14 +4295,13 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path.startswith("/api/swarm/"):
         from web.api.swarm import handle_swarm_get
 
-        _setup_workspace_from_request(handler, parsed)
-        try:
-            result = handle_swarm_get(handler, parsed)
-            if result is False:
-                return _kanban_unknown_endpoint(handler, parsed, "GET")
-            return True
-        finally:
-            _teardown_workspace_context()
+        # Swarm GETs require explicit project_path and use only the read-only
+        # store/config paths.  Do not create a Space/session directory merely
+        # to inspect a project-local run.
+        result = handle_swarm_get(handler, parsed)
+        if result is False:
+            return _kanban_unknown_endpoint(handler, parsed, "GET")
+        return True
     if parsed.path == "/api/wiki/status":
         return _handle_llm_wiki_status(handler, parsed)
     if parsed.path == "/api/logs":

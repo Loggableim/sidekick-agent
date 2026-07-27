@@ -81,7 +81,6 @@ def test_cli_run_and_status_never_trigger_model_refresh(
 
 def test_cli_approval_accepts_only_a_human_decision(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ):
     """Catches CLI flags forging a verifier/model quorum or caller identity."""
     project = tmp_path / "project"
@@ -109,7 +108,6 @@ def test_cli_approval_accepts_only_a_human_decision(
             approvals.append((project_root, run_id, proposal_id, actor_id, approved))
             return {"approval_type": "human", "approved": approved}
 
-    monkeypatch.setattr("cli.swarm.getpass.getuser", lambda: "alice")
     args = _parse(
         [
             "swarm",
@@ -123,8 +121,17 @@ def test_cli_approval_accepts_only_a_human_decision(
         ]
     )
 
-    assert swarm_command(args, service=FakeService()) == 0
-    assert approvals == [(project.resolve(), "run-1", "proposal-1", "cli:alice", False)]
+    assert (
+        swarm_command(
+            args,
+            service=FakeService(),
+            actor_factory=lambda: "os:uid:4242",
+        )
+        == 0
+    )
+    assert approvals == [
+        (project.resolve(), "run-1", "proposal-1", "os:uid:4242", False)
+    ]
 
 
 def test_cli_models_refresh_and_packs_list_are_explicit_commands(

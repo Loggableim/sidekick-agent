@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-import getpass
 import json
 from pathlib import Path
 import sys
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
-from cli.swarm_host import SidekickSwarmService
+from cli.swarm_host import SidekickSwarmService, get_cli_host_actor
 from swarm_core.config import initialize_project
 
 
@@ -104,6 +103,7 @@ def swarm_command(
     args: argparse.Namespace,
     *,
     service: SidekickSwarmService | Any | None = None,
+    actor_factory: Callable[[], str] | None = None,
 ) -> int:
     """Dispatch one command and return a shell-style exit code."""
     action = getattr(args, "swarm_action", None)
@@ -143,12 +143,13 @@ def swarm_command(
             )
             return 0
         if action == "approve":
+            actor_id = (actor_factory or get_cli_host_actor)()
             _emit(
                 service.record_human_approval(
                     project_root,
                     args.run_id,
                     args.proposal_id,
-                    actor_id=f"cli:{getpass.getuser()}",
+                    actor_id=actor_id,
                     approved=not bool(args.deny),
                 ),
                 json_output=json_output,

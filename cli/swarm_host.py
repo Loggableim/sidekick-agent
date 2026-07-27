@@ -42,6 +42,43 @@ _FALLBACK_SLOT_LOCK = threading.Lock()
 _FALLBACK_SLOTS: dict[int, threading.BoundedSemaphore] = {}
 
 
+def get_cli_host_actor() -> str:
+    """Derive a local human principal from the operating-system identity.
+
+    This intentionally accepts no CLI argument and does not trust environment
+    variables such as ``USERNAME``.  Windows asks the current process token;
+    POSIX records the numeric effective UID, which remains stable even when a
+    display-name lookup is altered.
+    """
+    if os.name == "nt":
+        return _windows_token_actor()
+    getuid = getattr(os, "getuid", None)
+    if not callable(getuid):
+        raise RuntimeError("Cannot derive an operating-system CLI principal")
+    return f"os:uid:{int(getuid())}"
+
+
+def _windows_token_actor() -> str:
+    """Read the current Windows token username through the native API."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        size = wintypes.DWORD(0)
+        ctypes.windll.advapi32.GetUserNameW(None, ctypes.byref(size))
+        if size.value < 2:
+            raise OSError("GetUserNameW did not return a token username size")
+        buffer = ctypes.create_unicode_buffer(size.value)
+        if not ctypes.windll.advapi32.GetUserNameW(buffer, ctypes.byref(size)):
+            raise OSError("GetUserNameW failed for the current process token")
+        username = buffer.value.strip()
+    except Exception as exc:
+        raise RuntimeError("Cannot derive a Windows token CLI principal") from exc
+    if not username:
+        raise RuntimeError("Cannot derive a Windows token CLI principal")
+    return f"os:windows-token-user:{username}"
+
+
 class SidekickSwarmService:
     """Host service for explicit Swarm writes and strictly bounded model calls."""
 

@@ -141,6 +141,67 @@ def test_http_read_on_missing_project_is_pure_and_returns_not_found(
     assert not (project / ".swarm").exists()
 
 
+def test_swarm_get_requires_explicit_project_path_without_space_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a supposedly pure GET bootstrapping a Space as an implicit fallback."""
+    active_space_calls: list[object] = []
+    trusted_calls: list[object] = []
+
+    def unexpected_active_space():
+        active_space_calls.append(object())
+        raise AssertionError("Swarm GET must not resolve an active Space")
+
+    def unexpected_trusted_path(_value):
+        trusted_calls.append(_value)
+        raise AssertionError("Swarm GET without project_path must fail first")
+
+    monkeypatch.setattr(swarm_api, "resolve_active_space", unexpected_active_space)
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", unexpected_trusted_path
+    )
+    handler = _Handler()
+
+    result = swarm_api.handle_swarm_get(handler, urlparse("/api/swarm/runs"))
+
+    assert result is None
+    assert handler.status_code == 400
+    assert active_space_calls == []
+    assert trusted_calls == []
+
+
+def test_direct_router_swarm_get_skips_workspace_setup(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches the legacy/direct dispatcher reintroducing Space initialization."""
+    from web.api import routes
+
+    def unexpected_setup(*_args):
+        raise AssertionError("Swarm GET must not initialize a workspace")
+
+    def fake_swarm_get(handler, parsed):
+        assert parsed.path == "/api/swarm/runs"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.end_headers()
+        handler.wfile.write(b'{"ok":true}')
+        return True
+
+    monkeypatch.setattr(routes, "_setup_workspace_from_request", unexpected_setup)
+    monkeypatch.setattr(routes, "_teardown_workspace_context", unexpected_setup)
+    monkeypatch.setattr(swarm_api, "handle_swarm_get", fake_swarm_get)
+    handler = _Handler()
+
+    handled = routes.handle_get(
+        handler,
+        urlparse("/api/swarm/runs?project_path=C%3A%2Ftrusted"),
+    )
+
+    assert handled is True
+    assert handler.status_code == 200
+    assert _response_json(handler) == {"ok": True}
+
+
 def test_http_packs_reads_initialized_config_without_creating_runtime_database(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -184,7 +245,6 @@ def test_http_approval_rejects_forged_model_fields_and_derives_human_actor(
     monkeypatch.setattr(
         swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
     )
-    monkeypatch.setattr(swarm_api, "get_active_profile_name", lambda: "reviewer")
 
     class FakeService:
         def record_human_approval(
@@ -214,7 +274,20 @@ def test_http_approval_rejects_forged_model_fields_and_derives_human_actor(
     assert forged.status_code == 400
     assert calls == []
 
+    missing_actor = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            missing_actor,
+            urlparse("/api/swarm/runs/run-1/approve"),
+            {"project_path": str(project), "proposal_id": "proposal-1"},
+        )
+        is None
+    )
+    assert missing_actor.status_code == 403
+    assert calls == []
+
     accepted = _Handler()
+    accepted.swarm_host_actor = "dashboard:trusted-test-principal"
     assert (
         swarm_api.handle_swarm_post(
             accepted,
@@ -224,7 +297,13 @@ def test_http_approval_rejects_forged_model_fields_and_derives_human_actor(
         is True
     )
     assert calls == [
-        (project.resolve(), "run-1", "proposal-1", "webui:reviewer", False)
+        (
+            project.resolve(),
+            "run-1",
+            "proposal-1",
+            "dashboard:trusted-test-principal",
+            False,
+        )
     ]
 
 
@@ -239,6 +318,7 @@ def test_http_existing_run_write_does_not_initialize_an_absent_project(
         swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
     )
     handler = _Handler()
+    handler.swarm_host_actor = "dashboard:trusted-test-principal"
 
     assert (
         swarm_api.handle_swarm_post(
