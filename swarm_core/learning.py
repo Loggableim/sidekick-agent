@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
+import json
 import math
 from typing import Iterable
 
@@ -64,7 +66,11 @@ class PromptCandidate:
     assessed_quality: float | None
     safety_passed: bool | None
     assessment_references: tuple[str, ...]
+    assessment_revision: int
+    assessment_digest: str | None
     human_approver_id: str | None
+    approved_assessment_revision: int | None
+    approved_assessment_digest: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -162,6 +168,7 @@ class PromptCandidates:
         results: Iterable[GoldenResult],
     ) -> PromptCandidate:
         candidate = self.get(candidate_id)
+        results = tuple(results)
         assessment = assess_golden_results(
             results,
             baseline_quality=candidate.baseline_quality,
@@ -173,16 +180,29 @@ class PromptCandidates:
                 safety_passed=assessment.all_safety_passed,
                 references=assessment.references,
                 eligible=assessment.eligible_for_promotion,
+                assessment_digest=_assessment_digest(candidate, results),
             )
         )
 
     def approve(self, candidate_id: str, *, approver_id: str) -> PromptCandidate:
-        return _to_prompt_candidate(
-            self.store.approve_prompt_candidate(
-                _require_text(candidate_id, "Candidate id"),
-                approver_id=_require_text(approver_id, "Human approver id"),
+        candidate = self.get(candidate_id)
+        if (
+            candidate.status != "eligible"
+            or candidate.assessment_revision < 1
+            or candidate.assessment_digest is None
+        ):
+            raise PermissionError(
+                "Prompt candidate requires a current eligible assessment"
             )
+        data, approved = self.store.approve_prompt_candidate(
+            candidate.candidate_id,
+            approver_id=_require_text(approver_id, "Human approver id"),
         )
+        if not approved:
+            raise PermissionError(
+                "Prompt candidate no longer has a current eligible assessment"
+            )
+        return _to_prompt_candidate(data)
 
     def promote(self, candidate_id: str) -> PromptCandidate:
         candidate = self.get(candidate_id)
@@ -204,7 +224,9 @@ class LessonExporter:
     def __init__(self, memory: ProjectMemory) -> None:
         self.memory = memory
 
-    def export(self) -> tuple[LessonExport, ...]:
+    def export(self, *, opt_in: bool = False) -> tuple[LessonExport, ...]:
+        if opt_in is not True:
+            raise PermissionError("Lesson export requires explicit opt-in=True")
         return tuple(
             LessonExport(kind=item.kind, statement=item.redacted_statement)
             for item in self.memory.list_exportable_lessons()
@@ -257,6 +279,32 @@ def _require_text(value: str, label: str) -> str:
     return value.strip()
 
 
+def _assessment_digest(
+    candidate: PromptCandidate,
+    results: tuple[GoldenResult, ...],
+) -> str:
+    """Bind approval to every structured result in the current assessment."""
+    payload = {
+        "baseline_quality": candidate.baseline_quality,
+        "candidate_id": candidate.candidate_id,
+        "results": [
+            {
+                "reference": result.reference,
+                "safety_passed": result.safety_passed,
+                "score": result.score,
+            }
+            for result in sorted(results, key=lambda result: result.reference)
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _to_reputation_record(data: dict[str, object]) -> ReputationRecord:
     return ReputationRecord(
         result_id=str(data["result_id"]),
@@ -284,9 +332,25 @@ def _to_prompt_candidate(data: dict[str, object]) -> PromptCandidate:
             bool(data["safety_passed"]) if data["safety_passed"] is not None else None
         ),
         assessment_references=tuple(data["assessment_references"]),  # type: ignore[arg-type]
+        assessment_revision=int(data["assessment_revision"]),
+        assessment_digest=(
+            str(data["assessment_digest"])
+            if data["assessment_digest"] is not None
+            else None
+        ),
         human_approver_id=(
             str(data["human_approver_id"])
             if data["human_approver_id"] is not None
+            else None
+        ),
+        approved_assessment_revision=(
+            int(data["approved_assessment_revision"])
+            if data["approved_assessment_revision"] is not None
+            else None
+        ),
+        approved_assessment_digest=(
+            str(data["approved_assessment_digest"])
+            if data["approved_assessment_digest"] is not None
             else None
         ),
         created_at=data["created_at"],  # type: ignore[arg-type]
