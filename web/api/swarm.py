@@ -21,6 +21,7 @@ from swarm_core.config import load_project_config
 from swarm_core.store import ProjectSwarmStore
 from web.api.helpers import bad, j
 from web.api.space_engine import resolve_active_space
+from web.api.swarm_kanban_projection import project_swarm_run_to_kanban
 from web.api.workspace import resolve_trusted_workspace
 
 
@@ -125,6 +126,8 @@ def handle_swarm_post(handler, parsed, body) -> bool | None:
         return _change_status(handler, parsed, body, run_id, pause=True)
     if action == "resume":
         return _change_status(handler, parsed, body, run_id, pause=False)
+    if action == "kanban-projection":
+        return _project_to_kanban(handler, parsed, body, run_id)
     return False
 
 
@@ -218,6 +221,33 @@ def _change_status(
         return bad(handler, str(exc), status=404)
     except KeyError as exc:
         return bad(handler, str(exc), status=404)
+    except (TypeError, ValueError) as exc:
+        return bad(handler, str(exc), status=400)
+    except RuntimeError as exc:
+        return bad(handler, str(exc), status=409)
+
+
+def _project_to_kanban(
+    handler,
+    parsed,
+    body: Mapping[str, Any],
+    run_id: str,
+) -> bool | None:
+    """Explicitly create a Sidekick-owned triage projection for one Swarm run."""
+    try:
+        # Unlike normal Swarm writes, this cross-surface projection must carry
+        # an explicit filesystem path.  The host maps it to the active Space;
+        # callers cannot select a board, dispatcher, or workspace identity.
+        project_root = _resolve_project_path(parsed, body, require_explicit=True)
+        _reject_unknown_keys(body, {"project_path"})
+        projection = project_swarm_run_to_kanban(project_root, run_id)
+        return j(handler, {"projection": _jsonable(projection)}, status=201) or True
+    except FileNotFoundError as exc:
+        return bad(handler, str(exc), status=404)
+    except KeyError as exc:
+        return bad(handler, str(exc), status=404)
+    except LookupError as exc:
+        return bad(handler, str(exc), status=409)
     except (TypeError, ValueError) as exc:
         return bad(handler, str(exc), status=400)
     except RuntimeError as exc:

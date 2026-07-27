@@ -472,6 +472,11 @@ function _refreshActiveSpaceScopedPanel() {
   const panel = (typeof _currentPanel !== 'undefined') ? _currentPanel : 'chat';
   if (panel === 'kanban' && typeof loadKanban === 'function') {
     loadKanban();
+  } else if (panel === 'swarm' && typeof loadSwarm === 'function') {
+    // The project directory belongs to the newly active Space.  Tear down the
+    // old run's EventSource before issuing read-only requests for the new one.
+    if (typeof stopSwarmStream === 'function') stopSwarmStream();
+    loadSwarm({resetSelection:true});
   } else if (panel === 'todos' && typeof loadTodos === 'function') {
     loadTodos();
   } else if (panel === 'tasks' && typeof loadCrons === 'function') {

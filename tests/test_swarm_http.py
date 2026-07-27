@@ -349,6 +349,79 @@ def test_http_existing_run_write_does_not_initialize_an_absent_project(
     assert not (project / ".swarm").exists()
 
 
+def test_http_kanban_projection_accepts_only_an_explicit_trusted_project_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches the optional Kanban write accepting a client board, Space slug, or untrusted path."""
+    project = tmp_path / "project"
+    project.mkdir()
+    trusted_values: list[str] = []
+    calls: list[tuple[Path, str]] = []
+
+    def resolve(value):
+        trusted_values.append(str(value))
+        if value != str(project):
+            raise ValueError("Path is outside the trusted workspace list")
+        return project.resolve()
+
+    monkeypatch.setattr(swarm_api, "resolve_trusted_workspace", resolve)
+    monkeypatch.setattr(
+        swarm_api,
+        "project_swarm_run_to_kanban",
+        lambda project_root, run_id: calls.append((project_root, run_id))
+        or {
+            "task_id": "task-1",
+            "board": "default",
+            "space_slug": "project-space",
+        },
+    )
+
+    forged = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            forged,
+            urlparse("/api/swarm/runs/run-1/kanban-projection"),
+            {"project_path": str(project), "board": "attacker-board"},
+        )
+        is None
+    )
+    assert forged.status_code == 400
+    assert calls == []
+
+    missing_path = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            missing_path,
+            urlparse("/api/swarm/runs/run-1/kanban-projection"),
+            {},
+        )
+        is None
+    )
+    assert missing_path.status_code == 400
+    assert calls == []
+
+    accepted = _Handler()
+    assert (
+        swarm_api.handle_swarm_post(
+            accepted,
+            urlparse("/api/swarm/runs/run-1/kanban-projection"),
+            {"project_path": str(project)},
+        )
+        is True
+    )
+    assert accepted.status_code == 201
+    assert trusted_values == [str(project), str(project)]
+    assert calls == [(project.resolve(), "run-1")]
+    assert _response_json(accepted) == {
+        "projection": {
+            "task_id": "task-1",
+            "board": "default",
+            "space_slug": "project-space",
+        }
+    }
+
+
 def test_sse_reads_ordered_cursor_tail_without_mutating_a_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
