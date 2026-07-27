@@ -50,43 +50,25 @@ class SwarmEngine:
         goal: str,
         project_root: Path,
         pack: str = "coding-team",
+        *,
+        autonomy: str | None = None,
     ) -> RunSummary:
         project_root = Path(project_root).resolve()
         pack_definition = PackRegistry(project_root).get(pack)
         store = ProjectSwarmStore(project_root)
-        run = store.create_run(
-            metadata={
-                "goal": goal,
-                "pack": pack,
-                "project_root": str(project_root),
-            }
-        )
+        metadata = {
+            "goal": goal,
+            "pack": pack,
+            "project_root": str(project_root),
+        }
+        if autonomy is not None:
+            metadata["autonomy"] = autonomy
+        run = store.create_run(metadata=metadata)
         store.append_event(
             run.run_id,
             "run.started",
             {"goal": goal, "pack": pack},
         )
-        if pack_definition.pack_id != "coding-team":
-            store.set_run_status(run.run_id, "paused")
-            store.append_event(
-                run.run_id,
-                "run.paused",
-                {
-                    "attempted_models": [],
-                    "reason": "pack_workflow_not_implemented",
-                    "role": "pack",
-                },
-            )
-            events = tuple(store.list_events(run.run_id))
-            return RunSummary(
-                run_id=run.run_id,
-                status="paused",
-                call_count=0,
-                evidence={},
-                decision=None,
-                pause_reason="pack_workflow_not_implemented",
-                events=events,
-            )
         executor = ModelExecutor(
             ModelRouter(self.registry),
             self.transport,
@@ -98,7 +80,11 @@ class SwarmEngine:
             store.append_event(run.run_id, event_type, payload)
 
         try:
-            outcome = CodingTeamWorkflow().run(
+            outcome = CodingTeamWorkflow(
+                pack_id=pack_definition.pack_id,
+                pack_description=pack_definition.description,
+                pack_roles=pack_definition.roles,
+            ).run(
                 run_id=run.run_id,
                 goal=goal,
                 project_root=project_root,
