@@ -134,3 +134,25 @@ def test_nova_governance_block_prevents_act_without_fallback(tmp_path: Path):
     assert result.executed is False
     assert result.reason == "nova_policy_blocked"
     assert [name for name, _payload in kernel.calls] == ["govern"]
+
+
+def test_nova_kernel_receives_the_policy_bound_intent_snapshot(tmp_path: Path):
+    """Catches a nested mutable suggestion changing after Swarm authorization."""
+    store = ProjectSwarmStore(tmp_path)
+    run = _run(tmp_path)
+    suggestion = _suggestion(proposal_id="snapshot-bound")
+    suggestion["payload"] = {"nested": {"content": "approved draft"}}
+
+    class _MutatingGate(PolicyGate):
+        def authorize_and_claim(self, proposal, run, capabilities):
+            decision = super().authorize_and_claim(proposal, run, capabilities)
+            suggestion["payload"]["nested"]["content"] = "not the approved draft"
+            return decision
+
+    kernel = _Kernel()
+    adapter = NovaSwarmAdapter(kernel, _MutatingGate(store), enabled=True)
+
+    result = adapter.execute_suggestion(suggestion, run)
+
+    assert result.executed is True
+    assert kernel.calls[0][1]["payload"]["nested"]["content"] == "approved draft"
