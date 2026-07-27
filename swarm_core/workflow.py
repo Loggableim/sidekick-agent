@@ -212,7 +212,23 @@ EventEmitter = Callable[[str, Mapping[str, Any]], None]
 
 
 class CodingTeamWorkflow:
-    """Scout through referee with a local evidence-oriented verifier."""
+    """Scout through referee with a local evidence-oriented verifier.
+
+    Every shipped pack shares this reviewed execution spine.  A pack only
+    narrows each role's prompt; it never bypasses the verifier, independent
+    review pair, integrator or referee.
+    """
+
+    def __init__(
+        self,
+        *,
+        pack_id: str = "coding-team",
+        pack_description: str = "",
+        pack_roles: Mapping[str, str] | None = None,
+    ) -> None:
+        self.pack_id = str(pack_id).strip() or "coding-team"
+        self.pack_description = str(pack_description).strip()
+        self.pack_roles = dict(pack_roles or {})
 
     def run(
         self,
@@ -231,7 +247,7 @@ class CodingTeamWorkflow:
             run_id,
             RoleCall(
                 "scout",
-                "Inspect the project and report relevant facts.",
+                self._prompt("scout", "Inspect the project and report relevant facts."),
                 board.shard("goal", "project_root"),
             ),
             emit,
@@ -243,7 +259,7 @@ class CodingTeamWorkflow:
             run_id,
             RoleCall(
                 "planner",
-                "Create a concrete implementation plan.",
+                self._prompt("planner", "Create a concrete implementation plan."),
                 board.shard("goal", "scout"),
             ),
             emit,
@@ -253,12 +269,12 @@ class CodingTeamWorkflow:
         build_calls = (
             RoleCall(
                 "builder",
-                "Build the planned result.",
+                self._prompt("builder", "Build the planned result."),
                 board.shard("goal", "plan"),
             ),
             RoleCall(
                 "critic",
-                "Critique risks and omissions in the plan.",
+                self._prompt("critic", "Critique risks and omissions in the plan."),
                 board.shard("goal", "plan"),
             ),
         )
@@ -298,13 +314,13 @@ class CodingTeamWorkflow:
             (
                 RoleCall(
                     "review_a",
-                    "Perform independent review A.",
+                    self._prompt("review_a", "Perform independent review A."),
                     review_context,
                     frozenset({"review", "structured-output"}),
                 ),
                 RoleCall(
                     "review_b",
-                    "Perform independent review B.",
+                    self._prompt("review_b", "Perform independent review B."),
                     review_context,
                     frozenset({"review", "structured-output"}),
                 ),
@@ -323,7 +339,10 @@ class CodingTeamWorkflow:
             run_id,
             RoleCall(
                 "integrator",
-                "Integrate the plan, work, verification, and reviews.",
+                self._prompt(
+                    "integrator",
+                    "Integrate the plan, work, verification, and reviews.",
+                ),
                 board.shard(
                     "goal",
                     "plan",
@@ -343,7 +362,7 @@ class CodingTeamWorkflow:
             run_id,
             RoleCall(
                 "referee",
-                "Issue the final evidence-backed decision.",
+                self._prompt("referee", "Issue the final evidence-backed decision."),
                 board.shard("goal", "integration", "verification", "reviews"),
                 frozenset({"referee", "structured-output"}),
             ),
@@ -351,6 +370,17 @@ class CodingTeamWorkflow:
         )
         self._record("referee", referee, "referee", board, evidence)
         return WorkflowOutcome(evidence=evidence, decision=referee.data["decision"])
+
+    def _prompt(self, role: str, base: str) -> str:
+        if self.pack_id == "coding-team":
+            return base
+        role_focus = self.pack_roles.get(role)
+        detail = f"\nPack: {self.pack_id}"
+        if self.pack_description:
+            detail += f"\nPack purpose: {self.pack_description}"
+        if role_focus:
+            detail += f"\nPack role focus: {role_focus}"
+        return base + detail
 
     @staticmethod
     def _complete_one(

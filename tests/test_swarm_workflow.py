@@ -147,6 +147,42 @@ def test_engine_persists_structured_work_evidence_decision_and_verifier_events(
     ]
 
 
+def test_each_shipped_pack_runs_the_reviewed_core_workflow(tmp_path: Path):
+    """Catches a selectable pack being accepted by the UI but immediately paused."""
+    for pack in ("bug-hunt", "research-team", "release-audit"):
+        project = tmp_path / pack
+        transport = WorkflowTransport()
+
+        summary = SwarmEngine(transport).run(
+            goal=f"Exercise {pack}",
+            project_root=project,
+            pack=pack,
+        )
+
+        assert summary.status == "completed"
+        assert summary.pause_reason is None
+        assert summary.call_count == 8
+        assert all(f"Pack: {pack}" in request.prompt for request in transport.requests)
+        started = ProjectSwarmStore(project).list_events(summary.run_id)[0]
+        assert started.event_type == "run.started"
+        assert started.payload["pack"] == pack
+
+
+def test_engine_records_an_explicit_autonomy_level_on_the_durable_run(
+    tmp_path: Path,
+):
+    """Catches SwarmEngine silently dropping its public autonomy argument."""
+    summary = SwarmEngine(WorkflowTransport()).run(
+        goal="Use execute-safe after separate policy configuration",
+        project_root=tmp_path,
+        autonomy="execute_safe",
+    )
+
+    run = ProjectSwarmStore(tmp_path).get_run(summary.run_id)
+    assert run is not None
+    assert run.metadata["autonomy"] == "execute_safe"
+
+
 def test_role_context_shards_remain_exact_after_reloading_durable_events(
     tmp_path: Path,
 ):
