@@ -21,6 +21,15 @@ class AutonomyPolicy:
         action_cfg = self.config.get("actions", {}).get(action, {})
         return action_cfg.get("tier", "risky")
 
+    def action_tier(self, action: str) -> str:
+        """Expose the configured canonical tier for an action integration.
+
+        Callers that bridge into Nova must use this value instead of supplying
+        a friendlier tier of their own.  ``check`` remains the authorization
+        authority; this accessor merely prevents adapter-side policy drift.
+        """
+        return self._action_tier(str(action or ""))
+
     @staticmethod
     def _hard_block(intent: dict[str, Any]) -> str | None:
         action = str(intent.get("action") or "").lower()
