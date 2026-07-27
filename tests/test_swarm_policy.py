@@ -780,8 +780,9 @@ def test_sidekick_adapter_uses_injected_trusted_workspace_and_worktree(
         trusted_workspace_resolver=resolve,
         action_executor=execute_action,
         worktree_creator=create_workspace,
-        worktree_validator=lambda source, target: source == trusted
-        and target == worktree,
+        worktree_validator=lambda source, target: (
+            source == trusted and target == worktree
+        ),
     )
 
     result = adapter.execute(_proposal(tmp_path, use_worktree=True).requested_action)
@@ -811,8 +812,9 @@ def test_sidekick_adapter_rejects_worktree_from_another_trusted_project(
         trusted_workspace_resolver=lambda workspace: Path(workspace),
         action_executor=lambda *args: executed.append(args),
         worktree_creator=lambda _source: {"path": str(unrelated)},
-        worktree_validator=lambda expected, created: expected == source
-        and created == source,
+        worktree_validator=lambda expected, created: (
+            expected == source and created == source
+        ),
     )
     action = RequestedToolAction(
         name="write_project_file",
