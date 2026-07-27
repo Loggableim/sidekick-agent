@@ -95,14 +95,21 @@ class SwarmEngine:
                     "role": paused.role,
                 },
             )
+            events = tuple(store.list_events(run.run_id))
+            partial_evidence = {
+                str(event.payload["role"]): list(event.payload["evidence"])
+                for event in events
+                if event.event_type == "evidence.recorded"
+                and isinstance(event.payload.get("evidence"), list)
+            }
             return RunSummary(
                 run_id=run.run_id,
                 status="paused",
                 call_count=executor.call_budget.used,
-                evidence={},
+                evidence=partial_evidence,
                 decision=None,
                 pause_reason=paused.reason,
-                events=tuple(store.list_events(run.run_id)),
+                events=events,
             )
 
         store.set_run_status(run.run_id, "completed")

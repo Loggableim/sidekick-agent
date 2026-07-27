@@ -4,7 +4,7 @@ from pathlib import Path
 import threading
 
 from swarm_core.engine import SwarmEngine
-from swarm_core.models import ModelRequest, ModelResponse
+from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.transport import ModelTransport
 
@@ -146,6 +146,56 @@ def test_engine_persists_structured_work_evidence_decision_and_verifier_events(
     ]
 
 
+def test_role_context_shards_remain_exact_after_reloading_durable_events(
+    tmp_path: Path,
+):
+    """Catches context shards existing only in transient transport requests."""
+    summary = SwarmEngine(WorkflowTransport()).run(
+        goal="Persist exact shards",
+        project_root=tmp_path,
+    )
+
+    reloaded = ProjectSwarmStore(tmp_path).list_events(summary.run_id)
+    started_by_role = {
+        event.payload["role"]: event.payload
+        for event in reloaded
+        if event.event_type == "work.started"
+    }
+
+    assert set(started_by_role["scout"]["context"]) == {"goal", "project_root"}
+    assert set(started_by_role["planner"]["context"]) == {"goal", "scout"}
+    assert set(started_by_role["builder"]["context"]) == {"goal", "plan"}
+    assert set(started_by_role["critic"]["context"]) == {"goal", "plan"}
+    assert set(started_by_role["verifier"]["context"]) == {
+        "goal",
+        "build",
+        "critique",
+    }
+    assert set(started_by_role["review_a"]["context"]) == {
+        "goal",
+        "build",
+        "critique",
+        "verification",
+    }
+    assert (
+        started_by_role["review_a"]["context"] == started_by_role["review_b"]["context"]
+    )
+    assert set(started_by_role["integrator"]["context"]) == {
+        "goal",
+        "plan",
+        "build",
+        "critique",
+        "verification",
+        "reviews",
+    }
+    assert set(started_by_role["referee"]["context"]) == {
+        "goal",
+        "integration",
+        "verification",
+        "reviews",
+    }
+
+
 def test_engine_pauses_and_persists_reason_after_role_chain_exhaustion(
     tmp_path: Path,
 ):
@@ -175,3 +225,106 @@ def test_engine_pauses_and_persists_reason_after_role_chain_exhaustion(
         "deepseek-v4-pro",
         "kimi-k2.6",
     ]
+
+
+def test_catalog_exhaustion_becomes_a_durable_pause_instead_of_a_running_leak(
+    tmp_path: Path,
+):
+    """Catches router lookup exhaustion escaping while the run remains running."""
+    summary = SwarmEngine(
+        WorkflowTransport(),
+        registry=ModelRegistry(catalog={"gemma4:31b"}),
+    ).run(
+        goal="Pause when no scout is eligible",
+        project_root=tmp_path,
+    )
+
+    persisted = ProjectSwarmStore(tmp_path).get_run(summary.run_id)
+    events = ProjectSwarmStore(tmp_path).list_events(summary.run_id)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "no_eligible_model"
+    assert summary.call_count == 0
+    assert persisted is not None
+    assert persisted.status == "paused"
+    assert events[-1].event_type == "run.paused"
+    assert events[-1].payload == {
+        "attempted_models": [],
+        "reason": "no_eligible_model",
+        "role": "scout",
+    }
+
+
+def test_successful_parallel_sibling_is_persisted_before_other_sibling_pauses(
+    tmp_path: Path,
+):
+    """Catches successful parallel work being discarded when its sibling exhausts."""
+
+    class CriticFailureTransport(WorkflowTransport):
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            if request.role == "critic":
+                with self._lock:
+                    self.requests.append(request)
+                raise RuntimeError("critic unavailable")
+            return super().complete(request)
+
+    summary = SwarmEngine(CriticFailureTransport()).run(
+        goal="Retain successful builder evidence",
+        project_root=tmp_path,
+    )
+
+    events = ProjectSwarmStore(tmp_path).list_events(summary.run_id)
+    builder_events = [
+        event
+        for event in events
+        if event.payload.get("role") == "builder"
+        and event.event_type
+        in {"work.completed", "evidence.recorded", "decision.recorded"}
+    ]
+    critic_completed = [
+        event
+        for event in events
+        if event.payload.get("role") == "critic"
+        and event.event_type == "work.completed"
+    ]
+
+    assert summary.status == "paused"
+    assert summary.evidence["builder"] == ["builder:minimax-m3"]
+    assert [event.event_type for event in builder_events] == [
+        "work.completed",
+        "evidence.recorded",
+        "decision.recorded",
+    ]
+    assert builder_events[0].payload["work"] == "builder completed"
+    assert builder_events[1].payload["evidence"] == ["builder:minimax-m3"]
+    assert builder_events[2].payload["decision"] == "builder approves"
+    assert critic_completed == []
+    assert events[-1].event_type == "run.paused"
+
+
+def test_failed_model_attempt_is_durable_when_role_fallback_later_succeeds(
+    tmp_path: Path,
+):
+    """Catches fallback success erasing the failed model and failure reason."""
+    summary = SwarmEngine(WorkflowTransport(fail_models={"deepseek-v4-pro"})).run(
+        goal="Record planner fallback",
+        project_root=tmp_path,
+    )
+
+    events = ProjectSwarmStore(tmp_path).list_events(summary.run_id)
+    failures = [event for event in events if event.event_type == "model.attempt_failed"]
+
+    assert summary.status == "completed"
+    assert [event.payload for event in failures] == [
+        {
+            "model": "deepseek-v4-pro",
+            "reason": "call_error",
+            "role": "planner",
+        }
+    ]
+    assert any(
+        event.event_type == "work.completed"
+        and event.payload.get("role") == "planner"
+        and event.payload.get("model") == "kimi-k2.6"
+        for event in events
+    )

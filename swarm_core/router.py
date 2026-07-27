@@ -22,6 +22,10 @@ _ROLE_CHAINS = {
 }
 
 
+class NoEligibleModel(LookupError):
+    """The requested role has no model in the available Ollama catalog."""
+
+
 @dataclass(frozen=True)
 class ModelSelection:
     models: tuple[str, ...]
@@ -57,7 +61,7 @@ class ModelRouter:
                 and self.registry.get(name).supports(required)
             )
         if not chain:
-            raise LookupError(
+            raise NoEligibleModel(
                 f"No Ollama Cloud model for role {role!r} and requirements "
                 f"{sorted(required)!r}"
             )
