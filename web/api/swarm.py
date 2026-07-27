@@ -8,7 +8,7 @@ established trusted-workspace resolver.
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from datetime import datetime
 import json
 from pathlib import Path
@@ -376,7 +376,14 @@ def _reject_unknown_keys(body: Mapping[str, Any], allowed: set[str]) -> None:
 
 def _jsonable(value: Any) -> Any:
     if is_dataclass(value):
-        return _jsonable(asdict(value))
+        # ``asdict`` deep-copies every field before recursion.  Pack metadata
+        # deliberately uses ``MappingProxyType`` for immutability, which is
+        # not picklable/deep-copyable.  Walk the declared fields directly so
+        # read-only API serialization preserves that immutability boundary.
+        return {
+            field.name: _jsonable(getattr(value, field.name))
+            for field in fields(value)
+        }
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, datetime):
