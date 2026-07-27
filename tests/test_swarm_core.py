@@ -35,6 +35,16 @@ def test_initialize_project_keeps_runtime_state_ignored_but_creates_its_director
     assert (swarm_dir / "swarm.yaml").is_file()
 
 
+def test_store_constructor_keeps_direct_runtime_state_ignored(tmp_path: Path):
+    """Catches direct store use creating an unignored runtime database."""
+    store = ProjectSwarmStore(tmp_path)
+
+    ignore_path = tmp_path / ".swarm" / ".gitignore"
+    assert store.db_path.is_file()
+    assert ignore_path.is_file()
+    assert ignore_path.read_text(encoding="utf-8") == "runtime/\n"
+
+
 def test_events_are_returned_in_monotonic_sequence_order(tmp_path: Path):
     """Catches event order being based on unstable timestamps or insertion order."""
     initialize_project(tmp_path)
