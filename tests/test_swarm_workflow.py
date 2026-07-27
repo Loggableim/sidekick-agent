@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import threading
+import time
 
 from swarm_core.engine import SwarmEngine
 from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
@@ -328,3 +329,48 @@ def test_failed_model_attempt_is_durable_when_role_fallback_later_succeeds(
         and event.payload.get("model") == "kimi-k2.6"
         for event in events
     )
+
+
+def test_parallel_pause_uses_role_order_when_both_siblings_fail_inverted(
+    tmp_path: Path,
+):
+    """Catches as-completed timing choosing Critic over earlier-role Builder."""
+
+    class InvertedFailureTransport(WorkflowTransport):
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            if request.role in {"builder", "critic"}:
+                with self._lock:
+                    self.requests.append(request)
+                if request.role == "builder":
+                    time.sleep(0.04)
+                raise RuntimeError(f"{request.role} unavailable")
+            return super().complete(request)
+
+    summary = SwarmEngine(InvertedFailureTransport()).run(
+        goal="Choose deterministic parallel pause",
+        project_root=tmp_path,
+    )
+
+    events = ProjectSwarmStore(tmp_path).list_events(summary.run_id)
+    failures = [
+        event.payload
+        for event in events
+        if event.event_type == "model.attempt_failed"
+        and event.payload["role"] in {"builder", "critic"}
+    ]
+
+    assert summary.status == "paused"
+    assert failures == [
+        {
+            "model": "minimax-m3",
+            "reason": "call_error",
+            "role": "builder",
+        },
+        {
+            "model": "minimax-m3",
+            "reason": "call_error",
+            "role": "critic",
+        },
+    ]
+    assert events[-1].event_type == "run.paused"
+    assert events[-1].payload["role"] == "builder"
