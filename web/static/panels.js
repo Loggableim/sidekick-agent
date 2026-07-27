@@ -108,7 +108,7 @@ async function _loadNovaRouteStatus(){
 const APP_TITLEBAR_KEYS = {
   chat: 'tab_chat', tasks: 'tab_tasks', skills: 'tab_skills',
   memory: 'tab_memory', workspaces: 'tab_workspaces',
-  profiles: 'tab_profiles', todos: 'tab_todos', insights: 'tab_insights', logs: 'tab_logs', settings: 'tab_settings',
+  profiles: 'tab_profiles', todos: 'tab_todos', insights: 'tab_insights', logs: 'tab_logs', settings: 'tab_settings', swarm: 'tab_swarm',
   agents: 'tab_agents',
 };
 
@@ -284,6 +284,11 @@ async function switchPanel(name, opts = {}) {
   if (prevPanel === 'kanban' && nextPanel !== 'kanban') {
     if (typeof _kanbanStopPolling === 'function') _kanbanStopPolling();
   }
+  // Swarm follows the same lifecycle rule: its project-local SSE stream must
+  // not survive a panel exit or keep observing a stale Space in the background.
+  if (prevPanel === 'swarm' && nextPanel !== 'swarm') {
+    if (typeof stopSwarmStream === 'function') stopSwarmStream();
+  }
   // Stop Gmail poll interval when leaving the gmail panel
   if (prevPanel === 'gmail' && nextPanel !== 'gmail') {
     if (typeof GMAIL !== 'undefined' && GMAIL.pollInterval) {
@@ -407,7 +412,7 @@ async function switchPanel(name, opts = {}) {
   // showing-<name> class on <main>; no class means chat (the default).
   const mainEl = document.querySelector('main.main');
   if (mainEl) {
-    ['settings','skills','memory','tasks','kanban','workspaces','review','subagents','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
+    ['settings','skills','memory','tasks','kanban','swarm','workspaces','review','subagents','profiles','insights','logs','gmail','mail','browser','discord','agents','todos','appstore'].forEach(p => {
       mainEl.classList.toggle('showing-' + p, nextPanel === p);
     });
   }
@@ -422,6 +427,7 @@ async function switchPanel(name, opts = {}) {
   // Lazy-load panel data
   if (nextPanel === 'tasks') await loadCrons();
   if (nextPanel === 'kanban') await loadKanban();
+  if (nextPanel === 'swarm' && typeof loadSwarm === 'function') await loadSwarm();
   if (nextPanel === 'skills') await loadSkills();
   if (nextPanel === 'memory') await loadMemory();
   if (nextPanel === 'workspaces') { if (typeof renderSpacesPanel === 'function') renderSpacesPanel(); else await loadWorkspacesPanel(); }

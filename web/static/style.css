@@ -3810,6 +3810,7 @@ main.main > #mainSkills,
 main.main > #mainMemory,
 main.main > #mainTasks,
 main.main > #mainKanban,
+main.main > #mainSwarm,
 main.main > #mainWorkspaces,
 main.main > #mainTodos,
 main.main > #mainProfiles,
@@ -3820,12 +3821,13 @@ main.main > #mainBrowser,
 main.main > #mainDiscord,
 main.main > #mainAgents,
 main.main > #mainAppstore{display:none;}
-main.main:not(.showing-settings):not(.showing-skills):not(.showing-memory):not(.showing-tasks):not(.showing-kanban):not(.showing-workspaces):not(.showing-todos):not(.showing-profiles):not(.showing-insights):not(.showing-logs):not(.showing-gmail):not(.showing-browser):not(.showing-discord):not(.showing-agents):not(.showing-appstore) > #mainChat{display:flex;}
+main.main:not(.showing-settings):not(.showing-skills):not(.showing-memory):not(.showing-tasks):not(.showing-kanban):not(.showing-swarm):not(.showing-workspaces):not(.showing-todos):not(.showing-profiles):not(.showing-insights):not(.showing-logs):not(.showing-gmail):not(.showing-browser):not(.showing-discord):not(.showing-agents):not(.showing-appstore) > #mainChat{display:flex;}
 main.main.showing-settings > #mainSettings{display:flex;overflow-y:auto;}
 main.main.showing-skills > #mainSkills{display:flex;}
 main.main.showing-memory > #mainMemory{display:flex;}
 main.main.showing-tasks > #mainTasks{display:flex;}
 main.main.showing-kanban > #mainKanban{display:flex;overflow-y:auto;}
+main.main.showing-swarm > #mainSwarm{display:flex;overflow-y:auto;}
 main.main.showing-workspaces > #mainWorkspaces{display:flex;}
 main.main.showing-todos > #mainTodos{display:flex;}
 main.main.showing-profiles > #mainProfiles{display:flex;}
