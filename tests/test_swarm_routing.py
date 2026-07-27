@@ -273,3 +273,52 @@ def test_parallel_execution_never_exceeds_three_active_model_calls():
     assert len(results) == 7
     assert Counter(response.model for response in results) == {"deepseek-v4-flash": 7}
     assert transport.max_active == 3
+
+
+def test_overlapping_executors_share_the_transport_call_concurrency_ceiling():
+    """Catches separate executor pools producing six simultaneous transport calls."""
+
+    class SharedConcurrencyTransport(ModelTransport):
+        def __init__(self) -> None:
+            self._lock = threading.Lock()
+            self.active = 0
+            self.max_active = 0
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            with self._lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            time.sleep(0.05)
+            with self._lock:
+                self.active -= 1
+            return _response(request)
+
+    transport = SharedConcurrencyTransport()
+    first = ModelExecutor(ModelRouter(ModelRegistry()), transport)
+    second = ModelExecutor(ModelRouter(ModelRegistry()), transport)
+    calls = [
+        RoleCall(role="scout", prompt=f"overlap {index}", context={})
+        for index in range(5)
+    ]
+    start = threading.Barrier(3)
+    failures: list[BaseException] = []
+
+    def run(executor: ModelExecutor, run_id: str) -> None:
+        try:
+            start.wait()
+            executor.complete_many(calls, run_id=run_id)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    threads = [
+        threading.Thread(target=run, args=(first, "overlap-a")),
+        threading.Thread(target=run, args=(second, "overlap-b")),
+    ]
+    for thread in threads:
+        thread.start()
+    start.wait()
+    for thread in threads:
+        thread.join()
+
+    assert failures == []
+    assert transport.max_active == 3

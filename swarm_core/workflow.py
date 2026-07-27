@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 import threading
 from typing import Any, Callable, Iterable, Mapping
 
 from .models import ModelRequest, ModelResponse
-from .router import ModelRouter
+from .router import ModelRouter, NoEligibleModel
 from .transport import ModelTransport
+
+
+_TRANSPORT_CALL_SLOTS = threading.BoundedSemaphore(3)
 
 
 class WorkflowPaused(RuntimeError):
@@ -60,6 +63,13 @@ class RoleCall:
     required_fields: tuple[str, ...] = ("work", "evidence", "decision")
 
 
+@dataclass(frozen=True)
+class ModelAttemptFailure:
+    role: str
+    model: str
+    reason: str
+
+
 class ModelExecutor:
     """Apply role routing, retries, schema checks, and global safety limits."""
 
@@ -78,8 +88,21 @@ class ModelExecutor:
         self.call_budget = call_budget or CallBudget()
         self.max_concurrent = max_concurrent
 
-    def complete(self, call: RoleCall, *, run_id: str) -> ModelResponse:
-        selection = self.router.select(call.role, call.requirements)
+    def complete(
+        self,
+        call: RoleCall,
+        *,
+        run_id: str,
+        on_failure: Callable[[ModelAttemptFailure], None] | None = None,
+    ) -> ModelResponse:
+        try:
+            selection = self.router.select(call.role, call.requirements)
+        except NoEligibleModel as exc:
+            raise WorkflowPaused(
+                "no_eligible_model",
+                role=call.role,
+                attempted_models=(),
+            ) from exc
         attempted: list[str] = []
         for model in selection.models:
             self.call_budget.claim(role=call.role, attempted_models=attempted)
@@ -94,11 +117,16 @@ class ModelExecutor:
                 provider=selection.provider,
             )
             try:
-                response = self.transport.complete(request)
+                with _TRANSPORT_CALL_SLOTS:
+                    response = self.transport.complete(request)
             except Exception:
+                if on_failure is not None:
+                    on_failure(ModelAttemptFailure(call.role, model, "call_error"))
                 continue
             if _valid_response(response, call.required_fields):
                 return response
+            if on_failure is not None:
+                on_failure(ModelAttemptFailure(call.role, model, "schema_invalid"))
         raise WorkflowPaused(
             "model_chain_exhausted",
             role=call.role,
@@ -106,14 +134,46 @@ class ModelExecutor:
         )
 
     def complete_many(
-        self, calls: Iterable[RoleCall], *, run_id: str
+        self,
+        calls: Iterable[RoleCall],
+        *,
+        run_id: str,
+        on_success: Callable[[RoleCall, ModelResponse], None] | None = None,
+        on_failure: Callable[[ModelAttemptFailure], None] | None = None,
     ) -> list[ModelResponse]:
         calls = tuple(calls)
+        responses: list[ModelResponse | None] = [None] * len(calls)
+        failures: list[list[ModelAttemptFailure]] = [[] for _call in calls]
+        first_error: BaseException | None = None
         with ThreadPoolExecutor(max_workers=self.max_concurrent) as pool:
-            futures = [
-                pool.submit(self.complete, call, run_id=run_id) for call in calls
-            ]
-            return [future.result() for future in futures]
+            futures = {
+                pool.submit(
+                    self.complete,
+                    call,
+                    run_id=run_id,
+                    on_failure=failures[index].append,
+                ): index
+                for index, call in enumerate(calls)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    response = future.result()
+                except BaseException as exc:
+                    if first_error is None:
+                        first_error = exc
+                    continue
+                responses[index] = response
+        for index, call_failures in enumerate(failures):
+            if on_failure is not None:
+                for failure in call_failures:
+                    on_failure(failure)
+            response = responses[index]
+            if response is not None and on_success is not None:
+                on_success(calls[index], response)
+        if first_error is not None:
+            raise first_error
+        return [response for response in responses if response is not None]
 
 
 def _valid_response(response: ModelResponse, required_fields: Iterable[str]) -> bool:
@@ -206,6 +266,11 @@ class CodingTeamWorkflow:
         self._record("builder", builder, "build", board, evidence)
         self._record("critic", critic, "critique", board, evidence)
 
+        verification_context = board.shard("goal", "build", "critique")
+        emit(
+            "work.started",
+            {"role": "verifier", "context": verification_context},
+        )
         verification = {
             "work": "Synthesized builder and critic evidence for review.",
             "evidence": [
@@ -294,8 +359,15 @@ class CodingTeamWorkflow:
         call: RoleCall,
         emit: EventEmitter,
     ) -> ModelResponse:
-        emit("work.started", {"role": call.role})
-        response = executor.complete(call, run_id=run_id)
+        emit(
+            "work.started",
+            {"role": call.role, "context": dict(call.context)},
+        )
+        response = executor.complete(
+            call,
+            run_id=run_id,
+            on_failure=lambda failure: CodingTeamWorkflow._emit_failure(failure, emit),
+        )
         CodingTeamWorkflow._emit_response(call.role, response, emit)
         return response
 
@@ -307,11 +379,18 @@ class CodingTeamWorkflow:
         emit: EventEmitter,
     ) -> list[ModelResponse]:
         for call in calls:
-            emit("work.started", {"role": call.role})
-        responses = executor.complete_many(calls, run_id=run_id)
-        for call, response in zip(calls, responses):
-            CodingTeamWorkflow._emit_response(call.role, response, emit)
-        return responses
+            emit(
+                "work.started",
+                {"role": call.role, "context": dict(call.context)},
+            )
+        return executor.complete_many(
+            calls,
+            run_id=run_id,
+            on_success=lambda call, response: CodingTeamWorkflow._emit_response(
+                call.role, response, emit
+            ),
+            on_failure=lambda failure: CodingTeamWorkflow._emit_failure(failure, emit),
+        )
 
     @staticmethod
     def _emit_response(role: str, response: ModelResponse, emit: EventEmitter) -> None:
@@ -326,6 +405,17 @@ class CodingTeamWorkflow:
         emit(
             "decision.recorded",
             {"role": role, "decision": response.data["decision"]},
+        )
+
+    @staticmethod
+    def _emit_failure(failure: ModelAttemptFailure, emit: EventEmitter) -> None:
+        emit(
+            "model.attempt_failed",
+            {
+                "role": failure.role,
+                "model": failure.model,
+                "reason": failure.reason,
+            },
         )
 
     @staticmethod
