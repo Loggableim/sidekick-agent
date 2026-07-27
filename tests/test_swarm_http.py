@@ -228,6 +228,30 @@ def test_http_approval_rejects_forged_model_fields_and_derives_human_actor(
     ]
 
 
+def test_http_existing_run_write_does_not_initialize_an_absent_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches an approval typo creating project state before it is rejected."""
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
+    )
+    handler = _Handler()
+
+    assert (
+        swarm_api.handle_swarm_post(
+            handler,
+            urlparse("/api/swarm/runs/missing/approve"),
+            {"project_path": str(project), "proposal_id": "proposal-1"},
+        )
+        is None
+    )
+    assert handler.status_code == 404
+    assert not (project / ".swarm").exists()
+
+
 def test_sse_reads_ordered_cursor_tail_without_mutating_a_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -243,13 +267,13 @@ def test_sse_reads_ordered_cursor_tail_without_mutating_a_run(
         swarm_api, "resolve_trusted_workspace", lambda _value: project.resolve()
     )
     writer = _DisconnectAfterEvents()
-    handler = _Handler(
-        headers={"Last-Event-ID": str(first.sequence)}, writer=writer
-    )
+    handler = _Handler(headers={"Last-Event-ID": str(first.sequence)}, writer=writer)
 
     result = swarm_api.handle_swarm_get(
         handler,
-        urlparse(f"/api/swarm/runs/events/stream?project_path={project}&run_id={run.run_id}"),
+        urlparse(
+            f"/api/swarm/runs/events/stream?project_path={project}&run_id={run.run_id}"
+        ),
     )
 
     frame_text = writer.getvalue().decode("utf-8")

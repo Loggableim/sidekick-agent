@@ -110,7 +110,9 @@ class SidekickSwarmService:
                     "provider": OLLAMA_CLOUD_PROVIDER,
                     "snapshot_present": snapshot is not None,
                     "healthy": bool(snapshot and snapshot.healthy),
-                    "source": snapshot.source if snapshot is not None else "not_refreshed",
+                    "source": snapshot.source
+                    if snapshot is not None
+                    else "not_refreshed",
                 },
             )
             summary = replace(
@@ -133,21 +135,23 @@ class SidekickSwarmService:
         return {"runs": reader.list_runs()}
 
     def get_model_catalog(self, project_root: Path) -> ModelCatalogSnapshot | None:
-        return ProjectSwarmStore.open_read_only(project_root).get_model_catalog_snapshot(
-            OLLAMA_CLOUD_PROVIDER
-        )
+        return ProjectSwarmStore.open_read_only(
+            project_root
+        ).get_model_catalog_snapshot(OLLAMA_CLOUD_PROVIDER)
 
     def list_packs(self, project_root: Path) -> tuple[object, ...]:
         """Read packaged/project metadata only; this never initializes Swarm."""
         return PackRegistry(project_root).list()
 
     def pause(self, project_root: Path, run_id: str) -> SwarmRun:
+        ProjectSwarmStore.open_read_only(project_root)
         store = ProjectSwarmStore(project_root)
         run = store.set_run_status(run_id, "paused")
         store.append_event(run_id, "run.paused_by_human", {})
         return run
 
     def resume(self, project_root: Path, run_id: str) -> SwarmRun:
+        ProjectSwarmStore.open_read_only(project_root)
         store = ProjectSwarmStore(project_root)
         run = store.resume_run(run_id)
         store.append_event(run_id, "run.resumed_by_human", {})
@@ -174,6 +178,7 @@ class SidekickSwarmService:
             raise ValueError("Human approval requires a host-derived actor")
         if not isinstance(approved, bool):
             raise TypeError("Human approval decision must be a bool")
+        ProjectSwarmStore.open_read_only(project_root)
         store = ProjectSwarmStore(project_root)
         run = store.get_run(run_id)
         if run is None:
@@ -226,7 +231,9 @@ def _proposal_from_event(
         raise ValueError("Durable action proposal arguments must be an object")
     if not isinstance(requested.get("use_worktree"), bool):
         raise ValueError("Durable action proposal worktree flag must be a bool")
-    if any(not isinstance(reference, str) or not reference for reference in evidence_refs):
+    if any(
+        not isinstance(reference, str) or not reference for reference in evidence_refs
+    ):
         raise ValueError("Durable action proposal evidence must be strings")
     action = RequestedToolAction(
         name=str(requested.get("name") or ""),
@@ -270,9 +277,7 @@ def _refresh_ollama_catalog() -> ModelCatalogSnapshot:
 
     api_key = os.environ.get("OLLAMA_API_KEY", "").strip()
     base_url = os.environ.get("OLLAMA_BASE_URL", "").strip() or "https://ollama.com/v1"
-    live_models = (
-        fetch_api_models(api_key, base_url, timeout=8.0) if api_key else None
-    )
+    live_models = fetch_api_models(api_key, base_url, timeout=8.0) if api_key else None
     # The Sidekick helper can expose a stale/models.dev list.  It is useful for
     # the explicit UI catalog, but only a successful live probe marks it usable
     # for a Swarm run.
@@ -342,7 +347,12 @@ def _configured_ollama_semaphore() -> threading.BoundedSemaphore:
         from runtime.config import load_config
         from runtime.gateway.agent_pool import AgentPool
 
-        limit = max(1, int(AgentPool(load_config()).get_pool(OLLAMA_CLOUD_PROVIDER).max_concurrent))
+        limit = max(
+            1,
+            int(
+                AgentPool(load_config()).get_pool(OLLAMA_CLOUD_PROVIDER).max_concurrent
+            ),
+        )
     except Exception:
         pass
     with _FALLBACK_SLOT_LOCK:
