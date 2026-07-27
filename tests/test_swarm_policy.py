@@ -492,7 +492,7 @@ def test_proposal_freezes_evidence_and_workspace_before_cwd_changes(
     )
     raw_evidence[0] = "evidence:second"
     monkeypatch.chdir(second_cwd)
-    store = ProjectSwarmStore(tmp_path)
+    store = ProjectSwarmStore(first_cwd / "workspace")
     run = store.create_run()
     gate = PolicyGate(store)
     gate.record_approval(
@@ -583,6 +583,42 @@ def test_gated_executor_blocks_a_non_running_durable_run(tmp_path: Path):
         )
 
     assert raised.value.decision.reason == "run_not_running"
+    assert adapter.executed == []
+
+
+def test_completed_run_cannot_reach_gated_executor_via_direct_status_write(
+    tmp_path: Path,
+):
+    """Catches a terminal run reopening through set_run_status then executing."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "autonomous"})
+    store.set_run_status(run.run_id, "completed")
+    proposal = _proposal(tmp_path, proposal_id="terminal-execution")
+    adapter = _RecordingAdapter()
+
+    with pytest.raises(ValueError, match="transition"):
+        store.set_run_status(run.run_id, "running")
+    with pytest.raises(ActionNotAllowed):
+        GatedToolExecutor(PolicyGate(store), adapter).execute(proposal, run)
+
+    assert adapter.executed == []
+
+
+def test_policy_gate_blocks_a_proposal_targeting_another_project_root(
+    tmp_path: Path,
+):
+    """Catches a valid run in project B authorizing a safe action in project A."""
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+    store_b = ProjectSwarmStore(project_b)
+    run_b = store_b.create_run(metadata={"autonomy": "autonomous"})
+    proposal_for_a = _proposal(project_a, proposal_id="cross-project")
+    adapter = _RecordingAdapter()
+
+    with pytest.raises(ActionNotAllowed) as raised:
+        GatedToolExecutor(PolicyGate(store_b), adapter).execute(proposal_for_a, run_b)
+
+    assert raised.value.decision.reason == "proposal_workspace_outside_project"
     assert adapter.executed == []
 
 

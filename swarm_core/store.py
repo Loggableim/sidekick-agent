@@ -16,6 +16,13 @@ from .types import ApprovalRecord, SwarmEvent, SwarmRun
 
 AuthorizationResult = TypeVar("AuthorizationResult")
 
+_RUN_STATUSES = frozenset({"running", "paused", "completed"})
+_ALLOWED_TRANSITIONS = {
+    "running": frozenset({"paused", "completed"}),
+    "paused": frozenset({"running"}),
+    "completed": frozenset(),
+}
+
 
 class ProjectSwarmStore:
     """Own durable runtime state beneath ``.swarm/runtime`` for one project."""
@@ -35,6 +42,8 @@ class ProjectSwarmStore:
         status: str = "running",
         metadata: Mapping[str, Any] | None = None,
     ) -> SwarmRun:
+        if status not in _RUN_STATUSES:
+            raise ValueError(f"Unsupported Swarm run status: {status}")
         run_id = run_id or str(uuid4())
         now = _utc_now()
         metadata_data = dict(metadata or {})
@@ -120,38 +129,37 @@ class ProjectSwarmStore:
         return [_row_to_event(row) for row in rows]
 
     def set_run_status(self, run_id: str, status: str) -> SwarmRun:
+        if status not in _RUN_STATUSES:
+            raise ValueError(f"Unsupported Swarm run status: {status}")
         updated_at = _utc_now()
-        with self._connection() as connection:
-            cursor = connection.execute(
-                "UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ?",
-                (status, _timestamp_text(updated_at), run_id),
-            )
-            if cursor.rowcount != 1:
+        with self._immediate_connection() as connection:
+            row = connection.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
                 raise KeyError(f"Unknown Swarm run: {run_id}")
-        run = self.get_run(run_id)
-        assert run is not None
-        return run
-
-    def resume_run(self, run_id: str) -> SwarmRun:
-        updated_at = _utc_now()
-        with self._connection() as connection:
+            current_status = row["status"]
+            if status not in _ALLOWED_TRANSITIONS.get(current_status, frozenset()):
+                if status == "running" and current_status != "paused":
+                    raise ValueError("Only paused Swarm runs can transition to running")
+                raise ValueError(
+                    f"Illegal Swarm run transition: {current_status} -> {status}"
+                )
             cursor = connection.execute(
                 """
                 UPDATE runs SET status = ?, updated_at = ?
                 WHERE run_id = ? AND status = ?
                 """,
-                ("running", _timestamp_text(updated_at), run_id, "paused"),
+                (status, _timestamp_text(updated_at), run_id, current_status),
             )
             if cursor.rowcount != 1:
-                exists = connection.execute(
-                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
-                ).fetchone()
-                if exists is None:
-                    raise KeyError(f"Unknown Swarm run: {run_id}")
-                raise ValueError("Only paused Swarm runs can be resumed")
+                raise RuntimeError("Swarm run status changed during transition")
         run = self.get_run(run_id)
         assert run is not None
         return run
+
+    def resume_run(self, run_id: str) -> SwarmRun:
+        return self.set_run_status(run_id, "running")
 
     def record_approval(
         self,
