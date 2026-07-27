@@ -5294,6 +5294,13 @@ def cmd_kanban(args):
     return kanban_command(args)
 
 
+def cmd_swarm(args):
+    """Project-local, Ollama Cloud-only Swarm workflows."""
+    from cli.swarm import swarm_command
+
+    return swarm_command(args)
+
+
 def cmd_hooks(args):
     """Shell-hook inspection and management."""
     from cli.hooks import hooks_command
@@ -9327,6 +9334,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "config", "cron", "curator", "dashboard", "debug", "doctor",
         "dump", "fallback", "gateway", "hooks", "import", "insights",
         "kanban", "login", "logout", "logs", "mcp", "memory", "model",
+        "swarm",
         "pairing", "plugins", "profile", "repair", "sessions", "setup", "skills",
         "slack", "status", "tools", "uninstall", "update", "version",
         "webhook", "whatsapp", "chat",
@@ -10154,6 +10162,14 @@ def main():
 
     kanban_parser = _build_kanban_parser(subparsers)
     kanban_parser.set_defaults(func=cmd_kanban)
+
+    # =========================================================================
+    # swarm command — project-local multi-role orchestration
+    # =========================================================================
+    from cli.swarm import build_parser as _build_swarm_parser
+
+    swarm_parser = _build_swarm_parser(subparsers)
+    swarm_parser.set_defaults(func=cmd_swarm)
 
     # =========================================================================
     # hooks command — shell-hook inspection and management
