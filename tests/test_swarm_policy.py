@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from swarm_core.config import initialize_project
-from swarm_core.policy import PolicyGate, PolicyStatus
+from swarm_core.policy import PolicyGate, PolicyStatus, proposal_digest
 from swarm_core.sidekick_adapter import SidekickToolAdapter
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.tools import ActionNotAllowed, GatedToolExecutor
@@ -55,6 +55,7 @@ def _record_durable_review_quorum(
     evidence_refs: tuple[str, ...] = ("evidence:test",),
     review_a_model: str = "glm-5.2",
     review_b_model: str = "kimi-k2.7-code",
+    review_bindings: Mapping[str, str] | None = None,
 ) -> None:
     """Persist the only workflow outcomes that can satisfy reviewed execution."""
     for role, model in (
@@ -72,7 +73,11 @@ def _record_durable_review_quorum(
                 },
             }
             if role == "verifier"
-            else {"decision": "approved", "approved": True}
+            else {
+                "decision": "approved",
+                "approved": True,
+                **dict(review_bindings or {}),
+            }
         )
         store.record_workflow_role_checkpoint(
             run.run_id,
@@ -396,6 +401,62 @@ def test_reviewed_execution_does_not_require_one_ref_shared_by_both_reviewers(
     proposal = _proposal(tmp_path, evidence_refs=("evidence:proposal",))
 
     assert PolicyGate(store).evaluate(proposal, run).status is PolicyStatus.ALLOWED
+
+
+def test_reviewed_nova_execution_requires_exact_digest_bound_checkpoints(
+    tmp_path: Path,
+):
+    """Generic positive reviews cannot authorize an unbound Nova action."""
+    store = ProjectSwarmStore(tmp_path)
+    intent_digest = "a" * 64
+    evidence_ref = f"nova:verifier:{intent_digest}"
+    proposal = ActionProposal(
+        proposal_id=f"nova-{intent_digest}",
+        category="project",
+        reversible=True,
+        external=False,
+        cost_increasing=False,
+        evidence_refs=(evidence_ref,),
+        requested_action=RequestedToolAction(
+            name="nova:mind_diary",
+            workspace=tmp_path,
+            arguments={
+                "intent": {
+                    "id": f"nova-{intent_digest}",
+                    "action": "mind_diary",
+                    "payload": {"content": "Exact reviewed payload."},
+                }
+            },
+        ),
+    )
+    expected_proposal_digest = proposal_digest(proposal)
+    unbound_run = _run(tmp_path, "reviewed_execution")
+    _record_durable_review_quorum(
+        store,
+        unbound_run,
+        evidence_refs=(evidence_ref,),
+    )
+
+    assert (
+        PolicyGate(store).evaluate(proposal, unbound_run).status
+        is PolicyStatus.NEEDS_MODEL_QUORUM
+    )
+
+    bound_run = _run(tmp_path, "reviewed_execution")
+    _record_durable_review_quorum(
+        store,
+        bound_run,
+        evidence_refs=(evidence_ref,),
+        review_bindings={
+            "intent_digest": intent_digest,
+            "proposal_digest": expected_proposal_digest,
+        },
+    )
+
+    assert (
+        PolicyGate(store).evaluate(proposal, bound_run).status
+        is PolicyStatus.ALLOWED
+    )
 
 
 @pytest.mark.parametrize(

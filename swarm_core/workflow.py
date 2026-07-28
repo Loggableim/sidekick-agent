@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from concurrent.futures import as_completed, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
 from pathlib import Path
+import re
 import threading
 from types import MappingProxyType
 from typing import Any, Callable, Iterable, Mapping
@@ -12,6 +14,7 @@ from typing import Any, Callable, Iterable, Mapping
 from .models import ModelRequest, ModelResponse
 from .router import ModelRouter, NoEligibleModel
 from .transport import ModelTransport, RetryableModelTransportError
+from .types import thaw_json_value
 from .verifier import (
     DefaultReadOnlyVerifier,
     InvalidVerifierResult,
@@ -72,6 +75,20 @@ class RoleCall:
     context: Mapping[str, Any]
     requirements: frozenset[str] = frozenset({"structured-output"})
     required_fields: tuple[str, ...] = ("work", "evidence", "decision")
+    checkpoint_bindings: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+
+    def __post_init__(self) -> None:
+        bindings = {
+            str(field_name): str(value)
+            for field_name, value in self.checkpoint_bindings.items()
+        }
+        object.__setattr__(
+            self,
+            "checkpoint_bindings",
+            MappingProxyType(bindings),
+        )
 
 
 @dataclass(frozen=True)
@@ -150,7 +167,10 @@ class ModelExecutor:
                 role=call.role,
                 model=model,
                 prompt=call.prompt,
-                context=call.context,
+                # Every provider attempt receives its own plain JSON copy.
+                # Event emitters and a parallel sibling therefore cannot
+                # mutate the immutable host-owned authorization source.
+                context=thaw_json_value(call.context),
                 required_fields=call.required_fields,
                 provider=selection.provider,
             )
@@ -163,7 +183,16 @@ class ModelExecutor:
                 continue
             response_failure = _response_failure_reason(response, call.required_fields)
             if response_failure is None:
-                return response
+                binding_failure = _checkpoint_binding_failure(
+                    response,
+                    call.checkpoint_bindings,
+                )
+                if binding_failure is None:
+                    return _bind_checkpoint_response(
+                        response,
+                        call.checkpoint_bindings,
+                    )
+                response_failure = binding_failure
             if on_failure is not None:
                 on_failure(ModelAttemptFailure(call.role, model, response_failure))
         raise WorkflowPaused(
@@ -274,6 +303,108 @@ def _response_failure_reason(
     if "approved" in required_fields and not isinstance(data.get("approved"), bool):
         return "schema_invalid"
     return None
+
+
+def _checkpoint_binding_failure(
+    response: ModelResponse,
+    bindings: Mapping[str, str],
+) -> str | None:
+    """Reject a model response that conflicts with host-owned checkpoint keys."""
+    for field_name, expected in bindings.items():
+        if field_name in response.data and response.data.get(field_name) != expected:
+            return "authorization_binding_mismatch"
+    return None
+
+
+def _bind_checkpoint_response(
+    response: ModelResponse,
+    bindings: Mapping[str, str],
+) -> ModelResponse:
+    if not bindings:
+        return response
+    data = dict(response.data)
+    data.update(bindings)
+    return ModelResponse(
+        model=response.model,
+        content=response.content,
+        data=MappingProxyType(data),
+    )
+
+
+_REVIEW_AUTHORIZATION_FIELDS = frozenset(
+    {
+        "action",
+        "target",
+        "payload",
+        "expected_output_scope",
+        "intent_digest",
+        "proposal_digest",
+    }
+)
+_REVIEW_AUTHORIZATION_DIGEST = re.compile(r"^[0-9a-f]{64}$")
+_MAX_REVIEW_AUTHORIZATION_BYTES = 16 * 1024
+
+
+def _review_authorization_context(
+    verifier: ReadOnlyVerifier,
+) -> Mapping[str, Any] | None:
+    """Read one optional, bounded host-owned action context from a verifier."""
+    resolver = getattr(verifier, "review_authorization_context", None)
+    if resolver is None:
+        return None
+    if not callable(resolver):
+        raise InvalidVerifierResult("review authorization context is not callable")
+    raw = resolver()
+    if not isinstance(raw, Mapping) or set(raw) != _REVIEW_AUTHORIZATION_FIELDS:
+        raise InvalidVerifierResult("review authorization context has invalid fields")
+    if (
+        not isinstance(raw.get("action"), str)
+        or not raw["action"].strip()
+        or not isinstance(raw.get("expected_output_scope"), str)
+        or not raw["expected_output_scope"].strip()
+        or not isinstance(raw.get("target"), Mapping)
+        or not isinstance(raw.get("payload"), Mapping)
+        or not _REVIEW_AUTHORIZATION_DIGEST.fullmatch(
+            str(raw.get("intent_digest") or "")
+        )
+        or not _REVIEW_AUTHORIZATION_DIGEST.fullmatch(
+            str(raw.get("proposal_digest") or "")
+        )
+    ):
+        raise InvalidVerifierResult("review authorization context is invalid")
+    try:
+        encoded = json.dumps(
+            raw,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        canonical = json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise InvalidVerifierResult(
+            "review authorization context is not JSON-safe"
+        ) from exc
+    if len(encoded) > _MAX_REVIEW_AUTHORIZATION_BYTES:
+        raise InvalidVerifierResult("review authorization context is too large")
+    frozen = _freeze_json_value(canonical)
+    if not isinstance(frozen, Mapping):  # pragma: no cover - canonical is a dict
+        raise InvalidVerifierResult("review authorization context is invalid")
+    return frozen
+
+
+def _freeze_json_value(value: Any) -> Any:
+    """Deep-freeze one already validated JSON value without changing meaning."""
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {
+                str(field_name): _freeze_json_value(child)
+                for field_name, child in value.items()
+            }
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_json_value(child) for child in value)
+    return value
 
 
 class Blackboard:
@@ -622,6 +753,22 @@ class CodingTeamWorkflow:
         evidence["verifier"] = list(verification["evidence"])
 
         review_context = board.shard("goal", "build", "critique", "verification")
+        try:
+            authorization_context = _review_authorization_context(self.verifier)
+        except (InvalidVerifierResult, TypeError, ValueError) as exc:
+            raise WorkflowPaused(
+                "invalid_verifier_result",
+                role="verifier",
+            ) from exc
+        review_bindings: Mapping[str, str] = MappingProxyType({})
+        if authorization_context is not None:
+            review_context["authorization_context"] = authorization_context
+            review_bindings = MappingProxyType(
+                {
+                    "intent_digest": authorization_context["intent_digest"],
+                    "proposal_digest": authorization_context["proposal_digest"],
+                }
+            )
         review_a, review_b = self._complete_parallel(
             executor,
             run_id,
@@ -633,12 +780,15 @@ class CodingTeamWorkflow:
                         (
                             "Perform independent review A. Return an explicit JSON "
                             "boolean `approved`; use decision `approve` or `approved` "
-                            "only when it is true, otherwise record a blocking decision."
+                            "only when it is true, otherwise record a blocking decision. "
+                            "When `authorization_context` is present, review that exact "
+                            "action, target, payload, output scope, and digest binding."
                         ),
                     ),
                     review_context,
                     frozenset({"review", "structured-output"}),
                     ("work", "evidence", "decision", "approved"),
+                    review_bindings,
                 ),
                 RoleCall(
                     "review_b",
@@ -647,12 +797,15 @@ class CodingTeamWorkflow:
                         (
                             "Perform independent review B. Return an explicit JSON "
                             "boolean `approved`; use decision `approve` or `approved` "
-                            "only when it is true, otherwise record a blocking decision."
+                            "only when it is true, otherwise record a blocking decision. "
+                            "When `authorization_context` is present, review that exact "
+                            "action, target, payload, output scope, and digest binding."
                         ),
                     ),
                     review_context,
                     frozenset({"review", "structured-output"}),
                     ("work", "evidence", "decision", "approved"),
+                    review_bindings,
                 ),
             ),
             emit,
@@ -735,7 +888,7 @@ class CodingTeamWorkflow:
             return restored
         emit(
             "work.started",
-            {"role": call.role, "context": dict(call.context)},
+            {"role": call.role, "context": thaw_json_value(call.context)},
         )
         response = executor.complete(
             call,
@@ -769,7 +922,7 @@ class CodingTeamWorkflow:
                 continue
             emit(
                 "work.started",
-                {"role": call.role, "context": dict(call.context)},
+                {"role": call.role, "context": thaw_json_value(call.context)},
             )
             pending.append(call)
         if pending:

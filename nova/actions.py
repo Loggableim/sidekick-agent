@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager, ExitStack
 import json
 import os
+import stat
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from nova.reflection_worker import ReflectionWorker
+import swarm_core.config as swarm_config
 
 
 # The handlers below write only these stable paths for the actions permitted by
@@ -24,6 +28,7 @@ NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES = MappingProxyType(
         "prioritize_thread": "continuity_state.json",
     }
 )
+_AUTOMATIC_ACTION_OUTPUT_LOCK = threading.RLock()
 
 
 def nova_automatic_action_output_path(space_dir: Path, action: str) -> Path:
@@ -35,18 +40,195 @@ def nova_automatic_action_output_path(space_dir: Path, action: str) -> Path:
     return Path(space_dir) / Path(scope)
 
 
-def _read_json(path: Path, default: Any) -> Any:
+def _read_text_descriptor(descriptor: int) -> str:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(descriptor, 64 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    return b"".join(chunks).decode("utf-8")
+
+
+def _read_json_document(document: str | None, default: Any) -> Any:
+    if document is None or not document.strip():
+        return default
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
+        return json.loads(document)
+    except (ValueError, TypeError):
         return default
 
 
-def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+def _json_document(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _write_verified_output(
+    directory: swarm_config._DirectoryLease,
+    filename: str,
+    document: str,
+) -> None:
+    """Atomically replace, then prove the final name is our fresh inode."""
+    directory.write_text(filename, document)
+    try:
+        with directory.hold_regular_file(
+            filename,
+            read_only=True,
+            create=False,
+        ) as descriptor:
+            if _read_text_descriptor(descriptor) != document:
+                raise swarm_config.SwarmProjectPathError(
+                    "Automatic Nova output changed during atomic replacement"
+                )
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise swarm_config.SwarmProjectPathError(
+                    "Automatic Nova output must be one unshared regular file"
+                )
+            if directory.posix_fd is not None:
+                current = os.stat(
+                    filename,
+                    dir_fd=directory.posix_fd,
+                    follow_symlinks=False,
+                )
+                if (
+                    not stat.S_ISREG(current.st_mode)
+                    or current.st_nlink != 1
+                    or (current.st_dev, current.st_ino)
+                    != (opened.st_dev, opened.st_ino)
+                ):
+                    raise swarm_config.SwarmProjectPathError(
+                        "Automatic Nova output name changed during validation"
+                    )
+    except BaseException:
+        # Removing a direct child never follows it. If the replace source was
+        # swapped to a link or hard link, this only removes the unsafe local
+        # name and leaves its outside target/inode untouched.
+        swarm_config._unlink_direct_child(directory, filename)
+        raise
+
+
+def _validate_pinned_output_chain(
+    root_path: Path,
+    root: swarm_config._DirectoryLease,
+    edges: list[
+        tuple[
+            swarm_config._DirectoryLease,
+            str,
+            swarm_config._DirectoryLease,
+        ]
+    ],
+) -> None:
+    """Recheck POSIX names against every held directory descriptor.
+
+    Windows directory handles are opened without delete sharing, so each
+    component is already protected against a rename/reparse swap until the
+    lease closes. POSIX descriptors keep access pinned to the opened inode but
+    do not stop a namespace rename, so compare every current name before and
+    after opening/writing the output.
+    """
+    if root.posix_fd is None:
+        return
+    try:
+        current_root = os.stat(root_path, follow_symlinks=False)
+        opened_root = os.fstat(root.posix_fd)
+        if (
+            not stat.S_ISDIR(current_root.st_mode)
+            or (current_root.st_dev, current_root.st_ino)
+            != (opened_root.st_dev, opened_root.st_ino)
+        ):
+            raise swarm_config.SwarmProjectPathError(
+                "Automatic Nova output root changed during access"
+            )
+        for parent, name, child in edges:
+            if parent.posix_fd is None or child.posix_fd is None:
+                raise swarm_config.SwarmProjectPathError(
+                    "Automatic Nova output lost its pinned directory"
+                )
+            current = os.stat(
+                name,
+                dir_fd=parent.posix_fd,
+                follow_symlinks=False,
+            )
+            opened = os.fstat(child.posix_fd)
+            if (
+                not stat.S_ISDIR(current.st_mode)
+                or (current.st_dev, current.st_ino)
+                != (opened.st_dev, opened.st_ino)
+            ):
+                raise swarm_config.SwarmProjectPathError(
+                    "Automatic Nova output directory changed during access"
+                )
+    except OSError as exc:
+        raise swarm_config.SwarmProjectPathError(
+            "Unable to revalidate automatic Nova output path"
+        ) from exc
+
+
+@contextmanager
+def _pinned_automatic_action_output(
+    space_dir: Path,
+    action: str,
+    *,
+    read_existing: bool,
+) -> Iterator[
+    tuple[
+        swarm_config._DirectoryLease,
+        str,
+        str | None,
+        Path,
+    ]
+]:
+    """Hold one allowlisted output through non-link directory/file handles."""
+    scope = Path(NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES[action])
+    if scope.is_absolute() or ".." in scope.parts or len(scope.parts) < 1:
+        raise swarm_config.SwarmProjectPathError(
+            "Automatic Nova output scope must remain beneath its project"
+        )
+    root_path = Path(space_dir).expanduser().absolute()
+    output_path = root_path.joinpath(*scope.parts)
+    with _AUTOMATIC_ACTION_OUTPUT_LOCK:
+        with ExitStack() as stack:
+            root = stack.enter_context(
+                swarm_config._pinned_root_directory(root_path)
+            )
+            parent = root
+            edges: list[
+                tuple[
+                    swarm_config._DirectoryLease,
+                    str,
+                    swarm_config._DirectoryLease,
+                ]
+            ] = []
+            for component in scope.parts[:-1]:
+                child = stack.enter_context(
+                    swarm_config._pinned_child_directory(
+                        parent,
+                        component,
+                        create=True,
+                        label=f"automatic Nova output {component}",
+                    )
+                )
+                edges.append((parent, component, child))
+                parent = child
+            _validate_pinned_output_chain(root_path, root, edges)
+            existing_document: str | None = None
+            try:
+                with parent.hold_regular_file(
+                    scope.name,
+                    read_only=True,
+                    create=False,
+                ) as descriptor:
+                    if read_existing:
+                        existing_document = _read_text_descriptor(descriptor)
+            except FileNotFoundError:
+                pass
+            _validate_pinned_output_chain(root_path, root, edges)
+            try:
+                yield parent, scope.name, existing_document, output_path
+            finally:
+                _validate_pinned_output_chain(root_path, root, edges)
 
 
 class ActionRegistry:
@@ -102,19 +284,27 @@ class ActionRegistry:
         thread_id = thread_id or topic
         if not thread_id:
             return {"ok": False, "message": "No concrete continuity thread target was supplied."}
-        path = nova_automatic_action_output_path(self.space_dir, "prioritize_thread")
-        continuity = _read_json(path, {})
-        continuity["prioritized_thread"] = {
-            "thread_id": thread_id,
-            "topic": topic or thread_id,
-            "next_step": (intent.get("payload") or {}).get("next_step") or "Resume and resolve this thread.",
-            "intent_id": intent.get("id") or intent.get("intent_id"),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        history = continuity.setdefault("prioritized_history", [])
-        history.append(dict(continuity["prioritized_thread"]))
-        continuity["prioritized_history"] = history[-50:]
-        _write_json(path, continuity)
+        with _pinned_automatic_action_output(
+            self.space_dir,
+            "prioritize_thread",
+            read_existing=True,
+        ) as (directory, filename, existing_document, path):
+            continuity = _read_json_document(existing_document, {})
+            continuity["prioritized_thread"] = {
+                "thread_id": thread_id,
+                "topic": topic or thread_id,
+                "next_step": (intent.get("payload") or {}).get("next_step") or "Resume and resolve this thread.",
+                "intent_id": intent.get("id") or intent.get("intent_id"),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            history = continuity.setdefault("prioritized_history", [])
+            history.append(dict(continuity["prioritized_thread"]))
+            continuity["prioritized_history"] = history[-50:]
+            _write_verified_output(
+                directory,
+                filename,
+                _json_document(continuity),
+            )
         return {"ok": True, "message": f"Prioritized continuity thread: {topic or thread_id}", "effects": {"effect": "thread_prioritized", "thread": continuity["prioritized_thread"], "path": str(path)}}
 
     def _goal_check(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -157,10 +347,17 @@ class ActionRegistry:
             "correlation_id": intent.get("correlation_id"),
             "emotion": state.get("emotion") or {},
         }
-        path = nova_automatic_action_output_path(self.space_dir, "mind_diary")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with _pinned_automatic_action_output(
+            self.space_dir,
+            "mind_diary",
+            read_existing=True,
+        ) as (directory, filename, existing_document, path):
+            document = json.dumps(entry, ensure_ascii=False) + "\n"
+            _write_verified_output(
+                directory,
+                filename,
+                (existing_document or "") + document,
+            )
         return {"ok": True, "message": content, "effects": {"effect": "diary_entry_persisted", "entry": entry, "path": str(path)}}
 
     def _dream(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -198,14 +395,22 @@ class ActionRegistry:
         return {"ok": True, "message": f"Created reversible local draft {path.name}.", "effects": {"path": str(path)}}
 
     def _agenda_update(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-        path = nova_automatic_action_output_path(self.space_dir, "agenda_update")
         snapshot = {
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "intent_id": intent.get("id") or intent.get("intent_id"),
             "need": intent.get("need"),
             "why": intent.get("why"),
         }
-        _write_json(path, snapshot)
+        with _pinned_automatic_action_output(
+            self.space_dir,
+            "agenda_update",
+            read_existing=False,
+        ) as (directory, filename, _existing_document, path):
+            _write_verified_output(
+                directory,
+                filename,
+                _json_document(snapshot),
+            )
         return {"ok": True, "message": "Persisted an agenda-maintenance checkpoint.", "effects": {"path": str(path), "snapshot": snapshot}}
 
     def _aces_cycle(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:

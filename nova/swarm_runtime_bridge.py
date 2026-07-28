@@ -49,6 +49,7 @@ _PERCENT_ESCAPE = re.compile(r"%[0-9a-fA-F]{2}")
 _OPAQUE_ENCODING_PREFIX = re.compile(r"^(?:base64(?:url)?|b64|data):", re.IGNORECASE)
 _BASE64_TEXT = re.compile(r"^[A-Za-z0-9+/_-]+={0,2}$")
 _PUBLIC_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_SHA256_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _ENCODED_CONTROL_TOKENS = (
     b"command",
     b"apply",
@@ -316,11 +317,13 @@ class NovaIntentReadOnlyVerifier:
         *,
         snapshot: NovaIntentSnapshot | None = None,
         run_id: str | None = None,
+        proposal_digest_value: str | None = None,
     ) -> None:
         self._project_root = _trusted_project_root(project_root)
         self._context = project_root
         self._snapshot = snapshot
         self._run_id = run_id
+        self._proposal_digest = proposal_digest_value
 
     def verify(self, request: VerificationRequest) -> VerificationResult:
         """Core protocol entry point; it validates the bound durable intent."""
@@ -350,6 +353,21 @@ class NovaIntentReadOnlyVerifier:
                 "intent_digest": snapshot.intent_digest,
             },
         )
+
+    def review_authorization_context(self) -> Mapping[str, Any]:
+        """Expose only the exact canonical action this bound verifier attests."""
+        snapshot = self._snapshot
+        if (
+            snapshot is None
+            or not isinstance(self._run_id, str)
+            or not self._run_id
+            or not isinstance(self._proposal_digest, str)
+        ):
+            raise InvalidVerifierResult(
+                "Nova review authorization requires a bound run and proposal"
+            )
+        self._validate(snapshot)
+        return _nova_review_authorization(snapshot, self._proposal_digest)
 
     def _validate(self, snapshot: NovaIntentSnapshot) -> None:
         if not isinstance(snapshot, NovaIntentSnapshot):
@@ -405,6 +423,42 @@ def _canonical_snapshot_document(
     if snapshot.verifier_evidence_ref != f"nova:verifier:{snapshot.intent_digest}":
         raise ValueError("Nova verifier evidence reference is invalid")
     return document
+
+
+def _nova_review_authorization(
+    snapshot: NovaIntentSnapshot,
+    proposal_digest_value: str,
+) -> dict[str, Any]:
+    """Return the sole durable/model-visible authorization context."""
+    if not _SHA256_DIGEST.fullmatch(snapshot.intent_digest):
+        raise ValueError("Nova intent digest is invalid")
+    if not _SHA256_DIGEST.fullmatch(proposal_digest_value):
+        raise ValueError("Nova proposal digest is invalid")
+    return {
+        "action": snapshot.action,
+        "target": _thaw_json(snapshot.target),
+        "payload": _thaw_json(snapshot.payload),
+        "expected_output_scope": snapshot.expected_output_scope,
+        "intent_digest": snapshot.intent_digest,
+        "proposal_digest": proposal_digest_value,
+    }
+
+
+def _nova_review_authorization_matches(
+    metadata: Mapping[str, Any],
+    snapshot: NovaIntentSnapshot,
+) -> bool:
+    proposal_digest_value = metadata.get("proposal_digest")
+    if not isinstance(proposal_digest_value, str):
+        return False
+    try:
+        expected = _nova_review_authorization(
+            snapshot,
+            proposal_digest_value,
+        )
+    except (TypeError, ValueError):
+        return False
+    return metadata.get("nova_review_authorization") == expected
 
 
 def _trusted_project_root(project_root: _NovaBridgeContext) -> Path:
@@ -605,6 +659,8 @@ class NovaPreCompletionHook:
                 return PreCompletionResult(False, "nova_proposal_digest_mismatch")
             if snapshot.intent_digest != metadata.get("nova_intent_digest"):
                 return PreCompletionResult(False, "nova_snapshot_digest_mismatch")
+            if not _nova_review_authorization_matches(metadata, snapshot):
+                return PreCompletionResult(False, "nova_review_authorization_mismatch")
             checkpoints = context.store.get_workflow_role_checkpoints(context.run.run_id)
             if not PolicyGate._has_durable_review_quorum(proposal, checkpoints):
                 return PreCompletionResult(False, "nova_review_evidence_unavailable")
@@ -678,6 +734,7 @@ class NovaSwarmRuntimeBridge:
         store = ProjectSwarmStore(self._project_root)
         adapter = NovaSwarmAdapter(self._kernel, PolicyGate(store), enabled=True)
         proposal = adapter.translate(snapshot.to_suggestion(context))
+        bound_proposal_digest = proposal_digest(proposal)
         yolo = self._kernel.is_yolo_enabled()
         if type(yolo) is not bool:
             yolo = False
@@ -692,9 +749,13 @@ class NovaSwarmRuntimeBridge:
             "integration_namespace": _NOVA_NAMESPACE,
             "nova_intent_digest": snapshot.intent_digest,
             "nova_snapshot": _snapshot_metadata(snapshot),
+            "nova_review_authorization": _nova_review_authorization(
+                snapshot,
+                bound_proposal_digest,
+            ),
             "nova_mode": mode,
             "nova_max_calls": max_calls,
-            "proposal_digest": proposal_digest(proposal),
+            "proposal_digest": bound_proposal_digest,
             "required_pre_completion_hook": _RUNTIME_HOOK_ID,
         }
         admission = store.admit_integration_run(
@@ -718,13 +779,16 @@ class NovaSwarmRuntimeBridge:
                 _NovaRuntimeBinding(
                     admission.run.run_id,
                     snapshot.intent_digest,
-                    proposal_digest(proposal),
+                    bound_proposal_digest,
                     mode,
                     max_calls,
                     adapter,
                     context,
                     NovaIntentReadOnlyVerifier(
-                        context, snapshot=snapshot, run_id=admission.run.run_id
+                        context,
+                        snapshot=snapshot,
+                        run_id=admission.run.run_id,
+                        proposal_digest_value=bound_proposal_digest,
                     ),
                 ),
             )
@@ -937,6 +1001,7 @@ def register_nova_runtime_context(
                 trusted_project_root,
                 snapshot=snapshot,
                 run_id=run.run_id,
+                proposal_digest_value=proposal,
             ),
         ),
     )
@@ -983,6 +1048,7 @@ def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBindi
             or snapshot.proposal_id != bound_snapshot.proposal_id
             or snapshot.verifier_evidence_ref != bound_snapshot.verifier_evidence_ref
             or snapshot.expected_output_scope != bound_snapshot.expected_output_scope
+            or not _nova_review_authorization_matches(metadata, snapshot)
         ):
             return None
         binding.verifier.verify_snapshot(snapshot)
@@ -1037,6 +1103,7 @@ def _durable_nova_contract_matches(
         and expected_calls is not None
         and metadata.get("nova_max_calls") == expected_calls
         and isinstance(metadata.get("proposal_digest"), str)
+        and _nova_review_authorization_matches(metadata, snapshot)
         and metadata.get("required_pre_completion_hook") == _RUNTIME_HOOK_ID
     )
 

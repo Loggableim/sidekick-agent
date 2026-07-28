@@ -155,6 +155,27 @@ def test_swarm_authorization_happens_before_nova_govern_and_act(tmp_path: Path):
     assert [name for name, _payload in kernel.calls] == ["govern", "act"]
 
 
+def test_adapter_rejects_a_truthy_non_boolean_action_result(tmp_path: Path):
+    """Only Nova's literal boolean success marker may report execution."""
+    store = ProjectSwarmStore(tmp_path)
+    run = _run(tmp_path)
+
+    class _TruthyStringKernel(_Kernel):
+        def act(self, decision: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(("act", decision))
+            return {
+                "executed": "false",
+                "action": decision["intent"]["action"],
+            }
+
+    kernel = _TruthyStringKernel(space_dir=tmp_path)
+    adapter = NovaSwarmAdapter(kernel, PolicyGate(store), enabled=True)
+
+    result = adapter.execute_suggestion(_suggestion(), run)
+
+    assert result.executed is False
+
+
 def test_swarm_policy_block_never_calls_nova_or_a_legacy_fallback(tmp_path: Path):
     """Catches a Swarm policy block falling through to an old Nova action path."""
     store = ProjectSwarmStore(tmp_path)
