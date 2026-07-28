@@ -4,6 +4,7 @@ import builtins
 from contextlib import contextmanager
 import copy
 from dataclasses import replace
+import inspect
 import json
 import os
 from pathlib import Path
@@ -782,6 +783,326 @@ def test_base64_control_detection_keeps_ordinary_text_usable(trusted_nova_projec
             project_root=trusted_nova_project,
         )
         assert snapshot.to_suggestion(trusted_nova_project)["payload"]["content"] == content
+
+
+def test_submit_nova_intent_derives_host_context_and_delegates_through_bridge(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches the public seam bypassing the bridge or accepting caller-owned trust."""
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+
+    class Kernel:
+        def __init__(self) -> None:
+            self.space_dir = project
+            self.actions = ActionRegistry(project)
+
+        def govern(self, _intent):
+            pytest.fail("the public entry must not call govern")
+
+        def act(self, _decision):
+            pytest.fail("the public entry must not call act")
+
+    kernel = Kernel()
+    captured: dict[str, object] = {}
+    original_import = builtins.__import__
+
+    def forbid_host_surface_import(name, *args, **kwargs):
+        if name == "config" or name.startswith(("web.", "cli.config")):
+            pytest.fail(f"public entry imported a host config surface: {name}")
+        return original_import(name, *args, **kwargs)
+
+    class RecordingBridge:
+        def __init__(
+            self,
+            supplied_kernel,
+            *,
+            project_root,
+            trusted_project_root,
+        ) -> None:
+            captured["kernel"] = supplied_kernel
+            captured["project_root"] = project_root
+            captured["context"] = trusted_project_root
+
+        def submit(self, suggestion, *, source_slot):
+            captured["suggestion"] = suggestion
+            captured["source_slot"] = source_slot
+            captured["trusted_root"] = bridge._trusted_project_root(
+                captured["context"]
+            )
+            return bridge.NovaBridgeResult(
+                "created",
+                run_id="run-123",
+                reason="SECRET raw admission policy text",
+            )
+
+    monkeypatch.setattr(bridge, "NovaSwarmRuntimeBridge", RecordingBridge)
+    monkeypatch.setattr(builtins, "__import__", forbid_host_surface_import)
+    proposal = _diary_suggestion()
+
+    result = bridge.submit_nova_intent(kernel, proposal, source_slot=123)
+
+    assert captured == {
+        "kernel": kernel,
+        "project_root": project.resolve(),
+        "context": captured["context"],
+        "suggestion": proposal,
+        "source_slot": 123,
+        "trusted_root": project.resolve(),
+    }
+    assert result == {
+        "run_id": "run-123",
+        "accepted": True,
+        "executed": False,
+        "reason": "admitted",
+        "decision": {
+            "policy": {
+                "allowed": True,
+                "reason": "admitted",
+            }
+        },
+    }
+    assert json.loads(json.dumps(result)) == result
+
+
+@pytest.mark.parametrize(
+    ("status", "bridge_run_id", "public_run_id", "accepted", "reason"),
+    [
+        ("bridge_disabled", None, None, False, "bridge_disabled"),
+        ("unsupported_action", None, None, False, "unsupported_action"),
+        ("coalesced", "run-existing", "run-existing", True, "coalesced"),
+        ("created", "run-new", "run-new", True, "admitted"),
+        ("created", "x" * 512, None, True, "admitted"),
+    ],
+)
+def test_submit_nova_intent_returns_only_bounded_public_admission_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: str,
+    bridge_run_id: str | None,
+    public_run_id: str | None,
+    accepted: bool,
+    reason: str,
+):
+    """Catches internal admission or policy text escaping the live entry result."""
+    project = tmp_path / status / "spaces" / "nova"
+    project.mkdir(parents=True)
+
+    class Kernel:
+        space_dir = project
+        actions = ActionRegistry(project)
+
+    class ResultBridge:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def submit(self, _proposal, *, source_slot):
+            assert source_slot == 9
+            return bridge.NovaBridgeResult(
+                status,
+                run_id=bridge_run_id,
+                reason="SECRET raw exception or policy text",
+            )
+
+    monkeypatch.setattr(bridge, "NovaSwarmRuntimeBridge", ResultBridge)
+
+    result = bridge.submit_nova_intent(
+        Kernel(),
+        _diary_suggestion(),
+        source_slot=9,
+    )
+
+    assert result == {
+        "run_id": public_run_id,
+        "accepted": accepted,
+        "executed": False,
+        "reason": reason,
+        "decision": {
+            "policy": {
+                "allowed": accepted,
+                "reason": reason,
+            }
+        },
+    }
+    assert "SECRET" not in json.dumps(result)
+
+
+def test_submit_nova_intent_rejects_root_disagreement_before_any_runtime_surface(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches mismatched code-owned roots reaching storage, workers, or Nova."""
+    kernel_root = tmp_path / "spaces" / "nova"
+    action_root = tmp_path / "spaces" / "other"
+    kernel_root.mkdir(parents=True)
+    action_root.mkdir(parents=True)
+
+    class Kernel:
+        space_dir = kernel_root
+        actions = ActionRegistry(action_root)
+
+        def is_yolo_enabled(self):
+            pytest.fail("root disagreement must not inspect runtime mode")
+
+        def govern(self, _intent):
+            pytest.fail("root disagreement must not call govern")
+
+        def act(self, _decision):
+            pytest.fail("root disagreement must not call act")
+
+    class ForbiddenBridge:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pytest.fail("root disagreement must not construct the runtime bridge")
+
+    monkeypatch.setattr(bridge, "NovaSwarmRuntimeBridge", ForbiddenBridge)
+
+    result = bridge.submit_nova_intent(
+        Kernel(),
+        _diary_suggestion() | {"action": "blog_draft"},
+        source_slot=10,
+    )
+
+    assert result == {
+        "run_id": None,
+        "accepted": False,
+        "executed": False,
+        "reason": "root_mismatch",
+        "decision": {
+            "policy": {
+                "allowed": False,
+                "reason": "root_mismatch",
+            }
+        },
+    }
+    assert not (kernel_root / ".swarm").exists()
+    assert not (action_root / ".swarm").exists()
+
+
+@pytest.mark.parametrize(
+    "root_case",
+    [
+        "missing_kernel_root",
+        "malformed_kernel_root",
+        "missing_action_root",
+        "raising_action_root",
+    ],
+)
+def test_submit_nova_intent_bounds_malformed_code_owned_roots(
+    tmp_path: Path,
+    root_case: str,
+):
+    """Catches root inspection errors leaking text or reaching persistent state."""
+    project = tmp_path / root_case / "spaces" / "nova"
+    project.mkdir(parents=True)
+
+    class MissingKernelRoot:
+        actions = ActionRegistry(project)
+
+    class MalformedKernelRoot:
+        space_dir = object()
+        actions = ActionRegistry(project)
+
+    class MissingActionRoot:
+        space_dir = project
+        actions = object()
+
+    class RaisingActions:
+        @property
+        def space_dir(self):
+            raise RuntimeError("SECRET root resolver failure")
+
+    class RaisingActionRoot:
+        space_dir = project
+        actions = RaisingActions()
+
+    kernels = {
+        "missing_kernel_root": MissingKernelRoot,
+        "malformed_kernel_root": MalformedKernelRoot,
+        "missing_action_root": MissingActionRoot,
+        "raising_action_root": RaisingActionRoot,
+    }
+
+    result = bridge.submit_nova_intent(
+        kernels[root_case](),
+        _diary_suggestion() | {"action": "blog_draft"},
+        source_slot=11,
+    )
+
+    assert result == {
+        "run_id": None,
+        "accepted": False,
+        "executed": False,
+        "reason": "root_mismatch",
+        "decision": {
+            "policy": {
+                "allowed": False,
+                "reason": "root_mismatch",
+            }
+        },
+    }
+    assert "SECRET" not in json.dumps(result, allow_nan=False)
+    assert not (project / ".swarm").exists()
+
+
+@pytest.mark.parametrize(
+    ("proposal", "source_slot"),
+    [
+        (object(), 12),
+        (_diary_suggestion(), float("nan")),
+    ],
+)
+def test_submit_nova_intent_bounds_submission_validation_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    proposal: object,
+    source_slot: object,
+):
+    """Catches malformed live inputs escaping as exceptions or non-JSON values."""
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+
+    class Kernel:
+        space_dir = project
+        actions = ActionRegistry(project)
+
+    class RejectingBridge:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def submit(self, _proposal, *, source_slot):
+            raise ValueError(f"SECRET invalid submission: {source_slot!r}")
+
+    monkeypatch.setattr(bridge, "NovaSwarmRuntimeBridge", RejectingBridge)
+
+    result = bridge.submit_nova_intent(
+        Kernel(),
+        proposal,
+        source_slot=source_slot,
+    )
+
+    assert result == {
+        "run_id": None,
+        "accepted": False,
+        "executed": False,
+        "reason": "submission_rejected",
+        "decision": {
+            "policy": {
+                "allowed": False,
+                "reason": "submission_rejected",
+            }
+        },
+    }
+    assert "SECRET" not in json.dumps(result, allow_nan=False)
+
+
+def test_submit_nova_intent_has_no_caller_root_or_resolver_parameters():
+    """Catches the live caller gaining authority to mint the trusted context."""
+    assert tuple(inspect.signature(bridge.submit_nova_intent).parameters) == (
+        "kernel",
+        "proposal",
+        "source_slot",
+    )
 
 
 def test_bridge_matrix_01_disabled_reads_only_config_and_touches_no_runtime(
