@@ -5,6 +5,10 @@ import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
+
+
+DASHBOARD_ACTOR = "dashboard:" + "a" * 64
 
 
 def _headers(web_server):
@@ -713,7 +717,7 @@ def test_generic_config_preserves_management_audit_and_refuses_malformed_evidenc
         enrolled=False,
         confirmation=None,
         trusted_project_root=None,
-        actor="dashboard:test",
+        actor=DASHBOARD_ACTOR,
     )
     before = space.load_config()
 
@@ -759,3 +763,139 @@ def test_management_post_fails_closed_without_dashboard_principal(monkeypatch, t
     )
 
     assert response.status_code == 403
+
+
+
+def test_generic_config_refuses_malformed_legacy_audit(monkeypatch, tmp_path):
+    """Legacy JSONL corruption cannot be erased through an ordinary config edit."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"}, mint_space_id=True)
+    (space.root / "nova-management-audit.jsonl").write_text("not json\n", encoding="utf-8")
+    before = space.config_path.read_bytes()
+
+    response = TestClient(web_server.app).post(
+        "/api/space/config",
+        headers=_headers(web_server),
+        json={"slug": "alpha", "description": "must not write"},
+    )
+
+    assert response.status_code == 409
+    assert space.config_path.read_bytes() == before
+
+
+def test_audit_get_reads_legacy_then_generic_update_migrates_it(monkeypatch, tmp_path):
+    """A pure audit GET exposes JSONL, while a later generic write preserves it in YAML."""
+    import json
+    import uuid
+
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space_id = uuid.uuid4().hex
+    event = {
+        "actor": DASHBOARD_ACTOR,
+        "timestamp": 1_700_000_001.0,
+        "space_id": space_id,
+        "root_fingerprint": "",
+        "policy_revision": 1,
+        "governance_revision": 1,
+        "previous": {"yolo": False, "enrolled": False, "revision": 0},
+        "next": {"yolo": True, "enrolled": False, "revision": 1},
+    }
+    space.save_config({
+        "name": "Alpha",
+        "space_id": space_id,
+        "nova_management": event["next"],
+    })
+    (space.root / "nova-management-audit.jsonl").write_text(
+        json.dumps(event) + "\n", encoding="utf-8"
+    )
+    before_get = space.config_path.read_bytes()
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+
+    audit = client.get("/api/space/nova-management/audit?slug=alpha", headers=headers)
+
+    assert audit.status_code == 200
+    assert audit.json()["events"] == [event]
+    assert space.config_path.read_bytes() == before_get
+
+    update = client.post(
+        "/api/space/config",
+        headers=headers,
+        json={"slug": "alpha", "description": "legacy retained"},
+    )
+
+    assert update.status_code == 200
+    assert space.load_config()["nova_management_audit"] == [event]
+    assert (space.root / "nova-management-audit.jsonl").is_file()
+
+
+def test_audit_get_returns_conflict_for_corrupt_evidence(monkeypatch, tmp_path):
+    """Audit GET is pure but fail-closed, not an internal-server-error, on corruption."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.root.mkdir(parents=True)
+    space.config_path.write_text("nova_management_audit:\n- broken\n", encoding="utf-8")
+
+    response = TestClient(web_server.app).get(
+        "/api/space/nova-management/audit?slug=alpha", headers=_headers(web_server)
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "corrupt_yaml",
+    ["{not valid", "- not-a-mapping\n", "[]\n", "false\n"],
+)
+def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
+    monkeypatch, tmp_path, corrupt_yaml,
+):
+    """No management or generic route may replace syntactically invalid/non-mapping YAML."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.root.mkdir(parents=True)
+    space.config_path.write_text(corrupt_yaml, encoding="utf-8")
+    before = space.config_path.read_bytes()
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+
+    management_get = client.get("/api/space/nova-management?slug=alpha", headers=headers)
+    audit_get = client.get("/api/space/nova-management/audit?slug=alpha", headers=headers)
+    management_post = client.post(
+        "/api/space/nova-management",
+        headers=headers,
+        json={"slug": "alpha", "yolo": False, "enrolled": False},
+    )
+    generic_post = client.post(
+        "/api/space/config",
+        headers=headers,
+        json={"slug": "alpha", "description": "must not replace source"},
+    )
+
+    assert management_get.status_code == 409
+    assert audit_get.status_code == 409
+    assert management_post.status_code == 409
+    assert generic_post.status_code == 409
+    assert space.config_path.read_bytes() == before
