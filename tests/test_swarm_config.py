@@ -161,6 +161,85 @@ save_integration_config(project, "other", {"version": 1, "enabled": True})
     assert load_integration_config(project, "other") == {"version": 1, "enabled": True}
 
 
+def test_two_process_integration_saves_serialize_initialization(
+    tmp_path: Path,
+):
+    """Catches an uninitialized project's late default write erasing a save."""
+    project = tmp_path / "uninitialized-project"
+    ready = tmp_path / "initialization-ready"
+    release = tmp_path / "release-initialization"
+    started = tmp_path / "nova-started"
+    source_root = Path(__file__).resolve().parents[1]
+    initializing_script = """
+import sys
+import time
+from pathlib import Path
+from swarm_core import config as config_module
+from swarm_core.config import save_integration_config
+
+project, ready, release = map(Path, sys.argv[1:4])
+original_write = config_module._write_project_config
+def hold_initial_default(lease, raw_config):
+    if raw_config == config_module._DEFAULT_CONFIG and not ready.exists():
+        ready.write_text("ready", encoding="utf-8")
+        deadline = time.monotonic() + 10
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("test did not release initializer")
+            time.sleep(0.01)
+    return original_write(lease, raw_config)
+config_module._write_project_config = hold_initial_default
+save_integration_config(project, "other", {"version": 1, "enabled": True})
+"""
+    saving_script = """
+import sys
+from pathlib import Path
+from swarm_core.config import save_integration_config
+
+project, started = map(Path, sys.argv[1:3])
+started.write_text("started", encoding="utf-8")
+save_integration_config(project, "nova", {"version": 1, "enabled": True})
+"""
+    initializer = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            initializing_script,
+            str(project),
+            str(ready),
+            str(release),
+        ],
+        cwd=source_root,
+    )
+    saver = None
+    try:
+        _wait_for_file(ready)
+        saver = subprocess.Popen(
+            [sys.executable, "-c", saving_script, str(project), str(started)],
+            cwd=source_root,
+        )
+        _wait_for_file(started)
+        deadline = time.monotonic() + 1
+        while saver.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert saver.poll() is None
+
+        release.write_text("release", encoding="utf-8")
+        assert initializer.wait(timeout=10) == 0
+        assert saver.wait(timeout=10) == 0
+    finally:
+        release.write_text("release", encoding="utf-8")
+        if initializer.poll() is None:
+            initializer.kill()
+            initializer.wait(timeout=10)
+        if saver is not None and saver.poll() is None:
+            saver.kill()
+            saver.wait(timeout=10)
+
+    assert load_integration_config(project, "nova") == {"version": 1, "enabled": True}
+    assert load_integration_config(project, "other") == {"version": 1, "enabled": True}
+
+
 def _wait_for_file(path: Path) -> None:
     deadline = time.monotonic() + 10
     while not path.exists():
