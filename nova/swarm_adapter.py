@@ -14,6 +14,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol
 
+from nova.actions import NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES
 from swarm_core.policy import PolicyDecision, PolicyGate, PolicyStatus
 from swarm_core.types import (
     ActionCapabilities,
@@ -43,6 +44,10 @@ class NovaActionSpec:
     action: str
     capabilities: ActionCapabilities
     policy_tier: str
+    output_scope: str | None = None
+    target_keys: frozenset[str] = frozenset()
+    payload_keys: frozenset[str] = frozenset()
+    requires_target: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,15 +96,33 @@ _BOUND_INTENT_FIELDS = (
 # tier; arbitrary suggestions cannot label themselves safe.
 NOVA_ACTION_SPECS: Mapping[str, NovaActionSpec] = MappingProxyType(
     {
-        "agenda_update": NovaActionSpec("agenda_update", _LOCAL_REVERSIBLE, "silent"),
+        "agenda_update": NovaActionSpec(
+            "agenda_update",
+            _LOCAL_REVERSIBLE,
+            "silent",
+            NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES["agenda_update"],
+        ),
         # Nova's own configured policy classifies drafts as external.  Keep
         # that human gate even though the current handler writes a local file.
         "blog_draft": NovaActionSpec(
             "blog_draft", _HUMAN_GATED_PROJECT_ACTION, "external"
         ),
-        "mind_diary": NovaActionSpec("mind_diary", _LOCAL_REVERSIBLE, "internal"),
+        "mind_diary": NovaActionSpec(
+            "mind_diary",
+            _LOCAL_REVERSIBLE,
+            "internal",
+            NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES["mind_diary"],
+            frozenset(),
+            frozenset({"content"}),
+        ),
         "prioritize_thread": NovaActionSpec(
-            "prioritize_thread", _LOCAL_REVERSIBLE, "silent"
+            "prioritize_thread",
+            _LOCAL_REVERSIBLE,
+            "silent",
+            NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES["prioritize_thread"],
+            frozenset({"thread_id", "topic"}),
+            frozenset({"next_step"}),
+            True,
         ),
     }
 )

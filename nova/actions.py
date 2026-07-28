@@ -8,9 +8,31 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable
 
 from nova.reflection_worker import ReflectionWorker
+
+
+# The handlers below write only these stable paths for the actions permitted by
+# the prepared Swarm bridge.  The adapter reads this immutable mapping rather
+# than maintaining a second, drift-prone copy of the output contract.
+NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES = MappingProxyType(
+    {
+        "mind_diary": "nova_data/entity/mind_diary.jsonl",
+        "agenda_update": "nova_data/entity/agenda_maintenance.json",
+        "prioritize_thread": "continuity_state.json",
+    }
+)
+
+
+def nova_automatic_action_output_path(space_dir: Path, action: str) -> Path:
+    """Return the sole local output path for a bridge-allowlisted action."""
+    try:
+        scope = NOVA_AUTOMATIC_ACTION_OUTPUT_SCOPES[action]
+    except KeyError as exc:
+        raise ValueError(f"No automatic Nova output scope: {action}") from exc
+    return Path(space_dir) / Path(scope)
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -78,7 +100,7 @@ class ActionRegistry:
         thread_id = str(target.get("thread_id") or target.get("topic") or "").strip()
         if not thread_id:
             return {"ok": False, "message": "No concrete continuity thread target was supplied."}
-        path = self.space_dir / "continuity_state.json"
+        path = nova_automatic_action_output_path(self.space_dir, "prioritize_thread")
         continuity = _read_json(path, {})
         continuity["prioritized_thread"] = {
             "thread_id": thread_id,
@@ -91,7 +113,7 @@ class ActionRegistry:
         history.append(dict(continuity["prioritized_thread"]))
         continuity["prioritized_history"] = history[-50:]
         _write_json(path, continuity)
-        return {"ok": True, "message": f"Prioritized continuity thread: {target.get('topic') or thread_id}", "effects": {"effect": "thread_prioritized", "thread": continuity["prioritized_thread"]}}
+        return {"ok": True, "message": f"Prioritized continuity thread: {target.get('topic') or thread_id}", "effects": {"effect": "thread_prioritized", "thread": continuity["prioritized_thread"], "path": str(path)}}
 
     def _goal_check(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         result = self._run_script("eigenziele.py", "check", timeout=60)
@@ -133,7 +155,7 @@ class ActionRegistry:
             "correlation_id": intent.get("correlation_id"),
             "emotion": state.get("emotion") or {},
         }
-        path = self.space_dir / "nova_data" / "entity" / "mind_diary.jsonl"
+        path = nova_automatic_action_output_path(self.space_dir, "mind_diary")
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -174,7 +196,7 @@ class ActionRegistry:
         return {"ok": True, "message": f"Created reversible local draft {path.name}.", "effects": {"path": str(path)}}
 
     def _agenda_update(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-        path = self.space_dir / "nova_data" / "entity" / "agenda_maintenance.json"
+        path = nova_automatic_action_output_path(self.space_dir, "agenda_update")
         snapshot = {
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "intent_id": intent.get("id") or intent.get("intent_id"),

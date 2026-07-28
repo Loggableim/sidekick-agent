@@ -6,13 +6,16 @@ It imports neither the Nova kernel nor any transport, tool, or model surface.
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from hashlib import sha256
 import json
 import math
 from pathlib import Path
+import re
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
+import unicodedata
 
 from nova.swarm_adapter import get_nova_action_spec
 from swarm_core.config import load_integration_config, save_integration_config
@@ -29,29 +32,12 @@ NOVA_AUTOMATIC_ACTIONS = (
 
 _BRIDGE_CONFIG_VERSION = 1
 _MAX_SOURCE_SLOT = (1 << 63) - 1
-_MAX_JSON_DEPTH = 8
-_MAX_JSON_ITEMS = 256
 _MAX_TEXT_LENGTH = 4_096
-_MAX_KEY_LENGTH = 128
-_ACTION_OUTPUT_SCOPES: Mapping[str, str] = MappingProxyType(
-    {
-        "mind_diary": "nova_data/mind_diary.jsonl",
-        "agenda_update": "nova_data/entity/agenda.json",
-        "prioritize_thread": "nova_data/entity/agenda.json",
-    }
-)
-_SENSITIVE_MARKERS = (
-    "apply",
-    "command",
-    "secret",
-    "url",
-    "password",
-    "credential",
-    "auth.json",
-    ".env",
-    "http://",
-    "https://",
-)
+_MAX_PRIORITY_ABS = 1_000_000
+_PERCENT_ESCAPE = re.compile(r"%[0-9a-fA-F]{2}")
+_OPAQUE_ENCODING_PREFIX = re.compile(r"^(?:base64|b64|data):", re.IGNORECASE)
+_BASE64_TEXT = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+TrustedProjectRootResolver = Callable[[str | Path], Path]
 
 
 @dataclass(frozen=True)
@@ -125,24 +111,28 @@ class NovaIntentSnapshot:
             raise ValueError("not an automatic Nova action")
         # Resolve the adapter-owned record before any suggestion reaches its
         # translation path; this can never instantiate or invoke a kernel.
-        get_nova_action_spec(action)
+        spec = get_nova_action_spec(action)
+        if spec.output_scope is None:  # defensive: only explicit local outputs
+            raise ValueError("automatic Nova action has no local output scope")
         slot = _source_slot(source_slot)
-        root = _resolved_root(project_root)
-        expected_outcome = _canonical_mapping(
-            submission.get("expected_outcome", {}), "Nova expected_outcome"
-        )
-        expected_outcome = dict(expected_outcome)
-        expected_outcome["output_scope"] = _ACTION_OUTPUT_SCOPES[action]
+        root = _trusted_project_root(project_root)
         document = {
             "action": action,
             "need": _required_text(submission.get("need"), "Nova need"),
             "title": _required_text(submission.get("title"), "Nova title"),
             "why": _required_text(submission.get("why"), "Nova why"),
-            "target": _canonical_mapping(submission.get("target", {}), "Nova target"),
-            "payload": _canonical_mapping(submission.get("payload", {}), "Nova payload"),
-            "expected_outcome": _freeze_json_mapping(
-                expected_outcome, "Nova expected_outcome"
+            "target": _canonical_action_mapping(
+                submission.get("target", {}),
+                "Nova target",
+                allowed_keys=spec.target_keys,
+                requires_value=spec.requires_target,
             ),
+            "payload": _canonical_action_mapping(
+                submission.get("payload", {}),
+                "Nova payload",
+                allowed_keys=spec.payload_keys,
+            ),
+            "expected_outcome": MappingProxyType({"output_scope": spec.output_scope}),
             "priority": _priority(submission.get("priority", 0.5)),
             "source_slot": slot,
             "project_root": str(root),
@@ -172,7 +162,10 @@ class NovaIntentSnapshot:
 
     @property
     def expected_output_scope(self) -> str:
-        return _ACTION_OUTPUT_SCOPES[self.action]
+        spec = get_nova_action_spec(self.action)
+        if spec.output_scope is None:
+            raise ValueError("Nova action has no automatic output scope")
+        return spec.output_scope
 
     def to_suggestion(self) -> dict[str, Any]:
         """Return the sole safe adapter input for this immutable snapshot."""
@@ -209,14 +202,24 @@ class NovaIntentSnapshot:
 class NovaIntentReadOnlyVerifier:
     """Validate a snapshot without kernel, adapter-action, tool, or I/O access."""
 
-    def __init__(self, project_root: Path) -> None:
-        self._project_root = _resolved_root(project_root)
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        trusted_project_root_resolver: TrustedProjectRootResolver | None = None,
+    ) -> None:
+        self._trusted_project_root_resolver = (
+            trusted_project_root_resolver or _default_trusted_project_root_resolver
+        )
+        self._project_root = _trusted_project_root(
+            project_root, self._trusted_project_root_resolver
+        )
 
     def verify(self, snapshot: NovaIntentSnapshot) -> VerificationResult:
         """Return independent positive evidence only for a valid local snapshot."""
         try:
             self._validate(snapshot)
-        except (TypeError, ValueError, OSError) as exc:
+        except (TypeError, ValueError, OSError, OverflowError) as exc:
             raise InvalidVerifierResult("invalid Nova intent snapshot") from exc
         return VerificationResult(
             work="Validated a canonical Nova automatic-action snapshot locally.",
@@ -233,30 +236,48 @@ class NovaIntentReadOnlyVerifier:
     def _validate(self, snapshot: NovaIntentSnapshot) -> None:
         if not isinstance(snapshot, NovaIntentSnapshot):
             raise TypeError("Nova verifier requires a NovaIntentSnapshot")
-        if _resolved_root(snapshot.project_root) != self._project_root:
+        if (
+            _trusted_project_root(
+                snapshot.project_root, self._trusted_project_root_resolver
+            )
+            != self._project_root
+        ):
             raise ValueError("Nova snapshot root does not match verifier root")
         if snapshot.action not in NOVA_AUTOMATIC_ACTIONS:
             raise ValueError("Nova snapshot action is not allowlisted")
-        if snapshot.expected_output_scope != _ACTION_OUTPUT_SCOPES[snapshot.action]:
+        spec = get_nova_action_spec(snapshot.action)
+        if spec.output_scope is None or snapshot.expected_output_scope != spec.output_scope:
             raise ValueError("Nova snapshot output scope is invalid")
-        expected_outcome = _canonical_mapping(snapshot.expected_outcome, "Nova expected_outcome")
-        if expected_outcome.get("output_scope") != snapshot.expected_output_scope:
+        expected_outcome = MappingProxyType({"output_scope": spec.output_scope})
+        if _thaw_json(snapshot.expected_outcome) != _thaw_json(expected_outcome):
             raise ValueError("Nova snapshot output is outside its expected scope")
         document = {
             "action": _required_text(snapshot.action, "Nova action"),
             "need": _required_text(snapshot.need, "Nova need"),
             "title": _required_text(snapshot.title, "Nova title"),
             "why": _required_text(snapshot.why, "Nova why"),
-            "target": _canonical_mapping(snapshot.target, "Nova target"),
-            "payload": _canonical_mapping(snapshot.payload, "Nova payload"),
+            "target": _canonical_action_mapping(
+                snapshot.target,
+                "Nova target",
+                allowed_keys=spec.target_keys,
+                requires_value=spec.requires_target,
+            ),
+            "payload": _canonical_action_mapping(
+                snapshot.payload,
+                "Nova payload",
+                allowed_keys=spec.payload_keys,
+            ),
             "expected_outcome": expected_outcome,
             "priority": _priority(snapshot.priority),
             "source_slot": _source_slot(snapshot.source_slot),
-            "project_root": str(_resolved_root(snapshot.project_root)),
+            "project_root": str(
+                _trusted_project_root(
+                    snapshot.project_root, self._trusted_project_root_resolver
+                )
+            ),
         }
         if document != snapshot._canonical_document():
             raise ValueError("Nova snapshot is not canonical")
-        _validate_document(document)
         if _digest(document) != snapshot.intent_digest:
             raise ValueError("Nova snapshot digest mismatch")
         if snapshot.proposal_id != f"nova-{snapshot.intent_digest}":
@@ -265,11 +286,24 @@ class NovaIntentReadOnlyVerifier:
             raise ValueError("Nova verifier evidence reference is invalid")
 
 
-def _resolved_root(project_root: Path) -> Path:
-    root = Path(project_root).expanduser().resolve()
-    if not root.is_absolute():  # pragma: no cover - resolve() is absolute
-        raise ValueError("Nova project root must be absolute")
-    return root
+def _default_trusted_project_root_resolver(path: str | Path) -> Path:
+    """Use Sidekick's non-mutating workspace trust boundary for Nova roots."""
+    from web.api.workspace import resolve_trusted_workspace_read_only
+
+    return resolve_trusted_workspace_read_only(path)
+
+
+def _trusted_project_root(
+    project_root: Path,
+    resolver: TrustedProjectRootResolver = _default_trusted_project_root_resolver,
+) -> Path:
+    candidate = Path(project_root).expanduser().resolve()
+    if not candidate.exists() or not candidate.is_dir():
+        raise ValueError("Nova project root must be an existing directory")
+    trusted = Path(resolver(candidate)).expanduser().resolve()
+    if trusted != candidate:
+        raise ValueError("trusted Nova project root resolver changed the root")
+    return trusted
 
 
 def _source_slot(value: Any) -> int:
@@ -283,7 +317,12 @@ def _source_slot(value: Any) -> int:
 def _priority(value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError("Nova priority must be numeric")
-    priority = float(value)
+    if isinstance(value, int) and abs(value) > _MAX_PRIORITY_ABS:
+        raise ValueError("Nova priority is too large")
+    try:
+        priority = float(value)
+    except OverflowError as exc:
+        raise ValueError("Nova priority is too large") from exc
     if not math.isfinite(priority):
         raise ValueError("Nova priority must be finite")
     return round(max(0.0, min(1.0, priority)), 4)
@@ -292,71 +331,35 @@ def _priority(value: Any) -> float:
 def _required_text(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a non-empty string")
-    text = value.strip()
+    text = _normalized_plain_text(value, label).strip()
     if len(text) > _MAX_TEXT_LENGTH:
         raise ValueError(f"{label} is too long")
     return text
 
 
-def _canonical_mapping(value: Any, label: str) -> Mapping[str, Any]:
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{label} must be a mapping")
-    return _freeze_json_mapping(value, label)
-
-
-def _freeze_json_mapping(value: Mapping[str, Any], label: str) -> Mapping[str, Any]:
-    item_count = [0]
-    frozen = _freeze_json_value(value, label, depth=0, item_count=item_count)
-    if not isinstance(frozen, Mapping):  # pragma: no cover - checked above
-        raise TypeError(f"{label} must be a mapping")
-    return frozen
-
-
-def _freeze_json_value(
+def _canonical_action_mapping(
     value: Any,
     label: str,
     *,
-    depth: int,
-    item_count: list[int],
-) -> Any:
-    if depth > _MAX_JSON_DEPTH:
-        raise ValueError(f"{label} is nested too deeply")
-    if value is None or isinstance(value, (bool, int, float, str)):
-        if isinstance(value, float) and not math.isfinite(value):
-            raise ValueError(f"{label} must not contain non-finite numbers")
-        if isinstance(value, str) and len(value) > _MAX_TEXT_LENGTH:
-            raise ValueError(f"{label} contains text that is too long")
-        return value
-    if isinstance(value, Mapping):
-        frozen: dict[str, Any] = {}
-        for key, child in value.items():
-            item_count[0] += 1
-            if item_count[0] > _MAX_JSON_ITEMS:
-                raise ValueError(f"{label} contains too many items")
-            if not isinstance(key, str) or not key or len(key) > _MAX_KEY_LENGTH:
-                raise ValueError(f"{label} contains an invalid key")
-            frozen[key] = _freeze_json_value(
-                child, label, depth=depth + 1, item_count=item_count
-            )
-        return MappingProxyType(frozen)
-    if isinstance(value, (list, tuple)):
-        frozen_list: list[Any] = []
-        for child in value:
-            item_count[0] += 1
-            if item_count[0] > _MAX_JSON_ITEMS:
-                raise ValueError(f"{label} contains too many items")
-            frozen_list.append(
-                _freeze_json_value(child, label, depth=depth + 1, item_count=item_count)
-            )
-        return tuple(frozen_list)
-    raise TypeError(f"{label} must contain JSON-safe values")
+    allowed_keys: frozenset[str],
+    requires_value: bool = False,
+) -> Mapping[str, str]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{label} must be a mapping")
+    canonical: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = _normalized_field_key(raw_key, label)
+        if key not in allowed_keys or key in canonical:
+            raise ValueError(f"{label} contains an unsupported field")
+        canonical[key] = _normalized_plain_text(raw_value, label)
+    if requires_value and not canonical:
+        raise ValueError(f"{label} requires a concrete target")
+    return MappingProxyType(canonical)
 
 
 def _thaw_json(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {key: _thaw_json(child) for key, child in value.items()}
-    if isinstance(value, tuple):
-        return [_thaw_json(child) for child in value]
     return value
 
 
@@ -371,22 +374,34 @@ def _digest(document: Mapping[str, Any]) -> str:
     return sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _validate_document(document: Mapping[str, Any]) -> None:
-    if not isinstance(document, Mapping):
-        raise TypeError("Nova snapshot canonical document must be a mapping")
-    if _contains_sensitive_marker(document):
-        raise ValueError("Nova snapshot contains a sensitive or effectful marker")
+def _normalized_field_key(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} contains an invalid key")
+    return _normalized_plain_text(value, label).casefold()
 
 
-def _contains_sensitive_marker(value: Any) -> bool:
-    if isinstance(value, Mapping):
-        return any(
-            _contains_sensitive_marker(key) or _contains_sensitive_marker(child)
-            for key, child in value.items()
-        )
-    if isinstance(value, (list, tuple)):
-        return any(_contains_sensitive_marker(child) for child in value)
-    if isinstance(value, str):
-        lowered = value.lower()
-        return any(marker in lowered for marker in _SENSITIVE_MARKERS)
-    return False
+def _normalized_plain_text(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} values must be plain text")
+    normalized = unicodedata.normalize("NFC", value)
+    if len(normalized) > _MAX_TEXT_LENGTH:
+        raise ValueError(f"{label} contains text that is too long")
+    if any(unicodedata.category(character).startswith("C") for character in normalized):
+        raise ValueError(f"{label} contains control characters")
+    if _PERCENT_ESCAPE.search(normalized) or _is_opaque_encoded_text(normalized):
+        raise ValueError(f"{label} contains opaque encoded material")
+    return normalized
+
+
+def _is_opaque_encoded_text(value: str) -> bool:
+    candidate = value.strip()
+    if _OPAQUE_ENCODING_PREFIX.match(candidate):
+        return True
+    if len(candidate) < 12 or len(candidate) % 4 or not _BASE64_TEXT.fullmatch(candidate):
+        return False
+    try:
+        decoded = base64.b64decode(candidate, validate=True)
+        decoded.decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return bool(decoded)
