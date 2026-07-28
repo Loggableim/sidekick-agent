@@ -37,20 +37,64 @@ _MAX_PRIORITY_ABS = 1_000_000
 _PERCENT_ESCAPE = re.compile(r"%[0-9a-fA-F]{2}")
 _OPAQUE_ENCODING_PREFIX = re.compile(r"^(?:base64(?:url)?|b64|data):", re.IGNORECASE)
 _BASE64_TEXT = re.compile(r"^[A-Za-z0-9+/_-]+={0,2}$")
-TrustedProjectRootResolver = Callable[[str | Path], Path]
-_TRUSTED_ROOT_CONSTRUCTION_TOKEN = object()
+_ENCODED_CONTROL_TOKENS = (
+    b"command",
+    b"apply",
+    b"secret",
+    b"url",
+    b"password",
+    b"credential",
+    b"auth.json",
+    b".env",
+)
+_CONTEXT_CONSTRUCTION_TOKEN = object()
 
 
-@dataclass(frozen=True, init=False)
-class NovaTrustedProjectRoot:
-    """An upstream-validated local root capability for a read-only bridge."""
+class _NovaBridgeContext:
+    """Private host-owned context that revalidates its trusted root at use."""
 
-    path: Path
+    __slots__ = ("_root", "_validator")
 
-    def __init__(self, path: Path, construction_token: object) -> None:
-        if construction_token is not _TRUSTED_ROOT_CONSTRUCTION_TOKEN:
-            raise TypeError("Nova trusted project roots must be created by the bridge")
-        object.__setattr__(self, "path", path)
+    def __init__(
+        self,
+        root: Path,
+        validator: Callable[[Path], Path],
+        construction_token: object,
+    ) -> None:
+        if construction_token is not _CONTEXT_CONSTRUCTION_TOKEN:
+            raise TypeError("Nova bridge contexts are host-owned")
+        self._root = root
+        self._validator = validator
+
+    def __reduce__(self):
+        raise TypeError("Nova bridge contexts cannot be serialized")
+
+    def _validated_root(self) -> Path:
+        root = self._root
+        if not root.exists() or not root.is_dir():
+            raise ValueError("trusted Nova project root is no longer a directory")
+        validated = Path(self._validator(root)).expanduser().resolve()
+        if validated != root:
+            raise ValueError("trusted Nova project root validation changed the root")
+        return root
+
+
+def _create_nova_bridge_context(
+    validated_project_root: Path,
+    *,
+    validator: Callable[[Path], Path],
+) -> _NovaBridgeContext:
+    """Create a host-only context after its owner independently validates root.
+
+    This deliberately remains private until the runtime host integration owns
+    trusted-workspace admission.  It accepts no YAML, intent, or request data.
+    """
+    if not callable(validator):
+        raise TypeError("Nova bridge context validator must be callable")
+    root = Path(validated_project_root).expanduser().resolve()
+    context = _NovaBridgeContext(root, validator, _CONTEXT_CONSTRUCTION_TOKEN)
+    context._validated_root()
+    return context
 
 
 @dataclass(frozen=True)
@@ -59,28 +103,6 @@ class NovaBridgeConfig:
 
     version: int = _BRIDGE_CONFIG_VERSION
     enabled: bool = False
-
-
-def create_trusted_nova_project_root(
-    project_root: Path,
-    *,
-    resolver: TrustedProjectRootResolver,
-) -> NovaTrustedProjectRoot:
-    """Accept an existing root only after an injected, upstream trust check.
-
-    The bridge has no default resolver: importing a WebUI resolver here could
-    initialize profile state.  A host that owns trusted-workspace policy must
-    supply its already-safe, side-effect-free validation boundary explicitly.
-    """
-    if not callable(resolver):
-        raise TypeError("Nova trusted root resolver must be callable")
-    candidate = Path(project_root).expanduser().resolve()
-    if not candidate.exists() or not candidate.is_dir():
-        raise ValueError("Nova project root must be an existing directory")
-    trusted = Path(resolver(candidate)).expanduser().resolve()
-    if trusted != candidate:
-        raise ValueError("trusted Nova project root resolver changed the root")
-    return NovaTrustedProjectRoot(candidate, _TRUSTED_ROOT_CONSTRUCTION_TOKEN)
 
 
 def load_nova_bridge_config(project_root: Path) -> NovaBridgeConfig:
@@ -114,7 +136,7 @@ def configure_nova_bridge(project_root: Path, *, enabled: bool) -> NovaBridgeCon
     return config
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class NovaIntentSnapshot:
     """A canonical, bounded Nova intent bound to one code-owned decision slot."""
 
@@ -136,7 +158,7 @@ class NovaIntentSnapshot:
         submission: Mapping[str, Any],
         *,
         source_slot: int,
-        project_root: NovaTrustedProjectRoot,
+        project_root: _NovaBridgeContext,
     ) -> "NovaIntentSnapshot":
         """Discard caller identity/security metadata and retain safe content only."""
         if not isinstance(submission, Mapping):
@@ -161,6 +183,7 @@ class NovaIntentSnapshot:
                 "Nova target",
                 allowed_keys=spec.target_keys,
                 requires_value=spec.requires_target,
+                trim_values=True,
             ),
             "payload": _canonical_action_mapping(
                 submission.get("payload", {}),
@@ -202,22 +225,25 @@ class NovaIntentSnapshot:
             raise ValueError("Nova action has no automatic output scope")
         return spec.output_scope
 
-    def to_suggestion(self) -> dict[str, Any]:
+    def to_suggestion(self, project_root: _NovaBridgeContext) -> Mapping[str, Any]:
         """Return the sole safe adapter input for this immutable snapshot."""
-        return {
-            "id": self.proposal_id,
-            "intent_id": self.proposal_id,
-            "proposal_id": self.proposal_id,
-            "action": self.action,
-            "need": self.need,
-            "title": self.title,
-            "why": self.why,
-            "target": _thaw_json(self.target),
-            "payload": _thaw_json(self.payload),
-            "expected_outcome": _thaw_json(self.expected_outcome),
-            "priority": self.priority,
-            "evidence_refs": [self.verifier_evidence_ref],
-        }
+        _canonical_snapshot_document(self, project_root)
+        return MappingProxyType(
+            {
+                "id": self.proposal_id,
+                "intent_id": self.proposal_id,
+                "proposal_id": self.proposal_id,
+                "action": self.action,
+                "need": self.need,
+                "title": self.title,
+                "why": self.why,
+                "target": self.target,
+                "payload": self.payload,
+                "expected_outcome": self.expected_outcome,
+                "priority": self.priority,
+                "evidence_refs": (self.verifier_evidence_ref,),
+            }
+        )
 
     def _canonical_document(self) -> dict[str, Any]:
         return {
@@ -239,9 +265,10 @@ class NovaIntentReadOnlyVerifier:
 
     def __init__(
         self,
-        project_root: NovaTrustedProjectRoot,
+        project_root: _NovaBridgeContext,
     ) -> None:
         self._project_root = _trusted_project_root(project_root)
+        self._context = project_root
 
     def verify(self, snapshot: NovaIntentSnapshot) -> VerificationResult:
         """Return independent positive evidence only for a valid local snapshot."""
@@ -264,53 +291,63 @@ class NovaIntentReadOnlyVerifier:
     def _validate(self, snapshot: NovaIntentSnapshot) -> None:
         if not isinstance(snapshot, NovaIntentSnapshot):
             raise TypeError("Nova verifier requires a NovaIntentSnapshot")
-        if (
-            Path(snapshot.project_root).expanduser().resolve() != self._project_root
-        ):
-            raise ValueError("Nova snapshot root does not match verifier root")
-        if snapshot.action not in NOVA_AUTOMATIC_ACTIONS:
-            raise ValueError("Nova snapshot action is not allowlisted")
-        spec = get_nova_action_spec(snapshot.action)
-        if spec.output_scope is None or snapshot.expected_output_scope != spec.output_scope:
-            raise ValueError("Nova snapshot output scope is invalid")
-        expected_outcome = MappingProxyType({"output_scope": spec.output_scope})
-        if _thaw_json(snapshot.expected_outcome) != _thaw_json(expected_outcome):
-            raise ValueError("Nova snapshot output is outside its expected scope")
-        document = {
-            "action": _required_text(snapshot.action, "Nova action"),
-            "need": _required_text(snapshot.need, "Nova need"),
-            "title": _required_text(snapshot.title, "Nova title"),
-            "why": _required_text(snapshot.why, "Nova why"),
-            "target": _canonical_action_mapping(
-                snapshot.target,
-                "Nova target",
-                allowed_keys=spec.target_keys,
-                requires_value=spec.requires_target,
-            ),
-            "payload": _canonical_action_mapping(
-                snapshot.payload,
-                "Nova payload",
-                allowed_keys=spec.payload_keys,
-            ),
-            "expected_outcome": expected_outcome,
-            "priority": _priority(snapshot.priority),
-            "source_slot": _source_slot(snapshot.source_slot),
-            "project_root": str(Path(snapshot.project_root).expanduser().resolve()),
-        }
-        if document != snapshot._canonical_document():
-            raise ValueError("Nova snapshot is not canonical")
-        if _digest(document) != snapshot.intent_digest:
-            raise ValueError("Nova snapshot digest mismatch")
-        if snapshot.proposal_id != f"nova-{snapshot.intent_digest}":
-            raise ValueError("Nova snapshot proposal id is invalid")
-        if snapshot.verifier_evidence_ref != f"nova:verifier:{snapshot.intent_digest}":
-            raise ValueError("Nova verifier evidence reference is invalid")
+        _canonical_snapshot_document(snapshot, self._context)
 
 
-def _trusted_project_root(project_root: NovaTrustedProjectRoot) -> Path:
-    if not isinstance(project_root, NovaTrustedProjectRoot):
-        raise TypeError("Nova bridge requires an injected trusted project root")
-    return project_root.path
+def _canonical_snapshot_document(
+    snapshot: NovaIntentSnapshot,
+    project_root: _NovaBridgeContext,
+) -> dict[str, Any]:
+    if not isinstance(snapshot, NovaIntentSnapshot):
+        raise TypeError("Nova verifier requires a NovaIntentSnapshot")
+    root = _trusted_project_root(project_root)
+    if Path(snapshot.project_root).expanduser().resolve() != root:
+        raise ValueError("Nova snapshot root does not match verifier root")
+    if snapshot.action not in NOVA_AUTOMATIC_ACTIONS:
+        raise ValueError("Nova snapshot action is not allowlisted")
+    spec = get_nova_action_spec(snapshot.action)
+    if spec.output_scope is None or snapshot.expected_output_scope != spec.output_scope:
+        raise ValueError("Nova snapshot output scope is invalid")
+    expected_outcome = MappingProxyType({"output_scope": spec.output_scope})
+    if _thaw_json(snapshot.expected_outcome) != _thaw_json(expected_outcome):
+        raise ValueError("Nova snapshot output is outside its expected scope")
+    document = {
+        "action": _required_text(snapshot.action, "Nova action"),
+        "need": _required_text(snapshot.need, "Nova need"),
+        "title": _required_text(snapshot.title, "Nova title"),
+        "why": _required_text(snapshot.why, "Nova why"),
+        "target": _canonical_action_mapping(
+            snapshot.target,
+            "Nova target",
+            allowed_keys=spec.target_keys,
+            requires_value=spec.requires_target,
+            trim_values=True,
+        ),
+        "payload": _canonical_action_mapping(
+            snapshot.payload,
+            "Nova payload",
+            allowed_keys=spec.payload_keys,
+        ),
+        "expected_outcome": expected_outcome,
+        "priority": _priority(snapshot.priority),
+        "source_slot": _source_slot(snapshot.source_slot),
+        "project_root": str(root),
+    }
+    if document != snapshot._canonical_document():
+        raise ValueError("Nova snapshot is not canonical")
+    if _digest(document) != snapshot.intent_digest:
+        raise ValueError("Nova snapshot digest mismatch")
+    if snapshot.proposal_id != f"nova-{snapshot.intent_digest}":
+        raise ValueError("Nova snapshot proposal id is invalid")
+    if snapshot.verifier_evidence_ref != f"nova:verifier:{snapshot.intent_digest}":
+        raise ValueError("Nova verifier evidence reference is invalid")
+    return document
+
+
+def _trusted_project_root(project_root: _NovaBridgeContext) -> Path:
+    if not isinstance(project_root, _NovaBridgeContext):
+        raise TypeError("Nova bridge requires a host-owned trusted root context")
+    return project_root._validated_root()
 
 
 def _source_slot(value: Any) -> int:
@@ -350,6 +387,7 @@ def _canonical_action_mapping(
     *,
     allowed_keys: frozenset[str],
     requires_value: bool = False,
+    trim_values: bool = False,
 ) -> Mapping[str, str]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{label} must be a mapping")
@@ -358,7 +396,12 @@ def _canonical_action_mapping(
         key = _normalized_field_key(raw_key, label)
         if key not in allowed_keys or key in canonical:
             raise ValueError(f"{label} contains an unsupported field")
-        canonical[key] = _normalized_plain_text(raw_value, label)
+        text = _normalized_plain_text(raw_value, label)
+        if trim_values:
+            text = text.strip()
+            if not text:
+                continue
+        canonical[key] = text
     if requires_value and not any(item.strip() for item in canonical.values()):
         raise ValueError(f"{label} requires a concrete target")
     return MappingProxyType(canonical)
@@ -410,7 +453,6 @@ def _is_opaque_encoded_text(value: str) -> bool:
     try:
         padded = candidate.rstrip("=") + "=" * (-len(candidate.rstrip("=")) % 4)
         decoded = base64.b64decode(padded, altchars=b"-_", validate=True)
-        decoded.decode("utf-8")
-    except (ValueError, UnicodeDecodeError):
+    except ValueError:
         return False
-    return bool(decoded)
+    return any(token in decoded.lower() for token in _ENCODED_CONTROL_TOKENS)
