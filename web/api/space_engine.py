@@ -27,8 +27,11 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import logging
+import math
 import os
+import re
 import shutil
 import threading
 import time
@@ -185,6 +188,27 @@ def _normalized_nova_management(value: object) -> dict[str, bool | int]:
     return {"yolo": yolo, "enrolled": enrolled, "revision": revision}
 
 
+_AUDIT_ROOT_FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
+_AUDIT_EVENT_FIELDS = {
+    "actor", "timestamp", "space_id", "root_fingerprint", "policy_revision",
+    "governance_revision", "previous", "next",
+}
+
+
+def _strict_nova_management_record(value: object) -> dict[str, bool | int] | None:
+    """Return a management record only when every field has its exact type."""
+    if not isinstance(value, dict) or set(value) != {"yolo", "enrolled", "revision"}:
+        return None
+    yolo = value.get("yolo")
+    enrolled = value.get("enrolled")
+    revision = value.get("revision")
+    if type(yolo) is not bool or type(enrolled) is not bool:
+        return None
+    if type(revision) is not int or revision < 0 or (enrolled and not yolo):
+        return None
+    return {"yolo": yolo, "enrolled": enrolled, "revision": revision}
+
+
 def space_root_fingerprint(root: str | Path) -> str:
     """Return the stable opaque confirmation value for a trusted project root."""
     canonical = str(Path(root).expanduser().resolve())
@@ -296,10 +320,14 @@ class Space:
                 continue
             if key == "nova_management":
                 result["nova_management"] = _normalized_nova_management(raw.get("nova_management"))
+                if key in raw and _strict_nova_management_record(raw.get(key)) is None:
+                    result["_nova_management_malformed"] = True
                 continue
             if key == "nova_management_audit":
                 audit = raw.get("nova_management_audit")
                 result["nova_management_audit"] = audit if isinstance(audit, list) else []
+                if key in raw:
+                    result["_nova_management_audit_present"] = True
                 if audit is not None and not isinstance(audit, list):
                     result["_nova_management_audit_malformed"] = True
                 continue
@@ -322,6 +350,11 @@ class Space:
         existing_id = _normalized_space_id(config.get("space_id"))
         if existing_id or mint_space_id:
             out["space_id"] = existing_id or uuid.uuid4().hex
+        audit = _prepare_audit_for_write(
+            self,
+            config,
+            expected_space_id=out.get("space_id", ""),
+        )
         # Save name if present and differs from slug
         if "name" in config:
             out["name"] = config["name"]
@@ -344,7 +377,7 @@ class Space:
                 )
                 continue
             if key == "nova_management_audit":
-                out["nova_management_audit"] = config.get("nova_management_audit") if isinstance(config.get("nova_management_audit"), list) else []
+                out["nova_management_audit"] = audit
                 continue
             if key in config:
                 out[key] = config[key]
@@ -476,21 +509,154 @@ class Space:
 # Registry (cached)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_NOVA_MANAGEMENT_THREAD_LOCK = threading.RLock()
+_SPACE_CONFIG_THREAD_LOCK = threading.RLock()
+
+
+def _legacy_audit_path(space: Space) -> Path:
+    return space.root / "nova-management-audit.jsonl"
+
+
+def _read_legacy_audit_events(space: Space) -> list[object]:
+    """Read JSONL evidence only; callers decide whether it is safe to persist."""
+    path = _legacy_audit_path(space)
+    if not path.exists():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise SpaceGovernanceError("management audit cannot be read") from exc
+    events: list[object] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            events.append(json.loads(line))
+        except (TypeError, ValueError) as exc:
+            raise SpaceGovernanceError("legacy management audit is malformed") from exc
+    return events
+
+
+def _validate_and_merge_audit_events(
+    *sources: list[object],
+    expected_space_id: str = "",
+    expected_management: object = None,
+) -> list[dict]:
+    """Strictly validate and merge YAML/JSONL evidence by revision.
+
+    JSONL is retained after migration.  A repeated revision is acceptable only
+    when it is byte-for-byte the same event; otherwise evidence conflicts and
+    no write may proceed.
+    """
+    by_revision: dict[int, dict] = {}
+    for source in sources:
+        if not isinstance(source, list):
+            raise SpaceGovernanceError("management audit is malformed")
+        for raw_event in source:
+            if not isinstance(raw_event, dict) or set(raw_event) != _AUDIT_EVENT_FIELDS:
+                raise SpaceGovernanceError("management audit event is malformed")
+            actor = raw_event.get("actor")
+            timestamp = raw_event.get("timestamp")
+            event_space_id = raw_event.get("space_id")
+            root_fingerprint = raw_event.get("root_fingerprint")
+            policy_revision = raw_event.get("policy_revision")
+            governance_revision = raw_event.get("governance_revision")
+            previous = _strict_nova_management_record(raw_event.get("previous"))
+            next_record = _strict_nova_management_record(raw_event.get("next"))
+            if not isinstance(actor, str) or not actor.startswith("dashboard:"):
+                raise SpaceGovernanceError("management audit actor is malformed")
+            if type(timestamp) not in (int, float) or not math.isfinite(timestamp):
+                raise SpaceGovernanceError("management audit timestamp is malformed")
+            normalized_event_id = _normalized_space_id(event_space_id)
+            if not normalized_event_id:
+                raise SpaceGovernanceError("management audit Space identity is malformed")
+            if expected_space_id and normalized_event_id != _normalized_space_id(expected_space_id):
+                raise SpaceGovernanceError("management audit Space identity conflicts")
+            if root_fingerprint != "" and (
+                not isinstance(root_fingerprint, str)
+                or not _AUDIT_ROOT_FINGERPRINT_RE.fullmatch(root_fingerprint)
+            ):
+                raise SpaceGovernanceError("management audit root fingerprint is malformed")
+            if type(policy_revision) is not int or type(governance_revision) is not int:
+                raise SpaceGovernanceError("management audit revision is malformed")
+            if previous is None or next_record is None:
+                raise SpaceGovernanceError("management audit state is malformed")
+            revision = next_record["revision"]
+            if (
+                policy_revision != revision
+                or governance_revision != revision
+                or previous["revision"] + 1 != revision
+            ):
+                raise SpaceGovernanceError("management audit revision chain is malformed")
+            event = copy.deepcopy(raw_event)
+            existing = by_revision.get(revision)
+            if existing is not None and existing != event:
+                raise SpaceGovernanceError("management audit contains conflicting revisions")
+            by_revision[revision] = event
+
+    events = [by_revision[revision] for revision in sorted(by_revision)]
+    for index, event in enumerate(events):
+        previous = event["previous"]
+        if index == 0:
+            if previous["revision"] != 0:
+                raise SpaceGovernanceError("management audit revision chain is incomplete")
+            continue
+        prior_next = events[index - 1]["next"]
+        if previous != prior_next:
+            raise SpaceGovernanceError("management audit revision chain is broken")
+    if events and expected_management is not None:
+        current = _strict_nova_management_record(expected_management)
+        if current is None or current != events[-1]["next"]:
+            raise SpaceGovernanceError("management audit does not match current governance")
+    return events
+
+
+def _effective_audit_events(space: Space, config: dict) -> list[dict]:
+    """Merge strict YAML and legacy evidence without taking a write lock."""
+    if config.get("_nova_management_malformed"):
+        raise SpaceGovernanceError("current Nova management record is malformed")
+    if config.get("_nova_management_audit_malformed"):
+        raise SpaceGovernanceError("management audit is malformed")
+    yaml_events = config.get("nova_management_audit", [])
+    legacy_events = _read_legacy_audit_events(space)
+    return _validate_and_merge_audit_events(
+        yaml_events,
+        legacy_events,
+        expected_space_id=config.get("space_id", ""),
+        expected_management=config.get("nova_management"),
+    )
+
+
+def _prepare_audit_for_write(
+    space: Space,
+    config: dict,
+    *,
+    expected_space_id: str,
+) -> list[dict]:
+    """Carry all valid historical evidence into the next atomic YAML write."""
+    persisted = space.load_config()
+    if persisted.get("_nova_management_malformed"):
+        raise SpaceGovernanceError("current Nova management record is malformed")
+    if persisted.get("_nova_management_audit_malformed"):
+        raise SpaceGovernanceError("management audit is malformed")
+    return _validate_and_merge_audit_events(
+        persisted.get("nova_management_audit", []),
+        _read_legacy_audit_events(space),
+        config.get("nova_management_audit", []),
+        expected_space_id=expected_space_id,
+        expected_management=config.get("nova_management"),
+    )
 
 
 @contextmanager
-def _nova_management_lock(space: Space):
-    """Lock one Space's governance transaction across threads and processes.
+def space_config_lock(space: Space):
+    """Serialize one Space config transaction across threads and processes.
 
-    The lock file is deliberately opened only by the management write path.
-    Management reads and all ordinary Space reads therefore remain side-effect
-    free.  A process-local re-entrant lock also protects platforms whose file
-    locks do not reliably serialize two handles in the same process.
+    Only mutation paths call this context manager.  Pure config/audit reads do
+    not create the lock file or modify either audit source.
     """
-    with _NOVA_MANAGEMENT_THREAD_LOCK:
+    with _SPACE_CONFIG_THREAD_LOCK:
         space.root.mkdir(parents=True, exist_ok=True)
-        lock_path = space.root / ".nova-management.lock"
+        lock_path = space.root / ".space-config.lock"
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         locked = False
         try:
@@ -528,7 +694,7 @@ def update_nova_management(
     **kwargs,
 ) -> dict[str, bool | int]:
     """Apply one fully serialized governance and audit transaction."""
-    with _nova_management_lock(space):
+    with space_config_lock(space):
         return _update_nova_management(space, **kwargs)
 
 
@@ -550,8 +716,7 @@ def _update_nova_management(
         raise SpaceGovernanceError("enrollment requires yolo to be true")
 
     config = space.load_config()
-    if config.get("_nova_management_audit_malformed"):
-        raise SpaceGovernanceError("management audit is malformed; refusing to overwrite evidence")
+    config["nova_management_audit"] = _effective_audit_events(space, config)
     if enrolled is True:
         configured_project = space.get_project_dir()
         if not configured_project:
@@ -606,10 +771,21 @@ def _update_nova_management(
     return next_record
 
 
+def update_space_config(space: Space, patch: dict) -> dict:
+    """Apply an ordinary config patch without racing governance evidence."""
+    if not isinstance(patch, dict):
+        raise SpaceGovernanceError("Space config patch must be an object")
+    with space_config_lock(space):
+        config = space.load_config()
+        config["nova_management_audit"] = _effective_audit_events(space, config)
+        config.update(patch)
+        space.save_config(config)
+        return space.load_config()
+
+
 def list_nova_management_audit(space: Space) -> list[dict]:
-    """Read append-only governance evidence without creating missing files."""
-    events = space.load_config().get("nova_management_audit", [])
-    return [dict(event) for event in events if isinstance(event, dict)]
+    """Purely read and validate merged YAML/legacy governance evidence."""
+    return _effective_audit_events(space, space.load_config())
 
 
 _SPACE_CACHE: list[Space] | None = None

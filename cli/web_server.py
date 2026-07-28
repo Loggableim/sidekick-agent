@@ -531,12 +531,20 @@ async def update_space_nova_management(request: Request):
 @app.get("/api/space/nova-management/audit")
 async def get_space_nova_management_audit(slug: str = ""):
     """Return the append-only governance evidence without writing Space state."""
-    from web.api.space_engine import get_existing_space_read_only, list_nova_management_audit
+    from web.api.space_engine import (
+        SpaceGovernanceError,
+        get_existing_space_read_only,
+        list_nova_management_audit,
+    )
 
     space = get_existing_space_read_only(str(slug).strip().lower()) if slug else None
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
-    return {"slug": space.slug, "events": list_nova_management_audit(space)}
+    try:
+        events = list_nova_management_audit(space)
+    except SpaceGovernanceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"slug": space.slug, "events": events}
 
 
 @app.get("/login", include_in_schema=False)

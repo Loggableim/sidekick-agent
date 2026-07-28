@@ -6144,7 +6144,7 @@ def handle_post(handler, parsed) -> bool:
                 "Nova management must be changed through /api/space/nova-management",
                 status=400,
             )
-        from web.api.space_engine import get_workspace
+        from web.api.space_engine import SpaceGovernanceError, get_workspace, update_space_config
         ws = get_workspace(slug)
         if not ws:
             return bad(handler, "Space not found", status=404)
@@ -6154,15 +6154,10 @@ def handle_post(handler, parsed) -> bool:
             if key in body:
                 patch_data[key] = body[key]
         if patch_data:
-            current = ws.load_config()
-            if current.get("_nova_management_audit_malformed"):
-                return bad(
-                    handler,
-                    "Nova management audit is malformed and cannot be rewritten by generic config",
-                    status=409,
-                )
-            current.update(patch_data)
-            ws.save_config(current)
+            try:
+                update_space_config(ws, patch_data)
+            except SpaceGovernanceError as exc:
+                return bad(handler, str(exc), status=409)
         return j(handler, {"config": ws.load_config()})
 
     # ── Space Agent API (POST) ────────────────────────────────────────────
