@@ -1362,6 +1362,27 @@ def test_required_pre_completion_hook_fails_closed_when_unavailable(tmp_path: Pa
     assert not any(event.event_type == "run.completed" for event in events)
 
 
+@pytest.mark.parametrize("required_hook_id", [None, ""])
+def test_explicitly_invalid_required_pre_completion_hook_fails_closed(
+    tmp_path: Path,
+    required_hook_id: object,
+):
+    """Catches an explicit null or empty durable requirement acting like no hook."""
+    engine = SwarmEngine(WorkflowTransport())
+    run = engine.start_run(
+        "reject invalid durable hook ids",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": required_hook_id},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
 def test_required_pre_completion_hook_fails_closed_when_installed_id_mismatches(
     tmp_path: Path,
 ):
@@ -1386,6 +1407,40 @@ def test_required_pre_completion_hook_fails_closed_when_installed_id_mismatches(
     assert summary.pause_reason == "required_pre_completion_hook_unavailable"
 
 
+def test_malformed_installed_pre_completion_hook_id_fails_without_raw_error(
+    tmp_path: Path,
+):
+    """Catches a hostile hook id raising during truthiness after equality."""
+
+    class ExplosiveHookId:
+        def __eq__(self, _other: object) -> object:
+            return self
+
+        def __bool__(self) -> bool:
+            raise RuntimeError("private hook id failure")
+
+    class MalformedHook:
+        hook_id = ExplosiveHookId()
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            raise AssertionError("malformed hook ids must not invoke the hook")
+
+    engine = SwarmEngine(WorkflowTransport(), pre_completion_hook=MalformedHook())
+    run = engine.start_run(
+        "contain malformed installed hook ids",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "pre_completion_hook_failed"
+    assert "private hook id failure" not in str(events)
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
 def test_pre_completion_hook_failure_uses_a_safe_pause_reason(tmp_path: Path):
     """Catches hook exception text being exposed in durable run state."""
 
@@ -1408,6 +1463,37 @@ def test_pre_completion_hook_failure_uses_a_safe_pause_reason(tmp_path: Path):
     assert summary.status == "paused"
     assert summary.pause_reason == "pre_completion_hook_failed"
     assert "private host failure detail" not in str(events)
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
+@pytest.mark.parametrize("continue_completion", ["continue", 1])
+def test_non_boolean_pre_completion_result_fails_closed(
+    tmp_path: Path,
+    continue_completion: object,
+):
+    """Catches truthy non-boolean results silently completing a required hook."""
+
+    class NonBooleanResultHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            return PreCompletionResult(continue_completion)  # type: ignore[arg-type]
+
+    engine = SwarmEngine(
+        WorkflowTransport(),
+        pre_completion_hook=NonBooleanResultHook(),
+    )
+    run = engine.start_run(
+        "reject truthy hook result values",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "pre_completion_hook_failed"
     assert not any(event.event_type == "run.completed" for event in events)
 
 
