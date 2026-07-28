@@ -167,6 +167,15 @@ def _raise_if_space_config_malformed(config: dict) -> None:
         raise SpaceConfigMalformedError("Space config is malformed; refusing to overwrite source")
 
 
+def _is_empty_yaml_document(source: str) -> bool:
+    """Treat only blank/comment/document-marker YAML as an empty config."""
+    for line in source.splitlines():
+        token = line.split("#", 1)[0].strip()
+        if token and token not in {"---", "..."}:
+            return False
+    return True
+
+
 def _normalized_space_id(value: object) -> str:
     """Return a persisted UUID identity, or empty when a read sees none."""
     if not isinstance(value, str):
@@ -304,7 +313,8 @@ class Space:
             return copy.deepcopy(self.CONFIG_DEFAULTS)
         try:
             import yaml
-            raw = yaml.safe_load(self.config_path.read_text("utf-8"))
+            source = self.config_path.read_text("utf-8")
+            raw = yaml.safe_load(source)
         except Exception:
             logger.exception("failed to parse %s", self.config_path)
             result = copy.deepcopy(self.CONFIG_DEFAULTS)
@@ -312,7 +322,12 @@ class Space:
             return result
 
         if raw is None:
-            raw = {}
+            if _is_empty_yaml_document(source):
+                raw = {}
+            else:
+                result = copy.deepcopy(self.CONFIG_DEFAULTS)
+                result["_space_config_malformed"] = True
+                return result
         if not isinstance(raw, dict):
             logger.warning("invalid space config in %s", self.config_path)
             result = copy.deepcopy(self.CONFIG_DEFAULTS)
