@@ -982,3 +982,48 @@ than an ad-hoc reviewer observation.
   ~~~powershell
   git commit -m "fix: align Scout fallback route contracts"
   ~~~
+
+## Task 14: Enforce Flash-primary admission for the Scout fallback route
+
+**Files:**
+
+- Modify: `swarm_core/router.py` and focused routing/workflow regressions.
+- Do not modify: `C:\\sidekick\\home\\spaces\\nova\\*`, live processes,
+  provider configuration, catalog refresh behavior, or any route outside
+  `default`/`scout`.
+
+**Purpose:**
+
+Task 13's full-catalog contract is correct, but review found that a catalog
+containing only `deepseek-v4-pro` selects Pro as Scout's initial model.  That
+violates the approved semantics: Flash is the required primary, and Pro is a
+fallback only after a permitted Flash model/provider/timeout/empty/schema
+failure.  When Flash is absent, do not silently promote Pro; pause before any
+provider request.  Preserve Flash-to-Pro fallback once Flash has actually
+been attempted and failed.
+
+- [ ] **Step 1: Add failing primary-admission regressions**
+
+  Cover `default` and `scout` with a Pro-only catalog.  Assert no selection
+  and no provider call / `no_eligible_model` pause.  Retain the existing
+  full-catalog Flash-to-Pro sequence tests.
+
+- [ ] **Step 2: Gate the bounded chains on their primary**
+
+  Change only the router behavior needed to require Flash's catalog presence
+  before exposing the default/Scout chain.  Do not change the role order,
+  permitted models, call budget, concurrency, catalog update, or provider.
+
+- [ ] **Step 3: Verify and commit**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_routing.py tests/test_swarm_workflow.py tests/test_swarm_core.py tests/test_nova_swarm_runtime_bridge.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check swarm_core\router.py tests/test_swarm_routing.py tests/test_swarm_workflow.py tests/test_swarm_core.py tests/test_nova_swarm_runtime_bridge.py
+  git diff --check
+  ~~~
+
+  Commit only the primary-admission repair with:
+
+  ~~~powershell
+  git commit -m "fix: require Flash before Scout fallback"
+  ~~~
