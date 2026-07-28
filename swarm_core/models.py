@@ -21,6 +21,14 @@ _MODEL_HEALTH_VALUES = frozenset(
         MODEL_HEALTH_UNVERIFIED,
     }
 )
+_SWARM_RESPONSE_FIELD_TYPES = MappingProxyType(
+    {
+        "work": "string",
+        "evidence": "array",
+        "decision": "string",
+        "approved": "boolean",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -176,10 +184,25 @@ class ModelRequest:
 
     def render_prompt(self) -> str:
         """Render a stable prompt for Sidekick-compatible chat transports."""
-        if not self.context:
-            return self.prompt
-        context = json.dumps(self.context, sort_keys=True, ensure_ascii=False)
-        return f"{self.prompt}\n\nContext:\n{context}"
+        sections = [self.prompt]
+        if self.context:
+            context = json.dumps(self.context, sort_keys=True, ensure_ascii=False)
+            sections.append(f"Context:\n{context}")
+        field_descriptions = []
+        for field_name in self.required_fields:
+            name = str(field_name)
+            encoded_name = json.dumps(name, ensure_ascii=False)
+            field_type = _SWARM_RESPONSE_FIELD_TYPES.get(name)
+            field_descriptions.append(
+                f"{encoded_name} ({field_type})" if field_type else encoded_name
+            )
+        fields = ", ".join(field_descriptions)
+        sections.append(
+            "Output contract:\n"
+            "Return exactly one JSON object. Do not include Markdown, code fences, or prose.\n"
+            f"Required fields: {fields}."
+        )
+        return "\n\n".join(sections)
 
 
 @dataclass(frozen=True)
