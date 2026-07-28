@@ -33,6 +33,52 @@ _NOVA_CLI_MODELS = (
 )
 
 
+class _CliNovaRuntimeGuard:
+    """Own only the process-local workers and bindings created by one CLI test."""
+
+    def __init__(self) -> None:
+        self.pause_workers: list[threading.Thread] = []
+        self.expected_clean_roots: set[Path] = set()
+        with nova_bridge._RUNTIME_BINDINGS_LOCK:
+            self.bindings_before = dict(nova_bridge._RUNTIME_BINDINGS)
+
+    def track_pause_worker(self) -> threading.Thread:
+        worker = threading.current_thread()
+        self.pause_workers.append(worker)
+        return worker
+
+    @staticmethod
+    def join_pause_worker(worker: threading.Thread) -> None:
+        worker.join(timeout=1)
+        assert not worker.is_alive(), f"CLI Nova pause worker leaked: {worker.name}"
+
+    def expect_binding_cleanup(self, project_root: Path) -> None:
+        self.expected_clean_roots.add(project_root.resolve())
+
+    def cleanup(self) -> None:
+        for worker in self.pause_workers:
+            self.join_pause_worker(worker)
+        with nova_bridge._RUNTIME_BINDINGS_LOCK:
+            created_roots = (
+                set(nova_bridge._RUNTIME_BINDINGS) - set(self.bindings_before)
+            )
+            for root in created_roots:
+                del nova_bridge._RUNTIME_BINDINGS[root]
+            for root, binding in self.bindings_before.items():
+                nova_bridge._RUNTIME_BINDINGS[root] = binding
+            assert dict(nova_bridge._RUNTIME_BINDINGS) == self.bindings_before
+            assert not (
+                self.expected_clean_roots - set(self.bindings_before)
+            ) & set(nova_bridge._RUNTIME_BINDINGS)
+
+
+@pytest.fixture
+def cli_nova_runtime_guard():
+    guard = _CliNovaRuntimeGuard()
+    yield guard
+    guard.cleanup()
+
+
 class _CliNovaKernel:
     def __init__(self, project_root: Path) -> None:
         self.space_dir = project_root
@@ -67,7 +113,10 @@ class _CliNovaKernel:
         return {"executed": True}
 
 
-def _paused_cli_nova_run(project: Path):
+def _paused_cli_nova_run(
+    project: Path,
+    runtime_guard: _CliNovaRuntimeGuard,
+):
     nova_bridge.configure_nova_bridge(project, enabled=True)
     ProjectSwarmStore(project).save_model_catalog_snapshot(
         ModelCatalogSnapshot(
@@ -82,8 +131,10 @@ def _paused_cli_nova_run(project: Path):
         project, validator=lambda candidate: candidate
     )
     paused = threading.Event()
+    pause_workers: list[threading.Thread] = []
 
     def pause_dispatch(project_root: Path, run_id: str) -> None:
+        pause_workers.append(runtime_guard.track_pause_worker())
         ProjectSwarmStore(project_root).set_run_status(run_id, "paused")
         paused.set()
 
@@ -106,6 +157,8 @@ def _paused_cli_nova_run(project: Path):
     )
     assert result.run_id is not None
     assert paused.wait(timeout=1)
+    assert len(pause_workers) == 1
+    runtime_guard.join_pause_worker(pause_workers[0])
     run = ProjectSwarmStore.open_read_only(project).get_run(result.run_id)
     assert run is not None and run.status == "paused"
     return kernel, context, run
@@ -160,12 +213,17 @@ def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    cli_nova_runtime_guard: _CliNovaRuntimeGuard,
 ):
     """Catches CLI resume discarding an explicitly reattached Nova capability."""
     project = tmp_path / "spaces" / "nova"
     project.mkdir(parents=True)
     monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
-    kernel, context, run = _paused_cli_nova_run(project)
+    cli_nova_runtime_guard.expect_binding_cleanup(project)
+    kernel, context, run = _paused_cli_nova_run(
+        project,
+        cli_nova_runtime_guard,
+    )
     nova_bridge._unregister_runtime_binding(project, run.run_id)
     nova_bridge.NovaSwarmRuntimeBridge(
         kernel,
@@ -186,18 +244,25 @@ def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
     assert len(model_calls) == 8
     assert len(kernel.govern_calls) == 1
     assert len(kernel.act_calls) == 1
+    with nova_bridge._RUNTIME_BINDINGS_LOCK:
+        assert project.resolve() in nova_bridge._RUNTIME_BINDINGS
 
 
 def test_cli_resume_fresh_process_nova_run_blocks_before_model_dispatch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    cli_nova_runtime_guard: _CliNovaRuntimeGuard,
 ):
     """Catches durable Nova metadata minting a capability in a fresh process."""
     project = tmp_path / "spaces" / "nova"
     project.mkdir(parents=True)
     monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
-    kernel, _context, run = _paused_cli_nova_run(project)
+    cli_nova_runtime_guard.expect_binding_cleanup(project)
+    kernel, _context, run = _paused_cli_nova_run(
+        project,
+        cli_nova_runtime_guard,
+    )
     nova_bridge._unregister_runtime_binding(project, run.run_id)
     model_calls: list[dict[str, object]] = []
     resume = _parse(
@@ -218,6 +283,8 @@ def test_cli_resume_fresh_process_nova_run_blocks_before_model_dispatch(
         for event in events
         if event.event_type == "run.execution_blocked"
     ] == [{"reason": "nova_bridge_unavailable"}]
+    with nova_bridge._RUNTIME_BINDINGS_LOCK:
+        assert project.resolve() not in nova_bridge._RUNTIME_BINDINGS
 
 
 def test_cli_init_is_explicit_and_status_on_missing_project_is_read_only(
