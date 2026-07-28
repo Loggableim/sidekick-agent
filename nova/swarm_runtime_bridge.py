@@ -48,6 +48,7 @@ _MAX_PRIORITY_ABS = 1_000_000
 _PERCENT_ESCAPE = re.compile(r"%[0-9a-fA-F]{2}")
 _OPAQUE_ENCODING_PREFIX = re.compile(r"^(?:base64(?:url)?|b64|data):", re.IGNORECASE)
 _BASE64_TEXT = re.compile(r"^[A-Za-z0-9+/_-]+={0,2}$")
+_PUBLIC_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _ENCODED_CONTROL_TOKENS = (
     b"command",
     b"apply",
@@ -63,6 +64,19 @@ _RUNTIME_HOOK_ID = "nova-runtime-v1"
 _NOVA_NAMESPACE = "nova"
 _RUNTIME_BINDINGS_LOCK = threading.RLock()
 _RUNTIME_BINDINGS: dict[Path, "_NovaRuntimeBinding"] = {}
+_PUBLIC_ENTRY_RESULTS = MappingProxyType(
+    {
+        "bridge_disabled": (False, "bridge_disabled"),
+        "unsupported_action": (False, "unsupported_action"),
+        "coalesced": (True, "coalesced"),
+        "created": (True, "admitted"),
+        "active_limit": (False, "active_limit"),
+        "rolling_limit": (False, "rolling_limit"),
+        "dispatch_failed": (False, "dispatch_failed"),
+        "root_mismatch": (False, "root_mismatch"),
+        "submission_rejected": (False, "submission_rejected"),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -511,6 +525,50 @@ class NovaBridgeResult:
     reason: str | None = None
 
 
+def _bounded_live_entry_result(status: object, run_id: object = None) -> dict[str, Any]:
+    accepted, reason = _PUBLIC_ENTRY_RESULTS.get(
+        status,
+        _PUBLIC_ENTRY_RESULTS["submission_rejected"],
+    )
+    public_run_id = (
+        run_id
+        if isinstance(run_id, str) and _PUBLIC_RUN_ID.fullmatch(run_id)
+        else None
+    )
+    return {
+        "run_id": public_run_id,
+        "accepted": accepted,
+        "executed": False,
+        "reason": reason,
+        "decision": {
+            "policy": {
+                "allowed": accepted,
+                "reason": reason,
+            }
+        },
+    }
+
+
+def _matching_code_owned_nova_root(kernel: Any) -> Path:
+    kernel_root = Path(kernel.space_dir).expanduser().resolve()
+    action_root = Path(kernel.actions.space_dir).expanduser().resolve()
+    if kernel_root != action_root:
+        raise ValueError("Nova code-owned roots do not match")
+    return kernel_root
+
+
+def _revalidate_code_owned_nova_root(
+    kernel: Any,
+    expected_root: Path,
+    candidate: Path,
+) -> Path:
+    candidate_root = Path(candidate).expanduser().resolve()
+    current_root = _matching_code_owned_nova_root(kernel)
+    if candidate_root != expected_root or current_root != expected_root:
+        raise ValueError("Nova code-owned root changed")
+    return current_root
+
+
 class NovaPreCompletionHook:
     """The only runtime path from a completed Swarm workflow to Nova action."""
 
@@ -721,6 +779,36 @@ class NovaSwarmRuntimeBridge:
             adapter=adapter,
             trusted_project_root=context,
         )
+
+
+def submit_nova_intent(
+    kernel: Any,
+    proposal: Mapping[str, Any],
+    source_slot: int,
+) -> dict[str, Any]:
+    """Submit one live Nova proposal through the versioned Swarm boundary."""
+    try:
+        project_root = _matching_code_owned_nova_root(kernel)
+        context = _create_nova_bridge_context(
+            project_root,
+            validator=lambda candidate: _revalidate_code_owned_nova_root(
+                kernel,
+                project_root,
+                candidate,
+            ),
+        )
+    except Exception:
+        return _bounded_live_entry_result("root_mismatch")
+
+    try:
+        result = NovaSwarmRuntimeBridge(
+            kernel,
+            project_root=project_root,
+            trusted_project_root=context,
+        ).submit(proposal, source_slot=source_slot)
+        return _bounded_live_entry_result(result.status, result.run_id)
+    except Exception:
+        return _bounded_live_entry_result("submission_rejected")
 
 
 def nova_execution_options_for_run(
