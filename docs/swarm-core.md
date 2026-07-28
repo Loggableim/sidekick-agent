@@ -146,33 +146,34 @@ cross-surface write. The projection is idempotent, does not start a dispatcher
 or worker, and failures are recorded as projection status without pausing or
 rewriting the Swarm run.
 
-## Nova adapter: prepared, disabled
+## Nova runtime bridge
 
-`nova.swarm_adapter.NovaSwarmAdapter` is intentionally not registered with a
-Nova startup path and defaults to `enabled=False`. Importing it does not create
-a kernel or touch the live Nova deployment.
+Nova admission is default-disabled through `integrations.nova.enabled`; reading
+that setting is read-only and creates neither `.swarm` state nor a worker. An
+enabled host must supply one trusted Nova root shared by the project, kernel,
+and action registry. Only `mind_diary`, `agenda_update`, and
+`prioritize_thread` are admitted. Cloud catalog/model execution is still the
+normal Swarm host path; unsupported Nova actions are recorded as bounded
+pre-run rejections before an adapter, model, or Cloud request exists.
 
-The initial adapter registry is deliberately narrow: `agenda_update`,
-`mind_diary` and `prioritize_thread` are direct project-local actions;
-`blog_draft` retains Nova's `external` tier and therefore always needs a human
-Swarm approval. Script-backed actions such as `inner_voice` are not enabled in
-this first slice. A later activation also requires the supplied
-`EntityKernel.space_dir` to be the exact Swarm project root, and the kernel's
-configured policy tier is used without adapter-side downgrades.
+Each admitted run has immutable canonical snapshot and proposal digests, is
+single-active, and requires `nova-runtime-v1` before completion. Standard mode
+is `reviewed_execution` (48 calls and six admissions per rolling 24 hours).
+Only `kernel.is_yolo_enabled()` may select autonomous YOLO mode (128 calls and
+no rolling quota); proposal/config input cannot claim YOLO. YOLO does not relax
+the allowlist, root check, reviewer/verifier evidence, or human approval for
+external/human-sensitive work.
 
-Before any later activation, verify all of the following in a separate,
-explicit rollout:
+Immediately before completion, the hook rereads the durable admission,
+revalidates its snapshot/root/evidence and exact proposal digest, records
+`nova.bridge.action_proposed`, and invokes only
+`NovaSwarmAdapter.execute_suggestion()`. The adapter preserves
+PolicyGate-to-govern-to-act ordering and the atomic policy claim; no other
+bridge method calls `kernel.act`. A denial, missing evidence, mismatch, or
+provider pause is auditably paused and never auto-retried. A post-claim crash
+records `nova.bridge.recovery_required` and requires explicit human recovery;
+it never replays govern or act.
 
-1. Use a disposable/non-live Nova space and a project with a trusted
-   `.swarm` configuration.
-2. Review the small adapter-owned Nova action registry and its Swarm risk
-   categories and Nova policy tiers.
-3. Exercise disabled, Swarm-blocked, Nova-governance-blocked and allowed paths
-   with a fake kernel first.
-4. Confirm an allowed path calls `EntityKernel.govern()` before
-   `EntityKernel.act()`, with no legacy fallback.
-5. Obtain separate approval before changing any Nova deployment configuration,
-   startup hook or runtime process.
-
-No current Swarm command, API request or WebUI load enables that adapter or
-restarts Nova.
+`sidekick swarm resume` and the WebUI use the same per-run resolver. Status
+GET/SSE construction stays read-only: it neither resolves Nova execution
+options, initializes `.swarm`, nor dispatches a worker.

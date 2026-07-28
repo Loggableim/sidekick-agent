@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from cli.swarm import build_parser, swarm_command
+from cli.swarm import build_parser, get_swarm_service, swarm_command
 from cli.swarm_host import SidekickSwarmService
 from swarm_core.engine import SwarmEngine
 from swarm_core.models import ModelRequest, ModelResponse
@@ -20,6 +20,12 @@ def _parse(argv: list[str]) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
     build_parser(subparsers)
     return parser.parse_args(argv)
+
+
+def test_cli_service_installs_the_durable_nova_options_resolver():
+    """Catches CLI resume bypassing the Nova required hook resolver."""
+    service = get_swarm_service()
+    assert service._execution_options_resolver.__name__ == "nova_execution_options_for_run"
 
 
 def test_cli_init_is_explicit_and_status_on_missing_project_is_read_only(
