@@ -889,14 +889,30 @@ def _unregister_completed_nova_runtime_binding(
 ) -> None:
     """Release only the exact Nova binding after durable completion."""
     root = Path(project_root).expanduser().resolve()
-    if run.status != "completed":
+    metadata = run.metadata
+    if (
+        run.status != "completed"
+        or metadata.get("integration_namespace") != _NOVA_NAMESPACE
+        or metadata.get("project_root") != str(root)
+    ):
         return
-    durable = ProjectSwarmStore.open_read_only(root).get_run(run.run_id)
-    if durable is None or durable.status != "completed":
-        return
-    if _runtime_binding_for(root, durable) is None:
-        return
-    _unregister_runtime_binding(root, durable.run_id)
+    # The host passes a just-re-read durable completed run. Avoid invoking the
+    # verifier again after completion: cleanup only needs an atomic exact match
+    # against the process-owned immutable binding fields.
+    with _RUNTIME_BINDINGS_LOCK:
+        binding = _RUNTIME_BINDINGS.get(root)
+        if (
+            binding is None
+            or binding.run_id != run.run_id
+            or binding.intent_digest != metadata.get("nova_intent_digest")
+            or binding.proposal_digest != metadata.get("proposal_digest")
+            or binding.mode != metadata.get("nova_mode")
+            or metadata.get("autonomy") != binding.mode
+            or metadata.get("nova_max_calls") != binding.max_calls
+            or metadata.get("required_pre_completion_hook") != _RUNTIME_HOOK_ID
+        ):
+            return
+        del _RUNTIME_BINDINGS[root]
 
 
 def _durable_nova_contract_matches(

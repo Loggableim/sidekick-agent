@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import copy
+from dataclasses import replace
 import json
 from pathlib import Path
 import threading
@@ -161,7 +162,11 @@ def _paused_cli_nova_run(
     return kernel, context, run
 
 
-def _cli_nova_service(model_calls: list[dict[str, object]]) -> SidekickSwarmService:
+def _cli_nova_service(
+    model_calls: list[dict[str, object]],
+    *,
+    completion_observer_error: str | None = None,
+) -> SidekickSwarmService:
     @contextmanager
     def provider_slot(_run_id: str, _provider: str):
         yield
@@ -185,10 +190,26 @@ def _cli_nova_service(model_calls: list[dict[str, object]]) -> SidekickSwarmServ
             ]
         }
 
+    def resolve_options(project_root: Path, run):
+        options = nova_bridge.nova_execution_options_for_run(project_root, run)
+        if (
+            options is None
+            or options.on_completed is None
+            or completion_observer_error is None
+        ):
+            return options
+        cleanup = options.on_completed
+
+        def cleanup_then_raise(root: Path, completed_run) -> None:
+            cleanup(root, completed_run)
+            raise RuntimeError(completion_observer_error)
+
+        return replace(options, on_completed=cleanup_then_raise)
+
     return SidekickSwarmService(
         call_llm=call_llm,
         provider_slot=provider_slot,
-        execution_options_resolver=nova_bridge.nova_execution_options_for_run,
+        execution_options_resolver=resolve_options,
         pause_poll_seconds=0.001,
     )
 
@@ -206,13 +227,13 @@ def test_cli_service_installs_the_durable_nova_options_resolver():
     assert service._execution_options_resolver.__name__ == "nova_execution_options_for_run"
 
 
-def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
+def test_cli_resume_keeps_completed_nova_success_when_cleanup_observer_raises(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     cli_nova_runtime_guard: _CliNovaRuntimeGuard,
 ):
-    """Catches CLI resume discarding an explicitly reattached Nova capability."""
+    """Catches cleanup failure leaking a binding or changing CLI completion."""
     project = tmp_path / "spaces" / "nova"
     project.mkdir(parents=True)
     monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
@@ -229,17 +250,48 @@ def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
         project_root=project,
         trusted_project_root=context,
     ).attach_admitted_run(run)
+    runtime_binding_for = nova_bridge._runtime_binding_for
+
+    def fail_redundant_completed_revalidation(project_root: Path, candidate):
+        if candidate.status == "completed":
+            raise RuntimeError("private Nova binding revalidation detail")
+        return runtime_binding_for(project_root, candidate)
+
+    monkeypatch.setattr(
+        nova_bridge,
+        "_runtime_binding_for",
+        fail_redundant_completed_revalidation,
+    )
     model_calls: list[dict[str, object]] = []
     resume = _parse(
         ["swarm", "--project", str(project), "--json", "resume", run.run_id]
     )
+    observer_error = "private Nova cleanup detail"
 
-    assert swarm_command(resume, service=_cli_nova_service(model_calls)) == 0
+    assert (
+        swarm_command(
+            resume,
+            service=_cli_nova_service(
+                model_calls,
+                completion_observer_error=observer_error,
+            ),
+        )
+        == 0
+    )
 
     payload = json.loads(capsys.readouterr().out)
     persisted = ProjectSwarmStore.open_read_only(project).get_run(run.run_id)
+    completion_observer_events = [
+        event
+        for event in ProjectSwarmStore.open_read_only(project).list_events(run.run_id)
+        if event.event_type == "run.completion_observer_failed"
+    ]
     assert payload["status"] == "completed"
     assert persisted is not None and persisted.status == "completed"
+    assert [event.payload for event in completion_observer_events] == [
+        {"reason": "completion_observer_failed"}
+    ]
+    assert observer_error not in json.dumps(payload, sort_keys=True)
     assert len(model_calls) == 8
     assert len(kernel.govern_calls) == 1
     assert len(kernel.act_calls) == 1
