@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import threading
 import time
+from types import MappingProxyType
 
 import pytest
 
@@ -20,6 +21,7 @@ from cli.swarm_host import (
     SidekickSwarmService,
 )
 from nova.actions import ActionRegistry
+import nova.swarm_adapter as nova_adapter
 from nova.swarm_adapter import get_nova_action_spec
 import nova.swarm_runtime_bridge as bridge
 from nova.swarm_runtime_bridge import (
@@ -31,6 +33,7 @@ from nova.swarm_runtime_bridge import (
 )
 from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.store import ProjectSwarmStore
+from swarm_core.types import ActionCapabilities
 from swarm_core.verifier import (
     InvalidVerifierResult,
     VERIFIED_DECISION,
@@ -47,6 +50,39 @@ _ROUTED_MODELS = (
     "kimi-k2.7-code",
     "nemotron-3-super",
 )
+_TEST_WORKER_THREADS: list[threading.Thread] = []
+_TEST_WORKER_THREADS_LOCK = threading.Lock()
+
+
+def _capture_test_worker() -> threading.Thread:
+    worker = threading.current_thread()
+    with _TEST_WORKER_THREADS_LOCK:
+        _TEST_WORKER_THREADS.append(worker)
+    return worker
+
+
+@pytest.fixture(autouse=True)
+def _join_workers_and_restore_runtime_bindings():
+    """Keep daemon workers and process-only capabilities inside each test."""
+    with _TEST_WORKER_THREADS_LOCK:
+        worker_start = len(_TEST_WORKER_THREADS)
+    with bridge._RUNTIME_BINDINGS_LOCK:
+        bindings_before = dict(bridge._RUNTIME_BINDINGS)
+    yield
+    with _TEST_WORKER_THREADS_LOCK:
+        workers = list(_TEST_WORKER_THREADS[worker_start:])
+    for worker in workers:
+        worker.join(timeout=2)
+        assert not worker.is_alive(), f"Task 8 worker leaked: {worker.name}"
+    with _TEST_WORKER_THREADS_LOCK:
+        del _TEST_WORKER_THREADS[worker_start:]
+    with bridge._RUNTIME_BINDINGS_LOCK:
+        for root in set(bridge._RUNTIME_BINDINGS) - set(bindings_before):
+            del bridge._RUNTIME_BINDINGS[root]
+        assert all(
+            bridge._RUNTIME_BINDINGS.get(root) is binding
+            for root, binding in bindings_before.items()
+        )
 
 
 class _FakeNovaPolicy:
@@ -57,8 +93,11 @@ class _FakeNovaPolicy:
         "prioritize_thread": "silent",
     }
 
+    def __init__(self) -> None:
+        self.tiers = dict(self._TIERS)
+
     def action_tier(self, action: str) -> str:
-        return self._TIERS[action]
+        return self.tiers[action]
 
 
 class _FakeNovaActionRecorder:
@@ -66,10 +105,13 @@ class _FakeNovaActionRecorder:
         self.space_dir = project_root
         self.calls: list[dict[str, object]] = []
         self._timeline = timeline
+        self.crash_after_recording = False
 
     def execute(self, decision: dict[str, object]) -> dict[str, object]:
         self._timeline.append("act")
         self.calls.append(copy.deepcopy(decision))
+        if self.crash_after_recording:
+            raise SystemExit("fake post-claim action crash")
         return {"executed": True, "status": "done"}
 
 
@@ -145,6 +187,7 @@ class _FakeBridgeHost:
         self.model_calls: list[dict[str, object]] = []
         self.provider_slots: list[tuple[str, str]] = []
         self.worker_run_ids: list[str] = []
+        self.worker_threads: dict[str, threading.Thread] = {}
         self.summaries: dict[str, object] = {}
         self.worker_errors: dict[str, BaseException] = {}
         self.options_mutator = None
@@ -175,8 +218,10 @@ class _FakeBridgeHost:
         )
 
     def dispatch(self, project_root: Path, run_id: str) -> None:
+        worker = _capture_test_worker()
         with self._condition:
             self.worker_run_ids.append(run_id)
+            self.worker_threads[run_id] = worker
             self._condition.notify_all()
         try:
             summary = self.service.execute_run(project_root, run_id)
@@ -213,6 +258,13 @@ class _FakeBridgeHost:
                 self._condition.wait(deadline - time.monotonic())
             if len(self.worker_run_ids) < count:
                 raise AssertionError("fake bridge worker was not dispatched")
+
+    def join_worker(self, run_id: str, *, timeout: float = 2.0) -> None:
+        self.wait_for_dispatch()
+        with self._condition:
+            worker = self.worker_threads[run_id]
+        worker.join(timeout=timeout)
+        assert not worker.is_alive(), f"fake bridge worker did not stop: {run_id}"
 
     def _resolve_options(self, project_root: Path, run):
         options = bridge.nova_execution_options_for_run(project_root, run)
@@ -312,8 +364,10 @@ def _admit_paused_without_model_calls(
     source_slot: int,
 ):
     finished = threading.Event()
+    worker_threads: list[threading.Thread] = []
 
     def pause_dispatch(project_root: Path, run_id: str) -> None:
+        worker_threads.append(_capture_test_worker())
         ProjectSwarmStore(project_root).set_run_status(run_id, "paused")
         finished.set()
 
@@ -323,6 +377,9 @@ def _admit_paused_without_model_calls(
     assert result.status == "created"
     assert result.run_id is not None
     assert finished.wait(timeout=1)
+    assert worker_threads
+    worker_threads[0].join(timeout=1)
+    assert not worker_threads[0].is_alive()
     durable = ProjectSwarmStore.open_read_only(host.project_root).get_run(
         result.run_id
     )
@@ -794,6 +851,7 @@ def test_bridge_matrix_03_equal_digest_new_bridge_coalesces_one_run_and_worker(
     worker_run_ids: list[str] = []
 
     def blocking_dispatch(_project_root: Path, run_id: str) -> None:
+        _capture_test_worker()
         worker_run_ids.append(run_id)
         started.set()
         assert release.wait(timeout=2)
@@ -833,6 +891,7 @@ def test_bridge_matrix_04_different_intent_is_rejected_while_running_and_paused(
     worker_run_ids: list[str] = []
 
     def blocking_dispatch(_project_root: Path, run_id: str) -> None:
+        _capture_test_worker()
         worker_run_ids.append(run_id)
         started.set()
         assert release.wait(timeout=2)
@@ -931,6 +990,7 @@ def test_bridge_matrix_05_standard_quota_and_literal_kernel_yolo_limits(
     active_workers: list[str] = []
 
     def blocking_dispatch(_project_root: Path, run_id: str) -> None:
+        _capture_test_worker()
         active_workers.append(run_id)
         started.set()
         assert release.wait(timeout=2)
@@ -987,6 +1047,7 @@ def test_bridge_matrix_06_yolo_rejects_unsafe_sources_and_ignores_caller_flag(
     release = threading.Event()
 
     def blocking_dispatch(_project_root: Path, _run_id: str) -> None:
+        _capture_test_worker()
         started.set()
         assert release.wait(timeout=2)
 
@@ -1015,6 +1076,51 @@ def test_bridge_matrix_06_yolo_rejects_unsafe_sources_and_ignores_caller_flag(
                 store.set_run_status(caller_flag.run_id, "paused")
         release.set()
     assert host.model_calls == []
+    assert host.kernel.govern_calls == []
+    assert host.kernel.actions.calls == []
+
+
+def test_bridge_matrix_06_yolo_allowlisted_external_spec_still_requires_human(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#6 catches YOLO treating an allowlisted but human-gated spec as local-safe."""
+    original = get_nova_action_spec("mind_diary")
+    controlled_external = replace(
+        original,
+        capabilities=ActionCapabilities(
+            category="project",
+            reversible=True,
+            external=True,
+            cost_increasing=False,
+        ),
+        policy_tier="external",
+    )
+    controlled_specs = dict(nova_adapter.NOVA_ACTION_SPECS)
+    controlled_specs["mind_diary"] = controlled_external
+    monkeypatch.setattr(
+        nova_adapter,
+        "NOVA_ACTION_SPECS",
+        MappingProxyType(controlled_specs),
+    )
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch, yolo=True)
+    host.kernel.policy.tiers["mind_diary"] = "external"
+
+    admitted = host.bridge().submit(_diary_suggestion(), source_slot=33)
+    assert admitted.status == "created"
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+    host.join_worker(admitted.run_id)
+
+    events = ProjectSwarmStore.open_read_only(host.project_root).list_events(
+        admitted.run_id
+    )
+    assert summary.status == "paused"
+    assert summary.pause_reason == "nova_human_approval_required"
+    assert any(
+        event.event_type == "nova.bridge.action_proposed" for event in events
+    )
+    assert len(host.model_calls) == 8
     assert host.kernel.govern_calls == []
     assert host.kernel.actions.calls == []
 
@@ -1128,11 +1234,26 @@ def test_bridge_matrix_09_provider_pause_has_no_replacement_or_automatic_resume(
     host = _configure_enabled_fake_host(
         tmp_path, monkeypatch, provider_unavailable=True
     )
+    dispatch_lock = threading.Lock()
+    dispatches: list[str] = []
+    unexpected_dispatch = threading.Event()
+    dispatcher_returned = threading.Event()
 
-    admitted = host.bridge().submit(_diary_suggestion(), source_slot=60)
+    def guarded_dispatch(project_root: Path, run_id: str) -> None:
+        with dispatch_lock:
+            dispatches.append(run_id)
+            if len(dispatches) != 1:
+                unexpected_dispatch.set()
+                raise AssertionError("provider pause dispatched a replacement worker")
+        host.dispatch(project_root, run_id)
+        dispatcher_returned.set()
+
+    admitted = host.bridge(dispatcher=guarded_dispatch).submit(
+        _diary_suggestion(), source_slot=60
+    )
     assert admitted.run_id is not None
     summary = host.wait_for_worker(admitted.run_id)
-    time.sleep(0.02)
+    host.join_worker(admitted.run_id)
 
     persisted = ProjectSwarmStore.open_read_only(host.project_root).get_run(
         admitted.run_id
@@ -1140,6 +1261,9 @@ def test_bridge_matrix_09_provider_pause_has_no_replacement_or_automatic_resume(
     assert summary.status == "paused"
     assert summary.pause_reason == "model_chain_exhausted"
     assert persisted is not None and persisted.status == "paused"
+    assert dispatcher_returned.is_set()
+    assert not unexpected_dispatch.is_set()
+    assert dispatches == [admitted.run_id]
     assert host.worker_run_ids == [admitted.run_id]
     assert host.kernel.govern_calls == []
     assert host.kernel.actions.calls == []
@@ -1151,28 +1275,36 @@ def test_bridge_matrix_10_post_claim_crash_recovers_once_without_replaying_actio
 ):
     """#10 catches recovery replaying a policy-claimed govern or act boundary."""
     host = _configure_enabled_fake_host(tmp_path, monkeypatch)
-    host.kernel.govern_mode = "crash"
+    host.kernel.actions.crash_after_recording = True
 
     admitted = host.bridge().submit(_diary_suggestion(), source_slot=70)
     assert admitted.run_id is not None
-    first = host.wait_for_worker(admitted.run_id)
-    assert first.pause_reason == "nova_pre_completion_validation_failed"
+    host.wait_for_dispatch()
+    host.join_worker(admitted.run_id)
+    first_events = ProjectSwarmStore.open_read_only(host.project_root).list_events(
+        admitted.run_id
+    )
+    persisted = ProjectSwarmStore.open_read_only(host.project_root).get_run(
+        admitted.run_id
+    )
+    assert persisted is not None and persisted.status == "paused"
+    assert [
+        event.payload
+        for event in first_events
+        if event.event_type == "nova.bridge.dispatch_failed"
+    ] == [{"reason": "nova_dispatch_failed"}]
     assert len(host.kernel.govern_calls) == 1
-    assert host.kernel.actions.calls == []
+    assert len(host.kernel.actions.calls) == 1
+    calls_after_crash = (
+        len(host.kernel.govern_calls),
+        len(host.kernel.actions.calls),
+    )
 
-    host.kernel.govern_mode = "allow"
+    host.kernel.actions.crash_after_recording = False
     host.service.resume(host.project_root, admitted.run_id)
     second = host.service.execute_run(host.project_root, admitted.run_id)
     assert second.pause_reason == "nova_action_claimed_requires_human_recovery"
 
-    store = ProjectSwarmStore(host.project_root)
-    assert store.claim_run_execution_lease(admitted.run_id, "abandoned-task8-owner")
-    recovered = host.service.recover_execution_lease(
-        host.project_root,
-        admitted.run_id,
-        actor_id="os:uid:4242",
-    )
-    assert recovered.status == "paused"
     host.service.resume(host.project_root, admitted.run_id)
     third = host.service.execute_run(host.project_root, admitted.run_id)
 
@@ -1186,8 +1318,10 @@ def test_bridge_matrix_10_post_claim_crash_recovers_once_without_replaying_actio
     ]
     assert third.pause_reason == "nova_action_claimed_requires_human_recovery"
     assert len(recovery_events) == 1
-    assert len(host.kernel.govern_calls) == 1
-    assert host.kernel.actions.calls == []
+    assert (
+        len(host.kernel.govern_calls),
+        len(host.kernel.actions.calls),
+    ) == calls_after_crash
 
 
 def test_attach_admitted_run_accepts_only_a_matching_paused_durable_run(

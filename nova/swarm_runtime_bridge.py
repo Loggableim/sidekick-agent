@@ -772,6 +772,7 @@ def _nova_pause_reason(reason: object) -> str:
     allowed = {
         "adapter_disabled": "adapter_disabled",
         "execution_already_claimed": "action_claimed",
+        "sensitive_action_requires_human": "human_approval_required",
         "nova_policy_blocked": "policy_denied",
         "kernel_workspace_mismatch": "root_mismatch",
         "kernel_policy_unavailable": "policy_unavailable",
