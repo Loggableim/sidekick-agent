@@ -62,6 +62,7 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
     slots: list[tuple[str, str]] = []
     resolver_runs = []
     engine_limits: list[tuple[int, int]] = []
+    completion_notifications: list[tuple[Path, str, str]] = []
     original_engine = swarm_host.SwarmEngine
 
     class RecordingEngine(original_engine):
@@ -105,6 +106,11 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
     def unexpected_refresh():
         raise AssertionError("executing a durable run must not refresh the catalog")
 
+    def on_completed(project_root: Path, completed_run) -> None:
+        completion_notifications.append(
+            (project_root, completed_run.run_id, completed_run.status)
+        )
+
     def resolve_execution_options(project_root: Path, run):
         assert project_root == tmp_path.resolve()
         resolver_runs.append(run)
@@ -112,6 +118,7 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
             max_calls=128,
             verifier=verifier,
             pre_completion_hook=hook,
+            on_completed=on_completed,
         )
 
     ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
@@ -143,6 +150,9 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
     assert engine_limits == [(48, 3), (128, 3)]
     assert verifier.requests and verifier.requests[0].run_id == run.run_id
     assert hook.run_ids == [run.run_id]
+    assert completion_notifications == [
+        (tmp_path.resolve(), run.run_id, "completed")
+    ]
     assert calls
     assert len(slots) == len(calls)
     assert all(provider == "ollama-cloud" for _run_id, provider in slots)
@@ -361,6 +371,10 @@ def test_execution_options_ownership_preflight_failure_releases_its_lease(
         (
             "reviewed_execution",
             swarm_host.SwarmExecutionOptions(pre_completion_hook=object()),
+        ),
+        (
+            "reviewed_execution",
+            swarm_host.SwarmExecutionOptions(on_completed=object()),
         ),
     ],
 )

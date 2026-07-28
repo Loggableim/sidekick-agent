@@ -42,6 +42,7 @@ CatalogRefresher = Callable[[], ModelCatalogSnapshot]
 ProviderSlot = Callable[[str, str], ContextManager[None]]
 ActionClassifier = Callable[[RequestedToolAction], ActionCapabilities]
 PauseObserver = Callable[[], None]
+RunCompletionObserver = Callable[[Path, SwarmRun], None]
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class SwarmExecutionOptions:
     max_concurrent: int = 3
     verifier: ReadOnlyVerifier | None = None
     pre_completion_hook: PreCompletionHook | None = None
+    on_completed: RunCompletionObserver | None = None
     blocked_reason: str | None = None
 
 
@@ -225,7 +227,15 @@ class SidekickSwarmService:
                 ),
             )
             release_lease_here = False
-            return self._record_catalog_unavailable(summary, snapshot, store)
+            summary = self._record_catalog_unavailable(summary, snapshot, store)
+            self._notify_run_completed(
+                project_root,
+                run_id,
+                summary,
+                options,
+                store,
+            )
+            return summary
         finally:
             if release_lease_here:
                 store.release_run_execution_lease(run_id, owner_token)
@@ -371,6 +381,23 @@ class SidekickSwarmService:
                 events=tuple(store.list_events(summary.run_id)),
             )
         return summary
+
+    @staticmethod
+    def _notify_run_completed(
+        project_root: Path,
+        run_id: str,
+        summary: RunSummary,
+        options: SwarmExecutionOptions,
+        store: ProjectSwarmStore,
+    ) -> None:
+        """Notify a process-only integration only after durable completion."""
+        callback = options.on_completed
+        if summary.status != "completed" or callback is None:
+            return
+        durable = store.get_run(run_id)
+        if durable is None or durable.status != "completed":
+            return
+        callback(project_root, durable)
 
     def _wait_for_running(
         self,
@@ -623,6 +650,7 @@ def _valid_execution_options(run: SwarmRun, options: SwarmExecutionOptions) -> b
         and 1 <= options.max_concurrent <= 3
         and _is_read_only_verifier(options.verifier)
         and _is_pre_completion_hook(options.pre_completion_hook)
+        and (options.on_completed is None or callable(options.on_completed))
     )
 
 

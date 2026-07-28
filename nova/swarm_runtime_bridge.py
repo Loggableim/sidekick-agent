@@ -747,6 +747,7 @@ def nova_execution_options_for_run(
         max_calls=max_calls,
         verifier=binding.verifier,
         pre_completion_hook=NovaPreCompletionHook(binding.adapter, binding.context),
+        on_completed=_unregister_completed_nova_runtime_binding,
     )
 
 
@@ -881,6 +882,21 @@ def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBindi
     except (TypeError, ValueError, InvalidVerifierResult):
         return None
     return binding
+
+
+def _unregister_completed_nova_runtime_binding(
+    project_root: Path, run: SwarmRun
+) -> None:
+    """Release only the exact Nova binding after durable completion."""
+    root = Path(project_root).expanduser().resolve()
+    if run.status != "completed":
+        return
+    durable = ProjectSwarmStore.open_read_only(root).get_run(run.run_id)
+    if durable is None or durable.status != "completed":
+        return
+    if _runtime_binding_for(root, durable) is None:
+        return
+    _unregister_runtime_binding(root, durable.run_id)
 
 
 def _durable_nova_contract_matches(
