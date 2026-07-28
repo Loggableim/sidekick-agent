@@ -94,6 +94,8 @@ class PreCompletionResult:
     pause_reason: str | None = None
 
     def __post_init__(self) -> None:
+        if type(self.continue_completion) is not bool:
+            raise ValueError("Pre-completion continuation must be a boolean")
         if not self.continue_completion and not (
             isinstance(self.pause_reason, str) and self.pause_reason.strip()
         ):
@@ -424,19 +426,28 @@ class SwarmEngine:
         checkpoint: Callable[[], None] | None,
     ) -> WorkflowPaused | None:
         """Run a host-neutral durable completion gate, when the run requires it."""
-        required_hook_id = run.metadata.get("required_pre_completion_hook")
-        if required_hook_id is None:
+        required_hook_key = "required_pre_completion_hook"
+        if required_hook_key not in run.metadata:
             return None
+        required_hook_id = run.metadata[required_hook_key]
+        if type(required_hook_id) is not str or not required_hook_id.strip():
+            return WorkflowPaused(
+                "required_pre_completion_hook_unavailable",
+                role="pre_completion_hook",
+            )
         hook = self.pre_completion_hook
+        if hook is None:
+            return WorkflowPaused(
+                "required_pre_completion_hook_unavailable",
+                role="pre_completion_hook",
+            )
         try:
-            hook_matches = hook is not None and hook.hook_id == required_hook_id
+            installed_hook_id = hook.hook_id
         except Exception:
             return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
-        if (
-            not isinstance(required_hook_id, str)
-            or not required_hook_id.strip()
-            or not hook_matches
-        ):
+        if type(installed_hook_id) is not str or not installed_hook_id.strip():
+            return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
+        if installed_hook_id != required_hook_id:
             return WorkflowPaused(
                 "required_pre_completion_hook_unavailable",
                 role="pre_completion_hook",
