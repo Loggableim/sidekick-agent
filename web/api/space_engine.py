@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -457,8 +458,11 @@ def update_nova_management(
     enrolled: object,
     confirmation: object,
     trusted_project_root: str | Path | None,
+    actor: str,
 ) -> dict[str, bool | int]:
     """Persist a validated management transition for one existing Space."""
+    if not isinstance(actor, str) or not actor.startswith("dashboard:"):
+        raise SpaceGovernanceError("management transition requires an authenticated dashboard actor")
     if type(yolo) is not bool or type(enrolled) is not bool:
         raise SpaceGovernanceError("yolo and enrolled must be literal booleans")
     if enrolled is True and yolo is not True:
@@ -493,9 +497,64 @@ def update_nova_management(
         "enrolled": enrolled,
         "revision": int(current["revision"]) + 1,
     }
+    original_config = space.config_path.read_bytes() if space.config_path.exists() else None
     config["nova_management"] = next_record
     space.save_config(config)
+    persisted = space.load_config()
+    root_fingerprint = ""
+    if trusted_project_root is not None:
+        try:
+            independent_root = Path(trusted_project_root).expanduser().resolve()
+            if independent_root.is_dir():
+                root_fingerprint = space_root_fingerprint(independent_root)
+        except (TypeError, OSError, RuntimeError):
+            pass
+    event = {
+        "actor": actor,
+        "timestamp": time.time(),
+        "space_id": persisted.get("space_id", ""),
+        "root_fingerprint": root_fingerprint,
+        "policy_revision": next_record["revision"],
+        "governance_revision": next_record["revision"],
+        "previous": current,
+        "next": next_record,
+    }
+    try:
+        _append_nova_management_audit(space, event)
+    except OSError as exc:
+        try:
+            if original_config is None:
+                space.config_path.unlink(missing_ok=True)
+            else:
+                space.config_path.write_bytes(original_config)
+        except OSError:
+            logger.exception("failed to roll back management config after audit failure")
+        raise SpaceGovernanceError("management audit persistence failed") from exc
     return next_record
+
+
+def _append_nova_management_audit(space: Space, event: dict) -> None:
+    """Append a completed management transition without rewriting prior evidence."""
+    with (space.root / "nova-management-audit.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(event, sort_keys=True) + "\n")
+
+
+def list_nova_management_audit(space: Space) -> list[dict]:
+    """Read append-only governance evidence without creating missing files."""
+    path = space.root / "nova-management-audit.jsonl"
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    events: list[dict] = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
 
 
 _SPACE_CACHE: list[Space] | None = None
@@ -800,6 +859,28 @@ def get_space(slug: str) -> Space | None:
     for s in get_all_spaces():
         if s.slug == slug:
             return s
+    return None
+
+
+def get_existing_space_read_only(slug: str) -> Space | None:
+    """Find an already-saved Space without cache scans, seeding, or migration."""
+    normalized = _normalize_space_slug(slug)
+    if not normalized:
+        return None
+    roots: list[tuple[Path, bool]] = [(_spaces_root(), False)]
+    old_root = _old_root()
+    if old_root != roots[0][0]:
+        roots.append((old_root, True))
+    for root, is_legacy in roots:
+        try:
+            resolved_root = root.resolve()
+            candidate = (resolved_root / normalized).resolve()
+            candidate.relative_to(resolved_root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not candidate.is_dir() or not (candidate / "space.yaml").is_file():
+            continue
+        return Space(normalized, normalized, custom_root=root if is_legacy else None)
     return None
 
 

@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -500,6 +501,7 @@ def test_space_management_enrollment_uses_server_resolved_root(monkeypatch, tmp_
 
     monkeypatch.setattr(web_server, "resolve_trusted_workspace", resolve_project)
     monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", resolve_project)
+    monkeypatch.setattr(web_server, "resolve_enrollment_trusted_workspace_read_only", resolve_project)
     space = space_engine.Space("alpha", "Alpha")
     space.save_config({"name": "Alpha", "project_dir": str(project)})
     client = TestClient(web_server.app)
@@ -558,3 +560,112 @@ def test_generic_space_config_refuses_nova_management_patch(monkeypatch, tmp_pat
         "enrolled": False,
         "revision": 0,
     }
+
+
+def test_space_management_get_is_pure_with_a_cold_space_cache(monkeypatch, tmp_path):
+    """A management read must not scan/seed or create any Space-side state."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    monkeypatch.setattr(space_engine, "_SPACE_CACHE", None)
+    monkeypatch.setattr(space_engine, "_SPACE_CACHE_TS", 0.0)
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    before = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+
+    def unexpected_seed():
+        raise AssertionError("management GET must not seed or scan Spaces")
+
+    monkeypatch.setattr(space_engine, "_seed_default_space_from_consciousness", unexpected_seed)
+    monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", lambda _value: project)
+
+    response = TestClient(web_server.app).get(
+        "/api/space/nova-management?slug=alpha", headers=_headers(web_server)
+    )
+
+    assert response.status_code == 200
+    after = {path.relative_to(tmp_path): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert after == before
+    assert not (spaces_root / "nova").exists()
+
+
+def test_enrollment_rejects_a_project_dir_that_only_the_space_config_trusts(monkeypatch, tmp_path):
+    """A generic project_dir write cannot become its own enrollment trust root."""
+    from cli import web_server
+    from web.api import space_engine, workspace
+
+    spaces_root = tmp_path / "spaces"
+    project = Path(r"C:\\sidekick")
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    monkeypatch.setattr(workspace.Path, "home", lambda: tmp_path / "isolated-home")
+    monkeypatch.setattr(workspace, "_read_only_saved_workspace_paths", lambda *_args: set())
+    monkeypatch.setattr(workspace, "_read_only_default_workspaces", lambda: ())
+    monkeypatch.setattr(
+        workspace,
+        "_read_only_space_project_roots",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("enrollment trust must not consult Space project roots")),
+    )
+    monkeypatch.setattr(
+        space_engine,
+        "get_all_spaces",
+        lambda: (_ for _ in ()).throw(AssertionError("enrollment trust must not scan Spaces")),
+    )
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    snapshot = TestClient(web_server.app).get(
+        "/api/space/nova-management?slug=alpha", headers=_headers(web_server)
+    ).json()
+
+    response = TestClient(web_server.app).post(
+        "/api/space/nova-management",
+        headers=_headers(web_server),
+        json={
+            "slug": "alpha",
+            "yolo": True,
+            "enrolled": True,
+            "confirmation": {
+                "space_id": snapshot["space_id"],
+                "root_fingerprint": snapshot["root_fingerprint"],
+            },
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_management_migrates_legacy_identity_and_exposes_append_only_audit(monkeypatch, tmp_path):
+    """An explicit management write migrates legacy identity and records evidence."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    space_dir = spaces_root / "alpha"
+    space_dir.mkdir(parents=True)
+    (space_dir / "space.yaml").write_text("name: Alpha\n", encoding="utf-8")
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", lambda _value: (_ for _ in ()).throw(ValueError()))
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+
+    response = client.post(
+        "/api/space/nova-management",
+        headers=headers,
+        json={"slug": "alpha", "yolo": False, "enrolled": False, "confirmation": None},
+    )
+    audit = client.get("/api/space/nova-management/audit?slug=alpha", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["space_id"]
+    assert audit.status_code == 200
+    event = audit.json()["events"][-1]
+    assert event["actor"].startswith("dashboard:")
+    assert event["space_id"] == response.json()["space_id"]
+    assert event["previous"] == {"yolo": False, "enrolled": False, "revision": 0}
+    assert event["next"] == {"yolo": False, "enrolled": False, "revision": 1}
