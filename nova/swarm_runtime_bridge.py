@@ -447,8 +447,7 @@ def _is_opaque_encoded_text(value: str) -> bool:
     candidate = value.strip()
     if _OPAQUE_ENCODING_PREFIX.match(candidate):
         return True
-    minimum_length = 4 if "-" in candidate or "_" in candidate else 10
-    if len(candidate) < minimum_length or not _BASE64_TEXT.fullmatch(candidate):
+    if not _BASE64_TEXT.fullmatch(candidate):
         return False
     try:
         padded = candidate.rstrip("=") + "=" * (-len(candidate.rstrip("=")) % 4)
