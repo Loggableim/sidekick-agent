@@ -105,6 +105,15 @@ NOVA_ACTION_SPECS: Mapping[str, NovaActionSpec] = MappingProxyType(
 )
 
 
+def get_nova_action_spec(action: str) -> NovaActionSpec:
+    """Return the immutable adapter-owned policy record for one Nova action."""
+    normalized_action = _required_text(action, "Nova action")
+    try:
+        return NOVA_ACTION_SPECS[normalized_action]
+    except KeyError as exc:
+        raise ValueError(f"unsupported Nova action: {normalized_action}") from exc
+
+
 class NovaSwarmAdapter:
     """Translate vetted Nova suggestions and execute only through both gates."""
 
@@ -310,10 +319,7 @@ class NovaSwarmAdapter:
             "Nova suggestion id",
         )
         action = _required_text(suggestion.get("action"), "Nova action")
-        try:
-            spec = NOVA_ACTION_SPECS[action]
-        except KeyError as exc:
-            raise ValueError(f"unsupported Nova action: {action}") from exc
+        spec = get_nova_action_spec(action)
         resolved_tier = _required_text(
             policy_tier if policy_tier is not None else spec.policy_tier,
             "Nova policy tier",

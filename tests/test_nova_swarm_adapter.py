@@ -7,7 +7,7 @@ import pytest
 
 from nova.actions import ActionRegistry
 from nova.entity_kernel import EntityKernel
-from nova.swarm_adapter import NovaSwarmAdapter
+from nova.swarm_adapter import NovaSwarmAdapter, get_nova_action_spec
 from swarm_core.policy import PolicyGate, PolicyStatus
 from swarm_core.store import ProjectSwarmStore
 
@@ -106,6 +106,20 @@ def test_translate_owns_capabilities_and_rejects_unknown_nova_actions(
 
     with pytest.raises(ValueError, match="unsupported Nova action"):
         adapter.translate({"id": "unknown-1", "action": "publish_release"})
+
+
+def test_translate_uses_the_adapter_owned_action_spec(tmp_path: Path):
+    """Catches translate deriving action capabilities from caller-controlled data."""
+    store = ProjectSwarmStore(tmp_path)
+    adapter = NovaSwarmAdapter(_Kernel(space_dir=tmp_path), PolicyGate(store))
+
+    spec = get_nova_action_spec("agenda_update")
+    proposal = adapter.translate(_suggestion(action="agenda_update"))
+
+    assert proposal.category == spec.capabilities.category
+    assert proposal.reversible is spec.capabilities.reversible
+    assert proposal.external is spec.capabilities.external
+    assert proposal.cost_increasing is spec.capabilities.cost_increasing
 
 
 def test_disabled_adapter_never_claims_or_calls_the_nova_kernel(tmp_path: Path):
