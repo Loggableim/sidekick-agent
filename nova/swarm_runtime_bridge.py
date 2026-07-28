@@ -67,6 +67,8 @@ class _NovaRuntimeBinding:
     run_id: str
     intent_digest: str
     proposal_digest: str
+    mode: str
+    max_calls: int
     adapter: NovaSwarmAdapter
     context: "_NovaBridgeContext"
     verifier: "NovaIntentReadOnlyVerifier"
@@ -602,6 +604,7 @@ class NovaSwarmRuntimeBridge:
             "nova_intent_digest": snapshot.intent_digest,
             "nova_snapshot": _snapshot_metadata(snapshot),
             "nova_mode": mode,
+            "nova_max_calls": max_calls,
             "proposal_digest": proposal_digest(proposal),
             "required_pre_completion_hook": _RUNTIME_HOOK_ID,
         }
@@ -625,6 +628,8 @@ class NovaSwarmRuntimeBridge:
                 admission.run.run_id,
                 snapshot.intent_digest,
                 proposal_digest(proposal),
+                mode,
+                max_calls,
                 adapter,
                 context,
                 NovaIntentReadOnlyVerifier(context),
@@ -668,7 +673,12 @@ def nova_execution_options_for_run(
         return None
     mode = run.metadata.get("nova_mode")
     max_calls = 128 if mode == "autonomous" else 48 if mode == "reviewed_execution" else None
-    if max_calls is None:
+    if (
+        max_calls is None
+        or run.metadata.get("autonomy") != mode
+        or run.metadata.get("nova_max_calls") != max_calls
+        or run.metadata.get("required_pre_completion_hook") != _RUNTIME_HOOK_ID
+    ):
         return SwarmExecutionOptions(blocked_reason="execution_options_blocked")
     if load_nova_bridge_config(Path(project_root)).enabled is not True:
         return SwarmExecutionOptions(blocked_reason="nova_bridge_disabled")
@@ -731,11 +741,30 @@ def register_nova_runtime_context(
         raise ValueError("Nova runtime context root mismatch")
     digest = metadata.get("nova_intent_digest")
     proposal = metadata.get("proposal_digest")
-    if not isinstance(digest, str) or not isinstance(proposal, str):
+    mode = metadata.get("nova_mode")
+    max_calls = metadata.get("nova_max_calls")
+    expected_calls = {"reviewed_execution": 48, "autonomous": 128}.get(mode)
+    if (
+        not isinstance(digest, str)
+        or not isinstance(proposal, str)
+        or expected_calls is None
+        or max_calls != expected_calls
+        or metadata.get("autonomy") != mode
+        or metadata.get("required_pre_completion_hook") != _RUNTIME_HOOK_ID
+    ):
         raise ValueError("Nova runtime context requires immutable digests")
     _register_runtime_binding(
         context,
-        _NovaRuntimeBinding(run.run_id, digest, proposal, adapter, trusted_project_root, NovaIntentReadOnlyVerifier(trusted_project_root)),
+        _NovaRuntimeBinding(
+            run.run_id,
+            digest,
+            proposal,
+            mode,
+            max_calls,
+            adapter,
+            trusted_project_root,
+            NovaIntentReadOnlyVerifier(trusted_project_root),
+        ),
     )
 
 
@@ -752,9 +781,20 @@ def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBindi
     metadata = run.metadata
     if (
         binding.run_id != run.run_id
+        or metadata.get("integration_namespace") != _NOVA_NAMESPACE
+        or metadata.get("project_root") != str(Path(project_root).resolve())
         or binding.intent_digest != metadata.get("nova_intent_digest")
         or binding.proposal_digest != metadata.get("proposal_digest")
+        or binding.mode != metadata.get("nova_mode")
+        or metadata.get("autonomy") != binding.mode
+        or metadata.get("nova_max_calls") != binding.max_calls
+        or metadata.get("required_pre_completion_hook") != _RUNTIME_HOOK_ID
     ):
+        return None
+    try:
+        snapshot = _snapshot_from_metadata(metadata, binding.context)
+        binding.verifier.verify(snapshot)
+    except (TypeError, ValueError, InvalidVerifierResult):
         return None
     return binding
 
@@ -780,5 +820,17 @@ def _run_worker(dispatcher: Callable[[Path, str], Any], project_root: Path, run_
     """Never leave an admitted run running if its in-process worker crashes."""
     try:
         dispatcher(project_root, run_id)
-    except Exception:
+    except BaseException:
         _pause_dispatch_failure(ProjectSwarmStore(project_root), run_id)
+        return
+    run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
+    if run is not None and run.status == "completed":
+        _unregister_runtime_binding(project_root, run_id)
+
+
+def _unregister_runtime_binding(project_root: Path, run_id: str) -> None:
+    with _RUNTIME_BINDINGS_LOCK:
+        root = Path(project_root).resolve()
+        binding = _RUNTIME_BINDINGS.get(root)
+        if binding is not None and binding.run_id == run_id:
+            del _RUNTIME_BINDINGS[root]
