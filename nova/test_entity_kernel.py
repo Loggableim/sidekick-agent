@@ -92,6 +92,17 @@ class EntityKernelTests(unittest.TestCase):
         yolo_state.write_text("{not-json", encoding="utf-8")
         self.assertFalse(kernel.is_yolo_enabled())
 
+    def test_is_yolo_enabled_requires_a_literal_boolean_true(self):
+        kernel = EntityKernel(space_dir=self.root, state_provider=self.fixture_state)
+        lifecycle = self.root / ".lifecycle"
+        lifecycle.mkdir()
+        yolo_state = lifecycle / "yolo.json"
+
+        for value in ('"true"', "1", "[]", "{}", "null", "false"):
+            with self.subTest(value=value):
+                yolo_state.write_text('{"enabled": ' + value + "}", encoding="utf-8")
+                self.assertFalse(kernel.is_yolo_enabled())
+
     def test_blocked_action_records_blocked_result(self):
         kernel = EntityKernel(space_dir=self.root, state_provider=self.fixture_state)
         decision = kernel.decide(now_iso="2026-07-05T23:00:00")

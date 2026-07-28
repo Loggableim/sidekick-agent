@@ -211,11 +211,157 @@ def test_execution_options_blocked_reason_pauses_before_engine_or_model_request(
     summary = service.execute_run(tmp_path, run.run_id)
 
     assert summary.status == "paused"
-    assert summary.pause_reason == "novabridgeisdisabledprivatedetail"
+    assert summary.pause_reason == "execution_options_blocked"
     assert calls == []
     event = ProjectSwarmStore(tmp_path).list_events(run.run_id)[-1]
     assert event.event_type == "run.execution_blocked"
-    assert event.payload == {"reason": "novabridgeisdisabledprivatedetail"}
+    assert event.payload == {"reason": "execution_options_blocked"}
+
+
+def test_execution_options_blocked_reason_never_persists_resolver_diagnostics(
+    tmp_path: Path,
+):
+    """Resolver text is untrusted and must map to a fixed audit token."""
+    secret = "S3CR3T-NovaPrivate"
+    path = r"C:\\Nova\\private\\token.json"
+    service = SidekickSwarmService(
+        execution_options_resolver=lambda _project, _run: swarm_host.SwarmExecutionOptions(
+            blocked_reason=f"bridge failed at {path} with {secret}"
+        )
+    )
+    run = service.start_run("keep resolver diagnostics private", tmp_path)
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    event = ProjectSwarmStore(tmp_path).list_events(run.run_id)[-1]
+    durable = json.dumps({"reason": summary.pause_reason, "event": event.payload})
+    assert summary.pause_reason == "execution_options_blocked"
+    assert event.payload == {"reason": "execution_options_blocked"}
+    assert secret not in durable
+    assert "NovaPrivate" not in durable
+    assert "C:" not in durable
+
+
+def test_execution_options_competitor_never_resolves_or_pauses_an_active_run(
+    tmp_path: Path,
+):
+    """The lease covers resolver work, so only its owner can block the run."""
+    resolver_entered = threading.Event()
+    release_resolver = threading.Event()
+    resolver_calls: list[str] = []
+    result: dict[str, object] = {}
+
+    def resolver(_project: Path, run):
+        resolver_calls.append(run.run_id)
+        resolver_entered.set()
+        assert release_resolver.wait(timeout=2)
+        return swarm_host.SwarmExecutionOptions(blocked_reason="nova_bridge_disabled")
+
+    service = SidekickSwarmService(execution_options_resolver=resolver)
+    run = service.start_run("only one executor may resolve options", tmp_path)
+
+    def execute_first() -> None:
+        try:
+            result["summary"] = service.execute_run(tmp_path, run.run_id)
+        except Exception as exc:  # pragma: no cover - assertions surface it
+            result["error"] = exc
+
+    worker = threading.Thread(target=execute_first)
+    worker.start()
+    assert resolver_entered.wait(timeout=1)
+
+    with pytest.raises(RuntimeError, match="already active"):
+        service.execute_run(tmp_path, run.run_id)
+    assert resolver_calls == [run.run_id]
+    assert ProjectSwarmStore(tmp_path).get_run(run.run_id).status == "running"
+
+    release_resolver.set()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert "error" not in result
+    assert result["summary"].status == "paused"
+    assert resolver_calls == [run.run_id]
+
+
+def test_execution_options_completion_race_cannot_persist_a_blocked_pause(
+    tmp_path: Path,
+):
+    """A run completed while resolving cannot be relabelled as bridge-blocked."""
+    resolver_entered = threading.Event()
+    release_resolver = threading.Event()
+    result: dict[str, object] = {}
+
+    def resolver(_project: Path, _run):
+        resolver_entered.set()
+        assert release_resolver.wait(timeout=2)
+        return swarm_host.SwarmExecutionOptions(blocked_reason="nova_bridge_disabled")
+
+    service = SidekickSwarmService(execution_options_resolver=resolver)
+    run = service.start_run("do not block a completed run", tmp_path)
+
+    def execute() -> None:
+        try:
+            service.execute_run(tmp_path, run.run_id)
+        except Exception as exc:
+            result["error"] = exc
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    assert resolver_entered.wait(timeout=1)
+    ProjectSwarmStore(tmp_path).set_run_status(run.run_id, "completed")
+    release_resolver.set()
+    worker.join(timeout=3)
+
+    assert not worker.is_alive()
+    assert isinstance(result.get("error"), ValueError)
+    assert not any(
+        event.event_type == "run.execution_blocked"
+        for event in ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    )
+
+
+@pytest.mark.parametrize(
+    ("autonomy", "options"),
+    [
+        ("reviewed_execution", swarm_host.SwarmExecutionOptions(max_calls=127)),
+        ("reviewed_execution", swarm_host.SwarmExecutionOptions(max_calls=128)),
+        ("autonomous", swarm_host.SwarmExecutionOptions(max_calls=48)),
+        ("reviewed_execution", swarm_host.SwarmExecutionOptions(max_concurrent=4)),
+        ("reviewed_execution", swarm_host.SwarmExecutionOptions(verifier=object())),
+        (
+            "reviewed_execution",
+            swarm_host.SwarmExecutionOptions(pre_completion_hook=object()),
+        ),
+    ],
+)
+def test_execution_options_reject_unsafe_protocols_and_unapproved_limits_before_cloud(
+    tmp_path: Path,
+    autonomy: str,
+    options: swarm_host.SwarmExecutionOptions,
+):
+    """Only durable autonomy selects an approved budget and usable extensions."""
+    calls: list[dict] = []
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    service = SidekickSwarmService(
+        call_llm=lambda **kwargs: calls.append(kwargs) or _valid_response(),
+        execution_options_resolver=lambda _project, _run: options,
+    )
+    run = service.start_run("reject unsafe resolver options", tmp_path, autonomy=autonomy)
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "invalid_execution_options"
+    assert calls == []
+    assert ProjectSwarmStore(tmp_path).get_run(run.run_id).status == "paused"
 
 
 def test_run_never_refreshes_an_absent_catalog_or_calls_another_provider(

@@ -16,6 +16,7 @@ import threading
 import time
 from typing import Any, Callable, ContextManager, Iterator, Mapping
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from swarm_core.engine import PreCompletionHook, RunSummary, SwarmEngine
 from swarm_core.models import (
@@ -59,6 +60,15 @@ ExecutionOptionsResolver = Callable[[Path, SwarmRun], SwarmExecutionOptions | No
 OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE = "ollama-cloud-api-live-verified"
 OLLAMA_CLOUD_UNAVAILABLE_CATALOG_SOURCE = "ollama-cloud-api-live-unavailable"
 OLLAMA_CLOUD_CANONICAL_BASE_URL = "https://ollama.com/v1"
+
+_ALLOWED_BLOCKED_EXECUTION_OPTION_REASONS = frozenset(
+    {
+        "execution_options_blocked",
+        "execution_options_unavailable",
+        "invalid_execution_options",
+        "nova_bridge_disabled",
+    }
+)
 
 _FALLBACK_SLOT_LOCK = threading.Lock()
 _FALLBACK_SLOTS: dict[int, threading.BoundedSemaphore] = {}
@@ -183,28 +193,41 @@ class SidekickSwarmService:
     ) -> RunSummary:
         """Continue a durable run, waiting at model boundaries while paused."""
         project_root = Path(project_root).resolve()
-        run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
-        if run is None:
-            raise KeyError(f"Unknown Swarm run: {run_id}")
-        options = self._resolve_execution_options(project_root, run)
-        if options.blocked_reason is not None:
-            return self._pause_before_execution_options(
-                project_root,
+        store = ProjectSwarmStore(project_root)
+        owner_token = str(uuid4())
+        if not store.claim_run_execution_lease(run_id, owner_token):
+            raise RuntimeError("Swarm execution is already active for this run")
+        release_lease_here = True
+        try:
+            run = store.get_run(run_id)
+            if run is None:
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            if run.status == "completed":
+                raise ValueError("Completed Swarm runs cannot be executed again")
+            options = self._resolve_execution_options(project_root, run)
+            if options.blocked_reason is not None:
+                return self._pause_before_execution_options(
+                    store,
+                    run_id,
+                    options.blocked_reason,
+                )
+            engine, snapshot, _store = self._engine_for(project_root, options=options)
+            release_lease_here = False
+            summary = engine.execute_claimed_run(
                 run_id,
-                options.blocked_reason,
+                project_root,
+                owner_token=owner_token,
+                checkpoint=lambda: self._wait_for_running(
+                    project_root,
+                    run_id,
+                    on_pause_wait=on_pause_wait,
+                    on_resume=on_resume,
+                ),
             )
-        engine, snapshot, store = self._engine_for(project_root, options=options)
-        summary = engine.execute_run(
-            run_id,
-            project_root,
-            checkpoint=lambda: self._wait_for_running(
-                project_root,
-                run_id,
-                on_pause_wait=on_pause_wait,
-                on_resume=on_resume,
-            ),
-        )
-        return self._record_catalog_unavailable(summary, snapshot, store)
+            return self._record_catalog_unavailable(summary, snapshot, store)
+        finally:
+            if release_lease_here:
+                store.release_run_execution_lease(run_id, owner_token)
 
     def _engine_for(
         self,
@@ -269,8 +292,6 @@ class SidekickSwarmService:
             return SwarmExecutionOptions()
         if not isinstance(resolved, SwarmExecutionOptions):
             return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
-        if not _valid_execution_limits(resolved):
-            return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
         if resolved.blocked_reason is not None:
             return replace(
                 resolved,
@@ -278,16 +299,17 @@ class SidekickSwarmService:
                     resolved.blocked_reason
                 ),
             )
+        if not _valid_execution_options(run, resolved):
+            return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
         return resolved
 
     @staticmethod
     def _pause_before_execution_options(
-        project_root: Path,
+        store: ProjectSwarmStore,
         run_id: str,
         reason: str,
     ) -> RunSummary:
         """Durably pause a bridge-blocked run before constructing an engine."""
-        store = ProjectSwarmStore(project_root)
         run = store.get_run(run_id)
         if run is None:
             raise KeyError(f"Unknown Swarm run: {run_id}")
@@ -303,12 +325,15 @@ class SidekickSwarmService:
         current = store.get_run(run_id)
         if current is None:
             raise KeyError(f"Unknown Swarm run: {run_id}")
-        if current.status != "completed":
-            store.append_event(
-                run_id,
-                "run.execution_blocked",
-                {"reason": _bounded_execution_options_reason(reason)},
-            )
+        if current.status == "completed":
+            raise ValueError("Completed Swarm runs cannot be executed again")
+        if current.status != "paused":
+            raise RuntimeError("Swarm run state changed during execution option resolution")
+        store.append_event(
+            run_id,
+            "run.execution_blocked",
+            {"reason": _bounded_execution_options_reason(reason)},
+        )
         return RunSummary(
             run_id=run_id,
             status=current.status,
@@ -582,26 +607,50 @@ def _safe_execution_error_type(error_type: str) -> str:
     return (cleaned or "Exception")[:128]
 
 
-def _valid_execution_limits(options: SwarmExecutionOptions) -> bool:
-    """Keep resolver tuning inside the established host-wide resource caps."""
+def _valid_execution_options(run: SwarmRun, options: SwarmExecutionOptions) -> bool:
+    """Accept only durable-mode limits and well-shaped read-only extensions."""
+    autonomy = run.metadata.get("autonomy")
+    expected_max_calls = {
+        "reviewed_execution": 48,
+        "autonomous": 128,
+    }.get(autonomy)
     return (
-        type(options.max_calls) is int
-        and 1 <= options.max_calls <= 128
+        expected_max_calls is not None
+        and type(options.max_calls) is int
+        and options.max_calls == expected_max_calls
         and type(options.max_concurrent) is int
         and 1 <= options.max_concurrent <= 3
+        and _is_read_only_verifier(options.verifier)
+        and _is_pre_completion_hook(options.pre_completion_hook)
     )
 
 
 def _bounded_execution_options_reason(reason: object) -> str:
-    """Persist a stable token, never resolver-controlled diagnostic text."""
-    if not isinstance(reason, str):
-        return "execution_options_blocked"
-    cleaned = "".join(
-        character
-        for character in reason.strip()
-        if character.isascii() and (character.isalnum() or character in {"_", "-"})
-    )
-    return (cleaned or "execution_options_blocked")[:128]
+    """Map untrusted resolver data to fixed non-diagnostic durable tokens."""
+    if type(reason) is str and reason in _ALLOWED_BLOCKED_EXECUTION_OPTION_REASONS:
+        return reason
+    return "execution_options_blocked"
+
+
+def _is_read_only_verifier(verifier: object) -> bool:
+    if verifier is None:
+        return True
+    try:
+        return callable(getattr(verifier, "verify"))
+    except Exception:
+        return False
+
+
+def _is_pre_completion_hook(hook: object) -> bool:
+    if hook is None:
+        return True
+    try:
+        hook_id = getattr(hook, "hook_id")
+        return type(hook_id) is str and bool(hook_id.strip()) and callable(
+            getattr(hook, "run")
+        )
+    except Exception:
+        return False
 
 
 def _validated_host_recovery_actor(actor_id: str) -> str:
