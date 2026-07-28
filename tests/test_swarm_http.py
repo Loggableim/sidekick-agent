@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import pytest
 
 from cli.swarm_host import OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE, SidekickSwarmService
+import nova.swarm_runtime_bridge as nova_bridge
 from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.packs import PackDefinition, PackRegistry
 from swarm_core.store import ProjectSwarmStore
@@ -790,6 +791,109 @@ def test_http_get_and_sse_use_a_non_mutating_explicit_project_trust_path(
         is True
     )
     assert "event: events" in writer.getvalue().decode("utf-8")
+
+
+def test_http_nova_status_and_sse_are_read_only_without_context_or_worker_resolution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches Nova observations attaching trust, initializing, or dispatching."""
+    from web.api import workspace as workspace_api
+
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    store = ProjectSwarmStore(project)
+    run = store.create_run(
+        run_id="nova-read-only",
+        status="paused",
+        metadata={
+            "goal": "Observe a durable Nova run",
+            "pack": "coding-team",
+            "project_root": str(project.resolve()),
+            "autonomy": "reviewed_execution",
+            "integration_namespace": "nova",
+            "required_pre_completion_hook": "nova-runtime-v1",
+        },
+    )
+    store.append_event(run.run_id, "run.paused", {"reason": "provider_unavailable"})
+    before_files = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in project.rglob("*")
+        if path.is_file()
+    }
+    with swarm_api._BACKGROUND_RUNS_LOCK:
+        before_workers = dict(swarm_api._BACKGROUND_RUNS)
+    before_bindings = dict(nova_bridge._RUNTIME_BINDINGS)
+
+    def unexpected_runtime_resolution(*_args, **_kwargs):
+        raise AssertionError("Nova status/SSE must not resolve runtime context")
+
+    def unexpected_mutating_resolver(*_args, **_kwargs):
+        raise AssertionError("Nova status/SSE must not enter mutating resolution")
+
+    monkeypatch.setattr(
+        workspace_api.Path,
+        "home",
+        classmethod(lambda _cls: tmp_path),
+    )
+    monkeypatch.setattr(
+        swarm_api, "resolve_trusted_workspace", unexpected_mutating_resolver
+    )
+    monkeypatch.setattr(
+        workspace_api, "load_workspaces", unexpected_mutating_resolver
+    )
+    monkeypatch.setattr(
+        workspace_api,
+        "_current_default_workspace",
+        unexpected_mutating_resolver,
+    )
+    monkeypatch.setattr(swarm_api, "get_swarm_service", unexpected_runtime_resolution)
+    monkeypatch.setattr(
+        nova_bridge, "_create_nova_bridge_context", unexpected_runtime_resolution
+    )
+    monkeypatch.setattr(
+        nova_bridge, "nova_execution_options_for_run", unexpected_runtime_resolution
+    )
+    monkeypatch.setattr(
+        nova_bridge, "_default_runtime_dispatcher", unexpected_runtime_resolution
+    )
+
+    status = _Handler()
+    assert (
+        swarm_api.handle_swarm_get(
+            status,
+            urlparse(
+                f"/api/swarm/runs/{run.run_id}?project_path={project}"
+            ),
+        )
+        is True
+    )
+    assert _response_json(status)["run"]["status"] == "paused"
+
+    writer = _DisconnectAfterEvents()
+    stream = _Handler(writer=writer)
+    assert (
+        swarm_api.handle_swarm_get(
+            stream,
+            urlparse(
+                "/api/swarm/runs/events/stream"
+                f"?project_path={project}&run_id={run.run_id}"
+            ),
+        )
+        is True
+    )
+    assert "event: events" in writer.getvalue().decode("utf-8")
+
+    after_files = {
+        path.relative_to(project).as_posix(): path.read_bytes()
+        for path in project.rglob("*")
+        if path.is_file()
+    }
+    with swarm_api._BACKGROUND_RUNS_LOCK:
+        after_workers = dict(swarm_api._BACKGROUND_RUNS)
+    assert after_files == before_files
+    assert after_workers == before_workers
+    assert nova_bridge._RUNTIME_BINDINGS == before_bindings
 
 
 def test_swarm_get_requires_explicit_project_path_without_space_resolution(
