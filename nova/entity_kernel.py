@@ -113,7 +113,11 @@ class EntityKernel:
     def _yolo_enabled(self) -> bool:
         try:
             payload = json.loads((self.space_dir / ".lifecycle" / "yolo.json").read_text(encoding="utf-8"))
-            return bool(payload.get("enabled", False)) if isinstance(payload, dict) else False
+            return (
+                type(payload.get("enabled")) is bool and payload["enabled"] is True
+                if isinstance(payload, dict)
+                else False
+            )
         except (OSError, ValueError, TypeError):
             return False
 

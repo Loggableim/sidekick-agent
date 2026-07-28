@@ -206,6 +206,31 @@ class SwarmEngine:
         owner_token = str(uuid4())
         if not store.claim_run_execution_lease(run_id, owner_token):
             raise RuntimeError("Swarm execution is already active for this run")
+        return self.execute_claimed_run(
+            run_id,
+            project_root,
+            owner_token=owner_token,
+            checkpoint=checkpoint,
+        )
+
+    def execute_claimed_run(
+        self,
+        run_id: str,
+        project_root: Path,
+        *,
+        owner_token: str,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> RunSummary:
+        """Execute and release an already-claimed durable host lease.
+
+        A host with a pre-dispatch admission step can safely resolve its
+        options only after it owns the same lease that protects Core model
+        execution.  The owner token remains private to that host invocation.
+        """
+        project_root = Path(project_root).resolve()
+        store = ProjectSwarmStore(project_root)
+        if not store.run_execution_lease_is_owned(run_id, owner_token):
+            raise RuntimeError("Swarm execution lease is not owned by this host")
         try:
             # Refresh only after the atomic claim.  Otherwise an executor
             # that observed ``running`` before another owner completed could

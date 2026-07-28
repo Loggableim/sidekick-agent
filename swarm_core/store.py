@@ -585,6 +585,21 @@ class ProjectSwarmStore:
             )
         return cursor.rowcount == 1
 
+    def run_execution_lease_is_owned(self, run_id: str, owner_token: str) -> bool:
+        """Return whether this exact host still owns the durable execution lease."""
+        owner_token = str(owner_token).strip()
+        if not owner_token:
+            raise ValueError("Swarm execution lease owner_token is required")
+        with self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT owner_token FROM run_execution_leases
+                WHERE run_id = ?
+                """,
+                (run_id,),
+            ).fetchone()
+        return row is not None and row["owner_token"] == owner_token
+
     def recover_run_execution_lease(self, run_id: str, *, actor_id: str) -> SwarmRun:
         """Human-audit an abandoned lease without automatically executing it.
 
