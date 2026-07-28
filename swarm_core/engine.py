@@ -229,9 +229,9 @@ class SwarmEngine:
         """
         project_root = Path(project_root).resolve()
         store = ProjectSwarmStore(project_root)
-        if not store.run_execution_lease_is_owned(run_id, owner_token):
-            raise RuntimeError("Swarm execution lease is not owned by this host")
         try:
+            if not store.run_execution_lease_is_owned(run_id, owner_token):
+                raise RuntimeError("Swarm execution lease is not owned by this host")
             # Refresh only after the atomic claim.  Otherwise an executor
             # that observed ``running`` before another owner completed could
             # claim a newly released lease and replay a terminal run from a
