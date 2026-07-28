@@ -456,3 +456,39 @@ def test_runtime_bridge_disabled_is_read_only(tmp_path: Path):
 
     assert result.status == "bridge_disabled"
     assert not (project / ".swarm").exists()
+
+
+def test_worker_system_exit_pauses_the_durable_admission(tmp_path: Path):
+    """Catches a dispatcher SystemExit leaving its active slot permanently running."""
+    from nova.swarm_runtime_bridge import _run_worker
+    from swarm_core.store import ProjectSwarmStore
+
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "reviewed_execution"})
+
+    def stop(*_args):
+        raise SystemExit(23)
+
+    _run_worker(stop, tmp_path, run.run_id)
+
+    assert store.get_run(run.run_id).status == "paused"
+    assert store.list_events(run.run_id)[-1].payload == {"reason": "nova_dispatch_failed"}
+
+
+def test_resolver_blocks_an_enabled_nova_run_without_a_process_binding(tmp_path: Path):
+    """Catches a cross-process resume constructing an engine without Nova trust."""
+    from nova.swarm_runtime_bridge import configure_nova_bridge, nova_execution_options_for_run
+    from swarm_core.store import ProjectSwarmStore
+
+    configure_nova_bridge(tmp_path, enabled=True)
+    run = ProjectSwarmStore(tmp_path).create_run(
+        metadata={
+            "goal": "g", "pack": "coding-team", "project_root": str(tmp_path.resolve()),
+            "autonomy": "reviewed_execution", "integration_namespace": "nova",
+            "nova_intent_digest": "a" * 64, "nova_snapshot": {},
+            "nova_mode": "reviewed_execution", "nova_max_calls": 48,
+            "proposal_digest": "b" * 64, "required_pre_completion_hook": "nova-runtime-v1",
+        }
+    )
+
+    assert nova_execution_options_for_run(tmp_path, run).blocked_reason == "nova_bridge_unavailable"
