@@ -4892,7 +4892,10 @@ def handle_get(handler, parsed) -> bool:
             from web.api.space_engine import get_workspace
             ws = get_workspace(slug)
             if ws:
-                return j(handler, {"config": ws.load_config()})
+                config = ws.load_config()
+                if config.get("_space_config_malformed"):
+                    return bad(handler, "Space config is malformed; refusing to use source", status=409)
+                return j(handler, {"config": config})
         return bad(handler, "Space not found", status=404)
 
     # ── Space Agents (GET) ────────────────────────────────────────────────
