@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sqlite3
@@ -8,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -194,10 +196,15 @@ save_integration_config(project, "other", {"version": 1, "enabled": True})
     saving_script = """
 import sys
 from pathlib import Path
+from swarm_core import config as config_module
 from swarm_core.config import save_integration_config
 
 project, started = map(Path, sys.argv[1:3])
-started.write_text("started", encoding="utf-8")
+original_lock = config_module._lock_config_descriptor
+def mark_lock_attempt(descriptor):
+    started.write_text("started", encoding="utf-8")
+    return original_lock(descriptor)
+config_module._lock_config_descriptor = mark_lock_attempt
 save_integration_config(project, "nova", {"version": 1, "enabled": True})
 """
     initializer = subprocess.Popen(
@@ -240,6 +247,38 @@ save_integration_config(project, "nova", {"version": 1, "enabled": True})
     assert load_integration_config(project, "other") == {"version": 1, "enabled": True}
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows msvcrt locking behavior")
+def test_windows_config_lock_retries_beyond_ten_nonblocking_conflicts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a 10-second `LK_LOCK` retry limit aborting a valid wait."""
+    lock_path = tmp_path / "swarm-config.lock"
+    lock_path.write_bytes(b"\0")
+    descriptor = os.open(lock_path, os.O_RDWR)
+    attempts: list[int] = []
+
+    def locking(_descriptor: int, mode: int, _size: int) -> None:
+        assert mode == 7
+        attempts.append(mode)
+        if len(attempts) <= 11:
+            raise OSError(errno.EACCES, "lock held")
+
+    fake_msvcrt = types.SimpleNamespace(
+        LK_NBLCK=7,
+        LK_UNLCK=8,
+        locking=locking,
+    )
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    monkeypatch.setattr(config_module.time, "sleep", lambda _seconds: None)
+    try:
+        config_module._lock_config_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert len(attempts) == 12
+
+
 def test_standalone_initialize_serializes_with_integration_save(
     tmp_path: Path,
 ):
@@ -273,10 +312,15 @@ initialize_project(project)
     saving_script = """
 import sys
 from pathlib import Path
+from swarm_core import config as config_module
 from swarm_core.config import save_integration_config
 
 project, started = map(Path, sys.argv[1:3])
-started.write_text("started", encoding="utf-8")
+original_lock = config_module._lock_config_descriptor
+def mark_lock_attempt(descriptor):
+    started.write_text("started", encoding="utf-8")
+    return original_lock(descriptor)
+config_module._lock_config_descriptor = mark_lock_attempt
 save_integration_config(project, "nova", {"version": 1, "enabled": True})
 """
     initializer = subprocess.Popen(

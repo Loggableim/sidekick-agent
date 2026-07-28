@@ -43,6 +43,8 @@ _AUTONOMY_LEVELS = {
 _CONFIG_INITIALIZATION_LOCK = threading.RLock()
 _SWARM_DIRECTORY_PIN_LOCK = threading.RLock()
 _REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2)
+_CONFIG_LOCK_TIMEOUT_SECONDS = 30.0
+_CONFIG_LOCK_RETRY_SECONDS = 0.1
 _MAX_INTEGRATION_VALUE_DEPTH = 32
 _MAX_INTEGRATION_VALUE_ITEMS = 10_000
 _SQLITE_RUNTIME_FILENAMES = (
@@ -1081,12 +1083,38 @@ def _lock_config_descriptor(descriptor: int) -> None:
         if os.fstat(descriptor).st_size == 0:
             os.write(descriptor, b"\0")
             os.fsync(descriptor)
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        _lock_windows_config_descriptor(descriptor, msvcrt)
         return
     import fcntl
 
     fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+
+def _lock_windows_config_descriptor(descriptor: int, msvcrt: Any) -> None:
+    """Wait explicitly for a byte-range lock without `LK_LOCK`'s 10s limit."""
+    deadline = time.monotonic() + _CONFIG_LOCK_TIMEOUT_SECONDS
+    while True:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            return
+        except OSError as exc:
+            if not _is_windows_lock_contention(exc):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    "Timed out waiting for the Swarm configuration lock"
+                ) from exc
+            time.sleep(min(_CONFIG_LOCK_RETRY_SECONDS, remaining))
+
+
+def _is_windows_lock_contention(exc: OSError) -> bool:
+    return exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK} or getattr(
+        exc,
+        "winerror",
+        None,
+    ) in {33, 36}
 
 
 def _unlock_config_descriptor(descriptor: int) -> None:
