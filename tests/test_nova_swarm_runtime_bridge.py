@@ -979,6 +979,78 @@ def test_submit_nova_intent_rejects_root_disagreement_before_any_runtime_surface
     assert not (action_root / ".swarm").exists()
 
 
+def test_submit_nova_intent_rechecks_changing_roots_before_unsupported_store(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches roots changing after public preflight but before rejection storage."""
+    trusted_root = tmp_path / "spaces" / "nova"
+    changed_root = tmp_path / "spaces" / "changed"
+    trusted_root.mkdir(parents=True)
+    changed_root.mkdir(parents=True)
+    monkeypatch.setattr(
+        bridge,
+        "load_nova_bridge_config",
+        lambda _project_root: bridge.NovaBridgeConfig(enabled=True),
+    )
+
+    class ChangingRoot:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        @property
+        def value(self) -> Path:
+            self.reads += 1
+            return trusted_root if self.reads <= 2 else changed_root
+
+    kernel_root = ChangingRoot()
+    action_root = ChangingRoot()
+
+    class Actions:
+        @property
+        def space_dir(self) -> Path:
+            return action_root.value
+
+    class Kernel:
+        actions = Actions()
+
+        @property
+        def space_dir(self) -> Path:
+            return kernel_root.value
+
+    store_roots: list[Path] = []
+
+    class ForbiddenStore:
+        def __init__(self, project_root: Path) -> None:
+            store_roots.append(Path(project_root))
+            raise RuntimeError("SECRET stale-root store construction")
+
+    monkeypatch.setattr(bridge, "ProjectSwarmStore", ForbiddenStore)
+
+    result = bridge.submit_nova_intent(
+        Kernel(),
+        _diary_suggestion() | {"action": "blog_draft"},
+        source_slot=11,
+    )
+
+    assert result == {
+        "run_id": None,
+        "accepted": False,
+        "executed": False,
+        "reason": "root_mismatch",
+        "decision": {
+            "policy": {
+                "allowed": False,
+                "reason": "root_mismatch",
+            }
+        },
+    }
+    assert store_roots == []
+    assert not (trusted_root / ".swarm").exists()
+    assert not (changed_root / ".swarm").exists()
+    assert "SECRET" not in json.dumps(result, allow_nan=False)
+
+
 @pytest.mark.parametrize(
     "root_case",
     [

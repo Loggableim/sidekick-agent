@@ -26,35 +26,76 @@ _LIVE_CONTRACT_REASON = (
 )
 
 
-def _simple_effect_aliases(*scopes: ast.AST) -> set[str]:
+def _execution_scope_nodes(body: list[ast.stmt]) -> list[ast.AST]:
+    class ScopeVisitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.nodes: list[ast.AST] = []
+
+        def generic_visit(self, node):
+            self.nodes.append(node)
+            super().generic_visit(node)
+
+        def visit_FunctionDef(self, node):
+            self.nodes.append(node)
+
+        def visit_AsyncFunctionDef(self, node):
+            self.nodes.append(node)
+
+        def visit_ClassDef(self, node):
+            self.nodes.append(node)
+
+        def visit_Lambda(self, node):
+            self.nodes.append(node)
+
+    visitor = ScopeVisitor()
+    for statement in body:
+        visitor.visit(statement)
+    return visitor.nodes
+
+
+def _expression_references_effect(node: ast.AST, aliases: set[str]) -> bool:
+    if isinstance(node, ast.Lambda):
+        return False
+    if isinstance(node, ast.Attribute) and node.attr in {"govern", "act"}:
+        return True
+    if isinstance(node, ast.Name) and node.id in aliases:
+        return True
+    return any(
+        _expression_references_effect(child, aliases)
+        for child in ast.iter_child_nodes(node)
+    )
+
+
+def _target_names(target: ast.AST) -> set[str]:
+    return {
+        node.id
+        for node in ast.walk(target)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    }
+
+
+def _simple_effect_aliases(nodes: list[ast.AST]) -> set[str]:
     aliases = {"govern", "act"}
     changed = True
     while changed:
         changed = False
-        for scope in scopes:
-            for node in ast.walk(scope):
-                if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                    value = node.value
-                    is_effect = (
-                        isinstance(value, ast.Attribute) and value.attr in aliases
-                    ) or (isinstance(value, ast.Name) and value.id in aliases)
-                    if is_effect:
-                        targets = (
-                            node.targets
-                            if isinstance(node, ast.Assign)
-                            else [node.target]
-                        )
-                        for target in targets:
-                            if isinstance(target, ast.Name) and target.id not in aliases:
-                                aliases.add(target.id)
-                                changed = True
-                elif isinstance(node, ast.ImportFrom):
-                    for imported in node.names:
-                        if imported.name in {"govern", "act"}:
-                            alias = imported.asname or imported.name
-                            if alias not in aliases:
-                                aliases.add(alias)
-                                changed = True
+        for node in nodes:
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+                value = node.value
+                if not _expression_references_effect(value, aliases):
+                    continue
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    for alias in _target_names(target) - aliases:
+                        aliases.add(alias)
+                        changed = True
+            elif isinstance(node, ast.ImportFrom):
+                for imported in node.names:
+                    if imported.name in {"govern", "act"}:
+                        alias = imported.asname or imported.name
+                        if alias not in aliases:
+                            aliases.add(alias)
+                            changed = True
     return aliases
 
 
@@ -75,6 +116,9 @@ def _top_level_name_bindings(tree: ast.Module, name: str) -> list[ast.AST]:
 
         def visit_ClassDef(self, node):
             self._definition(node)
+
+        def visit_Lambda(self, node):
+            return
 
         def visit_Name(self, node):
             if node.id == name and isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -122,29 +166,36 @@ def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") 
         and versioned_import.names[0].asname is None
     ), "submit_nova_intent must come from nova.swarm_runtime_bridge"
 
-    calls = [node for node in ast.walk(function_node) if isinstance(node, ast.Call)]
-    assert any(
-        isinstance(call.func, ast.Name) and call.func.id == "submit_nova_intent"
-        for call in calls
-    ), "live submit_intent_proposal must call submit_nova_intent"
-
-    module_effect_scopes = [
-        node
-        for node in tree.body
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-    ]
-    effect_aliases = _simple_effect_aliases(*module_effect_scopes, function_node)
-    effect_calls = [
+    seam_nodes = _execution_scope_nodes(function_node.body)
+    calls = [node for node in seam_nodes if isinstance(node, ast.Call)]
+    versioned_calls = [
         call
         for call in calls
         if (
-            isinstance(call.func, ast.Attribute)
-            and call.func.attr in {"govern", "act"}
-        )
-        or (
             isinstance(call.func, ast.Name)
-            and call.func.id in effect_aliases
+            and call.func.id == "submit_nova_intent"
         )
+    ]
+    assert len(versioned_calls) == 1, (
+        "live submit_intent_proposal must call the versioned "
+        "submit_nova_intent exactly once"
+    )
+
+    module_effect_nodes = _execution_scope_nodes(
+        [
+            node
+            for node in tree.body
+            if not isinstance(
+                node,
+                (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef),
+            )
+        ]
+    )
+    effect_aliases = _simple_effect_aliases(module_effect_nodes + seam_nodes)
+    effect_calls = [
+        call
+        for call in calls
+        if _expression_references_effect(call.func, effect_aliases)
     ]
     assert effect_calls == [], (
         "live submit_intent_proposal must not call govern/act directly or by alias"
@@ -200,6 +251,27 @@ def submit_intent_proposal(proposal):
 def submit_intent_proposal(proposal):
     submit_nova_intent = fake_entry
     return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+""",
+        """
+def submit_intent_proposal(proposal):
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    def unused_nested(submit_nova_intent):
+        return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return fake_entry(proposal)
+""",
+        """
+def submit_intent_proposal(proposal):
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    unused = lambda submit_nova_intent: submit_nova_intent(
+        EntityKernel(), proposal, source_slot=1
+    )
+    return fake_entry(proposal)
+""",
+        """
+def submit_intent_proposal(proposal):
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return (decide := EntityKernel().govern)(proposal)
 """,
     ],
 )
