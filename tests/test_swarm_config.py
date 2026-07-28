@@ -279,6 +279,41 @@ def test_windows_config_lock_retries_beyond_ten_nonblocking_conflicts(
     assert len(attempts) == 12
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows msvcrt locking behavior")
+def test_windows_config_lock_propagates_sharing_buffer_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches winerror 36 being retried and masked as a timeout."""
+    lock_path = tmp_path / "swarm-config.lock"
+    lock_path.write_bytes(b"\0")
+    descriptor = os.open(lock_path, os.O_RDWR)
+    attempts: list[int] = []
+
+    def locking(_descriptor: int, mode: int, _size: int) -> None:
+        assert mode == 7
+        attempts.append(mode)
+        raise OSError(0, "sharing buffer exhausted", None, 36)
+
+    fake_msvcrt = types.SimpleNamespace(
+        LK_NBLCK=7,
+        LK_UNLCK=8,
+        locking=locking,
+    )
+    monkeypatch.setitem(sys.modules, "msvcrt", fake_msvcrt)
+    monkeypatch.setattr(config_module, "_CONFIG_LOCK_TIMEOUT_SECONDS", 0.0)
+    try:
+        with pytest.raises(PermissionError, match="sharing buffer exhausted"):
+            config_module._lock_config_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert attempts == [7]
+    assert config_module._is_windows_lock_contention(
+        OSError(0, "lock conflict", None, 33)
+    )
+
+
 def test_standalone_initialize_serializes_with_integration_save(
     tmp_path: Path,
 ):

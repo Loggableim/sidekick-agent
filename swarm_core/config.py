@@ -1110,11 +1110,10 @@ def _lock_windows_config_descriptor(descriptor: int, msvcrt: Any) -> None:
 
 
 def _is_windows_lock_contention(exc: OSError) -> bool:
-    return exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK} or getattr(
-        exc,
-        "winerror",
-        None,
-    ) in {33, 36}
+    winerror = getattr(exc, "winerror", None)
+    if winerror is not None:
+        return winerror == 33
+    return exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}
 
 
 def _unlock_config_descriptor(descriptor: int) -> None:
