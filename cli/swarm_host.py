@@ -732,7 +732,10 @@ def _sidekick_call_llm(**kwargs: Any) -> Any:
         raise ModelProviderError("Swarm requires the canonical Ollama Cloud endpoint")
     from runtime.auxiliary_client import call_llm
 
-    return call_llm(**kwargs)
+    return call_llm(
+        required_base_url=OLLAMA_CLOUD_CANONICAL_BASE_URL,
+        **kwargs,
+    )
 
 
 def _refresh_ollama_catalog() -> ModelCatalogSnapshot:

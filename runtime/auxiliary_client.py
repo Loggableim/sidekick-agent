@@ -3928,6 +3928,7 @@ def call_llm(
     tools: list = None,
     timeout: float = None,
     extra_body: dict = None,
+    required_base_url: str = None,
 ) -> Any:
     """Centralized synchronous LLM call.
 
@@ -3955,6 +3956,15 @@ def call_llm(
     """
     resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         task, provider, model, base_url, api_key)
+    required_endpoint = str(required_base_url or "").strip().rstrip("/")
+    if required_endpoint:
+        if not provider or resolved_provider != provider:
+            raise RuntimeError("Required auxiliary endpoint needs an explicit provider")
+        # Keep the provider identity (and therefore its credential resolution)
+        # while forcing the endpoint into the cache key and client resolver.
+        # Passing this as the public ``base_url`` argument would relabel the
+        # provider as ``custom`` before routing.
+        resolved_base_url = required_endpoint
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
@@ -4019,9 +4029,12 @@ def call_llm(
                 f"Run: sidekick setup")
 
     effective_timeout = timeout if timeout is not None else _get_task_timeout(task)
+    actual_endpoint = str(getattr(client, "base_url", "") or "").strip().rstrip("/")
+    if required_endpoint and actual_endpoint != required_endpoint:
+        raise RuntimeError("Auxiliary client did not bind the required endpoint")
     _raise_if_game_mode_blocks_local_request(
         resolved_provider,
-        str(getattr(client, "base_url", "") or "") or resolved_base_url,
+        actual_endpoint or resolved_base_url,
     )
 
     # Log what we're about to do — makes auxiliary operations visible

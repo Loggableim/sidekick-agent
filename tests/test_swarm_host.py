@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -629,6 +630,91 @@ def test_default_sidekick_dispatch_rechecks_the_cloud_endpoint(
         )
 
     assert dispatched == []
+
+
+def test_default_sidekick_dispatch_does_not_reuse_a_stale_noncanonical_client(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A cached local client must not survive canonical cloud revalidation."""
+    import runtime.auxiliary_client as auxiliary_client
+
+    class RecordingClient:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+            self.calls: list[dict] = []
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self._create)
+            )
+
+        def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            content = _valid_response()["choices"][0]["message"]["content"]
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=content),
+                    )
+                ]
+            )
+
+        def close(self) -> None:
+            return None
+
+    auxiliary_client.shutdown_cached_clients()
+    stale = RecordingClient("http://127.0.0.1:11434/v1")
+    stale_key = auxiliary_client._client_cache_key(
+        "ollama-cloud",
+        async_mode=False,
+    )
+    auxiliary_client._store_cached_client(
+        stale_key,
+        stale,
+        "deepseek-v4-flash",
+    )
+    canonical = RecordingClient("https://ollama.com/v1")
+    resolutions: list[str | None] = []
+
+    def resolve_canonical(
+        provider,
+        model=None,
+        async_mode=False,
+        *,
+        explicit_base_url=None,
+        **_kwargs,
+    ):
+        assert provider == "ollama-cloud"
+        assert model == "deepseek-v4-flash"
+        assert async_mode is False
+        resolutions.append(explicit_base_url)
+        return canonical, model
+
+    monkeypatch.setattr(
+        auxiliary_client,
+        "resolve_provider_client",
+        resolve_canonical,
+    )
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+    try:
+        response = swarm_host._sidekick_call_llm(
+            task="swarm",
+            provider="ollama-cloud",
+            model="deepseek-v4-flash",
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Use the canonical cloud route.",
+                }
+            ],
+        )
+    finally:
+        auxiliary_client.shutdown_cached_clients()
+
+    assert response.choices[0].message.content == (
+        _valid_response()["choices"][0]["message"]["content"]
+    )
+    assert stale.calls == []
+    assert len(canonical.calls) == 1
+    assert resolutions == ["https://ollama.com/v1"]
 
 
 def test_legacy_live_snapshot_pauses_until_an_explicit_verified_refresh(

@@ -21,6 +21,7 @@ from cli.swarm_host import (
     OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
     SidekickSwarmService,
 )
+import nova.actions as nova_actions
 from nova.actions import ActionRegistry
 import nova.swarm_adapter as nova_adapter
 from nova.swarm_adapter import get_nova_action_spec
@@ -32,6 +33,7 @@ from nova.swarm_runtime_bridge import (
     configure_nova_bridge,
     load_nova_bridge_config,
 )
+import swarm_core.config as swarm_config
 from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.types import ActionCapabilities
@@ -596,6 +598,290 @@ def test_action_specs_and_verifier_scope_match_the_real_action_handler(
     ).as_posix()
     assert get_nova_action_spec(action).output_scope == actual_scope
     assert snapshot.expected_output_scope == actual_scope
+
+
+@pytest.mark.parametrize(
+    ("action", "target", "payload"),
+    [
+        ("mind_diary", {}, {"content": "Keep this inside the trusted root."}),
+        ("agenda_update", {}, {}),
+        (
+            "prioritize_thread",
+            {"thread_id": "release", "topic": "release"},
+            {"next_step": "Keep this inside the trusted root."},
+        ),
+    ],
+)
+def test_automatic_action_rejects_a_link_at_its_exact_output_path(
+    nova_project: Path,
+    action: str,
+    target: dict[str, str],
+    payload: dict[str, str],
+):
+    """Every automatic output rejects a final link, even when replacement looks safe."""
+    scope = Path(get_nova_action_spec(action).output_scope)
+    output = nova_project / scope
+    output.parent.mkdir(parents=True, exist_ok=True)
+    outside = nova_project.parent / f"outside-{action}.json"
+    sentinel = '{"sentinel": "unchanged"}\n'
+    outside.write_text(sentinel, encoding="utf-8")
+    try:
+        output.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"file symlinks are unavailable: {exc}")
+
+    result = ActionRegistry(nova_project).execute(
+        {
+            "id": f"linked-{action}",
+            "action": action,
+            "need": "continuity",
+            "why": "Exercise the automatic output boundary.",
+            "target": target,
+            "payload": payload,
+        },
+        {},
+    )
+
+    assert result["ok"] is False
+    assert outside.read_text(encoding="utf-8") == sentinel
+    assert output.is_symlink()
+
+
+def test_automatic_action_rejects_a_link_in_its_parent_chain(
+    nova_project: Path,
+):
+    """An existing linked output directory must never be treated as trusted."""
+    nova_data = nova_project / "nova_data"
+    nova_data.mkdir()
+    outside = nova_project.parent / "outside-entity"
+    outside.mkdir()
+    sentinel = outside / "mind_diary.jsonl"
+    sentinel.write_text("unchanged\n", encoding="utf-8")
+    entity = nova_data / "entity"
+    try:
+        entity.symlink_to(outside, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlinks are unavailable: {exc}")
+
+    result = ActionRegistry(nova_project).execute(
+        {
+            "id": "linked-parent",
+            "action": "mind_diary",
+            "need": "continuity",
+            "why": "Exercise the automatic parent boundary.",
+            "target": {},
+            "payload": {"content": "Do not escape."},
+        },
+        {},
+    )
+
+    assert result["ok"] is False
+    assert sentinel.read_text(encoding="utf-8") == "unchanged\n"
+
+
+@pytest.mark.parametrize(
+    ("action", "target", "payload"),
+    [
+        ("mind_diary", {}, {"content": "Append only to the local inode."}),
+        ("agenda_update", {}, {}),
+        (
+            "prioritize_thread",
+            {"thread_id": "release", "topic": "release"},
+            {"next_step": "Update only the local inode."},
+        ),
+    ],
+)
+def test_automatic_action_replaces_a_hardlinked_output_without_mutating_outside(
+    nova_project: Path,
+    action: str,
+    target: dict[str, str],
+    payload: dict[str, str],
+):
+    """A regular-looking hard link must not expose its other name to writes."""
+    output = nova_project / get_nova_action_spec(action).output_scope
+    output.parent.mkdir(parents=True, exist_ok=True)
+    outside = nova_project.parent / f"outside-hardlink-{action}.json"
+    sentinel = '{"sentinel": "unchanged"}\n'
+    outside.write_text(sentinel, encoding="utf-8")
+    try:
+        os.link(outside, output)
+    except OSError as exc:
+        pytest.skip(f"hard links are unavailable: {exc}")
+
+    result = ActionRegistry(nova_project).execute(
+        {
+            "id": f"hardlinked-{action}",
+            "action": action,
+            "need": "continuity",
+            "why": "Exercise the automatic hard-link boundary.",
+            "target": target,
+            "payload": payload,
+        },
+        {},
+    )
+
+    assert result["ok"] is True
+    assert outside.read_text(encoding="utf-8") == sentinel
+    assert not output.samefile(outside)
+
+
+def test_automatic_action_pins_parent_components_against_a_swap(
+    nova_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A deterministic parent swap is either prevented or detected before success."""
+    entity = nova_project / "nova_data" / "entity"
+    entity.mkdir(parents=True)
+    preserved = entity.with_name("entity-preserved")
+    outside = nova_project.parent / "outside-swapped-entity"
+    outside.mkdir()
+    sentinel = outside / "mind_diary.jsonl"
+    sentinel.write_text("unchanged\n", encoding="utf-8")
+    original_open = swarm_config._open_regular_file
+    swap_state = {"swapped": False, "blocked": False}
+
+    def swap_before_open(
+        directory,
+        filename,
+        *,
+        read_only,
+        create,
+    ):
+        if filename == "mind_diary.jsonl" and not any(swap_state.values()):
+            try:
+                entity.rename(preserved)
+                entity.symlink_to(outside, target_is_directory=True)
+                swap_state["swapped"] = True
+            except (OSError, PermissionError):
+                swap_state["blocked"] = True
+        return original_open(
+            directory,
+            filename,
+            read_only=read_only,
+            create=create,
+        )
+
+    monkeypatch.setattr(swarm_config, "_open_regular_file", swap_before_open)
+    result = ActionRegistry(nova_project).execute(
+        {
+            "id": "parent-swap",
+            "action": "mind_diary",
+            "need": "continuity",
+            "why": "Exercise the automatic swap boundary.",
+            "target": {},
+            "payload": {"content": "Do not escape."},
+        },
+        {},
+    )
+
+    assert swap_state["swapped"] or swap_state["blocked"]
+    if swap_state["swapped"]:
+        assert result["ok"] is False
+    assert sentinel.read_text(encoding="utf-8") == "unchanged\n"
+
+
+def test_automatic_action_rejects_a_swapped_atomic_replace_source(
+    nova_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The final name must still be the exact fresh regular inode that was written."""
+    outside = nova_project.parent / "outside-replace-source.json"
+    sentinel = '{"sentinel": "unchanged"}\n'
+    outside.write_text(sentinel, encoding="utf-8")
+    original_replace = swarm_config._replace_direct_child
+    swapped = False
+
+    def swap_replace_source(directory, source, destination):
+        nonlocal swapped
+        if destination == "agenda_maintenance.json" and not swapped:
+            preserved = f"{source}.preserved"
+            if directory.posix_fd is not None:
+                os.replace(
+                    source,
+                    preserved,
+                    src_dir_fd=directory.posix_fd,
+                    dst_dir_fd=directory.posix_fd,
+                )
+                os.symlink(outside, source, dir_fd=directory.posix_fd)
+            else:
+                source_path = directory.path / source
+                source_path.rename(directory.path / preserved)
+                source_path.symlink_to(outside)
+            swapped = True
+        return original_replace(directory, source, destination)
+
+    monkeypatch.setattr(
+        swarm_config,
+        "_replace_direct_child",
+        swap_replace_source,
+    )
+    result = ActionRegistry(nova_project).execute(
+        {
+            "id": "replace-source-swap",
+            "action": "agenda_update",
+            "need": "continuity",
+            "why": "Exercise the final atomic replacement boundary.",
+            "target": {},
+            "payload": {},
+        },
+        {},
+    )
+
+    output = nova_project / get_nova_action_spec("agenda_update").output_scope
+    assert swapped is True
+    assert result["ok"] is False
+    assert outside.read_text(encoding="utf-8") == sentinel
+    assert not output.exists() and not output.is_symlink()
+
+
+def test_automatic_action_rechecks_the_final_name_after_content_validation(
+    nova_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A POSIX final-name swap during read is detected; Windows blocks the swap."""
+    output = nova_project / get_nova_action_spec("agenda_update").output_scope
+    preserved = output.with_name("agenda_maintenance-preserved.json")
+    outside = nova_project.parent / "outside-final-name-swap.json"
+    sentinel = '{"sentinel": "unchanged"}\n'
+    outside.write_text(sentinel, encoding="utf-8")
+    original_read = nova_actions._read_text_descriptor
+    swap_state = {"swapped": False, "blocked": False}
+
+    def swap_after_read(descriptor):
+        document = original_read(descriptor)
+        if output.exists() and not any(swap_state.values()):
+            try:
+                output.rename(preserved)
+                output.symlink_to(outside)
+                swap_state["swapped"] = True
+            except (OSError, PermissionError):
+                swap_state["blocked"] = True
+        return document
+
+    monkeypatch.setattr(
+        nova_actions,
+        "_read_text_descriptor",
+        swap_after_read,
+    )
+    result = ActionRegistry(nova_project).execute(
+        {
+            "id": "final-name-swap",
+            "action": "agenda_update",
+            "need": "continuity",
+            "why": "Exercise the post-read final-name boundary.",
+            "target": {},
+            "payload": {},
+        },
+        {},
+    )
+
+    assert swap_state["swapped"] or swap_state["blocked"]
+    if swap_state["swapped"]:
+        assert result["ok"] is False
+        assert not output.exists() and not output.is_symlink()
+    else:
+        assert result["ok"] is True
+    assert outside.read_text(encoding="utf-8") == sentinel
 
 
 @pytest.mark.parametrize(
@@ -1547,6 +1833,158 @@ def test_bridge_matrix_07_verified_workflow_orders_policy_govern_act_and_complet
     assert len(host.model_calls) == 8
     assert len(host.provider_slots) == len(host.model_calls)
     assert all(provider == "ollama-cloud" for _run_id, provider in host.provider_slots)
+
+
+def test_reviewers_see_and_durably_bind_the_exact_nova_action_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Reviewer checkpoints authorize the canonical action, not its benign title."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    suggestion = _diary_suggestion() | {
+        "title": "Benign continuity note",
+        "payload": {"content": "Material action payload requiring exact review."},
+    }
+
+    admitted = host.bridge().submit(suggestion, source_slot=41)
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+    assert summary.status == "completed"
+    durable = ProjectSwarmStore.open_read_only(host.project_root)
+    run = durable.get_run(admitted.run_id)
+    assert run is not None
+    authorization = run.metadata["nova_review_authorization"]
+    assert authorization == {
+        "action": "mind_diary",
+        "target": {},
+        "payload": {
+            "content": "Material action payload requiring exact review.",
+        },
+        "expected_output_scope": "nova_data/entity/mind_diary.jsonl",
+        "intent_digest": run.metadata["nova_intent_digest"],
+        "proposal_digest": run.metadata["proposal_digest"],
+    }
+
+    review_calls = [
+        call
+        for call in host.model_calls
+        if call["model"] in {"glm-5.2", "kimi-k2.7-code"}
+    ]
+    assert len(review_calls) == 2
+    for call in review_calls:
+        rendered = call["messages"][0]["content"]
+        context = json.loads(rendered.split("\n\nContext:\n", 1)[1])
+        assert context["authorization_context"] == authorization
+
+    checkpoints = ProjectSwarmStore(
+        host.project_root
+    ).get_workflow_role_checkpoints(admitted.run_id)
+    for role in ("review_a", "review_b"):
+        assert checkpoints[role].data["intent_digest"] == authorization["intent_digest"]
+        assert (
+            checkpoints[role].data["proposal_digest"]
+            == authorization["proposal_digest"]
+        )
+
+
+def test_conflicting_reviewer_digest_never_reaches_nova_govern_or_act(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A model cannot authorize another action by returning conflicting bindings."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    original_call = host.service._call_llm
+
+    def mismatched_review(**kwargs):
+        response = original_call(**kwargs)
+        if kwargs["model"] == "glm-5.2":
+            data = json.loads(response["choices"][0]["message"]["content"])
+            data["intent_digest"] = "0" * 64
+            data["proposal_digest"] = "1" * 64
+            response = copy.deepcopy(response)
+            response["choices"][0]["message"]["content"] = json.dumps(data)
+        return response
+
+    host.service._call_llm = mismatched_review
+    admitted = host.bridge().submit(
+        _diary_suggestion()
+        | {
+            "title": "Benign continuity note",
+            "payload": {"content": "A materially different action payload."},
+        },
+        source_slot=42,
+    )
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+
+    assert summary.status == "paused"
+    assert host.kernel.govern_calls == []
+    assert host.kernel.actions.calls == []
+
+
+def test_review_authorization_context_resists_emitter_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """An event consumer cannot mutate the shared context before model dispatch."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    original_append = ProjectSwarmStore.append_event
+    mutation_count = 0
+
+    def mutating_append(
+        store,
+        run_id,
+        event_type,
+        payload=None,
+        *,
+        visibility="project",
+    ):
+        nonlocal mutation_count
+        if (
+            event_type == "work.started"
+            and isinstance(payload, dict)
+            and payload.get("role") in {"review_a", "review_b"}
+        ):
+            authorization = payload["context"].get("authorization_context")
+            if authorization is not None:
+                authorization["payload"]["content"] = "mutated by event consumer"
+                mutation_count += 1
+        return original_append(
+            store,
+            run_id,
+            event_type,
+            payload,
+            visibility=visibility,
+        )
+
+    monkeypatch.setattr(ProjectSwarmStore, "append_event", mutating_append)
+    expected_content = "Canonical action payload."
+    admitted = host.bridge().submit(
+        _diary_suggestion()
+        | {
+            "title": "Benign continuity note",
+            "payload": {"content": expected_content},
+        },
+        source_slot=43,
+    )
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+
+    assert summary.status == "completed"
+    assert mutation_count == 2
+    review_calls = [
+        call
+        for call in host.model_calls
+        if call["model"] in {"glm-5.2", "kimi-k2.7-code"}
+    ]
+    assert len(review_calls) == 2
+    for call in review_calls:
+        rendered = call["messages"][0]["content"]
+        context = json.loads(rendered.split("\n\nContext:\n", 1)[1])
+        assert (
+            context["authorization_context"]["payload"]["content"]
+            == expected_content
+        )
 
 
 @pytest.mark.parametrize(

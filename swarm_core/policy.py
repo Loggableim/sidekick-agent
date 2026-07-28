@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 import hashlib
 import json
+import re
 from typing import Any, Mapping
 
 from .config import initialize_project
@@ -58,6 +59,7 @@ class PolicyGate:
         "review_b": ("kimi-k2.7-code", "kimi-k2"),
     }
     _APPROVING_REVIEW_DECISIONS = frozenset({"approve", "approved"})
+    _NOVA_PROPOSAL_ID = re.compile(r"^nova-([0-9a-f]{64})$")
 
     def __init__(
         self,
@@ -231,6 +233,12 @@ class PolicyGate:
             return False
 
         observed_families: set[str] = set()
+        required_bindings = cls._nova_review_bindings(proposal)
+        if (
+            proposal.requested_action.name.startswith("nova:")
+            and required_bindings is None
+        ):
+            return False
         for role, (expected_model, expected_family) in cls._REQUIRED_REVIEW_MODELS.items():
             checkpoint = checkpoints.get(role)
             if (
@@ -238,6 +246,13 @@ class PolicyGate:
                 or checkpoint.model != expected_model
                 or not cls._valid_checkpoint_evidence(checkpoint)
                 or not cls._has_positive_review_vote(checkpoint)
+                or (
+                    required_bindings is not None
+                    and any(
+                        checkpoint.data.get(field) != value
+                        for field, value in required_bindings.items()
+                    )
+                )
             ):
                 return False
             # The model name is an exact workflow route; the paired family is
@@ -245,6 +260,32 @@ class PolicyGate:
             # by a browser, model, or adapter.
             observed_families.add(expected_family)
         return len(observed_families) == len(cls._REQUIRED_REVIEW_MODELS)
+
+    @classmethod
+    def _nova_review_bindings(
+        cls,
+        proposal: ActionProposal,
+    ) -> Mapping[str, str] | None:
+        """Derive host-checkable bindings for a canonical Nova proposal."""
+        if not proposal.requested_action.name.startswith("nova:"):
+            return None
+        match = cls._NOVA_PROPOSAL_ID.fullmatch(proposal.proposal_id)
+        if match is None:
+            return None
+        intent_digest = match.group(1)
+        intent = proposal.requested_action.arguments.get("intent")
+        action = proposal.requested_action.name.removeprefix("nova:")
+        if (
+            not isinstance(intent, Mapping)
+            or intent.get("id") != proposal.proposal_id
+            or intent.get("action") != action
+            or f"nova:verifier:{intent_digest}" not in proposal.evidence_refs
+        ):
+            return None
+        return {
+            "intent_digest": intent_digest,
+            "proposal_digest": proposal_digest(proposal),
+        }
 
     @staticmethod
     def _verified_local_verifier_evidence(

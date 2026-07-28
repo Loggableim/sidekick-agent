@@ -320,9 +320,8 @@ class NovaSwarmAdapter:
             proposal=proposal,
             swarm_decision=swarm_decision,
             nova_decision=nova_decision,
-            executed=bool(result.get("executed"))
-            if isinstance(result, Mapping)
-            else False,
+            executed=isinstance(result, Mapping)
+            and result.get("executed") is True,
             reason=None,
             result=result,
         )
