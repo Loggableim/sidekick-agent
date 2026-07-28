@@ -883,6 +883,7 @@ def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
 
     management_get = client.get("/api/space/nova-management?slug=alpha", headers=headers)
     audit_get = client.get("/api/space/nova-management/audit?slug=alpha", headers=headers)
+    generic_get = client.get("/api/space/config?slug=alpha", headers=headers)
     management_post = client.post(
         "/api/space/nova-management",
         headers=headers,
@@ -896,6 +897,8 @@ def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
 
     assert management_get.status_code == 409
     assert audit_get.status_code == 409
+    assert generic_get.status_code == 409
+    assert "_space_config_malformed" not in generic_get.text
     assert management_post.status_code == 409
     assert generic_post.status_code == 409
     assert space.config_path.read_bytes() == before
