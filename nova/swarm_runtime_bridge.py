@@ -79,6 +79,10 @@ _PUBLIC_ENTRY_RESULTS = MappingProxyType(
 )
 
 
+class _NovaRootMismatch(ValueError):
+    """A code-owned Nova root changed or failed closed."""
+
+
 @dataclass(frozen=True)
 class _NovaRuntimeBinding:
     """Non-serializable host capability retained only in this process."""
@@ -553,7 +557,7 @@ def _matching_code_owned_nova_root(kernel: Any) -> Path:
     kernel_root = Path(kernel.space_dir).expanduser().resolve()
     action_root = Path(kernel.actions.space_dir).expanduser().resolve()
     if kernel_root != action_root:
-        raise ValueError("Nova code-owned roots do not match")
+        raise _NovaRootMismatch("Nova code-owned roots do not match")
     return kernel_root
 
 
@@ -565,7 +569,7 @@ def _revalidate_code_owned_nova_root(
     candidate_root = Path(candidate).expanduser().resolve()
     current_root = _matching_code_owned_nova_root(kernel)
     if candidate_root != expected_root or current_root != expected_root:
-        raise ValueError("Nova code-owned root changed")
+        raise _NovaRootMismatch("Nova code-owned root changed")
     return current_root
 
 
@@ -650,6 +654,11 @@ class NovaSwarmRuntimeBridge:
 
     def submit(self, suggestion: Mapping[str, Any], *, source_slot: int) -> NovaBridgeResult:
         """Admit one canonical intent and dispatch exactly one newly-created worker."""
+        context = (
+            self._runtime_context()
+            if self._trusted_project_root is not None
+            else None
+        )
         config = load_nova_bridge_config(self._project_root)
         if not config.enabled:
             return NovaBridgeResult("bridge_disabled")
@@ -661,7 +670,8 @@ class NovaSwarmRuntimeBridge:
                 _NOVA_NAMESPACE, key, reason="unsupported_action"
             )
             return NovaBridgeResult("unsupported_action", reason=admission.reason)
-        context = self._runtime_context()
+        if context is None:
+            context = self._runtime_context()
         snapshot = NovaIntentSnapshot.from_submission(
             suggestion, source_slot=source_slot, project_root=context
         )
@@ -730,12 +740,19 @@ class NovaSwarmRuntimeBridge:
     def _runtime_context(self) -> _NovaBridgeContext:
         context = self._trusted_project_root
         if not isinstance(context, _NovaBridgeContext):
-            raise ValueError("Nova runtime bridge requires host-owned trusted root")
-        root = _trusted_project_root(context)
-        kernel_root = Path(self._kernel.space_dir).expanduser().resolve()
-        actions_root = Path(self._kernel.actions.space_dir).expanduser().resolve()
+            raise _NovaRootMismatch(
+                "Nova runtime bridge requires host-owned trusted root"
+            )
+        try:
+            root = _trusted_project_root(context)
+            kernel_root = Path(self._kernel.space_dir).expanduser().resolve()
+            actions_root = Path(self._kernel.actions.space_dir).expanduser().resolve()
+        except _NovaRootMismatch:
+            raise
+        except (AttributeError, OSError, TypeError, ValueError) as exc:
+            raise _NovaRootMismatch("Nova runtime root validation failed") from exc
         if root != self._project_root or kernel_root != root or actions_root != root:
-            raise ValueError("Nova runtime roots do not match")
+            raise _NovaRootMismatch("Nova runtime roots do not match")
         return context
 
     def _dispatch(self, run_id: str) -> bool:
@@ -807,6 +824,8 @@ def submit_nova_intent(
             trusted_project_root=context,
         ).submit(proposal, source_slot=source_slot)
         return _bounded_live_entry_result(result.status, result.run_id)
+    except _NovaRootMismatch:
+        return _bounded_live_entry_result("root_mismatch")
     except Exception:
         return _bounded_live_entry_result("submission_rejected")
 
