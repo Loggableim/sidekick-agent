@@ -321,6 +321,35 @@ def test_execution_options_completion_race_cannot_persist_a_blocked_pause(
     )
 
 
+def test_execution_options_ownership_preflight_failure_releases_its_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A failed Core handoff cannot strand the host's just-claimed lease."""
+    service = SidekickSwarmService()
+    run = service.start_run("release a failed execution-options handoff", tmp_path)
+    observed_tokens: list[str] = []
+
+    def exploding_ownership_lookup(_store, _run_id: str, owner_token: str) -> bool:
+        observed_tokens.append(owner_token)
+        raise RuntimeError("simulated ownership lookup failure")
+
+    monkeypatch.setattr(
+        ProjectSwarmStore,
+        "run_execution_lease_is_owned",
+        exploding_ownership_lookup,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated ownership lookup failure"):
+        service.execute_run(tmp_path, run.run_id)
+
+    assert len(observed_tokens) == 1
+    monkeypatch.undo()
+    store = ProjectSwarmStore(tmp_path)
+    assert store.claim_run_execution_lease(run.run_id, "next-host")
+    assert store.release_run_execution_lease(run.run_id, "next-host")
+
+
 @pytest.mark.parametrize(
     ("autonomy", "options"),
     [

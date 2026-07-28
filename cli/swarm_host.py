@@ -212,7 +212,6 @@ class SidekickSwarmService:
                     options.blocked_reason,
                 )
             engine, snapshot, _store = self._engine_for(project_root, options=options)
-            release_lease_here = False
             summary = engine.execute_claimed_run(
                 run_id,
                 project_root,
@@ -224,6 +223,7 @@ class SidekickSwarmService:
                     on_resume=on_resume,
                 ),
             )
+            release_lease_here = False
             return self._record_catalog_unavailable(summary, snapshot, store)
         finally:
             if release_lease_here:
