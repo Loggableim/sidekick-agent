@@ -437,3 +437,22 @@ def test_prioritize_thread_normalizes_blank_thread_id_to_a_valid_topic(
 
     assert result["ok"] is True
     assert result["effects"]["thread"]["thread_id"] == "release"
+
+
+def test_runtime_bridge_disabled_is_read_only(tmp_path: Path):
+    """Catches a disabled bridge constructing the Swarm store or dispatching."""
+    from nova.swarm_runtime_bridge import NovaSwarmRuntimeBridge
+
+    project = tmp_path / "nova"
+    project.mkdir()
+
+    class Kernel:
+        space_dir = project
+        actions = type("Actions", (), {"space_dir": project})()
+
+    result = NovaSwarmRuntimeBridge(Kernel(), project_root=project).submit(
+        _diary_suggestion(), source_slot=7
+    )
+
+    assert result.status == "bridge_disabled"
+    assert not (project / ".swarm").exists()

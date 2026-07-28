@@ -17,8 +17,13 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 import unicodedata
 
-from nova.swarm_adapter import get_nova_action_spec
+from cli.swarm_host import SwarmExecutionOptions
+from nova.swarm_adapter import NovaSwarmAdapter, get_nova_action_spec
+from swarm_core.engine import PreCompletionContext, PreCompletionResult
+from swarm_core.policy import PolicyGate, proposal_digest
 from swarm_core.config import load_integration_config, save_integration_config
+from swarm_core.store import ProjectSwarmStore
+from swarm_core.types import IntegrationAdmissionRequest, SwarmRun
 from swarm_core.verifier import InvalidVerifierResult, VerificationResult, VERIFIED_DECISION
 
 
@@ -48,6 +53,8 @@ _ENCODED_CONTROL_TOKENS = (
     b".env",
 )
 _CONTEXT_CONSTRUCTION_TOKEN = object()
+_RUNTIME_HOOK_ID = "nova-runtime-v1"
+_NOVA_NAMESPACE = "nova"
 
 
 class _NovaBridgeContext:
@@ -455,3 +462,210 @@ def _is_opaque_encoded_text(value: str) -> bool:
     except ValueError:
         return False
     return any(token in decoded.lower() for token in _ENCODED_CONTROL_TOKENS)
+
+
+@dataclass(frozen=True)
+class NovaBridgeResult:
+    """Bounded public result of admitting one Nova intent."""
+
+    status: str
+    run_id: str | None = None
+    reason: str | None = None
+
+
+class NovaPreCompletionHook:
+    """The only runtime path from a completed Swarm workflow to Nova action."""
+
+    hook_id = _RUNTIME_HOOK_ID
+
+    def __init__(
+        self,
+        adapter: NovaSwarmAdapter | None,
+        project_root: _NovaBridgeContext | None = None,
+    ) -> None:
+        self._adapter = adapter
+        self._project_root = project_root
+
+    def run(self, context: PreCompletionContext) -> PreCompletionResult:
+        """Revalidate durable admission state immediately before the adapter."""
+        try:
+            metadata = context.run.metadata
+            if metadata.get("integration_namespace") != _NOVA_NAMESPACE:
+                return PreCompletionResult(False, "nova_invalid_admission")
+            if metadata.get("required_pre_completion_hook") != self.hook_id:
+                return PreCompletionResult(False, "nova_required_hook_mismatch")
+            if self._adapter is None or self._project_root is None:
+                return PreCompletionResult(False, "nova_bridge_unavailable")
+            snapshot = _snapshot_from_metadata(metadata, self._project_root)
+            verifier = NovaIntentReadOnlyVerifier(self._project_root)
+            verifier.verify(snapshot)
+            suggestion = snapshot.to_suggestion(self._project_root)
+            proposal = self._adapter.translate(suggestion)
+            if proposal_digest(proposal) != metadata.get("proposal_digest"):
+                return PreCompletionResult(False, "nova_proposal_digest_mismatch")
+            if snapshot.intent_digest != metadata.get("nova_intent_digest"):
+                return PreCompletionResult(False, "nova_snapshot_digest_mismatch")
+            context.store.append_event(
+                context.run.run_id,
+                "nova.bridge.action_proposed",
+                {"proposal_id": proposal.proposal_id},
+            )
+            execution = self._adapter.execute_suggestion(suggestion, context.run)
+            if execution.reason == "execution_already_claimed":
+                context.store.append_event_once(
+                    context.run.run_id,
+                    "nova.bridge.recovery_required",
+                    {},
+                    idempotency_key="nova-action-claim-recovery",
+                )
+                return PreCompletionResult(
+                    False, "nova_action_claimed_requires_human_recovery"
+                )
+            if not execution.executed:
+                return PreCompletionResult(False, _nova_pause_reason(execution.reason))
+            context.store.append_event(
+                context.run.run_id,
+                "nova.bridge.action_result",
+                {"proposal_id": proposal.proposal_id, "executed": True},
+            )
+            return PreCompletionResult(True)
+        except Exception:
+            return PreCompletionResult(False, "nova_pre_completion_validation_failed")
+
+
+class NovaSwarmRuntimeBridge:
+    """Explicit host-owned admission bridge; it has no startup side effects."""
+
+    def __init__(
+        self,
+        kernel: Any,
+        *,
+        project_root: Path,
+        trusted_project_root: _NovaBridgeContext | None = None,
+        dispatcher: Callable[[Path, str], Any] | None = None,
+    ) -> None:
+        self._kernel = kernel
+        self._project_root = Path(project_root).expanduser().resolve()
+        self._trusted_project_root = trusted_project_root
+        self._dispatcher = dispatcher
+
+    def submit(self, suggestion: Mapping[str, Any], *, source_slot: int) -> NovaBridgeResult:
+        """Admit one canonical intent and dispatch exactly one newly-created worker."""
+        config = load_nova_bridge_config(self._project_root)
+        if not config.enabled:
+            return NovaBridgeResult("bridge_disabled")
+        action = suggestion.get("action") if isinstance(suggestion, Mapping) else None
+        key = _submission_key(suggestion, source_slot)
+        if action not in NOVA_AUTOMATIC_ACTIONS:
+            store = ProjectSwarmStore(self._project_root)
+            admission = store.record_integration_rejection(
+                _NOVA_NAMESPACE, key, reason="unsupported_action"
+            )
+            return NovaBridgeResult("unsupported_action", reason=admission.reason)
+        context = self._runtime_context()
+        snapshot = NovaIntentSnapshot.from_submission(
+            suggestion, source_slot=source_slot, project_root=context
+        )
+        store = ProjectSwarmStore(self._project_root)
+        adapter = NovaSwarmAdapter(self._kernel, PolicyGate(store), enabled=True)
+        proposal = adapter.translate(snapshot.to_suggestion(context))
+        yolo = self._kernel.is_yolo_enabled()
+        if type(yolo) is not bool:
+            yolo = False
+        mode, max_calls, rolling_limit = (
+            ("autonomous", 128, None) if yolo else ("reviewed_execution", 48, 6)
+        )
+        metadata = {
+            "goal": snapshot.title,
+            "pack": "coding-team",
+            "project_root": str(self._project_root),
+            "autonomy": mode,
+            "integration_namespace": _NOVA_NAMESPACE,
+            "nova_intent_digest": snapshot.intent_digest,
+            "nova_snapshot": _snapshot_metadata(snapshot),
+            "nova_mode": mode,
+            "proposal_digest": proposal_digest(proposal),
+            "required_pre_completion_hook": _RUNTIME_HOOK_ID,
+        }
+        admission = store.admit_integration_run(
+            IntegrationAdmissionRequest(
+                namespace=_NOVA_NAMESPACE,
+                idempotency_key=snapshot.intent_digest,
+                metadata=metadata,
+                max_active=1,
+                rolling_window_seconds=24 * 60 * 60,
+                rolling_run_limit=rolling_limit,
+            )
+        )
+        if admission.status != "created" or admission.run is None:
+            if admission.run is not None:
+                store.append_event(admission.run.run_id, "nova.bridge.admission_not_dispatched", {"status": admission.status})
+            return NovaBridgeResult(admission.status, admission.run.run_id, admission.reason)
+        store.append_event(admission.run.run_id, "nova.bridge.admitted", {"mode": mode, "max_calls": max_calls})
+        self._dispatch(admission.run.run_id)
+        return NovaBridgeResult("created", admission.run.run_id)
+
+    def _runtime_context(self) -> _NovaBridgeContext:
+        context = self._trusted_project_root
+        if not isinstance(context, _NovaBridgeContext):
+            raise ValueError("Nova runtime bridge requires host-owned trusted root")
+        root = _trusted_project_root(context)
+        kernel_root = Path(self._kernel.space_dir).expanduser().resolve()
+        actions_root = Path(self._kernel.actions.space_dir).expanduser().resolve()
+        if root != self._project_root or kernel_root != root or actions_root != root:
+            raise ValueError("Nova runtime roots do not match")
+        return context
+
+    def _dispatch(self, run_id: str) -> None:
+        if self._dispatcher is None:
+            return
+        thread = __import__("threading").Thread(
+            target=self._dispatcher, args=(self._project_root, run_id),
+            name=f"nova-swarm-{run_id}", daemon=True,
+        )
+        thread.start()
+
+
+def nova_execution_options_for_run(
+    project_root: Path, run: SwarmRun
+) -> SwarmExecutionOptions | None:
+    """Resolve only durable Nova runs; ordinary Swarm runs keep default options."""
+    if run.metadata.get("integration_namespace") != _NOVA_NAMESPACE:
+        return None
+    mode = run.metadata.get("nova_mode")
+    max_calls = 128 if mode == "autonomous" else 48 if mode == "reviewed_execution" else None
+    if max_calls is None:
+        return SwarmExecutionOptions(blocked_reason="execution_options_blocked")
+    if load_nova_bridge_config(Path(project_root)).enabled is not True:
+        return SwarmExecutionOptions(blocked_reason="nova_bridge_disabled")
+    # A resumed process still carries the required durable hook identity.  It
+    # fails closed at that hook until a host-owned bridge capability supplies
+    # the kernel/root-bound adapter; no resolver may reconstruct trust from
+    # request data or a persisted path string.
+    return SwarmExecutionOptions(
+        max_calls=max_calls,
+        verifier=None,
+        pre_completion_hook=NovaPreCompletionHook(None),
+    )
+
+
+def _snapshot_metadata(snapshot: NovaIntentSnapshot) -> dict[str, Any]:
+    return snapshot._canonical_document()
+
+
+def _snapshot_from_metadata(metadata: Mapping[str, Any], context: _NovaBridgeContext) -> NovaIntentSnapshot:
+    raw = metadata.get("nova_snapshot")
+    if not isinstance(raw, Mapping):
+        raise ValueError("missing Nova snapshot")
+    return NovaIntentSnapshot.from_submission(raw, source_slot=raw.get("source_slot"), project_root=context)
+
+
+def _submission_key(suggestion: Any, source_slot: Any) -> str:
+    try:
+        return sha256(json.dumps({"suggestion": suggestion, "source_slot": source_slot}, sort_keys=True, default=str).encode()).hexdigest()
+    except Exception:
+        return "invalid-nova-submission"
+
+
+def _nova_pause_reason(reason: object) -> str:
+    return "nova_" + (reason if isinstance(reason, str) and reason.isascii() and reason.replace("_", "").isalnum() else "action_blocked")

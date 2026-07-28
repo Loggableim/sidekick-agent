@@ -11,6 +11,7 @@ import sys
 from typing import Any, Callable, Mapping
 
 from cli.swarm_host import SidekickSwarmService, get_cli_host_actor
+from nova.swarm_runtime_bridge import nova_execution_options_for_run
 from swarm_core.config import initialize_project
 
 
@@ -87,7 +88,9 @@ def build_parser(
 
 def get_swarm_service() -> SidekickSwarmService:
     """Construct a state-free host service; writes happen only in its methods."""
-    return SidekickSwarmService()
+    return SidekickSwarmService(
+        execution_options_resolver=nova_execution_options_for_run
+    )
 
 
 def _add_common_arguments(
