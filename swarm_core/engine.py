@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping, Protocol
 from uuid import uuid4
 
 from .learning import ReputationLedger
@@ -52,6 +53,7 @@ _WORKFLOW_COMPLETION_EVENT_TYPES = frozenset(
 # unqualified unknown role could otherwise be a legacy workflow stage that we
 # must not silently replay from Scout.
 _NON_WORKFLOW_ROLE_PREFIXES = ("external/", "integration/", "plugin/", "nova/")
+_HOST_METADATA_RESERVED_KEYS = frozenset({"goal", "pack", "project_root", "autonomy"})
 
 
 def _is_non_workflow_role(role: object) -> bool:
@@ -71,6 +73,39 @@ class RunSummary:
     decision: str | None
     pause_reason: str | None
     events: tuple[SwarmEvent, ...]
+
+
+@dataclass(frozen=True)
+class PreCompletionContext:
+    run: SwarmRun
+    project_root: Path
+    store: ProjectSwarmStore
+    goal: str
+    pack: str
+    autonomy: str
+    call_count: int
+    decision: str
+    evidence: Mapping[str, list[Any]]
+
+
+@dataclass(frozen=True)
+class PreCompletionResult:
+    continue_completion: bool
+    pause_reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.continue_completion and not (
+            isinstance(self.pause_reason, str) and self.pause_reason.strip()
+        ):
+            raise ValueError("Paused pre-completion result requires a reason")
+        if self.continue_completion and self.pause_reason is not None:
+            raise ValueError("Continuing result cannot carry a pause reason")
+
+
+class PreCompletionHook(Protocol):
+    hook_id: str
+
+    def run(self, context: PreCompletionContext) -> PreCompletionResult: ...
 
 
 @dataclass(frozen=True)
@@ -96,12 +131,14 @@ class SwarmEngine:
         max_calls: int = 48,
         max_concurrent: int = 3,
         verifier: ReadOnlyVerifier | None = None,
+        pre_completion_hook: PreCompletionHook | None = None,
     ) -> None:
         self.transport = transport
         self.registry = registry or ModelRegistry()
         self.max_calls = max_calls
         self.max_concurrent = max_concurrent
         self.verifier = verifier
+        self.pre_completion_hook = pre_completion_hook
 
     def run(
         self,
@@ -122,6 +159,7 @@ class SwarmEngine:
         pack: str = "coding-team",
         *,
         autonomy: str | None = None,
+        host_metadata: Mapping[str, Any] | None = None,
     ) -> SwarmRun:
         """Persist a runnable run before any model invocation begins.
 
@@ -132,11 +170,12 @@ class SwarmEngine:
         project_root = Path(project_root).resolve()
         PackRegistry(project_root).get(pack)
         store = ProjectSwarmStore(project_root)
-        metadata = {
+        metadata = self._validated_host_metadata(host_metadata)
+        metadata.update({
             "goal": goal,
             "pack": pack,
             "project_root": str(project_root),
-        }
+        })
         if autonomy is not None:
             metadata["autonomy"] = autonomy
         run = store.create_run(metadata=metadata)
@@ -299,6 +338,25 @@ class SwarmEngine:
                 WorkflowPaused("invalid_verifier_result", role="verifier"),
             )
 
+        pre_completion_pause = self._run_pre_completion_hook(
+            store,
+            run,
+            project_root=project_root,
+            goal=goal,
+            pack=pack,
+            call_count=executor.call_budget.used,
+            decision=outcome.decision,
+            evidence=outcome.evidence,
+            checkpoint=checkpoint,
+        )
+        if pre_completion_pause is not None:
+            return self._pause_summary(
+                store,
+                run.run_id,
+                executor,
+                pre_completion_pause,
+            )
+
         if not self._complete_after_checkpoint(store, run.run_id, checkpoint):
             events = tuple(store.list_events(run.run_id))
             return RunSummary(
@@ -327,6 +385,91 @@ class SwarmEngine:
             pause_reason=None,
             events=tuple(store.list_events(run.run_id)),
         )
+
+    @staticmethod
+    def _validated_host_metadata(
+        host_metadata: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Accept durable host metadata without allowing Core input overrides."""
+        if host_metadata is None:
+            return {}
+        if not isinstance(host_metadata, Mapping):
+            raise ValueError("Swarm host metadata must be a mapping")
+        metadata = dict(host_metadata)
+        reserved = _HOST_METADATA_RESERVED_KEYS & set(metadata)
+        if reserved:
+            raise ValueError(
+                "Swarm host metadata cannot override "
+                + ", ".join(sorted(reserved))
+            )
+        try:
+            serialized = json.dumps(metadata, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Swarm host metadata must be JSON-safe") from exc
+        if json.loads(serialized) != metadata:
+            raise ValueError("Swarm host metadata must be JSON-safe")
+        return metadata
+
+    def _run_pre_completion_hook(
+        self,
+        store: ProjectSwarmStore,
+        run: SwarmRun,
+        *,
+        project_root: Path,
+        goal: str,
+        pack: str,
+        call_count: int,
+        decision: str,
+        evidence: Mapping[str, list[Any]],
+        checkpoint: Callable[[], None] | None,
+    ) -> WorkflowPaused | None:
+        """Run a host-neutral durable completion gate, when the run requires it."""
+        required_hook_id = run.metadata.get("required_pre_completion_hook")
+        if required_hook_id is None:
+            return None
+        hook = self.pre_completion_hook
+        try:
+            hook_matches = hook is not None and hook.hook_id == required_hook_id
+        except Exception:
+            return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
+        if (
+            not isinstance(required_hook_id, str)
+            or not required_hook_id.strip()
+            or not hook_matches
+        ):
+            return WorkflowPaused(
+                "required_pre_completion_hook_unavailable",
+                role="pre_completion_hook",
+            )
+
+        if checkpoint is not None:
+            checkpoint()
+        active_run = store.get_run(run.run_id)
+        if active_run is None:
+            raise KeyError(f"Unknown Swarm run: {run.run_id}")
+        if active_run.status != "running":
+            return None
+        autonomy = active_run.metadata.get("autonomy")
+        if not isinstance(autonomy, str):
+            raise ValueError("Swarm run is missing a durable autonomy setting")
+        context = PreCompletionContext(
+            run=active_run,
+            project_root=project_root,
+            store=store,
+            goal=goal,
+            pack=pack,
+            autonomy=autonomy,
+            call_count=call_count,
+            decision=decision,
+            evidence=evidence,
+        )
+        try:
+            result = hook.run(context)
+        except Exception:
+            return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
+        if result.continue_completion:
+            return None
+        return WorkflowPaused(result.pause_reason, role="pre_completion_hook")
 
     @staticmethod
     def _record_local_verifier_reputation(
