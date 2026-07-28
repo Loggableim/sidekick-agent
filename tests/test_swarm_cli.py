@@ -59,17 +59,14 @@ class _CliNovaRuntimeGuard:
         for worker in self.pause_workers:
             self.join_pause_worker(worker)
         with nova_bridge._RUNTIME_BINDINGS_LOCK:
-            created_roots = (
-                set(nova_bridge._RUNTIME_BINDINGS) - set(self.bindings_before)
+            owned_new_roots = self.expected_clean_roots - set(self.bindings_before)
+            for root in owned_new_roots:
+                nova_bridge._RUNTIME_BINDINGS.pop(root, None)
+            assert all(
+                nova_bridge._RUNTIME_BINDINGS.get(root) is binding
+                for root, binding in self.bindings_before.items()
             )
-            for root in created_roots:
-                del nova_bridge._RUNTIME_BINDINGS[root]
-            for root, binding in self.bindings_before.items():
-                nova_bridge._RUNTIME_BINDINGS[root] = binding
-            assert dict(nova_bridge._RUNTIME_BINDINGS) == self.bindings_before
-            assert not (
-                self.expected_clean_roots - set(self.bindings_before)
-            ) & set(nova_bridge._RUNTIME_BINDINGS)
+            assert not owned_new_roots & set(nova_bridge._RUNTIME_BINDINGS)
 
 
 @pytest.fixture
@@ -224,6 +221,8 @@ def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
         project,
         cli_nova_runtime_guard,
     )
+    with nova_bridge._RUNTIME_BINDINGS_LOCK:
+        assert project.resolve() in nova_bridge._RUNTIME_BINDINGS
     nova_bridge._unregister_runtime_binding(project, run.run_id)
     nova_bridge.NovaSwarmRuntimeBridge(
         kernel,
@@ -245,7 +244,7 @@ def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
     assert len(kernel.govern_calls) == 1
     assert len(kernel.act_calls) == 1
     with nova_bridge._RUNTIME_BINDINGS_LOCK:
-        assert project.resolve() in nova_bridge._RUNTIME_BINDINGS
+        assert project.resolve() not in nova_bridge._RUNTIME_BINDINGS
 
 
 def test_cli_resume_fresh_process_nova_run_blocks_before_model_dispatch(
@@ -263,6 +262,8 @@ def test_cli_resume_fresh_process_nova_run_blocks_before_model_dispatch(
         project,
         cli_nova_runtime_guard,
     )
+    with nova_bridge._RUNTIME_BINDINGS_LOCK:
+        assert project.resolve() in nova_bridge._RUNTIME_BINDINGS
     nova_bridge._unregister_runtime_binding(project, run.run_id)
     model_calls: list[dict[str, object]] = []
     resume = _parse(
