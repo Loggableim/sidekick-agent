@@ -174,6 +174,13 @@ provider pause is auditably paused and never auto-retried. A post-claim crash
 records `nova.bridge.recovery_required` and requires explicit human recovery;
 it never replays govern or act.
 
-`sidekick swarm resume` and the WebUI use the same per-run resolver. Status
-GET/SSE construction stays read-only: it neither resolves Nova execution
-options, initializes `.swarm`, nor dispatches a worker.
+`sidekick swarm resume` and the WebUI use the same per-run resolver. A Nova
+resume is executable only in the same process after the explicit host-owned
+bridge has registered its kernel, trusted root, verifier, and hook. The
+versioned `NovaSwarmRuntimeBridge.attach_admitted_run()` is the Task-6 host
+attach seam; it accepts an already-owned kernel/root capability and does not
+discover, start, or patch a live Nova process. A fresh process never restores
+that trust from metadata: it fails closed with `nova_bridge_unavailable` before
+engine construction or a Cloud call. Status GET/SSE construction stays
+read-only: it neither resolves Nova execution options, initializes `.swarm`,
+nor dispatches a worker.

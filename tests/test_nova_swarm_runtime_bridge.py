@@ -514,3 +514,23 @@ def test_runtime_verifier_implements_the_workflow_request_protocol(trusted_nova_
 
     assert result.decision == VERIFIED_DECISION
     assert result.evidence == (snapshot.verifier_evidence_ref,)
+
+
+def test_runtime_verifier_rejects_a_wrong_workflow_goal_or_run(trusted_nova_project):
+    """Catches a registered verifier accepting another workflow's context."""
+    from swarm_core.verifier import InvalidVerifierResult, VerificationRequest
+
+    snapshot = NovaIntentSnapshot.from_submission(
+        _diary_suggestion(), source_slot=92, project_root=trusted_nova_project
+    )
+    verifier = NovaIntentReadOnlyVerifier(
+        trusted_nova_project, snapshot=snapshot, run_id="bound-run"
+    )
+    for run_id, goal in (("other-run", snapshot.title), ("bound-run", "other goal")):
+        with pytest.raises(InvalidVerifierResult):
+            verifier.verify(
+                VerificationRequest(
+                    run_id=run_id, goal=goal, project_root=snapshot.project_root,
+                    builder={}, critic={},
+                )
+            )
