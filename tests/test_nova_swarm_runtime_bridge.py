@@ -57,6 +57,19 @@ _TEST_WORKER_THREADS: list[threading.Thread] = []
 _TEST_WORKER_THREADS_LOCK = threading.Lock()
 
 
+def _extract_rendered_prompt_context(rendered: str) -> dict[str, object]:
+    """Return the JSON context bounded by the prompt's required delimiters."""
+    _prefix, context_delimiter, after_context = rendered.partition("\n\nContext:\n")
+    assert context_delimiter == "\n\nContext:\n"
+    context_json, output_delimiter, _output_contract = after_context.partition(
+        "\n\nOutput contract:\n"
+    )
+    assert output_delimiter == "\n\nOutput contract:\n"
+    context = json.loads(context_json)
+    assert isinstance(context, dict)
+    return context
+
+
 def _capture_test_worker() -> threading.Thread:
     worker = threading.current_thread()
     with _TEST_WORKER_THREADS_LOCK:
@@ -1873,7 +1886,7 @@ def test_reviewers_see_and_durably_bind_the_exact_nova_action_context(
     assert len(review_calls) == 2
     for call in review_calls:
         rendered = call["messages"][0]["content"]
-        context = json.loads(rendered.split("\n\nContext:\n", 1)[1])
+        context = _extract_rendered_prompt_context(rendered)
         assert context["authorization_context"] == authorization
 
     checkpoints = ProjectSwarmStore(
@@ -1980,7 +1993,7 @@ def test_review_authorization_context_resists_emitter_mutation(
     assert len(review_calls) == 2
     for call in review_calls:
         rendered = call["messages"][0]["content"]
-        context = json.loads(rendered.split("\n\nContext:\n", 1)[1])
+        context = _extract_rendered_prompt_context(rendered)
         assert (
             context["authorization_context"]["payload"]["content"]
             == expected_content
