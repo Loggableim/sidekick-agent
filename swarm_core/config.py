@@ -298,8 +298,11 @@ def save_integration_config(
         config,
         label="Swarm integration configuration",
     )
+    # Preserve the explicit lexical escape rejection before creating any
+    # project-local lock/runtime state; pinned operations below close races.
+    resolve_swarm_path(project_root, "swarm.yaml")
     with _CONFIG_INITIALIZATION_LOCK:
-        initialize_project(project_root)
+        _ensure_project_root(project_root)
         with _pinned_swarm_directory(
             project_root,
             create=True,
@@ -309,6 +312,11 @@ def save_integration_config(
             if runtime is None:  # pragma: no cover - protected by runtime=True
                 raise RuntimeError("Swarm runtime directory was not pinned")
             with _exclusive_config_write_lock(runtime):
+                # Initialization itself performs a config read/conditional
+                # write.  It must share this process-wide lock with the later
+                # integration read-modify-write or a stale default can erase
+                # another process's just-saved namespace.
+                initialize_project(project_root)
                 raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
                 if not isinstance(raw_config, dict):
                     raise ValueError("Swarm configuration must be a mapping")
