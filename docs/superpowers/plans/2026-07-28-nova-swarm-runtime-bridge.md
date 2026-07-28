@@ -494,6 +494,78 @@
   git commit -m "feat: route Nova intents through Swarm"
   ~~~
 
+## Task 8: Gate Task 6 with the mandatory Nova bridge behavior matrix
+
+**Files:**
+
+- Modify: tests/test_nova_swarm_runtime_bridge.py
+- Modify only if a focused test exposes a bridge defect: nova/swarm_runtime_bridge.py
+- Modify: tests/test_swarm_cli.py
+- Modify: tests/test_swarm_http.py
+
+**Purpose:**
+
+This is a verification remediation created before the live seam because Task 5's
+initial implementation did not include the approved end-to-end bridge matrix.
+It uses only a disposable Nova project, fake transport/catalog/slot, and a fake
+kernel; it must not read or modify the live Nova space, start a process, or call
+Ollama.
+
+- [ ] **Step 1: Build reusable fake-host fixtures**
+
+  Create a fake kernel, fake action recorder, verified fake transport/catalog,
+  dispatcher recorder, and explicit host-context attachment helper.  A test must
+  drive `NovaSwarmRuntimeBridge.submit()` and the real Swarm engine/hook rather
+  than calling isolated adapter/policy methods directly.
+
+- [ ] **Step 2: Cover every approved bridge outcome**
+
+  Add executable tests for all of these outcomes:
+
+  1. Disabled reads configuration only: no `.swarm`, run, worker, or model call.
+  2. Unsupported action records one bounded rejection and performs no run,
+     Cloud, govern, act, or worker call.
+  3. Equal digest/slot submitted through a new bridge instance coalesces to one
+     run and one worker.
+  4. Different intent is rejected while the first run is `running` and while it
+     is `paused`, with no replacement worker.
+  5. Standard runs persist `reviewed_execution`/48 and enforce six rolling
+     admissions; literal kernel YOLO persists `autonomous`/128 and has no daily
+     quota while still retaining the one-active limit.
+  6. YOLO rejects non-allowlisted actions, root mismatch, external/human-gated
+     work, and a caller-supplied YOLO flag.
+  7. A verified fake workflow reaches `nova.bridge.action_proposed`, policy
+     before govern, exactly one act, `nova.bridge.action_result`, and then
+     `run.completed`.
+  8. Negative/unavailable verifier, review denial, evidence/digest/snapshot/root
+     mismatch, and Nova denial pause auditably with zero act calls.
+  9. Provider pause creates no replacement worker and no automatic resume.
+  10. A post-claim crash has one recovery-required event and explicit recovery
+      never replays govern or act.
+
+  Also cover `attach_admitted_run`: only a paused, matching durable run may
+  attach; running/completed/root/proposal mismatch must preserve an existing
+  binding.  Cover same-process CLI resume with attached context and a fresh
+  process/no-context resume blocking before model dispatch.  Confirm HTTP status
+  and SSE remain read-only (no context resolution, project initialization, or
+  worker dispatch).
+
+- [ ] **Step 3: Run focused and full non-live gates**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_nova_swarm_runtime_bridge.py tests/test_nova_swarm_adapter.py tests/test_swarm_policy.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_cli.py tests/test_swarm_http.py tests/test_fastapi_route_bridge.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check nova\swarm_runtime_bridge.py tests\test_nova_swarm_runtime_bridge.py tests\test_swarm_cli.py tests\test_swarm_http.py
+  git diff --check
+  ~~~
+
+- [ ] **Step 4: Commit the executable behavior gate**
+
+  ~~~powershell
+  git add tests/test_nova_swarm_runtime_bridge.py tests/test_swarm_cli.py tests/test_swarm_http.py nova/swarm_runtime_bridge.py
+  git commit -m "test: cover Nova Swarm runtime bridge behavior"
+  ~~~
+
 ## Task 6: Verify and stage the live Nova seam
 
 **Files:**
