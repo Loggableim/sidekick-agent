@@ -442,3 +442,119 @@ def test_login_uses_public_route_page_when_password_auth_is_enabled(monkeypatch)
     assert response.status_code == 200
     assert "id=\"login-form\"" in response.text
     assert "location" not in response.headers
+
+
+def test_space_management_get_is_authenticated_and_does_not_write(monkeypatch, tmp_path):
+    """Reading management state must not create or rewrite a Space identity."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    def unexpected_mutating_resolver(_value):
+        raise AssertionError("GET management must use the read-only resolver")
+
+    monkeypatch.setattr(web_server, "resolve_trusted_workspace", unexpected_mutating_resolver)
+    monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", lambda _value: project)
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    before = space.config_path.read_bytes()
+
+    client = TestClient(web_server.app)
+    assert client.get("/api/space/nova-management?slug=alpha").status_code == 401
+
+    response = client.get(
+        "/api/space/nova-management?slug=alpha", headers=_headers(web_server)
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["space_id"] == space.load_config()["space_id"]
+    assert payload["nova_management"] == {
+        "yolo": False,
+        "enrolled": False,
+        "revision": 0,
+    }
+    assert payload["root_fingerprint"] == space_engine.space_root_fingerprint(project)
+    assert space.config_path.read_bytes() == before
+
+
+def test_space_management_enrollment_uses_server_resolved_root(monkeypatch, tmp_path):
+    """Enrollment accepts only a confirmation bound to the server-derived root."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    resolved_inputs: list[str] = []
+
+    def resolve_project(value):
+        resolved_inputs.append(str(value))
+        return project
+
+    monkeypatch.setattr(web_server, "resolve_trusted_workspace", resolve_project)
+    monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", resolve_project)
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+    snapshot = client.get(
+        "/api/space/nova-management?slug=alpha", headers=headers
+    ).json()
+
+    response = client.post(
+        "/api/space/nova-management",
+        headers=headers,
+        json={
+            "slug": "alpha",
+            "yolo": True,
+            "enrolled": True,
+            "confirmation": {
+                "space_id": snapshot["space_id"],
+                "root_fingerprint": snapshot["root_fingerprint"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["nova_management"] == {
+        "yolo": True,
+        "enrolled": True,
+        "revision": 1,
+    }
+    assert resolved_inputs
+    assert all(value == str(project) for value in resolved_inputs)
+
+
+def test_generic_space_config_refuses_nova_management_patch(monkeypatch, tmp_path):
+    """Governance cannot be changed through the broad Space config endpoint."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"})
+
+    response = TestClient(web_server.app).post(
+        "/api/space/config",
+        headers=_headers(web_server),
+        json={
+            "slug": "alpha",
+            "nova_management": {"yolo": True, "enrolled": True, "revision": 999},
+        },
+    )
+
+    assert response.status_code == 400
+    assert space.load_config()["nova_management"] == {
+        "yolo": False,
+        "enrolled": False,
+        "revision": 0,
+    }

@@ -25,12 +25,15 @@ Backward-compat: reads old ``workspaces/`` dir as fallback.
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import logging
 import json
 import os
 import shutil
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from web.api._home import get_active_webui_home, get_webui_home
@@ -149,6 +152,44 @@ class SpaceExists(SpaceError):
     """Space slug already taken."""
 
 
+class SpaceGovernanceError(SpaceError):
+    """A requested Nova management change is not safe to persist."""
+
+
+def _normalized_space_id(value: object) -> str:
+    """Return a persisted UUID identity, or empty when a read sees none."""
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip()
+    try:
+        return uuid.UUID(candidate).hex
+    except (AttributeError, ValueError):
+        return ""
+
+
+def _normalized_nova_management(value: object) -> dict[str, bool | int]:
+    """Parse the governance record strictly so malformed config fails closed."""
+    defaults: dict[str, bool | int] = {"yolo": False, "enrolled": False, "revision": 0}
+    if value is None or not isinstance(value, dict):
+        return defaults
+    yolo = value.get("yolo", False)
+    enrolled = value.get("enrolled", False)
+    revision = value.get("revision", 0)
+    if type(yolo) is not bool or type(enrolled) is not bool:
+        return defaults
+    if type(revision) is not int or revision < 0:
+        return defaults
+    if enrolled and yolo is not True:
+        return defaults
+    return {"yolo": yolo, "enrolled": enrolled, "revision": revision}
+
+
+def space_root_fingerprint(root: str | Path) -> str:
+    """Return the stable opaque confirmation value for a trusted project root."""
+    canonical = str(Path(root).expanduser().resolve())
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class AgentNotFound(SpaceError):
     """Agent does not exist in this space."""
 
@@ -219,20 +260,26 @@ class Space:
             "source_space": CONSCIOUSNESS_SOURCE_SPACE_SLUG,
             "communication_mode": "pingpong",
         },
+        "space_id": "",
+        "nova_management": {"yolo": False, "enrolled": False, "revision": 0},
     }
 
     def load_config(self) -> dict:
         """Load space.yaml with sensible defaults for missing fields."""
         if not self.config_path.exists():
-            return dict(self.CONFIG_DEFAULTS)
+            return copy.deepcopy(self.CONFIG_DEFAULTS)
         try:
             import yaml
             raw = yaml.safe_load(self.config_path.read_text("utf-8")) or {}
         except Exception:
             logger.exception("failed to parse %s, using defaults", self.config_path)
-            return dict(self.CONFIG_DEFAULTS)
+            return copy.deepcopy(self.CONFIG_DEFAULTS)
 
-        result = dict(self.CONFIG_DEFAULTS)
+        if not isinstance(raw, dict):
+            logger.warning("invalid space config in %s, using defaults", self.config_path)
+            return copy.deepcopy(self.CONFIG_DEFAULTS)
+
+        result = copy.deepcopy(self.CONFIG_DEFAULTS)
         if isinstance(raw.get("model"), dict):
             result["model"].update(raw["model"])
         for key in self.CONFIG_DEFAULTS:
@@ -241,6 +288,12 @@ class Space:
             if key == "nova":
                 if isinstance(raw.get("nova"), dict):
                     result["nova"].update(raw["nova"])
+                continue
+            if key == "space_id":
+                result["space_id"] = _normalized_space_id(raw.get("space_id"))
+                continue
+            if key == "nova_management":
+                result["nova_management"] = _normalized_nova_management(raw.get("nova_management"))
                 continue
             if key in raw:
                 result[key] = raw[key]
@@ -256,6 +309,9 @@ class Space:
         import yaml
         self.root.mkdir(parents=True, exist_ok=True)
         out: dict = {}
+        # Identity is minted only by an explicit create/write path. Reads of
+        # legacy config must not silently persist a migration.
+        out["space_id"] = _normalized_space_id(config.get("space_id")) or uuid.uuid4().hex
         # Save name if present and differs from slug
         if "name" in config:
             out["name"] = config["name"]
@@ -269,6 +325,13 @@ class Space:
                 if isinstance(nova_cfg, dict):
                     out["nova"] = dict(self.CONFIG_DEFAULTS["nova"])
                     out["nova"].update(nova_cfg)
+                continue
+            if key == "space_id":
+                continue
+            if key == "nova_management":
+                out["nova_management"] = _normalized_nova_management(
+                    config.get("nova_management")
+                )
                 continue
             if key in config:
                 out[key] = config[key]
@@ -368,6 +431,8 @@ class Space:
             "reasoning_effort": cfg.get("reasoning_effort", ""),
             "personality": cfg.get("personality", ""),
             "project_dir": cfg.get("project_dir", ""),
+            "space_id": cfg.get("space_id", ""),
+            "nova_management": cfg.get("nova_management", {}),
             "color": cfg.get("color", "#4FC3F7"),
             "emoji": cfg.get("emoji", "📁"),
             "agents": self.list_agents(),
@@ -418,6 +483,54 @@ class Space:
 # ═══════════════════════════════════════════════════════════════════════════════
 # Registry (cached)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def update_nova_management(
+    space: Space,
+    *,
+    yolo: object,
+    enrolled: object,
+    confirmation: object,
+    trusted_project_root: str | Path | None,
+) -> dict[str, bool | int]:
+    """Persist a validated management transition for one existing Space."""
+    if type(yolo) is not bool or type(enrolled) is not bool:
+        raise SpaceGovernanceError("yolo and enrolled must be literal booleans")
+    if enrolled is True and yolo is not True:
+        raise SpaceGovernanceError("enrollment requires yolo to be true")
+
+    config = space.load_config()
+    if enrolled is True:
+        configured_project = space.get_project_dir()
+        if not configured_project:
+            raise SpaceGovernanceError("enrollment requires an existing project_dir")
+        try:
+            trusted_root = Path(trusted_project_root).expanduser().resolve()
+        except (TypeError, OSError, RuntimeError):
+            raise SpaceGovernanceError("enrollment requires a trusted project root") from None
+        if not trusted_root.is_dir():
+            raise SpaceGovernanceError("enrollment requires a trusted project root")
+        if trusted_root != Path(configured_project).expanduser().resolve():
+            raise SpaceGovernanceError("trusted project root does not match this Space")
+        space_id = _normalized_space_id(config.get("space_id"))
+        if not space_id:
+            raise SpaceGovernanceError("Space identity must be persisted before enrollment")
+        if not isinstance(confirmation, dict):
+            raise SpaceGovernanceError("enrollment requires explicit confirmation")
+        if confirmation.get("space_id") != space_id:
+            raise SpaceGovernanceError("confirmation Space identity does not match")
+        if confirmation.get("root_fingerprint") != space_root_fingerprint(trusted_root):
+            raise SpaceGovernanceError("confirmation root fingerprint does not match")
+
+    current = _normalized_nova_management(config.get("nova_management"))
+    next_record: dict[str, bool | int] = {
+        "yolo": yolo,
+        "enrolled": enrolled,
+        "revision": int(current["revision"]) + 1,
+    }
+    config["nova_management"] = next_record
+    space.save_config(config)
+    return next_record
+
 
 _SPACE_CACHE: list[Space] | None = None
 _SPACE_CACHE_ROOTS: tuple[str, str] | None = None

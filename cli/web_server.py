@@ -50,7 +50,12 @@ from cli.config import (
     redact_key,
 )
 from gateway.status import get_running_pid, read_runtime_status
-from web.api.workspace import load_workspaces, get_last_workspace
+from web.api.workspace import (
+    load_workspaces,
+    get_last_workspace,
+    resolve_trusted_workspace,
+    resolve_trusted_workspace_read_only,
+)
 from web.api.onboarding import (
     get_onboarding_status,
     complete_onboarding,
@@ -442,6 +447,77 @@ async def auth_middleware(request: Request, call_next):
                 content={"detail": "Unauthorized"},
             )
     return await call_next(request)
+
+
+def _nova_management_payload(space, trusted_project_root: Path | None = None) -> dict:
+    """Serialize governance without creating config, a Space, or a workspace."""
+    from web.api.space_engine import space_root_fingerprint
+
+    config = space.load_config()
+    return {
+        "slug": space.slug,
+        "space_id": config.get("space_id", ""),
+        "nova_management": config.get("nova_management", {}),
+        "root_fingerprint": (
+            space_root_fingerprint(trusted_project_root)
+            if trusted_project_root is not None
+            else ""
+        ),
+    }
+
+
+def _trusted_space_project_root(space, *, read_only: bool = False) -> Path | None:
+    """Resolve only the persisted project directory; never inspect client paths."""
+    project_dir = space.get_project_dir()
+    if not project_dir:
+        return None
+    try:
+        resolver = resolve_trusted_workspace_read_only if read_only else resolve_trusted_workspace
+        resolved = Path(resolver(project_dir)).expanduser().resolve()
+    except Exception:
+        return None
+    return resolved if resolved.is_dir() else None
+
+
+@app.get("/api/space/nova-management")
+async def get_space_nova_management(slug: str = ""):
+    """Read a Space's governance snapshot without triggering legacy bootstrap."""
+    from web.api.space_engine import get_workspace
+
+    space = get_workspace(str(slug).strip().lower()) if slug else None
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    return _nova_management_payload(
+        space, _trusted_space_project_root(space, read_only=True)
+    )
+
+
+@app.post("/api/space/nova-management")
+async def update_space_nova_management(request: Request):
+    """Apply the explicitly confirmed, server-root-bound governance transition."""
+    from web.api.space_engine import SpaceGovernanceError, get_workspace, update_nova_management
+
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON body must be an object")
+    slug = str(body.get("slug") or "").strip().lower()
+    space = get_workspace(slug) if slug else None
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    try:
+        update_nova_management(
+            space,
+            yolo=body.get("yolo"),
+            enrolled=body.get("enrolled"),
+            confirmation=body.get("confirmation"),
+            trusted_project_root=_trusted_space_project_root(space),
+        )
+    except SpaceGovernanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _nova_management_payload(space, _trusted_space_project_root(space))
 
 
 @app.get("/login", include_in_schema=False)
