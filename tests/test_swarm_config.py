@@ -240,6 +240,84 @@ save_integration_config(project, "nova", {"version": 1, "enabled": True})
     assert load_integration_config(project, "other") == {"version": 1, "enabled": True}
 
 
+def test_standalone_initialize_serializes_with_integration_save(
+    tmp_path: Path,
+):
+    """Catches a late standalone default write erasing an integration save."""
+    project = tmp_path / "uninitialized-project"
+    ready = tmp_path / "initializer-ready"
+    release = tmp_path / "release-initializer"
+    started = tmp_path / "save-started"
+    source_root = Path(__file__).resolve().parents[1]
+    initializer_script = """
+import sys
+import time
+from pathlib import Path
+from swarm_core import config as config_module
+from swarm_core.config import initialize_project
+
+project, ready, release = map(Path, sys.argv[1:4])
+original_write = config_module._write_project_config
+def hold_initial_default(lease, raw_config):
+    if raw_config == config_module._DEFAULT_CONFIG and not ready.exists():
+        ready.write_text("ready", encoding="utf-8")
+        deadline = time.monotonic() + 10
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("test did not release standalone initializer")
+            time.sleep(0.01)
+    return original_write(lease, raw_config)
+config_module._write_project_config = hold_initial_default
+initialize_project(project)
+"""
+    saving_script = """
+import sys
+from pathlib import Path
+from swarm_core.config import save_integration_config
+
+project, started = map(Path, sys.argv[1:3])
+started.write_text("started", encoding="utf-8")
+save_integration_config(project, "nova", {"version": 1, "enabled": True})
+"""
+    initializer = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            initializer_script,
+            str(project),
+            str(ready),
+            str(release),
+        ],
+        cwd=source_root,
+    )
+    saver = None
+    try:
+        _wait_for_file(ready)
+        saver = subprocess.Popen(
+            [sys.executable, "-c", saving_script, str(project), str(started)],
+            cwd=source_root,
+        )
+        _wait_for_file(started)
+        deadline = time.monotonic() + 1
+        while saver.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert saver.poll() is None
+
+        release.write_text("release", encoding="utf-8")
+        assert initializer.wait(timeout=10) == 0
+        assert saver.wait(timeout=10) == 0
+    finally:
+        release.write_text("release", encoding="utf-8")
+        if initializer.poll() is None:
+            initializer.kill()
+            initializer.wait(timeout=10)
+        if saver is not None and saver.poll() is None:
+            saver.kill()
+            saver.wait(timeout=10)
+
+    assert load_integration_config(project, "nova") == {"version": 1, "enabled": True}
+
+
 def _wait_for_file(path: Path) -> None:
     deadline = time.monotonic() + 10
     while not path.exists():
@@ -697,7 +775,7 @@ def test_concurrent_process_initializers_publish_only_complete_swarm_yaml(
         assert publish_started.wait(timeout=3), (
             "config initialization must publish through an atomic replacement"
         )
-        child = subprocess.run(
+        child = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
@@ -716,15 +794,21 @@ def test_concurrent_process_initializers_publish_only_complete_swarm_yaml(
             # Child import resolution stays explicit while the parent holds
             # its descriptor/handle-based publication lock.
             cwd=source_root,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             errors="replace",
-            check=False,
-            timeout=15,
         )
-        assert child.returncode == 0, child.stdout + child.stderr
-        assert json.loads(child.stdout) == {
+        # Initializers now serialize their config writes across processes, so
+        # the child must wait rather than observe/rewrite the parent's stale
+        # pre-publication default.
+        time.sleep(0.1)
+        assert child.poll() is None
+        release_first_publish.set()
+        child_stdout, child_stderr = child.communicate(timeout=15)
+        assert child.returncode == 0, child_stdout + child_stderr
+        assert json.loads(child_stdout) == {
             "version": 1,
             "provider": "ollama-cloud",
             "model": "deepseek-v4-flash",
@@ -732,7 +816,6 @@ def test_concurrent_process_initializers_publish_only_complete_swarm_yaml(
         }
         # Let the writer leave its descriptor/handle publication section
         # before this process performs a separate read-only observation.
-        release_first_publish.set()
         parent.join(timeout=10)
         observed = load_project_config(tmp_path)
         assert observed.version == 1
