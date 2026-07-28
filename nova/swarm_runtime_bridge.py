@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 import re
 from types import MappingProxyType
+import threading
 from typing import Any, Callable, Mapping
 import unicodedata
 
@@ -55,6 +56,20 @@ _ENCODED_CONTROL_TOKENS = (
 _CONTEXT_CONSTRUCTION_TOKEN = object()
 _RUNTIME_HOOK_ID = "nova-runtime-v1"
 _NOVA_NAMESPACE = "nova"
+_RUNTIME_BINDINGS_LOCK = threading.RLock()
+_RUNTIME_BINDINGS: dict[Path, "_NovaRuntimeBinding"] = {}
+
+
+@dataclass(frozen=True)
+class _NovaRuntimeBinding:
+    """Non-serializable host capability retained only in this process."""
+
+    run_id: str
+    intent_digest: str
+    proposal_digest: str
+    adapter: NovaSwarmAdapter
+    context: "_NovaBridgeContext"
+    verifier: "NovaIntentReadOnlyVerifier"
 
 
 class _NovaBridgeContext:
@@ -505,6 +520,9 @@ class NovaPreCompletionHook:
                 return PreCompletionResult(False, "nova_proposal_digest_mismatch")
             if snapshot.intent_digest != metadata.get("nova_intent_digest"):
                 return PreCompletionResult(False, "nova_snapshot_digest_mismatch")
+            checkpoints = context.store.get_workflow_role_checkpoints(context.run.run_id)
+            if not PolicyGate._has_durable_review_quorum(proposal, checkpoints):
+                return PreCompletionResult(False, "nova_review_evidence_unavailable")
             context.store.append_event(
                 context.run.run_id,
                 "nova.bridge.action_proposed",
@@ -601,8 +619,21 @@ class NovaSwarmRuntimeBridge:
             if admission.run is not None:
                 store.append_event(admission.run.run_id, "nova.bridge.admission_not_dispatched", {"status": admission.status})
             return NovaBridgeResult(admission.status, admission.run.run_id, admission.reason)
+        _register_runtime_binding(
+            self._project_root,
+            _NovaRuntimeBinding(
+                admission.run.run_id,
+                snapshot.intent_digest,
+                proposal_digest(proposal),
+                adapter,
+                context,
+                NovaIntentReadOnlyVerifier(context),
+            ),
+        )
         store.append_event(admission.run.run_id, "nova.bridge.admitted", {"mode": mode, "max_calls": max_calls})
-        self._dispatch(admission.run.run_id)
+        if not self._dispatch(admission.run.run_id):
+            _pause_dispatch_failure(store, admission.run.run_id)
+            return NovaBridgeResult("dispatch_failed", admission.run.run_id, "nova_dispatch_failed")
         return NovaBridgeResult("created", admission.run.run_id)
 
     def _runtime_context(self) -> _NovaBridgeContext:
@@ -616,14 +647,17 @@ class NovaSwarmRuntimeBridge:
             raise ValueError("Nova runtime roots do not match")
         return context
 
-    def _dispatch(self, run_id: str) -> None:
-        if self._dispatcher is None:
-            return
-        thread = __import__("threading").Thread(
-            target=self._dispatcher, args=(self._project_root, run_id),
+    def _dispatch(self, run_id: str) -> bool:
+        dispatcher = self._dispatcher or _default_runtime_dispatcher
+        thread = threading.Thread(
+            target=_run_worker, args=(dispatcher, self._project_root, run_id),
             name=f"nova-swarm-{run_id}", daemon=True,
         )
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError:
+            return False
+        return True
 
 
 def nova_execution_options_for_run(
@@ -638,14 +672,13 @@ def nova_execution_options_for_run(
         return SwarmExecutionOptions(blocked_reason="execution_options_blocked")
     if load_nova_bridge_config(Path(project_root)).enabled is not True:
         return SwarmExecutionOptions(blocked_reason="nova_bridge_disabled")
-    # A resumed process still carries the required durable hook identity.  It
-    # fails closed at that hook until a host-owned bridge capability supplies
-    # the kernel/root-bound adapter; no resolver may reconstruct trust from
-    # request data or a persisted path string.
+    binding = _runtime_binding_for(Path(project_root), run)
+    if binding is None:
+        return SwarmExecutionOptions(blocked_reason="nova_bridge_unavailable")
     return SwarmExecutionOptions(
         max_calls=max_calls,
-        verifier=None,
-        pre_completion_hook=NovaPreCompletionHook(None),
+        verifier=binding.verifier,
+        pre_completion_hook=NovaPreCompletionHook(binding.adapter, binding.context),
     )
 
 
@@ -668,4 +701,84 @@ def _submission_key(suggestion: Any, source_slot: Any) -> str:
 
 
 def _nova_pause_reason(reason: object) -> str:
-    return "nova_" + (reason if isinstance(reason, str) and reason.isascii() and reason.replace("_", "").isalnum() else "action_blocked")
+    allowed = {
+        "adapter_disabled": "adapter_disabled",
+        "execution_already_claimed": "action_claimed",
+        "nova_policy_blocked": "policy_denied",
+        "kernel_workspace_mismatch": "root_mismatch",
+        "kernel_policy_unavailable": "policy_unavailable",
+        "kernel_policy_tier_mismatch": "policy_mismatch",
+        "nova_governance_malformed": "governance_invalid",
+        "nova_governance_intent_mismatch": "governance_mismatch",
+        "nova_governance_policy_mismatch": "governance_mismatch",
+    }
+    return "nova_" + allowed.get(reason, "action_blocked")
+
+
+def register_nova_runtime_context(
+    project_root: Path,
+    *,
+    run: SwarmRun,
+    adapter: NovaSwarmAdapter,
+    trusted_project_root: _NovaBridgeContext,
+) -> None:
+    """Explicit Task-6 seam for a host to attach a non-persisted capability."""
+    metadata = run.metadata
+    if metadata.get("integration_namespace") != _NOVA_NAMESPACE:
+        raise ValueError("Nova runtime context requires a Nova run")
+    context = _trusted_project_root(trusted_project_root)
+    if context != Path(project_root).expanduser().resolve():
+        raise ValueError("Nova runtime context root mismatch")
+    digest = metadata.get("nova_intent_digest")
+    proposal = metadata.get("proposal_digest")
+    if not isinstance(digest, str) or not isinstance(proposal, str):
+        raise ValueError("Nova runtime context requires immutable digests")
+    _register_runtime_binding(
+        context,
+        _NovaRuntimeBinding(run.run_id, digest, proposal, adapter, trusted_project_root, NovaIntentReadOnlyVerifier(trusted_project_root)),
+    )
+
+
+def _register_runtime_binding(project_root: Path, binding: _NovaRuntimeBinding) -> None:
+    with _RUNTIME_BINDINGS_LOCK:
+        _RUNTIME_BINDINGS[Path(project_root).resolve()] = binding
+
+
+def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBinding | None:
+    with _RUNTIME_BINDINGS_LOCK:
+        binding = _RUNTIME_BINDINGS.get(Path(project_root).resolve())
+    if binding is None:
+        return None
+    metadata = run.metadata
+    if (
+        binding.run_id != run.run_id
+        or binding.intent_digest != metadata.get("nova_intent_digest")
+        or binding.proposal_digest != metadata.get("proposal_digest")
+    ):
+        return None
+    return binding
+
+
+def _default_runtime_dispatcher(project_root: Path, run_id: str) -> None:
+    """Concrete named worker; Cloud calls remain guarded by the host service."""
+    from cli.swarm_host import SidekickSwarmService
+
+    SidekickSwarmService(
+        execution_options_resolver=nova_execution_options_for_run
+    ).execute_run(project_root, run_id)
+
+
+def _pause_dispatch_failure(store: ProjectSwarmStore, run_id: str) -> None:
+    try:
+        store.set_run_status(run_id, "paused")
+    except (RuntimeError, ValueError):
+        pass
+    store.append_event(run_id, "nova.bridge.dispatch_failed", {"reason": "nova_dispatch_failed"})
+
+
+def _run_worker(dispatcher: Callable[[Path, str], Any], project_root: Path, run_id: str) -> None:
+    """Never leave an admitted run running if its in-process worker crashes."""
+    try:
+        dispatcher(project_root, run_id)
+    except Exception:
+        _pause_dispatch_failure(ProjectSwarmStore(project_root), run_id)

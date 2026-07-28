@@ -67,6 +67,7 @@ _ALLOWED_BLOCKED_EXECUTION_OPTION_REASONS = frozenset(
         "execution_options_unavailable",
         "invalid_execution_options",
         "nova_bridge_disabled",
+        "nova_bridge_unavailable",
     }
 )
 
