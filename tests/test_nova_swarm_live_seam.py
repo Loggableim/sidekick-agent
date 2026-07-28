@@ -132,9 +132,53 @@ def _top_level_name_bindings(tree: ast.Module, name: str) -> list[ast.AST]:
             if any((item.asname or item.name) == name for item in node.names):
                 self.bindings.append(node)
 
+        def visit_ExceptHandler(self, node):
+            if node.name == name:
+                self.bindings.append(node)
+            self.generic_visit(node)
+
+        def visit_Global(self, node):
+            if name in node.names:
+                self.bindings.append(node)
+
+        def visit_Nonlocal(self, node):
+            if name in node.names:
+                self.bindings.append(node)
+
+        def visit_MatchAs(self, node):
+            if node.name == name:
+                self.bindings.append(node)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            if node.name == name:
+                self.bindings.append(node)
+
+        def visit_MatchMapping(self, node):
+            if node.rest == name:
+                self.bindings.append(node)
+            self.generic_visit(node)
+
     visitor = BindingVisitor()
     visitor.visit(tree)
     return visitor.bindings
+
+
+def _function_argument_names(function_node: ast.FunctionDef | ast.AsyncFunctionDef):
+    arguments = function_node.args
+    names = [
+        argument.arg
+        for argument in (
+            list(arguments.posonlyargs)
+            + list(arguments.args)
+            + list(arguments.kwonlyargs)
+        )
+    ]
+    if arguments.vararg is not None:
+        names.append(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.append(arguments.kwarg.arg)
+    return set(names)
 
 
 def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") -> None:
@@ -145,6 +189,10 @@ def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") 
         (ast.FunctionDef, ast.AsyncFunctionDef),
     ), "live Nova Mind must define exactly one top-level submit_intent_proposal"
     function_node = binding_nodes[0]
+    assert "submit_nova_intent" not in _function_argument_names(function_node), (
+        "live submit_intent_proposal must not shadow submit_nova_intent "
+        "in its parameters"
+    )
 
     module_entry_bindings = _top_level_name_bindings(tree, "submit_nova_intent")
     assert module_entry_bindings == [], (
@@ -165,6 +213,9 @@ def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") 
         and versioned_import.names[0].name == "submit_nova_intent"
         and versioned_import.names[0].asname is None
     ), "submit_nova_intent must come from nova.swarm_runtime_bridge"
+    assert versioned_import in function_node.body, (
+        "submit_nova_intent must be imported unconditionally in the seam body"
+    )
 
     seam_nodes = _execution_scope_nodes(function_node.body)
     calls = [node for node in seam_nodes if isinstance(node, ast.Call)]
@@ -180,6 +231,13 @@ def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") 
         "live submit_intent_proposal must call the versioned "
         "submit_nova_intent exactly once"
     )
+    assert (
+        versioned_import.lineno,
+        versioned_import.col_offset,
+    ) < (
+        versioned_calls[0].lineno,
+        versioned_calls[0].col_offset,
+    ), "the versioned submit_nova_intent import must occur before its call"
 
     module_effect_nodes = _execution_scope_nodes(
         [
@@ -272,6 +330,29 @@ def submit_intent_proposal(proposal):
     from nova.swarm_runtime_bridge import submit_nova_intent
     submit_nova_intent(EntityKernel(), proposal, source_slot=1)
     return (decide := EntityKernel().govern)(proposal)
+""",
+        """
+def submit_intent_proposal(
+    proposal,
+    submit_nova_intent=fake_entry,
+):
+    result = submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    return result
+""",
+        """
+def submit_intent_proposal(proposal):
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    match fake_entry:
+        case submit_nova_intent:
+            pass
+    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+""",
+        """
+def submit_intent_proposal(proposal):
+    result = submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    return result
 """,
     ],
 )
