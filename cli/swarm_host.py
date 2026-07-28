@@ -397,7 +397,20 @@ class SidekickSwarmService:
         durable = store.get_run(run_id)
         if durable is None or durable.status != "completed":
             return
-        callback(project_root, durable)
+        try:
+            callback(project_root, durable)
+        except Exception:
+            # Completion is already durable. An optional process-only observer
+            # cannot turn that success into a caller-visible failure or leak
+            # its diagnostic details.
+            try:
+                store.append_event(
+                    run_id,
+                    "run.completion_observer_failed",
+                    {"reason": "completion_observer_failed"},
+                )
+            except Exception:
+                pass
 
     def _wait_for_running(
         self,

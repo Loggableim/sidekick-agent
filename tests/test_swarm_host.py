@@ -159,6 +159,50 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
     assert all(call["provider"] == "ollama-cloud" for call in calls)
 
 
+def test_completion_observer_exception_keeps_the_durable_completed_result(
+    tmp_path: Path,
+):
+    """Catches an optional integration observer turning completion into failure."""
+    secret_error = "private observer detail must not escape"
+
+    def raising_observer(_project_root: Path, _run) -> None:
+        raise RuntimeError(secret_error)
+
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    service = SidekickSwarmService(
+        call_llm=_valid_response,
+        execution_options_resolver=lambda _project, _run: (
+            swarm_host.SwarmExecutionOptions(on_completed=raising_observer)
+        ),
+    )
+    run = service.start_run("contain an observer failure", tmp_path)
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    persisted = ProjectSwarmStore.open_read_only(tmp_path).get_run(run.run_id)
+    observer_events = [
+        event
+        for event in ProjectSwarmStore.open_read_only(tmp_path).list_events(run.run_id)
+        if event.event_type == "run.completion_observer_failed"
+    ]
+    assert summary.status == "completed"
+    assert persisted is not None and persisted.status == "completed"
+    assert [event.payload for event in observer_events] == [
+        {"reason": "completion_observer_failed"}
+    ]
+    assert secret_error not in json.dumps(
+        [event.payload for event in observer_events],
+        sort_keys=True,
+    )
+
+
 def test_execution_options_required_hook_still_fails_closed_without_a_resolver(
     tmp_path: Path,
 ):
