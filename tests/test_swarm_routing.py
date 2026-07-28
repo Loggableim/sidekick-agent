@@ -48,8 +48,8 @@ def test_router_uses_exact_ollama_only_role_chains_without_gpt_oss():
     router = ModelRouter(ModelRegistry())
 
     expected = {
-        "default": ("deepseek-v4-flash",),
-        "scout": ("deepseek-v4-flash",),
+        "default": ("deepseek-v4-flash", "deepseek-v4-pro"),
+        "scout": ("deepseek-v4-flash", "deepseek-v4-pro"),
         "planner": ("deepseek-v4-pro", "kimi-k2.6"),
         "builder": ("minimax-m3",),
         "critic": ("minimax-m3",),

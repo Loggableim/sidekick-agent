@@ -208,7 +208,7 @@ _MODEL_SPECS = (
         thinking=True,
         json_capable=True,
         context_budget=1_000_000,
-        role_quality={"planner": 1.0},
+        role_quality={"default": 0.9, "planner": 1.0, "scout": 0.9},
     ),
     ModelSpec(
         "kimi-k2.6",

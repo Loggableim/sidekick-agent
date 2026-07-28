@@ -112,6 +112,54 @@ def test_scout_schema_invalid_flash_response_uses_only_pro_cloud_fallback_and_bu
     ]
 
 
+def test_scout_two_schema_invalid_cloud_responses_pause_after_flash_and_pro_only():
+    """Catches a production Scout retry escaping its two-model Cloud chain."""
+
+    class SchemaInvalidScoutTransport(ModelTransport):
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.requests.append(request)
+            return ModelResponse(
+                model=request.model,
+                content="Scout response missing required structured fields.",
+                data={"work": "scout inspection"},
+            )
+
+    budget = CallBudget(limit=2)
+    transport = SchemaInvalidScoutTransport()
+    failures = []
+
+    with pytest.raises(WorkflowPaused) as raised:
+        ModelExecutor(
+            ModelRouter(ModelRegistry()),
+            transport,
+            call_budget=budget,
+        ).complete(
+            RoleCall("scout", "Inspect the project.", {}),
+            run_id="scout-schema-pause",
+            on_failure=failures.append,
+        )
+
+    assert raised.value.reason == "model_chain_exhausted"
+    assert raised.value.role == "scout"
+    assert raised.value.attempted_models == (
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    )
+    assert [request.model for request in transport.requests] == [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    ]
+    assert {request.provider for request in transport.requests} == {"ollama-cloud"}
+    assert budget.used == 2
+    assert [(failure.model, failure.reason) for failure in failures] == [
+        ("deepseek-v4-flash", "schema_invalid"),
+        ("deepseek-v4-pro", "schema_invalid"),
+    ]
+
+
 def test_coding_team_runs_exact_stages_with_sharded_blackboard_context(tmp_path: Path):
     """Catches missing stages, model drift, or leaking the full blackboard to every role."""
     transport = WorkflowTransport()
