@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 
@@ -47,6 +49,7 @@ def test_get_or_create_space_normalizes_default_alias(monkeypatch, tmp_path):
 
     assert space.slug == "nova"
     assert (spaces_root / "nova" / "space.yaml").exists()
+    assert space.load_config()["space_id"]
     assert not (spaces_root / "novaspace").exists()
 
 
@@ -91,7 +94,7 @@ def test_space_governance_persists_identity_and_increments_revision(monkeypatch,
     monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
 
     space = space_engine.Space("alpha", "Alpha")
-    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    space.save_config({"name": "Alpha", "project_dir": str(project)}, mint_space_id=True)
     space_id = space.load_config()["space_id"]
     confirmation = {
         "space_id": space_id,
@@ -148,8 +151,8 @@ def test_space_governance_rejects_enrollment_without_a_trusted_project(monkeypat
         )
 
 
-def test_space_governance_rolls_back_when_its_required_audit_append_fails(monkeypatch, tmp_path):
-    """A management transition cannot persist when its append-only evidence fails."""
+def test_space_governance_rolls_back_when_atomic_management_write_fails(monkeypatch, tmp_path):
+    """A management transition cannot persist when its atomic write fails."""
     from web.api import space_engine
 
     spaces_root = tmp_path / "spaces"
@@ -159,13 +162,13 @@ def test_space_governance_rolls_back_when_its_required_audit_append_fails(monkey
     space.save_config({"name": "Alpha"})
     before = space.config_path.read_bytes()
     monkeypatch.setattr(
-        space_engine,
-        "_append_nova_management_audit",
+        space_engine.Space,
+        "_atomic_write_config",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
         raising=False,
     )
 
-    with pytest.raises(space_engine.SpaceGovernanceError):
+    with pytest.raises(OSError):
         space_engine.update_nova_management(
             space,
             yolo=True,
@@ -176,3 +179,114 @@ def test_space_governance_rolls_back_when_its_required_audit_append_fails(monkey
         )
 
     assert space.config_path.read_bytes() == before
+
+
+def test_management_rejects_a_malformed_audit_without_overwriting_it(monkeypatch, tmp_path):
+    """Malformed audit evidence fails closed instead of being silently replaced."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.root.mkdir(parents=True)
+    space.config_path.write_text(
+        "name: Alpha\nnova_management_audit: malformed\n",
+        encoding="utf-8",
+    )
+    before = space.config_path.read_bytes()
+
+    with pytest.raises(space_engine.SpaceGovernanceError, match="audit is malformed"):
+        space_engine.update_nova_management(
+            space,
+            yolo=True,
+            enrolled=False,
+            confirmation=None,
+            trusted_project_root=None,
+            actor="dashboard:test",
+        )
+
+    assert space.config_path.read_bytes() == before
+
+
+def test_management_persists_governance_and_audit_together_in_space_config(monkeypatch, tmp_path):
+    """The audit history is atomically bound to the same config revision."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"}, mint_space_id=True)
+
+    space_engine.update_nova_management(
+        space,
+        yolo=True,
+        enrolled=False,
+        confirmation=None,
+        trusted_project_root=None,
+        actor="dashboard:test",
+    )
+
+    config = space.load_config()
+    assert config["nova_management"]["revision"] == 1
+    assert config["nova_management_audit"][-1]["next"]["revision"] == 1
+    assert space_engine.list_nova_management_audit(space) == config["nova_management_audit"]
+    assert not (space.root / "nova-management-audit.jsonl").exists()
+
+
+def test_management_save_failure_leaves_config_and_audit_unchanged(monkeypatch, tmp_path):
+    """A failed atomic write cannot expose a new governance state without its audit."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"}, mint_space_id=True)
+    before = space.config_path.read_bytes()
+    monkeypatch.setattr(
+        space_engine.Space,
+        "_atomic_write_config",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+        raising=False,
+    )
+
+    with pytest.raises(OSError):
+        space_engine.update_nova_management(
+            space,
+            yolo=True,
+            enrolled=False,
+            confirmation=None,
+            trusted_project_root=None,
+            actor="dashboard:test",
+        )
+
+    assert space.config_path.read_bytes() == before
+    assert space.load_config()["nova_management_audit"] == []
+
+
+def test_concurrent_management_updates_form_one_strict_revision_chain(monkeypatch, tmp_path):
+    """Concurrent writes serialize into one coherent audit and revision sequence."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"}, mint_space_id=True)
+
+    def transition(enabled):
+        return space_engine.update_nova_management(
+            space,
+            yolo=enabled,
+            enrolled=False,
+            confirmation=None,
+            trusted_project_root=None,
+            actor="dashboard:test",
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(transition, [True, False] * 8))
+
+    audit = space_engine.list_nova_management_audit(space)
+    assert sorted(item["revision"] for item in results) == list(range(1, 17))
+    assert [event["governance_revision"] for event in audit] == list(range(1, 17))
+    assert all(event["previous"]["revision"] + 1 == event["next"]["revision"] for event in audit)
+    assert (space.root / ".nova-management.lock").is_file()
