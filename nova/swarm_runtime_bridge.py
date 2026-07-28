@@ -642,7 +642,8 @@ class NovaSwarmRuntimeBridge:
         if admission.status != "created" or admission.run is None:
             if admission.run is not None:
                 store.append_event(admission.run.run_id, "nova.bridge.admission_not_dispatched", {"status": admission.status})
-            return NovaBridgeResult(admission.status, admission.run.run_id, admission.reason)
+            run_id = admission.run.run_id if admission.run is not None else None
+            return NovaBridgeResult(admission.status, run_id, admission.reason)
         try:
             _register_runtime_binding(
                 self._project_root,
@@ -712,15 +713,14 @@ class NovaSwarmRuntimeBridge:
             self._kernel, PolicyGate(ProjectSwarmStore(self._project_root)), enabled=True
         )
         proposal = adapter.translate(snapshot.to_suggestion(context))
+        if proposal_digest(proposal) != durable.metadata.get("proposal_digest"):
+            raise ValueError("Nova runtime attachment proposal mismatch")
         register_nova_runtime_context(
             self._project_root,
             run=durable,
             adapter=adapter,
             trusted_project_root=context,
         )
-        if proposal_digest(proposal) != durable.metadata.get("proposal_digest"):
-            _unregister_runtime_binding(self._project_root, durable.run_id)
-            raise ValueError("Nova runtime attachment proposal mismatch")
 
 
 def nova_execution_options_for_run(

@@ -1,18 +1,146 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import copy
 import json
 from pathlib import Path
+import threading
 
 import pytest
 
 from cli.swarm import build_parser, get_swarm_service, swarm_command
-from cli.swarm_host import SidekickSwarmService
+from cli.swarm_host import (
+    OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+    SidekickSwarmService,
+)
+import nova.swarm_runtime_bridge as nova_bridge
 from swarm_core.engine import SwarmEngine
-from swarm_core.models import ModelRequest, ModelResponse
+from swarm_core.models import ModelCatalogSnapshot, ModelRequest, ModelResponse
 from swarm_core.packs import PackDefinition
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.transport import ModelTransport
+
+
+_NOVA_CLI_MODELS = (
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "kimi-k2.6",
+    "minimax-m3",
+    "glm-5.2",
+    "kimi-k2.7-code",
+    "nemotron-3-super",
+)
+
+
+class _CliNovaKernel:
+    def __init__(self, project_root: Path) -> None:
+        self.space_dir = project_root
+        self.actions = type(
+            "Actions",
+            (),
+            {"space_dir": project_root},
+        )()
+        self.policy = type(
+            "Policy",
+            (),
+            {"action_tier": lambda _self, _action: "internal"},
+        )()
+        self.govern_calls: list[dict[str, object]] = []
+        self.act_calls: list[dict[str, object]] = []
+
+    @staticmethod
+    def is_yolo_enabled() -> bool:
+        return False
+
+    def govern(self, intent):
+        self.govern_calls.append(copy.deepcopy(intent))
+        return {
+            "intent": copy.deepcopy(intent),
+            "policy": {"allowed": True, "tier": intent["tier"]},
+            "state": {},
+            "autonomy": {},
+        }
+
+    def act(self, decision):
+        self.act_calls.append(copy.deepcopy(decision))
+        return {"executed": True}
+
+
+def _paused_cli_nova_run(project: Path):
+    nova_bridge.configure_nova_bridge(project, enabled=True)
+    ProjectSwarmStore(project).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_NOVA_CLI_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    kernel = _CliNovaKernel(project)
+    context = nova_bridge._create_nova_bridge_context(
+        project, validator=lambda candidate: candidate
+    )
+    paused = threading.Event()
+
+    def pause_dispatch(project_root: Path, run_id: str) -> None:
+        ProjectSwarmStore(project_root).set_run_status(run_id, "paused")
+        paused.set()
+
+    result = nova_bridge.NovaSwarmRuntimeBridge(
+        kernel,
+        project_root=project,
+        trusted_project_root=context,
+        dispatcher=pause_dispatch,
+    ).submit(
+        {
+            "action": "mind_diary",
+            "need": "continuity",
+            "title": "Resume the attached Nova bridge",
+            "why": "Exercise the same-process CLI continuation.",
+            "target": {},
+            "payload": {"content": "A deterministic CLI bridge note."},
+            "priority": 0.8,
+        },
+        source_slot=900,
+    )
+    assert result.run_id is not None
+    assert paused.wait(timeout=1)
+    run = ProjectSwarmStore.open_read_only(project).get_run(result.run_id)
+    assert run is not None and run.status == "paused"
+    return kernel, context, run
+
+
+def _cli_nova_service(model_calls: list[dict[str, object]]) -> SidekickSwarmService:
+    @contextmanager
+    def provider_slot(_run_id: str, _provider: str):
+        yield
+
+    def call_llm(**kwargs):
+        model_calls.append(dict(kwargs))
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "work": "deterministic CLI bridge work",
+                                "evidence": ["task8:cli"],
+                                "decision": "approved",
+                                "approved": True,
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+    return SidekickSwarmService(
+        call_llm=call_llm,
+        provider_slot=provider_slot,
+        execution_options_resolver=nova_bridge.nova_execution_options_for_run,
+        pause_poll_seconds=0.001,
+    )
 
 
 def _parse(argv: list[str]) -> argparse.Namespace:
@@ -26,6 +154,70 @@ def test_cli_service_installs_the_durable_nova_options_resolver():
     """Catches CLI resume bypassing the Nova required hook resolver."""
     service = get_swarm_service()
     assert service._execution_options_resolver.__name__ == "nova_execution_options_for_run"
+
+
+def test_cli_resume_completes_a_same_process_nova_run_after_explicit_attachment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Catches CLI resume discarding an explicitly reattached Nova capability."""
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+    kernel, context, run = _paused_cli_nova_run(project)
+    nova_bridge._unregister_runtime_binding(project, run.run_id)
+    nova_bridge.NovaSwarmRuntimeBridge(
+        kernel,
+        project_root=project,
+        trusted_project_root=context,
+    ).attach_admitted_run(run)
+    model_calls: list[dict[str, object]] = []
+    resume = _parse(
+        ["swarm", "--project", str(project), "--json", "resume", run.run_id]
+    )
+
+    assert swarm_command(resume, service=_cli_nova_service(model_calls)) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    persisted = ProjectSwarmStore.open_read_only(project).get_run(run.run_id)
+    assert payload["status"] == "completed"
+    assert persisted is not None and persisted.status == "completed"
+    assert len(model_calls) == 8
+    assert len(kernel.govern_calls) == 1
+    assert len(kernel.act_calls) == 1
+
+
+def test_cli_resume_fresh_process_nova_run_blocks_before_model_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    """Catches durable Nova metadata minting a capability in a fresh process."""
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+    kernel, _context, run = _paused_cli_nova_run(project)
+    nova_bridge._unregister_runtime_binding(project, run.run_id)
+    model_calls: list[dict[str, object]] = []
+    resume = _parse(
+        ["swarm", "--project", str(project), "--json", "resume", run.run_id]
+    )
+
+    assert swarm_command(resume, service=_cli_nova_service(model_calls)) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    events = ProjectSwarmStore.open_read_only(project).list_events(run.run_id)
+    assert payload["status"] == "paused"
+    assert payload["pause_reason"] == "nova_bridge_unavailable"
+    assert model_calls == []
+    assert kernel.govern_calls == []
+    assert kernel.act_calls == []
+    assert [
+        event.payload
+        for event in events
+        if event.event_type == "run.execution_blocked"
+    ] == [{"reason": "nova_bridge_unavailable"}]
 
 
 def test_cli_init_is_explicit_and_status_on_missing_project_is_read_only(

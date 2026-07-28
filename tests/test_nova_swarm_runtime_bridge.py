@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 import builtins
+from contextlib import contextmanager
+import copy
 from dataclasses import replace
+import json
 import os
 from pathlib import Path
 import pickle
+import sqlite3
 import sys
+import threading
+import time
 
 import pytest
 
+from cli.swarm_host import (
+    OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+    SidekickSwarmService,
+)
 from nova.actions import ActionRegistry
 from nova.swarm_adapter import get_nova_action_spec
 import nova.swarm_runtime_bridge as bridge
@@ -19,7 +29,305 @@ from nova.swarm_runtime_bridge import (
     configure_nova_bridge,
     load_nova_bridge_config,
 )
-from swarm_core.verifier import InvalidVerifierResult, VERIFIED_DECISION
+from swarm_core.models import ModelCatalogSnapshot
+from swarm_core.store import ProjectSwarmStore
+from swarm_core.verifier import (
+    InvalidVerifierResult,
+    VERIFIED_DECISION,
+    VerificationResult,
+)
+
+
+_ROUTED_MODELS = (
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "kimi-k2.6",
+    "minimax-m3",
+    "glm-5.2",
+    "kimi-k2.7-code",
+    "nemotron-3-super",
+)
+
+
+class _FakeNovaPolicy:
+    _TIERS = {
+        "agenda_update": "silent",
+        "blog_draft": "external",
+        "mind_diary": "internal",
+        "prioritize_thread": "silent",
+    }
+
+    def action_tier(self, action: str) -> str:
+        return self._TIERS[action]
+
+
+class _FakeNovaActionRecorder:
+    def __init__(self, project_root: Path, timeline: list[str]) -> None:
+        self.space_dir = project_root
+        self.calls: list[dict[str, object]] = []
+        self._timeline = timeline
+
+    def execute(self, decision: dict[str, object]) -> dict[str, object]:
+        self._timeline.append("act")
+        self.calls.append(copy.deepcopy(decision))
+        return {"executed": True, "status": "done"}
+
+
+class _FakeNovaKernel:
+    def __init__(self, project_root: Path, *, yolo: bool = False) -> None:
+        self.space_dir = project_root
+        self.timeline: list[str] = []
+        self.actions = _FakeNovaActionRecorder(project_root, self.timeline)
+        self.policy = _FakeNovaPolicy()
+        self.yolo = yolo
+        self.yolo_checks = 0
+        self.govern_mode = "allow"
+        self.root_mismatch_target: Path | None = None
+        self.govern_calls: list[dict[str, object]] = []
+        self.policy_claimed_before_govern: list[bool] = []
+
+    def is_yolo_enabled(self) -> bool:
+        self.yolo_checks += 1
+        return self.yolo
+
+    def govern(self, intent: dict[str, object]) -> dict[str, object]:
+        self.timeline.append("govern")
+        self.govern_calls.append(copy.deepcopy(intent))
+        with sqlite3.connect(
+            self.space_dir / ".swarm" / "runtime" / "swarm.sqlite"
+        ) as connection:
+            claimed = bool(
+                connection.execute(
+                    "SELECT COUNT(*) FROM action_executions WHERE proposal_id = ?",
+                    (intent["id"],),
+                ).fetchone()[0]
+            )
+        self.policy_claimed_before_govern.append(claimed)
+        if self.govern_mode == "crash":
+            raise RuntimeError("fake post-claim crash")
+        if self.root_mismatch_target is not None:
+            self.space_dir = self.root_mismatch_target
+        allowed = self.govern_mode != "deny"
+        return {
+            "intent": copy.deepcopy(intent),
+            "policy": {
+                "allowed": allowed,
+                "reason": None if allowed else "nova_policy_blocked",
+                "tier": intent["tier"],
+            },
+            "state": {},
+            "autonomy": {},
+        }
+
+    def act(self, decision: dict[str, object]) -> dict[str, object]:
+        return self.actions.execute(decision)
+
+
+class _FakeBridgeHost:
+    """A deterministic Sidekick host with no process, network, or live Nova access."""
+
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        yolo: bool = False,
+        review_denied_model: str | None = None,
+        provider_unavailable: bool = False,
+    ) -> None:
+        self.project_root = project_root.resolve()
+        self.kernel = _FakeNovaKernel(self.project_root, yolo=yolo)
+        self.context = bridge._create_nova_bridge_context(
+            self.project_root,
+            validator=lambda candidate: candidate,
+        )
+        self.review_denied_model = review_denied_model
+        self.provider_unavailable = provider_unavailable
+        self.model_calls: list[dict[str, object]] = []
+        self.provider_slots: list[tuple[str, str]] = []
+        self.worker_run_ids: list[str] = []
+        self.summaries: dict[str, object] = {}
+        self.worker_errors: dict[str, BaseException] = {}
+        self.options_mutator = None
+        self.after_options_resolved = None
+        self._condition = threading.Condition()
+        ProjectSwarmStore(self.project_root).save_model_catalog_snapshot(
+            ModelCatalogSnapshot(
+                provider="ollama-cloud",
+                models=_ROUTED_MODELS,
+                healthy=True,
+                source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+            )
+        )
+        self.service = SidekickSwarmService(
+            call_llm=self._call_llm,
+            catalog_refresher=self._unexpected_catalog_refresh,
+            provider_slot=self._provider_slot,
+            execution_options_resolver=self._resolve_options,
+            pause_poll_seconds=0.001,
+        )
+
+    def bridge(self, *, dispatcher=None) -> bridge.NovaSwarmRuntimeBridge:
+        return bridge.NovaSwarmRuntimeBridge(
+            self.kernel,
+            project_root=self.project_root,
+            trusted_project_root=self.context,
+            dispatcher=dispatcher or self.dispatch,
+        )
+
+    def dispatch(self, project_root: Path, run_id: str) -> None:
+        with self._condition:
+            self.worker_run_ids.append(run_id)
+            self._condition.notify_all()
+        try:
+            summary = self.service.execute_run(project_root, run_id)
+        except BaseException as exc:
+            with self._condition:
+                self.worker_errors[run_id] = exc
+                self._condition.notify_all()
+            raise
+        with self._condition:
+            self.summaries[run_id] = summary
+            self._condition.notify_all()
+
+    def wait_for_worker(self, run_id: str, *, timeout: float = 3.0):
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while (
+                run_id not in self.summaries
+                and run_id not in self.worker_errors
+                and time.monotonic() < deadline
+            ):
+                self._condition.wait(deadline - time.monotonic())
+            if run_id in self.worker_errors:
+                raise AssertionError("fake bridge worker crashed") from self.worker_errors[
+                    run_id
+                ]
+            if run_id not in self.summaries:
+                raise AssertionError("fake bridge worker did not finish")
+            return self.summaries[run_id]
+
+    def wait_for_dispatch(self, *, count: int = 1, timeout: float = 1.0) -> None:
+        deadline = time.monotonic() + timeout
+        with self._condition:
+            while len(self.worker_run_ids) < count and time.monotonic() < deadline:
+                self._condition.wait(deadline - time.monotonic())
+            if len(self.worker_run_ids) < count:
+                raise AssertionError("fake bridge worker was not dispatched")
+
+    def _resolve_options(self, project_root: Path, run):
+        options = bridge.nova_execution_options_for_run(project_root, run)
+        assert options is not None
+        if self.options_mutator is not None:
+            options = self.options_mutator(options, run)
+        if self.after_options_resolved is not None:
+            callback = self.after_options_resolved
+            self.after_options_resolved = None
+            callback(run)
+        return options
+
+    def _call_llm(self, **kwargs):
+        self.model_calls.append(dict(kwargs))
+        if self.provider_unavailable:
+            raise ConnectionError("fake Ollama Cloud unavailable")
+        model = kwargs["model"]
+        approved = model != self.review_denied_model
+        content = json.dumps(
+            {
+                "work": f"{model} completed deterministic fake work",
+                "evidence": [f"fake-cloud:{model}"],
+                "decision": "approved" if approved else "denied",
+                "approved": approved,
+            }
+        )
+        return {"choices": [{"message": {"content": content}}]}
+
+    @contextmanager
+    def _provider_slot(self, run_id: str, provider: str):
+        self.provider_slots.append((run_id, provider))
+        yield
+
+    @staticmethod
+    def _unexpected_catalog_refresh():
+        raise AssertionError("durable fake catalog must not refresh")
+
+
+class _FixedVerifier:
+    def __init__(self, *, decision: str, evidence: str) -> None:
+        self.decision = decision
+        self.evidence = evidence
+
+    def verify(self, _request) -> VerificationResult:
+        return VerificationResult(
+            work="Deterministic fake verifier outcome.",
+            evidence=(self.evidence,),
+            decision=self.decision,
+            provenance={"adapter": "task-8-fake", "mode": "read_only"},
+        )
+
+
+def _configure_enabled_fake_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    **kwargs,
+) -> _FakeBridgeHost:
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.com/v1")
+    configure_nova_bridge(project, enabled=True)
+    return _FakeBridgeHost(project, **kwargs)
+
+
+def _pause_reason(project_root: Path, run_id: str) -> str | None:
+    paused = [
+        event
+        for event in ProjectSwarmStore.open_read_only(project_root).list_events(run_id)
+        if event.event_type == "run.paused"
+    ]
+    return paused[-1].payload["reason"] if paused else None
+
+
+def _tamper_run_metadata(
+    project_root: Path,
+    run_id: str,
+    mutator,
+) -> dict[str, object]:
+    database = project_root / ".swarm" / "runtime" / "swarm.sqlite"
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT metadata_json FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        assert row is not None
+        metadata = json.loads(row[0])
+        mutator(metadata)
+        connection.execute(
+            "UPDATE runs SET metadata_json = ? WHERE run_id = ?",
+            (json.dumps(metadata, sort_keys=True), run_id),
+        )
+    return metadata
+
+
+def _admit_paused_without_model_calls(
+    host: _FakeBridgeHost,
+    *,
+    source_slot: int,
+):
+    finished = threading.Event()
+
+    def pause_dispatch(project_root: Path, run_id: str) -> None:
+        ProjectSwarmStore(project_root).set_run_status(run_id, "paused")
+        finished.set()
+
+    result = host.bridge(dispatcher=pause_dispatch).submit(
+        _diary_suggestion(), source_slot=source_slot
+    )
+    assert result.status == "created"
+    assert result.run_id is not None
+    assert finished.wait(timeout=1)
+    durable = ProjectSwarmStore.open_read_only(host.project_root).get_run(
+        result.run_id
+    )
+    assert durable is not None and durable.status == "paused"
+    return durable
 
 
 def _diary_suggestion() -> dict[str, object]:
@@ -416,6 +724,536 @@ def test_base64_control_detection_keeps_ordinary_text_usable(trusted_nova_projec
             project_root=trusted_nova_project,
         )
         assert snapshot.to_suggestion(trusted_nova_project)["payload"]["content"] == content
+
+
+def test_bridge_matrix_01_disabled_reads_only_config_and_touches_no_runtime(
+    tmp_path: Path,
+):
+    """#1 catches disabled admission creating state or touching any host surface."""
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    timeline: list[str] = []
+    kernel = _FakeNovaKernel(project)
+    context = bridge._create_nova_bridge_context(
+        project, validator=lambda candidate: candidate
+    )
+
+    result = bridge.NovaSwarmRuntimeBridge(
+        kernel,
+        project_root=project,
+        trusted_project_root=context,
+        dispatcher=lambda *_args: timeline.append("worker"),
+    ).submit(_diary_suggestion(), source_slot=1)
+
+    assert result == bridge.NovaBridgeResult("bridge_disabled")
+    assert timeline == []
+    assert kernel.yolo_checks == 0
+    assert kernel.govern_calls == []
+    assert kernel.actions.calls == []
+    assert not (project / ".swarm").exists()
+
+
+def test_bridge_matrix_02_unsupported_action_records_one_bounded_rejection_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#2 catches rejected work reaching admission, Cloud, govern, act, or a worker."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    suggestion = _diary_suggestion() | {"action": "blog_draft"}
+
+    first = host.bridge(
+        dispatcher=lambda *_args: pytest.fail("unsupported work must not dispatch")
+    ).submit(suggestion, source_slot=2)
+    second = host.bridge(
+        dispatcher=lambda *_args: pytest.fail("unsupported work must not dispatch")
+    ).submit(suggestion, source_slot=2)
+
+    rejection = ProjectSwarmStore(host.project_root).get_integration_admission(
+        "nova", bridge._submission_key(suggestion, 2)
+    )
+    assert first.status == second.status == "unsupported_action"
+    assert first.run_id is second.run_id is None
+    assert rejection is not None
+    assert rejection.run is None
+    assert rejection.reason == "unsupported_action"
+    assert ProjectSwarmStore.open_read_only(host.project_root).list_runs() == []
+    assert host.worker_run_ids == []
+    assert host.model_calls == []
+    assert host.kernel.govern_calls == []
+    assert host.kernel.actions.calls == []
+
+
+def test_bridge_matrix_03_equal_digest_new_bridge_coalesces_one_run_and_worker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#3 catches process-local bridge instances defeating durable idempotency."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    started = threading.Event()
+    release = threading.Event()
+    worker_run_ids: list[str] = []
+
+    def blocking_dispatch(_project_root: Path, run_id: str) -> None:
+        worker_run_ids.append(run_id)
+        started.set()
+        assert release.wait(timeout=2)
+
+    try:
+        first = host.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion(), source_slot=3
+        )
+        assert first.run_id is not None
+        assert started.wait(timeout=1)
+        second = host.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion(), source_slot=3
+        )
+
+        assert first.status == "created"
+        assert second.status == "coalesced"
+        assert second.run_id == first.run_id
+        assert worker_run_ids == [first.run_id]
+        assert len(ProjectSwarmStore.open_read_only(host.project_root).list_runs()) == 1
+        assert host.model_calls == []
+    finally:
+        if "first" in locals() and first.run_id is not None:
+            store = ProjectSwarmStore(host.project_root)
+            if store.get_run(first.run_id).status == "running":
+                store.set_run_status(first.run_id, "paused")
+        release.set()
+
+
+def test_bridge_matrix_04_different_intent_is_rejected_while_running_and_paused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#4 catches replacement workers bypassing the durable one-active slot."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    started = threading.Event()
+    release = threading.Event()
+    worker_run_ids: list[str] = []
+
+    def blocking_dispatch(_project_root: Path, run_id: str) -> None:
+        worker_run_ids.append(run_id)
+        started.set()
+        assert release.wait(timeout=2)
+
+    try:
+        first = host.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion(), source_slot=4
+        )
+        assert first.run_id is not None
+        assert started.wait(timeout=1)
+
+        while_running = host.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion() | {"title": "A different running intent"},
+            source_slot=5,
+        )
+        ProjectSwarmStore(host.project_root).set_run_status(first.run_id, "paused")
+        while_paused = host.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion() | {"title": "A different paused intent"},
+            source_slot=6,
+        )
+
+        assert while_running.status == while_paused.status == "active_limit"
+        assert while_running.run_id is while_paused.run_id is None
+        assert worker_run_ids == [first.run_id]
+        assert host.model_calls == []
+    finally:
+        release.set()
+
+
+def test_bridge_matrix_05_standard_quota_and_literal_kernel_yolo_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#5 catches autonomy/call-budget drift or caller-visible quota bypasses."""
+    standard = _configure_enabled_fake_host(tmp_path / "standard", monkeypatch)
+    standard_runs = []
+    for source_slot in range(10, 16):
+        admitted = standard.bridge().submit(
+            _diary_suggestion()
+            | {"payload": {"content": f"standard intent {source_slot}"}},
+            source_slot=source_slot,
+        )
+        assert admitted.status == "created"
+        assert admitted.run_id is not None
+        summary = standard.wait_for_worker(admitted.run_id)
+        assert summary.status == "completed"
+        standard_runs.append(
+            ProjectSwarmStore.open_read_only(standard.project_root).get_run(
+                admitted.run_id
+            )
+        )
+
+    seventh = standard.bridge().submit(
+        _diary_suggestion() | {"payload": {"content": "seventh standard intent"}},
+        source_slot=16,
+    )
+    assert seventh.status == "rolling_limit"
+    assert all(
+        run is not None
+        and run.metadata["autonomy"] == "reviewed_execution"
+        and run.metadata["nova_mode"] == "reviewed_execution"
+        and run.metadata["nova_max_calls"] == 48
+        for run in standard_runs
+    )
+    assert len(standard.worker_run_ids) == 6
+
+    yolo = _configure_enabled_fake_host(
+        tmp_path / "yolo", monkeypatch, yolo=True
+    )
+    yolo_runs = []
+    for source_slot in range(20, 27):
+        admitted = yolo.bridge().submit(
+            _diary_suggestion()
+            | {"payload": {"content": f"yolo intent {source_slot}"}},
+            source_slot=source_slot,
+        )
+        assert admitted.status == "created"
+        assert admitted.run_id is not None
+        summary = yolo.wait_for_worker(admitted.run_id)
+        assert summary.status == "completed"
+        yolo_runs.append(
+            ProjectSwarmStore.open_read_only(yolo.project_root).get_run(
+                admitted.run_id
+            )
+        )
+    assert all(
+        run is not None
+        and run.metadata["autonomy"] == "autonomous"
+        and run.metadata["nova_mode"] == "autonomous"
+        and run.metadata["nova_max_calls"] == 128
+        for run in yolo_runs
+    )
+
+    started = threading.Event()
+    release = threading.Event()
+    active_workers: list[str] = []
+
+    def blocking_dispatch(_project_root: Path, run_id: str) -> None:
+        active_workers.append(run_id)
+        started.set()
+        assert release.wait(timeout=2)
+
+    try:
+        active = yolo.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion() | {"payload": {"content": "active yolo intent"}},
+            source_slot=27,
+        )
+        assert active.run_id is not None
+        assert started.wait(timeout=1)
+        blocked = yolo.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion() | {"payload": {"content": "blocked yolo intent"}},
+            source_slot=28,
+        )
+        assert blocked.status == "active_limit"
+        assert active_workers == [active.run_id]
+    finally:
+        if "active" in locals() and active.run_id is not None:
+            store = ProjectSwarmStore(yolo.project_root)
+            if store.get_run(active.run_id).status == "running":
+                store.set_run_status(active.run_id, "paused")
+        release.set()
+
+
+def test_bridge_matrix_06_yolo_rejects_unsafe_sources_and_ignores_caller_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#6 catches caller YOLO escalation or unsafe work entering automatic mode."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch, yolo=True)
+
+    def no_dispatch(*_args):
+        pytest.fail("rejected work must not dispatch")
+
+    for action in ("reflection", "blog_draft"):
+        rejected = host.bridge(dispatcher=no_dispatch).submit(
+            _diary_suggestion() | {"action": action},
+            source_slot=30,
+        )
+        assert rejected.status == "unsupported_action"
+
+    outside = host.project_root.parent / "other-root"
+    outside.mkdir()
+    host.kernel.space_dir = outside
+    with pytest.raises(ValueError, match="roots do not match"):
+        host.bridge(dispatcher=no_dispatch).submit(
+            _diary_suggestion(), source_slot=31
+        )
+    host.kernel.space_dir = host.project_root
+
+    host.kernel.yolo = False
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_dispatch(_project_root: Path, _run_id: str) -> None:
+        started.set()
+        assert release.wait(timeout=2)
+
+    try:
+        caller_flag = host.bridge(dispatcher=blocking_dispatch).submit(
+            _diary_suggestion()
+            | {
+                "yolo": True,
+                "autonomy": "autonomous",
+                "external": False,
+            },
+            source_slot=32,
+        )
+        assert caller_flag.run_id is not None
+        assert started.wait(timeout=1)
+        run = ProjectSwarmStore.open_read_only(host.project_root).get_run(
+            caller_flag.run_id
+        )
+        assert run is not None
+        assert run.metadata["nova_mode"] == "reviewed_execution"
+        assert run.metadata["nova_max_calls"] == 48
+    finally:
+        if "caller_flag" in locals() and caller_flag.run_id is not None:
+            store = ProjectSwarmStore(host.project_root)
+            if store.get_run(caller_flag.run_id).status == "running":
+                store.set_run_status(caller_flag.run_id, "paused")
+        release.set()
+    assert host.model_calls == []
+    assert host.kernel.govern_calls == []
+    assert host.kernel.actions.calls == []
+
+
+def test_bridge_matrix_07_verified_workflow_orders_policy_govern_act_and_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#7 catches action execution outside the complete verified bridge lifecycle."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+
+    admitted = host.bridge().submit(_diary_suggestion(), source_slot=40)
+    assert admitted.status == "created"
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+
+    events = ProjectSwarmStore.open_read_only(host.project_root).list_events(
+        admitted.run_id
+    )
+    event_types = [event.event_type for event in events]
+    assert summary.status == "completed"
+    assert host.kernel.policy_claimed_before_govern == [True]
+    assert host.kernel.timeline == ["govern", "act"]
+    assert len(host.kernel.actions.calls) == 1
+    assert (
+        event_types.index("nova.bridge.action_proposed")
+        < event_types.index("nova.bridge.action_result")
+        < event_types.index("run.completed")
+    )
+    assert len(host.model_calls) == 8
+    assert len(host.provider_slots) == len(host.model_calls)
+    assert all(provider == "ollama-cloud" for _run_id, provider in host.provider_slots)
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_pause"),
+    [
+        ("negative_verifier", "nova_review_evidence_unavailable"),
+        ("unavailable_verifier", "nova_review_evidence_unavailable"),
+        ("review_denial", "nova_review_evidence_unavailable"),
+        ("evidence_mismatch", "nova_review_evidence_unavailable"),
+        ("proposal_digest_mismatch", "nova_proposal_digest_mismatch"),
+        ("snapshot_mismatch", "nova_proposal_digest_mismatch"),
+        ("root_mismatch", "nova_root_mismatch"),
+        ("nova_denial", "nova_policy_denied"),
+    ],
+)
+def test_bridge_matrix_08_denials_and_mismatches_pause_auditably_without_act(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+    expected_pause: str,
+):
+    """#8 catches a failed verifier, review, binding, root, or Nova gate acting."""
+    host = _configure_enabled_fake_host(
+        tmp_path,
+        monkeypatch,
+        review_denied_model="glm-5.2" if case == "review_denial" else None,
+    )
+    if case in {"negative_verifier", "unavailable_verifier", "evidence_mismatch"}:
+        decision = (
+            "verification_unavailable"
+            if case == "unavailable_verifier"
+            else "rejected"
+            if case == "negative_verifier"
+            else VERIFIED_DECISION
+        )
+        host.options_mutator = lambda options, _run: replace(
+            options,
+            verifier=_FixedVerifier(
+                decision=decision,
+                evidence="task8:independent-but-unbound",
+            ),
+        )
+    elif case == "proposal_digest_mismatch":
+        host.after_options_resolved = lambda run: _tamper_run_metadata(
+            host.project_root,
+            run.run_id,
+            lambda metadata: metadata.__setitem__("proposal_digest", "0" * 64),
+        )
+    elif case == "snapshot_mismatch":
+        host.after_options_resolved = lambda run: _tamper_run_metadata(
+            host.project_root,
+            run.run_id,
+            lambda metadata: metadata["nova_snapshot"].__setitem__(
+                "title", "tampered durable snapshot"
+            ),
+        )
+    elif case == "root_mismatch":
+        other = host.project_root.parent / "root-after-admission"
+        other.mkdir()
+        host.kernel.root_mismatch_target = other
+    elif case == "nova_denial":
+        host.kernel.govern_mode = "deny"
+
+    admitted = host.bridge().submit(_diary_suggestion(), source_slot=50)
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == expected_pause
+    assert _pause_reason(host.project_root, admitted.run_id) == expected_pause
+    assert host.kernel.actions.calls == []
+
+
+def test_bridge_matrix_09_provider_pause_has_no_replacement_or_automatic_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#9 catches provider exhaustion spawning or silently resuming another worker."""
+    host = _configure_enabled_fake_host(
+        tmp_path, monkeypatch, provider_unavailable=True
+    )
+
+    admitted = host.bridge().submit(_diary_suggestion(), source_slot=60)
+    assert admitted.run_id is not None
+    summary = host.wait_for_worker(admitted.run_id)
+    time.sleep(0.02)
+
+    persisted = ProjectSwarmStore.open_read_only(host.project_root).get_run(
+        admitted.run_id
+    )
+    assert summary.status == "paused"
+    assert summary.pause_reason == "model_chain_exhausted"
+    assert persisted is not None and persisted.status == "paused"
+    assert host.worker_run_ids == [admitted.run_id]
+    assert host.kernel.govern_calls == []
+    assert host.kernel.actions.calls == []
+
+
+def test_bridge_matrix_10_post_claim_crash_recovers_once_without_replaying_action(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """#10 catches recovery replaying a policy-claimed govern or act boundary."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    host.kernel.govern_mode = "crash"
+
+    admitted = host.bridge().submit(_diary_suggestion(), source_slot=70)
+    assert admitted.run_id is not None
+    first = host.wait_for_worker(admitted.run_id)
+    assert first.pause_reason == "nova_pre_completion_validation_failed"
+    assert len(host.kernel.govern_calls) == 1
+    assert host.kernel.actions.calls == []
+
+    host.kernel.govern_mode = "allow"
+    host.service.resume(host.project_root, admitted.run_id)
+    second = host.service.execute_run(host.project_root, admitted.run_id)
+    assert second.pause_reason == "nova_action_claimed_requires_human_recovery"
+
+    store = ProjectSwarmStore(host.project_root)
+    assert store.claim_run_execution_lease(admitted.run_id, "abandoned-task8-owner")
+    recovered = host.service.recover_execution_lease(
+        host.project_root,
+        admitted.run_id,
+        actor_id="os:uid:4242",
+    )
+    assert recovered.status == "paused"
+    host.service.resume(host.project_root, admitted.run_id)
+    third = host.service.execute_run(host.project_root, admitted.run_id)
+
+    events = ProjectSwarmStore.open_read_only(host.project_root).list_events(
+        admitted.run_id
+    )
+    recovery_events = [
+        event
+        for event in events
+        if event.event_type == "nova.bridge.recovery_required"
+    ]
+    assert third.pause_reason == "nova_action_claimed_requires_human_recovery"
+    assert len(recovery_events) == 1
+    assert len(host.kernel.govern_calls) == 1
+    assert host.kernel.actions.calls == []
+
+
+def test_attach_admitted_run_accepts_only_a_matching_paused_durable_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches same-process attachment trusting metadata without the host capability."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    paused = _admit_paused_without_model_calls(host, source_slot=80)
+    bridge._unregister_runtime_binding(host.project_root, paused.run_id)
+    assert (
+        bridge.nova_execution_options_for_run(
+            host.project_root, paused
+        ).blocked_reason
+        == "nova_bridge_unavailable"
+    )
+
+    host.bridge().attach_admitted_run(paused)
+
+    options = bridge.nova_execution_options_for_run(host.project_root, paused)
+    assert options is not None
+    assert options.blocked_reason is None
+    assert options.max_calls == 48
+    assert options.verifier is not None
+    assert options.pre_completion_hook is not None
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["running", "completed", "root_mismatch", "proposal_mismatch"],
+)
+def test_attach_admitted_run_rejection_preserves_the_existing_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+):
+    """Catches a failed attachment deleting or replacing a valid process binding."""
+    host = _configure_enabled_fake_host(tmp_path, monkeypatch)
+    paused = _admit_paused_without_model_calls(host, source_slot=81)
+    store = ProjectSwarmStore(host.project_root)
+    candidate = paused
+    if case in {"running", "completed", "root_mismatch"}:
+        metadata = copy.deepcopy(paused.metadata)
+        if case == "root_mismatch":
+            metadata["project_root"] = str(host.project_root.parent / "other")
+        candidate = store.create_run(
+            run_id=f"attach-{case}",
+            status="completed" if case == "completed" else "paused"
+            if case == "root_mismatch"
+            else "running",
+            metadata=metadata,
+        )
+    else:
+        _tamper_run_metadata(
+            host.project_root,
+            paused.run_id,
+            lambda metadata: metadata.__setitem__("proposal_digest", "f" * 64),
+        )
+
+    with pytest.raises((RuntimeError, ValueError)):
+        host.bridge().attach_admitted_run(candidate)
+
+    existing = bridge.nova_execution_options_for_run(host.project_root, paused)
+    assert existing is not None
+    assert existing.blocked_reason is None
+    assert existing.max_calls == 48
 
 
 def test_prioritize_thread_normalizes_blank_thread_id_to_a_valid_topic(
