@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
-from swarm_core.router import ModelRouter
+from swarm_core.router import ModelRouter, NoEligibleModel
 from swarm_core.transport import (
     ModelProviderError,
     ModelTimeoutError,
@@ -65,6 +65,37 @@ def test_router_uses_exact_ollama_only_role_chains_without_gpt_oss():
         assert selection.models == expected_models
         assert selection.provider == "ollama-cloud"
         assert all("gpt-oss" not in model.lower() for model in selection.models)
+
+
+@pytest.mark.parametrize("role", ("default", "scout"))
+def test_router_requires_flash_before_exposing_the_pro_fallback(role: str):
+    """Catches filtering Flash out and silently promoting Pro to a primary."""
+    router = ModelRouter(ModelRegistry(catalog={"deepseek-v4-pro"}))
+
+    with pytest.raises(NoEligibleModel):
+        router.select(role, {"structured-output"})
+
+
+@pytest.mark.parametrize("role", ("default", "scout"))
+def test_missing_flash_pauses_before_the_pro_fallback_reaches_the_provider(role: str):
+    """Catches a Pro-only refreshed catalog spending a primary role call."""
+    transport = RecordingTransport()
+    executor = ModelExecutor(
+        ModelRouter(ModelRegistry(catalog={"deepseek-v4-pro"})),
+        transport,
+    )
+
+    with pytest.raises(WorkflowPaused) as raised:
+        executor.complete(
+            RoleCall(role=role, prompt="inspect", context={}),
+            run_id=f"missing-flash-{role}",
+        )
+
+    assert raised.value.reason == "no_eligible_model"
+    assert raised.value.role == role
+    assert raised.value.attempted_models == ()
+    assert transport.requests == []
+    assert executor.call_budget.used == 0
 
 
 def test_independent_review_pair_uses_distinct_required_model_families():

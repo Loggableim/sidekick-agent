@@ -60,12 +60,19 @@ class ModelRouter:
                 configured_chain = _ROLE_CHAINS[role]
             except KeyError as exc:
                 raise KeyError(f"Unknown Swarm role: {role}") from exc
-            chain = tuple(
-                name
-                for name in configured_chain
-                if self.registry.is_available(name)
-                and self.registry.get(name).supports(required)
-            )
+            primary = configured_chain[0]
+            if role in {"default", "scout"} and (
+                not self.registry.is_available(primary)
+                or not self.registry.get(primary).supports(required)
+            ):
+                chain = ()
+            else:
+                chain = tuple(
+                    name
+                    for name in configured_chain
+                    if self.registry.is_available(name)
+                    and self.registry.get(name).supports(required)
+                )
         if not chain:
             raise NoEligibleModel(
                 f"No Ollama Cloud model for role {role!r} and requirements "
