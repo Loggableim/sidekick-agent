@@ -566,6 +566,61 @@ Ollama.
   git commit -m "test: cover Nova Swarm runtime bridge behavior"
   ~~~
 
+## Task 9: Add the versioned live-entry API and harden the deployment contract
+
+**Files:**
+
+- Modify: nova/swarm_runtime_bridge.py
+- Modify: tests/test_nova_swarm_runtime_bridge.py
+- Modify: tests/test_nova_swarm_live_seam.py
+
+**Purpose:**
+
+Task 6's preflight found that the planned live seam calls a missing
+`submit_nova_intent()` API.  This remediation must be complete before any live
+file changes.  It remains entirely versioned/non-live.
+
+- [ ] **Step 1: Write failing public-entry and AST-contract tests**
+
+  Test `submit_nova_intent(kernel, proposal, source_slot)` with a disposable
+  trusted fake kernel.  It must create the host-owned runtime context from the
+  code-owned kernel roots, delegate only through `NovaSwarmRuntimeBridge`, and
+  return a plain JSON-safe mapping with exactly bounded `run_id`, `accepted`,
+  `executed`, `reason`, and `decision.policy` fields.  Disabled, unsupported,
+  coalesced, and admitted results must never leak raw exception/policy text.
+
+  Strengthen the gated AST test so it skips unless *both*
+  `NOVA_LIVE_BRIDGE_CONTRACT=1` and `NOVA_LIVE_SPACE` are supplied; requires
+  exactly one effective top-level `submit_intent_proposal`; requires an actual
+  call to `submit_nova_intent`; and detects direct or simple alias calls to
+  `govern`/`act` in that function.
+
+- [ ] **Step 2: Implement the bounded entry point**
+
+  `submit_nova_intent` must derive its project roots only from the supplied
+  code-owned kernel and its action registry, require all resolved roots to
+  agree, create the internal host trust context without importing WebUI/config
+  modules or accepting a caller root/resolver, then submit through the existing
+  bridge.  Root disagreement returns a bounded rejected mapping before a store,
+  worker, model, govern, or act call.  It must not directly call `govern` or
+  `act`.
+
+- [ ] **Step 3: Run the non-live entry gate**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_nova_swarm_runtime_bridge.py tests/test_nova_swarm_live_seam.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check nova\swarm_runtime_bridge.py tests\test_nova_swarm_runtime_bridge.py tests\test_nova_swarm_live_seam.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m compileall -q nova
+  git diff --check
+  ~~~
+
+- [ ] **Step 4: Commit the versioned deployment API**
+
+  ~~~powershell
+  git add nova/swarm_runtime_bridge.py tests/test_nova_swarm_runtime_bridge.py tests/test_nova_swarm_live_seam.py
+  git commit -m "feat: add Nova Swarm live entry point"
+  ~~~
+
 ## Task 6: Verify and stage the live Nova seam
 
 **Files:**
