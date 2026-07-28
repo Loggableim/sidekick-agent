@@ -674,6 +674,7 @@ def test_read_only_bridge_requires_injected_trusted_root_without_web_imports(
 ):
     """Catches a read-only snapshot importing WebUI config code or choosing its root."""
     created_before = {entry.name for entry in tmp_path.iterdir()}
+    workspace_module_before = sys.modules.get("web.api.workspace")
     original_import = builtins.__import__
 
     def fail_web_api_import(name, *args, **kwargs):
@@ -693,7 +694,7 @@ def test_read_only_bridge_requires_injected_trusted_root_without_web_imports(
 
     assert result.decision == VERIFIED_DECISION
     assert {entry.name for entry in tmp_path.iterdir()} == created_before
-    assert "web.api.workspace" not in sys.modules
+    assert sys.modules.get("web.api.workspace") is workspace_module_before
     with pytest.raises(TypeError):
         NovaIntentSnapshot.from_submission(
             _diary_suggestion(), source_slot=39, project_root=nova_project
