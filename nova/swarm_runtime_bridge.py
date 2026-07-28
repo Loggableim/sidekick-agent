@@ -25,7 +25,12 @@ from swarm_core.policy import PolicyGate, proposal_digest
 from swarm_core.config import load_integration_config, save_integration_config
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.types import IntegrationAdmissionRequest, SwarmRun
-from swarm_core.verifier import InvalidVerifierResult, VerificationResult, VERIFIED_DECISION
+from swarm_core.verifier import (
+    InvalidVerifierResult,
+    VerificationRequest,
+    VerificationResult,
+    VERIFIED_DECISION,
+)
 
 
 # This is intentionally the complete automatic-action allowlist.  Nova's
@@ -290,11 +295,27 @@ class NovaIntentReadOnlyVerifier:
     def __init__(
         self,
         project_root: _NovaBridgeContext,
+        *,
+        snapshot: NovaIntentSnapshot | None = None,
+        run_id: str | None = None,
     ) -> None:
         self._project_root = _trusted_project_root(project_root)
         self._context = project_root
+        self._snapshot = snapshot
+        self._run_id = run_id
 
-    def verify(self, snapshot: NovaIntentSnapshot) -> VerificationResult:
+    def verify(self, request: VerificationRequest) -> VerificationResult:
+        """Core protocol entry point; it validates the bound durable intent."""
+        if not isinstance(request, VerificationRequest):
+            raise InvalidVerifierResult("Nova verifier requires a verification request")
+        snapshot = self._snapshot
+        if snapshot is None or self._run_id != request.run_id:
+            raise InvalidVerifierResult("Nova verifier is not bound to this run")
+        if request.project_root.resolve() != self._project_root or request.goal != snapshot.title:
+            raise InvalidVerifierResult("Nova verifier request does not match admission")
+        return self.verify_snapshot(snapshot)
+
+    def verify_snapshot(self, snapshot: NovaIntentSnapshot) -> VerificationResult:
         """Return independent positive evidence only for a valid local snapshot."""
         try:
             self._validate(snapshot)
@@ -515,7 +536,7 @@ class NovaPreCompletionHook:
                 return PreCompletionResult(False, "nova_bridge_unavailable")
             snapshot = _snapshot_from_metadata(metadata, self._project_root)
             verifier = NovaIntentReadOnlyVerifier(self._project_root)
-            verifier.verify(snapshot)
+            verifier.verify_snapshot(snapshot)
             suggestion = snapshot.to_suggestion(self._project_root)
             proposal = self._adapter.translate(suggestion)
             if proposal_digest(proposal) != metadata.get("proposal_digest"):
@@ -622,19 +643,25 @@ class NovaSwarmRuntimeBridge:
             if admission.run is not None:
                 store.append_event(admission.run.run_id, "nova.bridge.admission_not_dispatched", {"status": admission.status})
             return NovaBridgeResult(admission.status, admission.run.run_id, admission.reason)
-        _register_runtime_binding(
-            self._project_root,
-            _NovaRuntimeBinding(
-                admission.run.run_id,
-                snapshot.intent_digest,
-                proposal_digest(proposal),
-                mode,
-                max_calls,
-                adapter,
-                context,
-                NovaIntentReadOnlyVerifier(context),
-            ),
-        )
+        try:
+            _register_runtime_binding(
+                self._project_root,
+                _NovaRuntimeBinding(
+                    admission.run.run_id,
+                    snapshot.intent_digest,
+                    proposal_digest(proposal),
+                    mode,
+                    max_calls,
+                    adapter,
+                    context,
+                    NovaIntentReadOnlyVerifier(
+                        context, snapshot=snapshot, run_id=admission.run.run_id
+                    ),
+                ),
+            )
+        except (OSError, RuntimeError, ValueError):
+            _pause_dispatch_failure(store, admission.run.run_id)
+            return NovaBridgeResult("dispatch_failed", admission.run.run_id, "nova_dispatch_failed")
         store.append_event(admission.run.run_id, "nova.bridge.admitted", {"mode": mode, "max_calls": max_calls})
         if not self._dispatch(admission.run.run_id):
             _pause_dispatch_failure(store, admission.run.run_id)
@@ -763,14 +790,27 @@ def register_nova_runtime_context(
             max_calls,
             adapter,
             trusted_project_root,
-            NovaIntentReadOnlyVerifier(trusted_project_root),
+            NovaIntentReadOnlyVerifier(
+                trusted_project_root,
+                snapshot=_snapshot_from_metadata(metadata, trusted_project_root),
+                run_id=run.run_id,
+            ),
         ),
     )
 
 
 def _register_runtime_binding(project_root: Path, binding: _NovaRuntimeBinding) -> None:
     with _RUNTIME_BINDINGS_LOCK:
-        _RUNTIME_BINDINGS[Path(project_root).resolve()] = binding
+        root = Path(project_root).resolve()
+        durable = ProjectSwarmStore.open_read_only(root).get_run(binding.run_id)
+        if durable is None or durable.status == "completed":
+            raise ValueError("Nova runtime binding requires a non-terminal run")
+        existing = _RUNTIME_BINDINGS.get(root)
+        if existing is not None and existing.run_id != binding.run_id:
+            existing_run = ProjectSwarmStore.open_read_only(root).get_run(existing.run_id)
+            if existing_run is not None and existing_run.status in {"running", "paused"}:
+                raise RuntimeError("Nova runtime binding is already active")
+        _RUNTIME_BINDINGS[root] = binding
 
 
 def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBinding | None:
@@ -793,7 +833,16 @@ def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBindi
         return None
     try:
         snapshot = _snapshot_from_metadata(metadata, binding.context)
-        binding.verifier.verify(snapshot)
+        bound_snapshot = binding.verifier._snapshot
+        if (
+            bound_snapshot is None
+            or snapshot.intent_digest != binding.intent_digest
+            or snapshot.proposal_id != bound_snapshot.proposal_id
+            or snapshot.verifier_evidence_ref != bound_snapshot.verifier_evidence_ref
+            or snapshot.expected_output_scope != bound_snapshot.expected_output_scope
+        ):
+            return None
+        binding.verifier.verify_snapshot(snapshot)
     except (TypeError, ValueError, InvalidVerifierResult):
         return None
     return binding
@@ -821,7 +870,12 @@ def _run_worker(dispatcher: Callable[[Path, str], Any], project_root: Path, run_
     try:
         dispatcher(project_root, run_id)
     except BaseException:
-        _pause_dispatch_failure(ProjectSwarmStore(project_root), run_id)
+        store = ProjectSwarmStore(project_root)
+        completed = store.get_run(run_id)
+        if completed is not None and completed.status == "completed":
+            _unregister_runtime_binding(project_root, run_id)
+            return
+        _pause_dispatch_failure(store, run_id)
         return
     run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
     if run is not None and run.status == "completed":
