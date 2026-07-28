@@ -103,8 +103,6 @@ def _is_entity_kernel_fallback(node: ast.AST) -> bool:
 
 
 def _is_source_slot_expression(node: ast.AST) -> bool:
-    if isinstance(node, ast.Constant):
-        return type(node.value) is int
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -185,6 +183,21 @@ def _top_level_name_bindings(tree: ast.Module, name: str) -> list[ast.AST]:
             if node.id == name and isinstance(node.ctx, (ast.Store, ast.Del)):
                 self.bindings.append(node)
 
+        def visit_Subscript(self, node):
+            # Guard direct literal globals writes without interpreting Python.
+            if (
+                isinstance(node.ctx, (ast.Store, ast.Del))
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "globals"
+                and node.value.args == []
+                and node.value.keywords == []
+                and isinstance(node.slice, ast.Constant)
+                and node.slice.value == name
+            ):
+                self.bindings.append(node)
+            self.generic_visit(node)
+
         def visit_Import(self, node):
             if any((item.asname or item.name.split(".")[0]) == name for item in node.names):
                 self.bindings.append(node)
@@ -242,25 +255,15 @@ def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") 
         arguments.posonlyargs == []
         and len(arguments.args) == 1
         and arguments.args[0].arg == "proposal"
-        and (
-            arguments.args[0].annotation is None
-            or (
-                isinstance(arguments.args[0].annotation, ast.Name)
-                and arguments.args[0].annotation.id == "dict"
-            )
-        )
+        and isinstance(arguments.args[0].annotation, ast.Name)
+        and arguments.args[0].annotation.id == "dict"
         and arguments.vararg is None
         and arguments.kwonlyargs == []
         and arguments.kw_defaults == []
         and arguments.kwarg is None
         and arguments.defaults == []
-        and (
-            function_node.returns is None
-            or (
-                isinstance(function_node.returns, ast.Name)
-                and function_node.returns.id == "dict"
-            )
-        )
+        and isinstance(function_node.returns, ast.Name)
+        and function_node.returns.id == "dict"
         and function_node.decorator_list == []
         and list(getattr(function_node, "type_params", ())) == []
     ), (
@@ -313,17 +316,15 @@ def _assert_versioned_live_entry(source: str, *, filename: str = "<live-nova>") 
         "live submit_intent_proposal must directly return exactly one "
         "canonical submit_nova_intent call"
     )
-    source_slot = body[1].value.keywords[0].value
-    if not isinstance(source_slot, ast.Constant):
-        assert _top_level_name_bindings(tree, "int") == [], (
-            "live Nova Mind must not replace built-in int used by source_slot"
-        )
-        time_bindings = _top_level_name_bindings(tree, "time")
-        assert (
-            len(time_bindings) == 1
-            and time_bindings[0] in tree.body
-            and _is_direct_time_import(time_bindings[0])
-        ), "live Nova Mind must source time from a direct standard-library import"
+    assert _top_level_name_bindings(tree, "int") == [], (
+        "live Nova Mind must not replace built-in int used by source_slot"
+    )
+    time_bindings = _top_level_name_bindings(tree, "time")
+    assert (
+        len(time_bindings) == 1
+        and time_bindings[0] in tree.body
+        and _is_direct_time_import(time_bindings[0])
+    ), "live Nova Mind must source time from a direct standard-library import"
 
 
 @pytest.mark.skipif(_LIVE_CONTRACT_DISABLED, reason=_LIVE_CONTRACT_REASON)
@@ -347,13 +348,19 @@ def test_live_submit_intent_proposal_delegates_only_to_the_versioned_bridge():
 
 def test_ast_contract_accepts_only_the_versioned_entry_import():
     source = """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
     try:
         from nova.entity_kernel import EntityKernel
     except ImportError:
         from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """
 
     _assert_versioned_live_entry(source)
@@ -509,18 +516,24 @@ def test_ast_contract_rejects_definition_time_calls_through_entry_alias(
     definition: str,
 ):
     source = f"""
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
     try:
         from nova.entity_kernel import EntityKernel
     except ImportError:
         from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
 {definition}
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """
 
     assert _execute_synthetic_live_entry(source) == (2, 0)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="contain only its bridge import"):
         _assert_versioned_live_entry(source)
 
 
@@ -546,11 +559,60 @@ def submit_intent_proposal(proposal: dict) -> dict:
     _assert_versioned_live_entry(source)
 
 
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "def submit_intent_proposal(proposal) -> dict:",
+        "def submit_intent_proposal(proposal: dict):",
+    ],
+    ids=["missing-proposal-annotation", "missing-return-annotation"],
+)
+def test_ast_contract_rejects_a_live_seam_without_exact_dict_annotations(
+    signature: str,
+):
+    source = f"""
+import time
+
+{signature}
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
+"""
+
+    with pytest.raises(AssertionError, match="canonical proposal-only signature"):
+        _assert_versioned_live_entry(source)
+
+
+def test_ast_contract_rejects_a_fixed_source_slot():
+    source = """
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+"""
+
+    with pytest.raises(AssertionError, match="canonical submit_nova_intent call"):
+        _assert_versioned_live_entry(source)
+
+
 def test_ast_contract_rejects_an_additional_module_alias_of_the_entry():
     source = """
+import time
 from nova.swarm_runtime_bridge import submit_nova_intent as int
 
-def submit_intent_proposal(proposal):
+def submit_intent_proposal(proposal: dict) -> dict:
     try:
         from nova.entity_kernel import EntityKernel
     except ImportError:
@@ -564,19 +626,48 @@ def submit_intent_proposal(proposal):
 """
 
     assert _execute_synthetic_live_entry(source) == (2, 0)
-    with pytest.raises(AssertionError):
+    with pytest.raises(AssertionError, match="exactly one import"):
+        _assert_versioned_live_entry(source)
+
+
+def test_ast_contract_rejects_a_literal_globals_replacement_of_int():
+    source = """
+import time
+from nova import swarm_runtime_bridge as bridge
+
+globals()["int"] = lambda value: (
+    bridge.submit_nova_intent(object(), {}, source_slot=0),
+    value,
+)[1]
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
+"""
+
+    assert _execute_synthetic_live_entry(source) == (2, 0)
+    with pytest.raises(AssertionError, match="replace built-in int"):
         _assert_versioned_live_entry(source)
 
 
 def test_ast_contract_rejects_a_parent_package_entry_alias():
     source = """
+import time
 from nova import swarm_runtime_bridge as bridge
 
 def int(value):
     bridge.submit_nova_intent(EntityKernel(), {}, source_slot=0)
     return value
 
-def submit_intent_proposal(proposal):
+def submit_intent_proposal(proposal: dict) -> dict:
     try:
         from nova.entity_kernel import EntityKernel
     except ImportError:
@@ -596,12 +687,17 @@ def submit_intent_proposal(proposal):
 
 def test_ast_contract_rejects_a_parent_package_entity_kernel_alias():
     source = """
+import time
 from nova import swarm_runtime_bridge as bridge
 EntityKernel = bridge.submit_nova_intent
 
-def submit_intent_proposal(proposal):
+def submit_intent_proposal(proposal: dict) -> dict:
     from nova.swarm_runtime_bridge import submit_nova_intent
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """
 
     assert _execute_synthetic_live_entry(source) == (2, 0)
@@ -611,14 +707,20 @@ def submit_intent_proposal(proposal):
 
 def test_ast_contract_rejects_a_conditionally_defined_canonical_seam():
     source = """
+import time
+
 if False:
-    def submit_intent_proposal(proposal):
+    def submit_intent_proposal(proposal: dict) -> dict:
         try:
             from nova.entity_kernel import EntityKernel
         except ImportError:
             from entity_kernel import EntityKernel
         from nova.swarm_runtime_bridge import submit_nova_intent
-        return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+        return submit_nova_intent(
+            EntityKernel(),
+            proposal,
+            source_slot=int(time.time() // DECIDE_INTERVAL),
+        )
 """
     namespace = {}
     exec(compile(source, "<synthetic-live-nova>", "exec"), namespace)
@@ -632,82 +734,197 @@ if False:
     "source",
     [
         """
+import time
 from other_module import govern as decide
-def submit_intent_proposal(proposal):
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
     decide(proposal)
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """,
         """
+import time
+
 def submit_nova_intent(*args, **kwargs):
     return {}
-def submit_intent_proposal(proposal):
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    from nova.swarm_runtime_bridge import submit_nova_intent
     submit_nova_intent = fake_entry
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
     def unused_nested(submit_nova_intent):
-        return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+        return submit_nova_intent(
+            EntityKernel(),
+            proposal,
+            source_slot=int(time.time() // DECIDE_INTERVAL),
+        )
     return fake_entry(proposal)
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
     unused = lambda submit_nova_intent: submit_nova_intent(
-        EntityKernel(), proposal, source_slot=1
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
     )
     return fake_entry(proposal)
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
-    submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
     return (decide := EntityKernel().govern)(proposal)
 """,
         """
+import time
+
 def submit_intent_proposal(
-    proposal,
+    proposal: dict,
     submit_nova_intent=fake_entry,
-):
-    result = submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    result = submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
     from nova.swarm_runtime_bridge import submit_nova_intent
     return result
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
     match fake_entry:
         case submit_nova_intent:
             pass
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """,
         """
-def submit_intent_proposal(proposal):
-    result = submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
+    result = submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
     from nova.swarm_runtime_bridge import submit_nova_intent
     return result
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
     def helper(
-        ignored=submit_nova_intent(EntityKernel(), proposal, source_slot=1),
+        ignored=submit_nova_intent(
+            EntityKernel(),
+            proposal,
+            source_slot=int(time.time() // DECIDE_INTERVAL),
+        ),
     ):
         return ignored
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """,
         """
-def submit_intent_proposal(proposal):
+import time
+
+def submit_intent_proposal(proposal: dict) -> dict:
+    try:
+        from nova.entity_kernel import EntityKernel
+    except ImportError:
+        from entity_kernel import EntityKernel
     from nova.swarm_runtime_bridge import submit_nova_intent
     def helper(ignored=(submit_nova_intent := fake_entry)):
         return ignored
-    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+    return submit_nova_intent(
+        EntityKernel(),
+        proposal,
+        source_slot=int(time.time() // DECIDE_INTERVAL),
+    )
 """,
     ],
 )
