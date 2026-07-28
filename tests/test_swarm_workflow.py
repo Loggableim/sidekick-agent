@@ -1267,6 +1267,67 @@ def test_pre_completion_hook_pause_resumes_from_durable_role_outputs(
     assert resumed_transport.requests == []
 
 
+def test_required_hook_rechecks_after_a_cooperative_pause_before_completion(
+    tmp_path: Path,
+):
+    """Catches a checkpoint pause/resume bypassing a required completion hook."""
+    hook_calls: list[str] = []
+
+    class PausingHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            hook_calls.append("called")
+            return PreCompletionResult(False, "awaiting_nova_approval")
+
+    transport = WorkflowTransport()
+    engine = SwarmEngine(transport, pre_completion_hook=PausingHook())
+    run = engine.start_run(
+        "recheck a required hook after cooperative resume",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+    store = ProjectSwarmStore(tmp_path)
+    phase = "running"
+
+    def checkpoint() -> None:
+        nonlocal phase
+        if len(transport.requests) != 8:
+            return
+        if phase == "running":
+            store.set_run_status(run.run_id, "paused")
+            phase = "paused"
+        elif phase == "paused":
+            store.resume_run(run.run_id)
+            phase = "resumed"
+
+    paused = engine.execute_run(run.run_id, tmp_path, checkpoint=checkpoint)
+
+    events = store.list_events(run.run_id)
+    assert phase == "resumed"
+    assert hook_calls == ["called"]
+    assert paused.status == "paused"
+    assert paused.pause_reason == "awaiting_nova_approval"
+    assert len(transport.requests) == 8
+    assert not any(event.event_type == "run.completed" for event in events)
+
+    class ContinuingHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            return PreCompletionResult(True)
+
+    store.resume_run(run.run_id)
+    resumed_transport = WorkflowTransport()
+    resumed = SwarmEngine(
+        resumed_transport,
+        pre_completion_hook=ContinuingHook(),
+    ).execute_run(run.run_id, tmp_path)
+
+    assert resumed.status == "completed"
+    assert resumed_transport.requests == []
+
+
 def test_run_without_pre_completion_hook_keeps_terminal_event_sequence(tmp_path: Path):
     """Catches ordinary runs gaining a new terminal event or pause requirement."""
     run = SwarmEngine(WorkflowTransport()).start_run("normal completion", tmp_path)
@@ -1301,6 +1362,30 @@ def test_required_pre_completion_hook_fails_closed_when_unavailable(tmp_path: Pa
     assert not any(event.event_type == "run.completed" for event in events)
 
 
+def test_required_pre_completion_hook_fails_closed_when_installed_id_mismatches(
+    tmp_path: Path,
+):
+    """Catches an installed but differently named hook bypassing the durable gate."""
+
+    class OtherHook:
+        hook_id = "other-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            raise AssertionError("a mismatched hook must not run")
+
+    engine = SwarmEngine(WorkflowTransport(), pre_completion_hook=OtherHook())
+    run = engine.start_run(
+        "require the exact hook id",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "expected-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
+
+
 def test_pre_completion_hook_failure_uses_a_safe_pause_reason(tmp_path: Path):
     """Catches hook exception text being exposed in durable run state."""
 
@@ -1324,6 +1409,59 @@ def test_pre_completion_hook_failure_uses_a_safe_pause_reason(tmp_path: Path):
     assert summary.pause_reason == "pre_completion_hook_failed"
     assert "private host failure detail" not in str(events)
     assert not any(event.event_type == "run.completed" for event in events)
+
+
+def test_malformed_pre_completion_hook_result_fails_closed(tmp_path: Path):
+    """Catches malformed hook returns escaping as implementation exceptions."""
+
+    class MalformedResultHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            return None  # type: ignore[return-value]
+
+    engine = SwarmEngine(
+        WorkflowTransport(),
+        pre_completion_hook=MalformedResultHook(),
+    )
+    run = engine.start_run(
+        "contain malformed hook results",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "pre_completion_hook_failed"
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
+def test_pre_completion_hook_base_exception_propagates_and_releases_lease(
+    tmp_path: Path,
+):
+    """Catches BaseException swallowing or a leaked execution lease from a hook."""
+
+    class InterruptingHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            raise KeyboardInterrupt("stop immediately")
+
+    engine = SwarmEngine(WorkflowTransport(), pre_completion_hook=InterruptingHook())
+    run = engine.start_run(
+        "preserve BaseException semantics",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="stop immediately"):
+        engine.execute_run(run.run_id, tmp_path)
+
+    store = ProjectSwarmStore(tmp_path)
+    assert store.claim_run_execution_lease(run.run_id, "post-interrupt-owner")
+    store.release_run_execution_lease(run.run_id, "post-interrupt-owner")
 
 
 def test_start_run_rejects_unsafe_or_reserved_host_metadata(tmp_path: Path):

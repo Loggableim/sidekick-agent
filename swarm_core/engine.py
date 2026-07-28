@@ -442,13 +442,22 @@ class SwarmEngine:
                 role="pre_completion_hook",
             )
 
-        if checkpoint is not None:
-            checkpoint()
-        active_run = store.get_run(run.run_id)
-        if active_run is None:
-            raise KeyError(f"Unknown Swarm run: {run.run_id}")
-        if active_run.status != "running":
-            return None
+        while True:
+            if checkpoint is not None:
+                checkpoint()
+            active_run = store.get_run(run.run_id)
+            if active_run is None:
+                raise KeyError(f"Unknown Swarm run: {run.run_id}")
+            if active_run.status == "running":
+                break
+            if active_run.status == "paused" and checkpoint is not None:
+                # A cooperative host may resume while waiting.  Re-enter the
+                # required hook gate rather than letting the terminal
+                # transition complete after a pause/resume race.
+                continue
+            if active_run.status == "paused":
+                return WorkflowPaused("human_paused", role="pre_completion_hook")
+            raise RuntimeError("Swarm run reached a terminal state before completion")
         autonomy = active_run.metadata.get("autonomy")
         if not isinstance(autonomy, str):
             raise ValueError("Swarm run is missing a durable autonomy setting")
@@ -465,11 +474,13 @@ class SwarmEngine:
         )
         try:
             result = hook.run(context)
+            if not isinstance(result, PreCompletionResult):
+                raise TypeError("Pre-completion hook returned an invalid result")
+            if result.continue_completion:
+                return None
+            return WorkflowPaused(result.pause_reason, role="pre_completion_hook")
         except Exception:
             return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
-        if result.continue_completion:
-            return None
-        return WorkflowPaused(result.pause_reason, role="pre_completion_hook")
 
     @staticmethod
     def _record_local_verifier_reputation(
