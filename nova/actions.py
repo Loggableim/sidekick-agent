@@ -97,14 +97,16 @@ class ActionRegistry:
 
     def _prioritize_thread(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         target = intent.get("target") or {}
-        thread_id = str(target.get("thread_id") or target.get("topic") or "").strip()
+        thread_id = str(target.get("thread_id") or "").strip()
+        topic = str(target.get("topic") or "").strip()
+        thread_id = thread_id or topic
         if not thread_id:
             return {"ok": False, "message": "No concrete continuity thread target was supplied."}
         path = nova_automatic_action_output_path(self.space_dir, "prioritize_thread")
         continuity = _read_json(path, {})
         continuity["prioritized_thread"] = {
             "thread_id": thread_id,
-            "topic": target.get("topic") or thread_id,
+            "topic": topic or thread_id,
             "next_step": (intent.get("payload") or {}).get("next_step") or "Resume and resolve this thread.",
             "intent_id": intent.get("id") or intent.get("intent_id"),
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -113,7 +115,7 @@ class ActionRegistry:
         history.append(dict(continuity["prioritized_thread"]))
         continuity["prioritized_history"] = history[-50:]
         _write_json(path, continuity)
-        return {"ok": True, "message": f"Prioritized continuity thread: {target.get('topic') or thread_id}", "effects": {"effect": "thread_prioritized", "thread": continuity["prioritized_thread"], "path": str(path)}}
+        return {"ok": True, "message": f"Prioritized continuity thread: {topic or thread_id}", "effects": {"effect": "thread_prioritized", "thread": continuity["prioritized_thread"], "path": str(path)}}
 
     def _goal_check(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         result = self._run_script("eigenziele.py", "check", timeout=60)
