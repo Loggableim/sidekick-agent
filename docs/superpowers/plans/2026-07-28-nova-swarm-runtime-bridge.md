@@ -884,3 +884,54 @@ bridge.
   ~~~powershell
   git commit -m "fix: register the Swarm CLI entrypoint"
   ~~~
+
+## Task 12: Complete the Cloud-only Scout fallback chain found by the live canary
+
+**Files:**
+
+- Modify: `swarm_core/router.py`, capability metadata only if required for the
+  allowed route, and focused routing/workflow regressions.
+- Do not modify: `C:\\sidekick\\home\\spaces\\nova\\*`, live processes,
+  provider credentials/configuration, or any fallback-provider settings.
+
+**Purpose:**
+
+The first live canary reached the intended Cloud-only `deepseek-v4-flash`
+Scout route and received an invalid structured response.  The executor
+correctly classified it as `schema_invalid`, but the configured Scout chain
+contained no second permitted Ollama Cloud model, so it paused with
+`model_chain_exhausted` after one call.  The approved policy explicitly
+permits defined Cloud-chain fallback for schema failures and requires a pause
+only when that chain is exhausted.  Make the default/Scout chain
+`deepseek-v4-flash` followed by `deepseek-v4-pro`, retaining Flash as the
+normal first choice and never adding GPT-OSS, a local model, or another
+provider.
+
+- [ ] **Step 1: Capture the real failure in a deterministic RED test**
+
+  Add a focused ModelExecutor/workflow regression in which Scout receives an
+  invalid structured response from Flash and a valid response from the allowed
+  Pro fallback.  Assert the exact attempt order, one additional budgeted
+  Cloud call, and no third-party/local/GPT-OSS candidate.  Also assert normal
+  healthy Scout selection remains Flash first.
+
+- [ ] **Step 2: Define the bounded route and capability compatibility**
+
+  Update only the safety-locked route/capability metadata necessary for Pro to
+  satisfy Scout's existing requirements.  Preserve all role-primary choices,
+  planner challenger independence, review pair identities, model budgets, and
+  the existing pause behavior when both permitted Cloud models fail.
+
+- [ ] **Step 3: Verify and commit the repair**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_workflow.py tests/test_swarm_core.py tests/test_nova_swarm_runtime_bridge.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check swarm_core\router.py swarm_core\models.py tests/test_swarm_workflow.py tests/test_swarm_core.py tests/test_nova_swarm_runtime_bridge.py
+  git diff --check
+  ~~~
+
+  Commit only the fallback repair with:
+
+  ~~~powershell
+  git commit -m "fix: add the Scout Cloud fallback chain"
+  ~~~
