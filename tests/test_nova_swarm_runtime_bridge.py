@@ -127,7 +127,7 @@ def test_verifier_returns_exactly_its_snapshot_evidence(trusted_nova_project):
         _diary_suggestion(), source_slot=17, project_root=trusted_nova_project
     )
 
-    result = NovaIntentReadOnlyVerifier(trusted_nova_project).verify(snapshot)
+    result = NovaIntentReadOnlyVerifier(trusted_nova_project).verify_snapshot(snapshot)
 
     assert result.decision == VERIFIED_DECISION
     assert result.evidence == (snapshot.verifier_evidence_ref,)
@@ -161,7 +161,7 @@ def test_verifier_rejects_tampered_or_sensitive_snapshots_without_side_effects(
     )
 
     with pytest.raises(InvalidVerifierResult):
-        NovaIntentReadOnlyVerifier(trusted_nova_project).verify(
+        NovaIntentReadOnlyVerifier(trusted_nova_project).verify_snapshot(
             mutator(snapshot, nova_project)
         )
 
@@ -324,7 +324,7 @@ def test_read_only_bridge_requires_injected_trusted_root_without_web_imports(
     snapshot = NovaIntentSnapshot.from_submission(
         _diary_suggestion(), source_slot=39, project_root=trusted
     )
-    result = NovaIntentReadOnlyVerifier(trusted).verify(snapshot)
+    result = NovaIntentReadOnlyVerifier(trusted).verify_snapshot(snapshot)
 
     assert result.decision == VERIFIED_DECISION
     assert {entry.name for entry in tmp_path.iterdir()} == created_before
@@ -362,7 +362,7 @@ def test_prioritize_thread_requires_a_nonblank_canonical_target(
         project_root=trusted_nova_project,
     )
     with pytest.raises(InvalidVerifierResult):
-        NovaIntentReadOnlyVerifier(trusted_nova_project).verify(
+        NovaIntentReadOnlyVerifier(trusted_nova_project).verify_snapshot(
             replace(valid, target={"thread_id": "  "})
         )
 
@@ -394,7 +394,7 @@ def test_verified_snapshot_fails_closed_after_attempted_object_mutation(
         _diary_suggestion(), source_slot=43, project_root=trusted_nova_project
     )
     verifier = NovaIntentReadOnlyVerifier(trusted_nova_project)
-    assert verifier.verify(snapshot).decision == VERIFIED_DECISION
+    assert verifier.verify_snapshot(snapshot).decision == VERIFIED_DECISION
     assert not hasattr(snapshot, "__dict__")
     suggestion = snapshot.to_suggestion(trusted_nova_project)
     with pytest.raises(TypeError):
@@ -492,3 +492,25 @@ def test_resolver_blocks_an_enabled_nova_run_without_a_process_binding(tmp_path:
     )
 
     assert nova_execution_options_for_run(tmp_path, run).blocked_reason == "nova_bridge_unavailable"
+
+
+def test_runtime_verifier_implements_the_workflow_request_protocol(trusted_nova_project):
+    """Catches a snapshot-only verifier being injected into the Core workflow."""
+    from swarm_core.verifier import VerificationRequest
+
+    snapshot = NovaIntentSnapshot.from_submission(
+        _diary_suggestion(), source_slot=91, project_root=trusted_nova_project
+    )
+    verifier = NovaIntentReadOnlyVerifier(
+        trusted_nova_project, snapshot=snapshot, run_id="nova-run"
+    )
+
+    result = verifier.verify(
+        VerificationRequest(
+            run_id="nova-run", goal=snapshot.title,
+            project_root=snapshot.project_root, builder={}, critic={},
+        )
+    )
+
+    assert result.decision == VERIFIED_DECISION
+    assert result.evidence == (snapshot.verifier_evidence_ref,)
