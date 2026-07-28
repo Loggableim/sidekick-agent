@@ -300,7 +300,7 @@ def save_integration_config(
     )
     # Preserve the explicit lexical escape rejection before creating any
     # project-local lock/runtime state; pinned operations below close races.
-    resolve_swarm_path(project_root, "swarm.yaml")
+    config_path = resolve_swarm_path(project_root, "swarm.yaml")
     with _CONFIG_INITIALIZATION_LOCK:
         _ensure_project_root(project_root)
         with _pinned_swarm_directory(
@@ -312,11 +312,11 @@ def save_integration_config(
             if runtime is None:  # pragma: no cover - protected by runtime=True
                 raise RuntimeError("Swarm runtime directory was not pinned")
             with _exclusive_config_write_lock(runtime):
-                # Initialization itself performs a config read/conditional
-                # write.  It must share this process-wide lock with the later
-                # integration read-modify-write or a stale default can erase
-                # another process's just-saved namespace.
-                initialize_project(project_root)
+                _initialize_project_from_pinned_lease(
+                    project_root,
+                    config_path,
+                    lease,
+                )
                 raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
                 if not isinstance(raw_config, dict):
                     raise ValueError("Swarm configuration must be a mapping")
@@ -345,20 +345,35 @@ def initialize_project(project_root: Path) -> SwarmConfig:
             create=True,
             runtime=True,
         ) as lease:
-            _ensure_runtime_is_ignored(lease.swarm)
-            try:
-                raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
-            except FileNotFoundError:
-                raw_config = dict(_DEFAULT_CONFIG)
-                _write_project_config(lease.swarm, raw_config)
-            if not isinstance(raw_config, dict):
-                raise ValueError(
-                    f"Swarm configuration must be a mapping: {config_path}"
+            runtime = lease.runtime
+            if runtime is None:  # pragma: no cover - protected by runtime=True
+                raise RuntimeError("Swarm runtime directory was not pinned")
+            with _exclusive_config_write_lock(runtime):
+                return _initialize_project_from_pinned_lease(
+                    project_root,
+                    config_path,
+                    lease,
                 )
-            if "default_autonomy" not in raw_config:
-                raw_config["default_autonomy"] = _DEFAULT_CONFIG["default_autonomy"]
-                _write_project_config(lease.swarm, raw_config)
-            return _to_config(project_root, config_path, raw_config)
+
+
+def _initialize_project_from_pinned_lease(
+    project_root: Path,
+    config_path: Path,
+    lease: _SwarmLease,
+) -> SwarmConfig:
+    """Initialize only while the caller holds the process-wide config lock."""
+    _ensure_runtime_is_ignored(lease.swarm)
+    try:
+        raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
+    except FileNotFoundError:
+        raw_config = dict(_DEFAULT_CONFIG)
+        _write_project_config(lease.swarm, raw_config)
+    if not isinstance(raw_config, dict):
+        raise ValueError(f"Swarm configuration must be a mapping: {config_path}")
+    if "default_autonomy" not in raw_config:
+        raw_config["default_autonomy"] = _DEFAULT_CONFIG["default_autonomy"]
+        _write_project_config(lease.swarm, raw_config)
+    return _to_config(project_root, config_path, raw_config)
 
 
 def resolve_swarm_path(project_root: Path, *parts: str) -> Path:
