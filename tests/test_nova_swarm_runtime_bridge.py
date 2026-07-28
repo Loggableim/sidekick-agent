@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import builtins
 from dataclasses import replace
 import os
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -12,6 +14,7 @@ from nova.swarm_runtime_bridge import (
     NOVA_AUTOMATIC_ACTIONS,
     NovaIntentReadOnlyVerifier,
     NovaIntentSnapshot,
+    create_trusted_nova_project_root,
     configure_nova_bridge,
     load_nova_bridge_config,
 )
@@ -44,13 +47,21 @@ def nova_project(tmp_path: Path) -> Path:
     return project
 
 
-def test_snapshot_identity_is_stable_for_one_decision_slot(nova_project: Path):
+@pytest.fixture
+def trusted_nova_project(nova_project: Path):
+    return create_trusted_nova_project_root(
+        nova_project,
+        resolver=lambda candidate: candidate,
+    )
+
+
+def test_snapshot_identity_is_stable_for_one_decision_slot(trusted_nova_project):
     """Catches caller-owned identity replacing a canonical decision identity."""
     first = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=1234, project_root=nova_project
+        _diary_suggestion(), source_slot=1234, project_root=trusted_nova_project
     )
     second = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=1234, project_root=nova_project
+        _diary_suggestion(), source_slot=1234, project_root=trusted_nova_project
     )
 
     assert first.intent_digest == second.intent_digest
@@ -59,13 +70,13 @@ def test_snapshot_identity_is_stable_for_one_decision_slot(nova_project: Path):
     assert first.to_suggestion()["evidence_refs"] == [first.verifier_evidence_ref]
 
 
-def test_snapshot_slot_change_changes_the_canonical_digest(nova_project: Path):
+def test_snapshot_slot_change_changes_the_canonical_digest(trusted_nova_project):
     """Catches distinct decision slots collapsing onto one approval identity."""
     first = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=1234, project_root=nova_project
+        _diary_suggestion(), source_slot=1234, project_root=trusted_nova_project
     )
     second = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=1235, project_root=nova_project
+        _diary_suggestion(), source_slot=1235, project_root=trusted_nova_project
     )
 
     assert first.intent_digest != second.intent_digest
@@ -76,23 +87,23 @@ def test_snapshot_slot_change_changes_the_canonical_digest(nova_project: Path):
     "action", ["reflection", "aces", "moltbook", "blog_draft", "unknown_action"]
 )
 def test_snapshot_rejects_non_automatic_actions_before_any_runtime_path(
-    nova_project: Path, action: str
+    trusted_nova_project, action: str
 ):
     """Catches a reflective, ACES, social, blog, or unknown action reaching Nova."""
     with pytest.raises(ValueError, match="automatic Nova action"):
         NovaIntentSnapshot.from_submission(
             _diary_suggestion() | {"action": action},
             source_slot=1,
-            project_root=nova_project,
+            project_root=trusted_nova_project,
         )
 
 
 def test_snapshot_discards_caller_controlled_identity_and_security_fields(
-    nova_project: Path,
+    trusted_nova_project,
 ):
     """Catches untrusted proposal metadata weakening canonical bridge output."""
     snapshot = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=9, project_root=nova_project
+        _diary_suggestion(), source_slot=9, project_root=trusted_nova_project
     )
     suggestion = snapshot.to_suggestion()
 
@@ -107,13 +118,13 @@ def test_snapshot_discards_caller_controlled_identity_and_security_fields(
     assert "builder:untrusted" not in repr(suggestion)
 
 
-def test_verifier_returns_exactly_its_snapshot_evidence(nova_project: Path):
+def test_verifier_returns_exactly_its_snapshot_evidence(trusted_nova_project):
     """Catches the verifier copying Builder/Critic evidence into a positive result."""
     snapshot = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=17, project_root=nova_project
+        _diary_suggestion(), source_slot=17, project_root=trusted_nova_project
     )
 
-    result = NovaIntentReadOnlyVerifier(nova_project).verify(snapshot)
+    result = NovaIntentReadOnlyVerifier(trusted_nova_project).verify(snapshot)
 
     assert result.decision == VERIFIED_DECISION
     assert result.evidence == (snapshot.verifier_evidence_ref,)
@@ -137,17 +148,19 @@ def test_verifier_returns_exactly_its_snapshot_evidence(nova_project: Path):
     ],
 )
 def test_verifier_rejects_tampered_or_sensitive_snapshots_without_side_effects(
-    nova_project: Path, mutator
+    nova_project: Path, trusted_nova_project, mutator
 ):
     """Catches verifier acceptance of a root escape, tamper, output escape, or effect marker."""
     marker = nova_project / "must-not-change.txt"
     marker.write_text("unchanged", encoding="utf-8")
     snapshot = NovaIntentSnapshot.from_submission(
-        _diary_suggestion(), source_slot=22, project_root=nova_project
+        _diary_suggestion(), source_slot=22, project_root=trusted_nova_project
     )
 
     with pytest.raises(InvalidVerifierResult):
-        NovaIntentReadOnlyVerifier(nova_project).verify(mutator(snapshot, nova_project))
+        NovaIntentReadOnlyVerifier(trusted_nova_project).verify(
+            mutator(snapshot, nova_project)
+        )
 
     assert marker.read_text(encoding="utf-8") == "unchanged"
 
@@ -185,6 +198,7 @@ def test_bridge_config_is_explicit_and_reading_absent_config_creates_nothing(
 )
 def test_action_specs_and_verifier_scope_match_the_real_action_handler(
     nova_project: Path,
+    trusted_nova_project,
     action: str,
     target: dict[str, str],
     payload: dict[str, str],
@@ -205,7 +219,7 @@ def test_action_specs_and_verifier_scope_match_the_real_action_handler(
         _diary_suggestion()
         | {"action": action, "target": target, "payload": payload},
         source_slot=33,
-        project_root=nova_project,
+        project_root=trusted_nova_project,
     )
 
     actual_scope = Path(actual["effects"]["path"]).resolve().relative_to(
@@ -220,40 +234,41 @@ def test_action_specs_and_verifier_scope_match_the_real_action_handler(
     [
         {"payload": {"c\uff4fmm\uff41nd": "write"}},
         {"payload": {"content": "Y29tbWFuZA=="}},
+        {"payload": {"content": "Y29tbWFuZA"}},
+        {"payload": {"content": "base64url:Y29tbWFuZA"}},
+        {"payload": {"content": "8J-YgA"}},
         {"target": {"nested": {"%63ommand": "write"}}},
     ],
 )
 def test_snapshot_rejects_normalized_or_encoded_control_material(
-    nova_project: Path, submission_change: dict[str, object]
+    trusted_nova_project, submission_change: dict[str, object]
 ):
     """Catches Unicode, percent, or opaque-encoded fields bypassing action schemas."""
     with pytest.raises(ValueError):
         NovaIntentSnapshot.from_submission(
             _diary_suggestion() | submission_change,
             source_slot=34,
-            project_root=nova_project,
+            project_root=trusted_nova_project,
         )
 
 
 def test_snapshot_requires_a_real_trusted_project_root(tmp_path: Path):
     """Catches a caller selecting a nonexistent or Windows system root as Nova space."""
-    suggestion = _diary_suggestion()
-
     with pytest.raises(ValueError):
-        NovaIntentSnapshot.from_submission(
-            suggestion, source_slot=35, project_root=tmp_path / "does-not-exist"
+        create_trusted_nova_project_root(
+            tmp_path / "does-not-exist",
+            resolver=lambda candidate: candidate,
         )
     with pytest.raises(ValueError):
-        NovaIntentSnapshot.from_submission(
-            suggestion,
-            source_slot=35,
-            project_root=Path(os.environ["SystemRoot"]),
+        create_trusted_nova_project_root(
+            Path(os.environ["SystemRoot"]),
+            resolver=lambda _candidate: (_ for _ in ()).throw(ValueError("blocked")),
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         NovaIntentReadOnlyVerifier(Path(os.environ["SystemRoot"]))
 
 
-def test_canonical_unicode_and_numeric_forms_have_one_identity(nova_project: Path):
+def test_canonical_unicode_and_numeric_forms_have_one_identity(trusted_nova_project):
     """Catches visually equal Unicode or numeric zero/one forms creating new intents."""
     decomposed = _diary_suggestion() | {"title": "Cafe\u0301", "priority": 1}
     composed = _diary_suggestion() | {"title": "Caf\u00e9", "priority": 1.0}
@@ -261,22 +276,85 @@ def test_canonical_unicode_and_numeric_forms_have_one_identity(nova_project: Pat
     positive_zero = _diary_suggestion() | {"priority": 0}
 
     assert NovaIntentSnapshot.from_submission(
-        decomposed, source_slot=36, project_root=nova_project
+        decomposed, source_slot=36, project_root=trusted_nova_project
     ).intent_digest == NovaIntentSnapshot.from_submission(
-        composed, source_slot=36, project_root=nova_project
+        composed, source_slot=36, project_root=trusted_nova_project
     ).intent_digest
     assert NovaIntentSnapshot.from_submission(
-        negative_zero, source_slot=37, project_root=nova_project
+        negative_zero, source_slot=37, project_root=trusted_nova_project
     ).intent_digest == NovaIntentSnapshot.from_submission(
-        positive_zero, source_slot=37, project_root=nova_project
+        positive_zero, source_slot=37, project_root=trusted_nova_project
     ).intent_digest
 
 
-def test_huge_priority_is_rejected_without_an_overflow_crash(nova_project: Path):
+def test_huge_priority_is_rejected_without_an_overflow_crash(trusted_nova_project):
     """Catches an unbounded integer causing float conversion to escape validation."""
     with pytest.raises(ValueError):
         NovaIntentSnapshot.from_submission(
             _diary_suggestion() | {"priority": 10**1000},
             source_slot=38,
-            project_root=nova_project,
+            project_root=trusted_nova_project,
+        )
+
+
+def test_read_only_bridge_requires_injected_trusted_root_without_web_imports(
+    monkeypatch: pytest.MonkeyPatch, nova_project: Path, tmp_path: Path
+):
+    """Catches a read-only snapshot importing WebUI config code or choosing its root."""
+    created_before = {entry.name for entry in tmp_path.iterdir()}
+    original_import = builtins.__import__
+
+    def fail_web_api_import(name, *args, **kwargs):
+        if name == "web.api.workspace" or name.startswith("web.api.workspace."):
+            raise AssertionError("read-only bridge must not import WebUI workspace code")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fail_web_api_import)
+    trusted = create_trusted_nova_project_root(
+        nova_project,
+        resolver=lambda candidate: candidate,
+    )
+    snapshot = NovaIntentSnapshot.from_submission(
+        _diary_suggestion(), source_slot=39, project_root=trusted
+    )
+    result = NovaIntentReadOnlyVerifier(trusted).verify(snapshot)
+
+    assert result.decision == VERIFIED_DECISION
+    assert {entry.name for entry in tmp_path.iterdir()} == created_before
+    assert "web.api.workspace" not in sys.modules
+    with pytest.raises(TypeError):
+        NovaIntentSnapshot.from_submission(
+            _diary_suggestion(), source_slot=39, project_root=nova_project
+        )
+
+
+def test_prioritize_thread_requires_a_nonblank_canonical_target(
+    trusted_nova_project,
+):
+    """Catches a whitespace-only thread target becoming a durable prioritized action."""
+    with pytest.raises(ValueError):
+        NovaIntentSnapshot.from_submission(
+            _diary_suggestion()
+            | {
+                "action": "prioritize_thread",
+                "target": {"thread_id": " \t "},
+                "payload": {},
+            },
+            source_slot=40,
+            project_root=trusted_nova_project,
+        )
+
+    valid = NovaIntentSnapshot.from_submission(
+        _diary_suggestion()
+        | {
+            "action": "prioritize_thread",
+            "target": {"thread_id": "release"},
+            "payload": {},
+        },
+        source_slot=41,
+        project_root=trusted_nova_project,
+    )
+    with pytest.raises(InvalidVerifierResult):
+        NovaIntentReadOnlyVerifier(trusted_nova_project).verify(
+            replace(valid, target={"thread_id": "  "})
         )

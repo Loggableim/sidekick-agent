@@ -35,9 +35,22 @@ _MAX_SOURCE_SLOT = (1 << 63) - 1
 _MAX_TEXT_LENGTH = 4_096
 _MAX_PRIORITY_ABS = 1_000_000
 _PERCENT_ESCAPE = re.compile(r"%[0-9a-fA-F]{2}")
-_OPAQUE_ENCODING_PREFIX = re.compile(r"^(?:base64|b64|data):", re.IGNORECASE)
-_BASE64_TEXT = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
+_OPAQUE_ENCODING_PREFIX = re.compile(r"^(?:base64(?:url)?|b64|data):", re.IGNORECASE)
+_BASE64_TEXT = re.compile(r"^[A-Za-z0-9+/_-]+={0,2}$")
 TrustedProjectRootResolver = Callable[[str | Path], Path]
+_TRUSTED_ROOT_CONSTRUCTION_TOKEN = object()
+
+
+@dataclass(frozen=True, init=False)
+class NovaTrustedProjectRoot:
+    """An upstream-validated local root capability for a read-only bridge."""
+
+    path: Path
+
+    def __init__(self, path: Path, construction_token: object) -> None:
+        if construction_token is not _TRUSTED_ROOT_CONSTRUCTION_TOKEN:
+            raise TypeError("Nova trusted project roots must be created by the bridge")
+        object.__setattr__(self, "path", path)
 
 
 @dataclass(frozen=True)
@@ -46,6 +59,28 @@ class NovaBridgeConfig:
 
     version: int = _BRIDGE_CONFIG_VERSION
     enabled: bool = False
+
+
+def create_trusted_nova_project_root(
+    project_root: Path,
+    *,
+    resolver: TrustedProjectRootResolver,
+) -> NovaTrustedProjectRoot:
+    """Accept an existing root only after an injected, upstream trust check.
+
+    The bridge has no default resolver: importing a WebUI resolver here could
+    initialize profile state.  A host that owns trusted-workspace policy must
+    supply its already-safe, side-effect-free validation boundary explicitly.
+    """
+    if not callable(resolver):
+        raise TypeError("Nova trusted root resolver must be callable")
+    candidate = Path(project_root).expanduser().resolve()
+    if not candidate.exists() or not candidate.is_dir():
+        raise ValueError("Nova project root must be an existing directory")
+    trusted = Path(resolver(candidate)).expanduser().resolve()
+    if trusted != candidate:
+        raise ValueError("trusted Nova project root resolver changed the root")
+    return NovaTrustedProjectRoot(candidate, _TRUSTED_ROOT_CONSTRUCTION_TOKEN)
 
 
 def load_nova_bridge_config(project_root: Path) -> NovaBridgeConfig:
@@ -101,7 +136,7 @@ class NovaIntentSnapshot:
         submission: Mapping[str, Any],
         *,
         source_slot: int,
-        project_root: Path,
+        project_root: NovaTrustedProjectRoot,
     ) -> "NovaIntentSnapshot":
         """Discard caller identity/security metadata and retain safe content only."""
         if not isinstance(submission, Mapping):
@@ -204,16 +239,9 @@ class NovaIntentReadOnlyVerifier:
 
     def __init__(
         self,
-        project_root: Path,
-        *,
-        trusted_project_root_resolver: TrustedProjectRootResolver | None = None,
+        project_root: NovaTrustedProjectRoot,
     ) -> None:
-        self._trusted_project_root_resolver = (
-            trusted_project_root_resolver or _default_trusted_project_root_resolver
-        )
-        self._project_root = _trusted_project_root(
-            project_root, self._trusted_project_root_resolver
-        )
+        self._project_root = _trusted_project_root(project_root)
 
     def verify(self, snapshot: NovaIntentSnapshot) -> VerificationResult:
         """Return independent positive evidence only for a valid local snapshot."""
@@ -237,10 +265,7 @@ class NovaIntentReadOnlyVerifier:
         if not isinstance(snapshot, NovaIntentSnapshot):
             raise TypeError("Nova verifier requires a NovaIntentSnapshot")
         if (
-            _trusted_project_root(
-                snapshot.project_root, self._trusted_project_root_resolver
-            )
-            != self._project_root
+            Path(snapshot.project_root).expanduser().resolve() != self._project_root
         ):
             raise ValueError("Nova snapshot root does not match verifier root")
         if snapshot.action not in NOVA_AUTOMATIC_ACTIONS:
@@ -270,11 +295,7 @@ class NovaIntentReadOnlyVerifier:
             "expected_outcome": expected_outcome,
             "priority": _priority(snapshot.priority),
             "source_slot": _source_slot(snapshot.source_slot),
-            "project_root": str(
-                _trusted_project_root(
-                    snapshot.project_root, self._trusted_project_root_resolver
-                )
-            ),
+            "project_root": str(Path(snapshot.project_root).expanduser().resolve()),
         }
         if document != snapshot._canonical_document():
             raise ValueError("Nova snapshot is not canonical")
@@ -286,24 +307,10 @@ class NovaIntentReadOnlyVerifier:
             raise ValueError("Nova verifier evidence reference is invalid")
 
 
-def _default_trusted_project_root_resolver(path: str | Path) -> Path:
-    """Use Sidekick's non-mutating workspace trust boundary for Nova roots."""
-    from web.api.workspace import resolve_trusted_workspace_read_only
-
-    return resolve_trusted_workspace_read_only(path)
-
-
-def _trusted_project_root(
-    project_root: Path,
-    resolver: TrustedProjectRootResolver = _default_trusted_project_root_resolver,
-) -> Path:
-    candidate = Path(project_root).expanduser().resolve()
-    if not candidate.exists() or not candidate.is_dir():
-        raise ValueError("Nova project root must be an existing directory")
-    trusted = Path(resolver(candidate)).expanduser().resolve()
-    if trusted != candidate:
-        raise ValueError("trusted Nova project root resolver changed the root")
-    return trusted
+def _trusted_project_root(project_root: NovaTrustedProjectRoot) -> Path:
+    if not isinstance(project_root, NovaTrustedProjectRoot):
+        raise TypeError("Nova bridge requires an injected trusted project root")
+    return project_root.path
 
 
 def _source_slot(value: Any) -> int:
@@ -352,7 +359,7 @@ def _canonical_action_mapping(
         if key not in allowed_keys or key in canonical:
             raise ValueError(f"{label} contains an unsupported field")
         canonical[key] = _normalized_plain_text(raw_value, label)
-    if requires_value and not canonical:
+    if requires_value and not any(item.strip() for item in canonical.values()):
         raise ValueError(f"{label} requires a concrete target")
     return MappingProxyType(canonical)
 
@@ -397,10 +404,12 @@ def _is_opaque_encoded_text(value: str) -> bool:
     candidate = value.strip()
     if _OPAQUE_ENCODING_PREFIX.match(candidate):
         return True
-    if len(candidate) < 12 or len(candidate) % 4 or not _BASE64_TEXT.fullmatch(candidate):
+    minimum_length = 4 if "-" in candidate or "_" in candidate else 10
+    if len(candidate) < minimum_length or not _BASE64_TEXT.fullmatch(candidate):
         return False
     try:
-        decoded = base64.b64decode(candidate, validate=True)
+        padded = candidate.rstrip("=") + "=" * (-len(candidate.rstrip("=")) % 4)
+        decoded = base64.b64decode(padded, altchars=b"-_", validate=True)
         decoded.decode("utf-8")
     except (ValueError, UnicodeDecodeError):
         return False
