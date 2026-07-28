@@ -6138,6 +6138,12 @@ def handle_post(handler, parsed) -> bool:
         slug = (body.get("slug") or "").strip().lower()
         if not slug:
             return bad(handler, "slug is required")
+        if "nova_management" in body or "space_id" in body:
+            return bad(
+                handler,
+                "Nova management must be changed through /api/space/nova-management",
+                status=400,
+            )
         from web.api.space_engine import get_workspace
         ws = get_workspace(slug)
         if not ws:

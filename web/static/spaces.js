@@ -827,6 +827,17 @@ function renderSpaceDetail(space) {
           ${!_isProtectedSpaceSlug(space.slug) ? '<button class="space-danger-action" type="button" onclick="deleteActiveSpaceFromDetail()">Delete space</button>' : ''}
         </div>
       </section>
+      <section class="space-nova-management-card" id="spaceNovaManagementCard" data-slug="${spaceEsc(space.slug)}">
+        <div class="space-section-title">Nova supervision</div>
+        <p class="space-nova-management-copy">Enable autonomous supervision only for this isolated Space. Enrollment is bound to this Space ID and its server-validated project root.</p>
+        <label class="space-nova-management-option"><input id="spaceNovaManagementYolo" type="checkbox" disabled><span>Allow YOLO supervision for this Space</span></label>
+        <label class="space-nova-management-option"><input id="spaceNovaManagementEnrolled" type="checkbox" disabled><span>Enroll this Space for Nova supervision</span></label>
+        <div class="space-nova-management-meta" id="spaceNovaManagementMeta">Loading management identity…</div>
+        <div class="space-detail-actions">
+          <button class="space-secondary-action" type="button" onclick="fetchSpaceNovaManagement('${spaceEsc(space.slug)}')">Refresh supervision status</button>
+          <button class="space-primary-action" id="spaceNovaManagementSave" type="button" onclick="saveSpaceNovaManagement()" disabled>Save supervision</button>
+        </div>
+      </section>
       <section class="space-isolation-card">
         <div class="space-section-title">Isolation contract</div>
         <div class="space-isolation-list">
@@ -838,6 +849,64 @@ function renderSpaceDetail(space) {
       </section>
     </div>`;
   _setSpaceDetailActions(space);
+  void fetchSpaceNovaManagement(space.slug);
+}
+
+async function fetchSpaceNovaManagement(slug) {
+  const card = document.getElementById('spaceNovaManagementCard');
+  if (!card || String(card.dataset.slug || '') !== String(slug || '')) return null;
+  const meta = document.getElementById('spaceNovaManagementMeta');
+  try {
+    const data = await api('/api/space/nova-management?slug=' + encodeURIComponent(slug));
+    const management = data && data.nova_management || {};
+    card.dataset.spaceId = String(data && data.space_id || '');
+    card.dataset.rootFingerprint = String(data && data.root_fingerprint || '');
+    const yolo = document.getElementById('spaceNovaManagementYolo');
+    const enrolled = document.getElementById('spaceNovaManagementEnrolled');
+    const save = document.getElementById('spaceNovaManagementSave');
+    if (yolo) { yolo.checked = management.yolo === true; yolo.disabled = false; }
+    if (enrolled) { enrolled.checked = management.enrolled === true; enrolled.disabled = false; }
+    if (save) save.disabled = false;
+    if (meta) meta.textContent = 'Space ID: ' + (card.dataset.spaceId || 'not persisted yet') + ' · Root fingerprint: ' + (card.dataset.rootFingerprint || 'no trusted project directory');
+    return data;
+  } catch (e) {
+    if (meta) meta.textContent = 'Supervision status unavailable: ' + (e.message || e);
+    return null;
+  }
+}
+
+async function saveSpaceNovaManagement() {
+  const card = document.getElementById('spaceNovaManagementCard');
+  const yolo = document.getElementById('spaceNovaManagementYolo');
+  const enrolled = document.getElementById('spaceNovaManagementEnrolled');
+  if (!card || !yolo || !enrolled) return;
+  const wantsYolo = yolo.checked === true;
+  const wantsEnrollment = enrolled.checked === true;
+  if (wantsEnrollment && !wantsYolo) {
+    if (typeof showToast === 'function') showToast('Enrollment requires YOLO supervision for this Space.');
+    return;
+  }
+  let confirmation = null;
+  if (wantsEnrollment) {
+    const spaceId = String(card.dataset.spaceId || '');
+    const rootFingerprint = String(card.dataset.rootFingerprint || '');
+    if (!spaceId || !rootFingerprint) {
+      if (typeof showToast === 'function') showToast('A persisted Space ID and trusted project directory are required for enrollment.');
+      return;
+    }
+    if (!confirm('Enroll this Space for Nova YOLO supervision?\n\nSpace ID: ' + spaceId + '\nRoot fingerprint: ' + rootFingerprint)) return;
+    confirmation = { space_id: spaceId, root_fingerprint: rootFingerprint };
+  }
+  try {
+    await api('/api/space/nova-management', {
+      method: 'POST',
+      body: JSON.stringify({ slug: card.dataset.slug, yolo: wantsYolo, enrolled: wantsEnrollment, confirmation }),
+    });
+    await fetchSpaceNovaManagement(card.dataset.slug);
+    if (typeof showToast === 'function') showToast('Nova supervision saved for this Space.');
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('Nova supervision save failed: ' + (e.message || e));
+  }
 }
 
 function _syncSpacesPanelActiveState(slug) {

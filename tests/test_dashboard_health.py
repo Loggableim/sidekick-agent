@@ -2175,6 +2175,21 @@ def test_space_dropdown_selection_uses_delegated_container_click():
     assert "_bindSpaceDropdownSelection(dd);" in spaces_js[spaces_js.index("function _openSpaceDropdown") :]
 
 
+def test_space_settings_exposes_confirmed_nova_management_controls():
+    """The settings surface binds enrollment to server-issued Space/root identity."""
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert "fetchSpaceNovaManagement" in spaces_js
+    assert "saveSpaceNovaManagement" in spaces_js
+    assert "/api/space/nova-management" in spaces_js
+    assert "root_fingerprint" in spaces_js
+    assert "space_id" in spaces_js
+    assert "confirm(" in spaces_js
+    assert "space-nova-management-card" in spaces_js
+    assert ".space-nova-management-card" in style_css
+
+
 def test_desktop_sidebar_nav_does_not_use_mobile_touch_compaction():
     style_css = Path("web/static/style.css").read_text(encoding="utf-8")
 

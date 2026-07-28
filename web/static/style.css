@@ -1027,6 +1027,12 @@
   .cast-unavailable:hover{opacity:1;color:#f59e0b!important;}
   .nova-yolo-toggle-btn.active{background:rgba(239,68,68,.18);color:#fb7185;box-shadow:0 0 0 1px rgba(251,113,133,.45) inset,0 0 12px rgba(239,68,68,.24);}
   .nova-yolo-toggle-btn.active:hover{background:rgba(239,68,68,.28);color:#fecdd3;}
+
+  .space-nova-management-card{margin-top:14px;padding:14px;border:1px solid rgba(245,158,11,.32);border-radius:10px;background:linear-gradient(135deg,rgba(245,158,11,.09),rgba(30,41,59,.28));}
+  .space-nova-management-copy{margin:0 0 10px;color:var(--muted,#a1a1aa);font-size:12px;line-height:1.45;}
+  .space-nova-management-option{display:flex;align-items:center;gap:8px;margin:8px 0;font-size:13px;color:var(--text,#e4e4e7);cursor:pointer;}
+  .space-nova-management-option input{accent-color:#f59e0b;}
+  .space-nova-management-meta{margin:10px 0;color:var(--muted,#a1a1aa);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;line-height:1.5;overflow-wrap:anywhere;}
   /* -- Language Selector (titlebar) -- */
   .titlebar-lang-selector{position:relative;display:inline-flex;align-items:center;}
   .lang-selector-btn{font-size:16px;line-height:1;}
