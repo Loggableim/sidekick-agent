@@ -838,3 +838,49 @@ can merge or the live seam can change.
   ~~~powershell
   git commit -m "fix: harden Swarm runtime security boundaries"
   ~~~
+
+## Task 11: Wire the promised public `sidekick swarm` entrypoint
+
+**Files:**
+
+- Modify: `cli/main.py` and focused CLI-entrypoint regression tests.
+- Do not modify: `C:\\sidekick\\home\\spaces\\nova\\*`, live processes,
+  provider configuration, or network state.
+
+**Purpose:**
+
+The Swarm parser exists in `cli/swarm.py` and the command is already reserved
+in `cli/main.py`'s built-in command set, but the top-level parser never calls
+`cli.swarm.build_parser(...)`.  Consequently the installed `sidekick` command
+rejects `sidekick swarm`, despite that being the approved public interface.
+Close that public-entrypoint gap before initializing or enabling the live Nova
+bridge.
+
+- [ ] **Step 1: Reproduce with the real top-level parser**
+
+  Add a focused regression that proves the public `cli.main:main` route accepts
+  `sidekick swarm --help` (and exposes its normal Swarm subcommands), rather
+  than testing `cli.swarm.build_parser` in isolation.  Keep help/read-only;
+  it must not initialize `.swarm` or access a provider.
+
+- [ ] **Step 2: Register and dispatch the parser once**
+
+  Wire `cli.swarm.build_parser` and `swarm_command` into the authoritative
+  `cli.main` top-level subparser/dispatch flow.  Avoid duplicate registration,
+  plugin discovery paths, or any import-time write/model refresh.  Preserve
+  the current `sidekick` command behavior.
+
+- [ ] **Step 3: Verify and commit the narrowly scoped repair**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_cli.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check cli\main.py cli\swarm.py tests/test_swarm_cli.py
+  & C:\sidekick\sidekick\.venv\Scripts\sidekick.exe swarm --help
+  git diff --check
+  ~~~
+
+  Commit only the entrypoint repair with:
+
+  ~~~powershell
+  git commit -m "fix: register the Swarm CLI entrypoint"
+  ~~~
