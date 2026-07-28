@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import threading
 
 import pytest
 import yaml
@@ -9,6 +11,165 @@ from swarm_core.config import initialize_project
 from swarm_core.events import SwarmEventBus
 from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.store import ProjectSwarmStore
+from swarm_core.types import IntegrationAdmissionRequest
+
+
+@pytest.fixture
+def nova_project(tmp_path: Path) -> Path:
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    initialize_project(project)
+    return project
+
+
+def _integration_request(
+    project: Path,
+    key: str,
+    *,
+    max_active: int = 1,
+    rolling_window_seconds: int = 24 * 60 * 60,
+    rolling_run_limit: int | None = 6,
+) -> IntegrationAdmissionRequest:
+    return IntegrationAdmissionRequest(
+        namespace="nova",
+        idempotency_key=key,
+        metadata={
+            "goal": "Review the pending change",
+            "pack": "coding-team",
+            "project_root": str(project.resolve()),
+            "autonomy": "reviewed_execution",
+        },
+        max_active=max_active,
+        rolling_window_seconds=rolling_window_seconds,
+        rolling_run_limit=rolling_run_limit,
+    )
+
+
+def test_integration_admission_coalesces_equal_concurrent_keys(
+    nova_project: Path,
+):
+    """Catches concurrent retries creating two runs for one integration intent."""
+    request = _integration_request(nova_project, "same-intent")
+    barrier = threading.Barrier(2)
+    results = []
+
+    def admit() -> None:
+        store = ProjectSwarmStore(nova_project)
+        barrier.wait(timeout=5)
+        results.append(store.admit_integration_run(request))
+
+    first = threading.Thread(target=admit)
+    second = threading.Thread(target=admit)
+    first.start()
+    second.start()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert first.is_alive() is False
+    assert second.is_alive() is False
+    assert sorted(result.status for result in results) == ["coalesced", "created"]
+    assert results[0].run is not None
+    assert results[1].run is not None
+    assert results[0].run.run_id == results[1].run.run_id
+    assert len(ProjectSwarmStore(nova_project).list_runs()) == 1
+
+
+def test_integration_admission_keeps_paused_slots_and_retains_rolling_quota(
+    nova_project: Path,
+):
+    """Catches pauses freeing capacity or completion deleting admission history."""
+    store = ProjectSwarmStore(nova_project)
+    now = datetime(2026, 7, 28, 12, tzinfo=timezone.utc)
+    first = store.admit_integration_run(
+        _integration_request(nova_project, "first", rolling_run_limit=2), now=now
+    )
+    assert first.status == "created"
+    assert first.run is not None
+
+    store.set_run_status(first.run.run_id, "paused")
+    paused_limit = store.admit_integration_run(
+        _integration_request(nova_project, "while-paused", rolling_run_limit=2),
+        now=now + timedelta(seconds=1),
+    )
+    assert paused_limit.status == "active_limit"
+    assert paused_limit.run is None
+
+    store.resume_run(first.run.run_id)
+    store.set_run_status(first.run.run_id, "completed")
+    after_completion = store.admit_integration_run(
+        _integration_request(nova_project, "after-completion", rolling_run_limit=2),
+        now=now + timedelta(seconds=2),
+    )
+    assert after_completion.status == "created"
+    assert after_completion.run is not None
+    store.set_run_status(after_completion.run.run_id, "completed")
+    quota_limit = store.admit_integration_run(
+        _integration_request(nova_project, "quota-limit", rolling_run_limit=2),
+        now=now + timedelta(seconds=3),
+    )
+    assert quota_limit.status == "rolling_limit"
+
+
+def test_integration_admission_enforces_configurable_rolling_limit(
+    nova_project: Path,
+):
+    """Catches rolling limits counting retries, paused state, or the wrong window."""
+    store = ProjectSwarmStore(nova_project)
+    start = datetime(2026, 7, 28, 9, tzinfo=timezone.utc)
+    for index in range(6):
+        result = store.admit_integration_run(
+            _integration_request(
+                nova_project,
+                f"window-{index}",
+                max_active=20,
+                rolling_run_limit=6,
+            ),
+            now=start + timedelta(minutes=index),
+        )
+        assert result.status == "created"
+
+    limited = store.admit_integration_run(
+        _integration_request(
+            nova_project,
+            "window-limited",
+            max_active=20,
+            rolling_run_limit=6,
+        ),
+        now=start + timedelta(hours=1),
+    )
+    unlimited = store.admit_integration_run(
+        _integration_request(
+            nova_project,
+            "window-unlimited",
+            max_active=20,
+            rolling_run_limit=None,
+        ),
+        now=start + timedelta(hours=1),
+    )
+
+    assert limited.status == "rolling_limit"
+    assert unlimited.status == "created"
+
+
+def test_integration_rejection_has_no_run_and_only_a_bounded_reason(
+    nova_project: Path,
+):
+    """Catches integration rejections leaking an unbounded pre-run payload."""
+    store = ProjectSwarmStore(nova_project)
+
+    rejected = store.record_integration_rejection(
+        "nova",
+        "unsupported",
+        reason="unsupported_action",
+    )
+
+    assert rejected.status == "rejected"
+    assert rejected.run is None
+    assert rejected.reason == "unsupported_action"
+    assert store.get_integration_admission("nova", "unsupported") == rejected
+    assert store.list_runs() == []
+    with pytest.raises(ValueError, match="bounded"):
+        store.record_integration_rejection("nova", "too-long", reason="x" * 129)
 
 
 def test_initialize_project_creates_versionable_default_configuration(tmp_path: Path):

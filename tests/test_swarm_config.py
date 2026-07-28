@@ -10,13 +10,16 @@ import threading
 from pathlib import Path
 
 import pytest
+import yaml
 
 from swarm_core import config as config_module
 from swarm_core.config import (
     SwarmProjectNotInitializedError,
     initialize_project,
+    load_integration_config,
     load_project_config,
     pinned_swarm_database,
+    save_integration_config,
 )
 from swarm_core import store as store_module
 from swarm_core.store import ProjectSwarmStore
@@ -35,6 +38,36 @@ def _project_with_external_swarm_link(tmp_path: Path) -> tuple[Path, Path]:
             f"directory symlinks are unavailable in this test environment: {exc}"
         )
     return project, outside
+
+
+def test_integration_config_is_empty_until_explicitly_saved_and_round_trips(
+    tmp_path: Path,
+):
+    """Catches integration reads mutating config or overwriting core settings."""
+    project = tmp_path / "spaces" / "nova"
+    project.mkdir(parents=True)
+    initialize_project(project)
+
+    assert load_integration_config(project, "nova") == {}
+
+    save_integration_config(project, "nova", {"version": 1, "enabled": True})
+
+    assert load_integration_config(project, "nova") == {"version": 1, "enabled": True}
+    raw_config = yaml.safe_load((project / ".swarm" / "swarm.yaml").read_text())
+    assert raw_config["default_autonomy"] == "reviewed_execution"
+    assert raw_config["integrations"] == {"nova": {"version": 1, "enabled": True}}
+
+
+def test_save_integration_config_rejects_external_swarm_link_before_writing(
+    tmp_path: Path,
+):
+    """Catches an integration save following a `.swarm` link outside its project."""
+    project, outside = _project_with_external_swarm_link(tmp_path)
+
+    with pytest.raises(ValueError, match="Swarm.*outside.*project"):
+        save_integration_config(project, "nova", {"version": 1, "enabled": True})
+
+    assert list(outside.iterdir()) == []
 
 
 def test_initialize_rejects_external_swarm_link_before_writing(tmp_path: Path):
