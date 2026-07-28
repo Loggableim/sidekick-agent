@@ -701,9 +701,13 @@ class NovaSwarmRuntimeBridge:
         context = self._runtime_context()
         store = ProjectSwarmStore.open_read_only(self._project_root)
         durable = store.get_run(run.run_id)
-        if durable is None or durable.status == "completed":
-            raise ValueError("Nova runtime attachment requires a non-terminal run")
+        if durable is None or durable.status != "paused":
+            raise ValueError("Nova runtime attachment requires a paused run")
         snapshot = _snapshot_from_metadata(durable.metadata, context)
+        if not _durable_nova_contract_matches(
+            self._project_root, durable, snapshot=snapshot
+        ):
+            raise ValueError("Nova runtime attachment durable contract mismatch")
         adapter = NovaSwarmAdapter(
             self._kernel, PolicyGate(ProjectSwarmStore(self._project_root)), enabled=True
         )
@@ -807,6 +811,9 @@ def register_nova_runtime_context(
         or metadata.get("required_pre_completion_hook") != _RUNTIME_HOOK_ID
     ):
         raise ValueError("Nova runtime context requires immutable digests")
+    snapshot = _snapshot_from_metadata(metadata, trusted_project_root)
+    if not _durable_nova_contract_matches(project_root, run, snapshot=snapshot):
+        raise ValueError("Nova runtime context durable contract mismatch")
     _register_runtime_binding(
         context,
         _NovaRuntimeBinding(
@@ -819,7 +826,7 @@ def register_nova_runtime_context(
             trusted_project_root,
             NovaIntentReadOnlyVerifier(
                 trusted_project_root,
-                snapshot=_snapshot_from_metadata(metadata, trusted_project_root),
+                snapshot=snapshot,
                 run_id=run.run_id,
             ),
         ),
@@ -873,6 +880,25 @@ def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBindi
     except (TypeError, ValueError, InvalidVerifierResult):
         return None
     return binding
+
+
+def _durable_nova_contract_matches(
+    project_root: Path, run: SwarmRun, *, snapshot: NovaIntentSnapshot
+) -> bool:
+    metadata = run.metadata
+    mode = metadata.get("nova_mode")
+    expected_calls = {"reviewed_execution": 48, "autonomous": 128}.get(mode)
+    return (
+        metadata.get("integration_namespace") == _NOVA_NAMESPACE
+        and metadata.get("project_root") == str(Path(project_root).resolve())
+        and isinstance(metadata.get("nova_intent_digest"), str)
+        and snapshot.intent_digest == metadata.get("nova_intent_digest")
+        and metadata.get("autonomy") == mode
+        and expected_calls is not None
+        and metadata.get("nova_max_calls") == expected_calls
+        and isinstance(metadata.get("proposal_digest"), str)
+        and metadata.get("required_pre_completion_hook") == _RUNTIME_HOOK_ID
+    )
 
 
 def _default_runtime_dispatcher(project_root: Path, run_id: str) -> None:
