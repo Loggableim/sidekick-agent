@@ -29,6 +29,29 @@ class SwarmRun:
 
 
 @dataclass(frozen=True)
+class IntegrationAdmissionRequest:
+    """One bounded request for a project-local integration run."""
+
+    namespace: str
+    idempotency_key: str
+    metadata: Mapping[str, Any]
+    max_active: int
+    rolling_window_seconds: int
+    rolling_run_limit: int | None
+
+
+@dataclass(frozen=True)
+class IntegrationAdmission:
+    """The durable result of admitting or rejecting one integration request."""
+
+    status: str
+    namespace: str
+    idempotency_key: str
+    run: SwarmRun | None
+    reason: str | None
+
+
+@dataclass(frozen=True)
 class SwarmEvent:
     event_id: str
     sequence: int

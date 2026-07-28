@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
@@ -21,7 +21,14 @@ from .config import (
     resolve_swarm_path,
 )
 from .models import ModelCatalogSnapshot
-from .types import ApprovalRecord, SwarmEvent, SwarmRun, WorkflowRoleCheckpoint
+from .types import (
+    ApprovalRecord,
+    IntegrationAdmission,
+    IntegrationAdmissionRequest,
+    SwarmEvent,
+    SwarmRun,
+    WorkflowRoleCheckpoint,
+)
 
 
 AuthorizationResult = TypeVar("AuthorizationResult")
@@ -86,6 +93,199 @@ class ProjectSwarmStore:
                 ),
             )
         return SwarmRun(run_id, status, now, now, metadata_data)
+
+    def admit_integration_run(
+        self,
+        request: IntegrationAdmissionRequest,
+        *,
+        now: datetime | None = None,
+    ) -> IntegrationAdmission:
+        """Atomically create one integration run or retain its bounded rejection."""
+        if not isinstance(request, IntegrationAdmissionRequest):
+            raise TypeError("Swarm integration admission requires a typed request")
+        namespace = _validated_integration_namespace(request.namespace)
+        idempotency_key = _validated_integration_idempotency_key(
+            request.idempotency_key
+        )
+
+        with self._immediate_connection() as connection:
+            existing = _get_integration_admission_from_connection(
+                connection,
+                namespace,
+                idempotency_key,
+            )
+            if existing is not None:
+                if existing.run is not None:
+                    return IntegrationAdmission(
+                        status="coalesced",
+                        namespace=existing.namespace,
+                        idempotency_key=existing.idempotency_key,
+                        run=existing.run,
+                        reason=None,
+                    )
+                return IntegrationAdmission(
+                    status=existing.reason or "rejected",
+                    namespace=existing.namespace,
+                    idempotency_key=existing.idempotency_key,
+                    run=None,
+                    reason=existing.reason,
+                )
+
+            max_active, rolling_window_seconds, rolling_run_limit = (
+                _validated_integration_admission_bounds(request)
+            )
+            metadata = _validated_integration_metadata(
+                request.metadata,
+                self.project_root,
+            )
+            timestamp = _validated_admission_timestamp(now)
+            timestamp_text = _timestamp_text(timestamp)
+
+            active_slots = {
+                int(row["active_slot"])
+                for row in connection.execute(
+                    """
+                    SELECT active_slot FROM integration_admissions
+                    WHERE namespace = ? AND active_slot IS NOT NULL
+                    """,
+                    (namespace,),
+                ).fetchall()
+            }
+            if len(active_slots) >= max_active:
+                return _record_integration_rejection_in_connection(
+                    connection,
+                    namespace,
+                    idempotency_key,
+                    reason="active_limit",
+                    timestamp=timestamp,
+                )
+
+            if rolling_run_limit is not None:
+                cutoff = timestamp - _seconds_delta(rolling_window_seconds)
+                rolling_count = int(
+                    connection.execute(
+                        """
+                        SELECT COUNT(*) FROM integration_admissions
+                        WHERE namespace = ?
+                          AND state = 'admitted'
+                          AND created_at >= ?
+                        """,
+                        (namespace, _timestamp_text(cutoff)),
+                    ).fetchone()[0]
+                )
+                if rolling_count >= rolling_run_limit:
+                    return _record_integration_rejection_in_connection(
+                        connection,
+                        namespace,
+                        idempotency_key,
+                        reason="rolling_limit",
+                        timestamp=timestamp,
+                    )
+
+            active_slot = next(
+                slot for slot in range(max_active) if slot not in active_slots
+            )
+            run_id = str(uuid4())
+            metadata_json = json.dumps(metadata, sort_keys=True, allow_nan=False)
+            connection.execute(
+                """
+                INSERT INTO runs (run_id, status, created_at, updated_at, metadata_json)
+                VALUES (?, 'running', ?, ?, ?)
+                """,
+                (run_id, timestamp_text, timestamp_text, metadata_json),
+            )
+            connection.execute(
+                """
+                INSERT INTO integration_admissions (
+                    namespace, idempotency_key, run_id, state, active_slot,
+                    metadata_json, reason, created_at, updated_at
+                ) VALUES (?, ?, ?, 'admitted', ?, ?, NULL, ?, ?)
+                """,
+                (
+                    namespace,
+                    idempotency_key,
+                    run_id,
+                    active_slot,
+                    metadata_json,
+                    timestamp_text,
+                    timestamp_text,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO events (
+                    event_id, timestamp, event_type, run_id, payload_json, visibility
+                ) VALUES (?, ?, 'run.started', ?, ?, 'project')
+                """,
+                (
+                    str(uuid4()),
+                    timestamp_text,
+                    run_id,
+                    json.dumps(
+                        {"goal": metadata["goal"], "pack": metadata["pack"]},
+                        sort_keys=True,
+                        allow_nan=False,
+                    ),
+                ),
+            )
+        return IntegrationAdmission(
+            status="created",
+            namespace=namespace,
+            idempotency_key=idempotency_key,
+            run=SwarmRun(run_id, "running", timestamp, timestamp, metadata),
+            reason=None,
+        )
+
+    def record_integration_rejection(
+        self,
+        namespace: str,
+        idempotency_key: str,
+        *,
+        reason: str,
+        now: datetime | None = None,
+    ) -> IntegrationAdmission:
+        """Persist a bounded pre-run integration rejection without creating a run."""
+        namespace = _validated_integration_namespace(namespace)
+        idempotency_key = _validated_integration_idempotency_key(idempotency_key)
+        reason = _validated_integration_reason(reason)
+        timestamp = _validated_admission_timestamp(now)
+        with self._immediate_connection() as connection:
+            existing = _get_integration_admission_from_connection(
+                connection,
+                namespace,
+                idempotency_key,
+            )
+            if existing is not None:
+                return existing
+            recorded = _record_integration_rejection_in_connection(
+                connection,
+                namespace,
+                idempotency_key,
+                reason=reason,
+                timestamp=timestamp,
+            )
+            return IntegrationAdmission(
+                status="rejected",
+                namespace=recorded.namespace,
+                idempotency_key=recorded.idempotency_key,
+                run=None,
+                reason=recorded.reason,
+            )
+
+    def get_integration_admission(
+        self,
+        namespace: str,
+        idempotency_key: str,
+    ) -> IntegrationAdmission | None:
+        """Return one durable integration identity without creating new state."""
+        namespace = _validated_integration_namespace(namespace)
+        idempotency_key = _validated_integration_idempotency_key(idempotency_key)
+        with self._connection() as connection:
+            return _get_integration_admission_from_connection(
+                connection,
+                namespace,
+                idempotency_key,
+            )
 
     def get_run(self, run_id: str) -> SwarmRun | None:
         with self._connection() as connection:
@@ -576,6 +776,15 @@ class ProjectSwarmStore:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Swarm run status changed during transition")
+            if status == "completed":
+                connection.execute(
+                    """
+                    UPDATE integration_admissions
+                    SET active_slot = NULL, updated_at = ?
+                    WHERE run_id = ? AND active_slot IS NOT NULL
+                    """,
+                    (_timestamp_text(updated_at), run_id),
+                )
         run = self.get_run(run_id)
         assert run is not None
         return run
@@ -1346,6 +1555,21 @@ class ProjectSwarmStore:
                     event_id TEXT NOT NULL UNIQUE REFERENCES events(event_id),
                     PRIMARY KEY (run_id, event_type, idempotency_key)
                 );
+                CREATE TABLE IF NOT EXISTS integration_admissions (
+                    namespace TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    run_id TEXT UNIQUE REFERENCES runs(run_id),
+                    state TEXT NOT NULL,
+                    active_slot INTEGER,
+                    metadata_json TEXT NOT NULL,
+                    reason TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (namespace, idempotency_key)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_admissions_active_slot
+                    ON integration_admissions(namespace, active_slot)
+                    WHERE active_slot IS NOT NULL;
                 CREATE TABLE IF NOT EXISTS approvals (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     approval_id TEXT NOT NULL UNIQUE,
@@ -1983,6 +2207,218 @@ def _row_to_run(row: sqlite3.Row) -> SwarmRun:
         updated_at=datetime.fromisoformat(row["updated_at"]),
         metadata=json.loads(row["metadata_json"]),
     )
+
+
+def _get_integration_admission_from_connection(
+    connection: sqlite3.Connection,
+    namespace: str,
+    idempotency_key: str,
+) -> IntegrationAdmission | None:
+    row = connection.execute(
+        """
+        SELECT integration_admissions.namespace,
+               integration_admissions.idempotency_key,
+               integration_admissions.state,
+               integration_admissions.reason,
+               runs.run_id AS run_id,
+               runs.status AS status,
+               runs.created_at AS created_at,
+               runs.updated_at AS updated_at,
+               runs.metadata_json AS run_metadata_json
+        FROM integration_admissions
+        LEFT JOIN runs ON runs.run_id = integration_admissions.run_id
+        WHERE integration_admissions.namespace = ?
+          AND integration_admissions.idempotency_key = ?
+        """,
+        (namespace, idempotency_key),
+    ).fetchone()
+    if row is None:
+        return None
+    state = row["state"]
+    if state not in {"admitted", "rejected"}:
+        raise RuntimeError("Stored integration admission has an invalid state")
+    if state == "admitted":
+        if row["run_id"] is None or row["run_metadata_json"] is None:
+            raise RuntimeError("Stored admitted integration has no run")
+        run = SwarmRun(
+            run_id=row["run_id"],
+            status=row["status"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            metadata=json.loads(row["run_metadata_json"]),
+        )
+        return IntegrationAdmission(
+            status="admitted",
+            namespace=row["namespace"],
+            idempotency_key=row["idempotency_key"],
+            run=run,
+            reason=None,
+        )
+    if row["run_id"] is not None:
+        raise RuntimeError("Stored rejected integration unexpectedly has a run")
+    return IntegrationAdmission(
+        status="rejected",
+        namespace=row["namespace"],
+        idempotency_key=row["idempotency_key"],
+        run=None,
+        reason=row["reason"],
+    )
+
+
+def _record_integration_rejection_in_connection(
+    connection: sqlite3.Connection,
+    namespace: str,
+    idempotency_key: str,
+    *,
+    reason: str,
+    timestamp: datetime,
+) -> IntegrationAdmission:
+    reason = _validated_integration_reason(reason)
+    timestamp_text = _timestamp_text(timestamp)
+    connection.execute(
+        """
+        INSERT INTO integration_admissions (
+            namespace, idempotency_key, run_id, state, active_slot,
+            metadata_json, reason, created_at, updated_at
+        ) VALUES (?, ?, NULL, 'rejected', NULL, '{}', ?, ?, ?)
+        """,
+        (namespace, idempotency_key, reason, timestamp_text, timestamp_text),
+    )
+    return IntegrationAdmission(
+        status=reason,
+        namespace=namespace,
+        idempotency_key=idempotency_key,
+        run=None,
+        reason=reason,
+    )
+
+
+def _validated_integration_namespace(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TypeError("Swarm integration namespace must be a string")
+    value = value.strip()
+    if (
+        not value
+        or len(value) > 64
+        or not value.isascii()
+        or any(not (character.isalnum() or character in "._-") for character in value)
+    ):
+        raise ValueError("Swarm integration namespace must be bounded ASCII text")
+    return value
+
+
+def _validated_integration_idempotency_key(value: Any) -> str:
+    if not isinstance(value, str):
+        raise TypeError("Swarm integration idempotency_key must be a string")
+    value = value.strip()
+    if (
+        not value
+        or len(value) > 256
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("Swarm integration idempotency_key must be bounded text")
+    return value
+
+
+def _validated_integration_admission_bounds(
+    request: IntegrationAdmissionRequest,
+) -> tuple[int, int, int | None]:
+    max_active = request.max_active
+    rolling_window_seconds = request.rolling_window_seconds
+    rolling_run_limit = request.rolling_run_limit
+    if (
+        isinstance(max_active, bool)
+        or not isinstance(max_active, int)
+        or not 1 <= max_active <= 128
+    ):
+        raise ValueError("Swarm integration max_active must be between 1 and 128")
+    if (
+        isinstance(rolling_window_seconds, bool)
+        or not isinstance(rolling_window_seconds, int)
+        or not 1 <= rolling_window_seconds <= 31 * 24 * 60 * 60
+    ):
+        raise ValueError(
+            "Swarm integration rolling_window_seconds must be bounded positive seconds"
+        )
+    if rolling_run_limit is not None and (
+        isinstance(rolling_run_limit, bool)
+        or not isinstance(rolling_run_limit, int)
+        or not 1 <= rolling_run_limit <= 100_000
+    ):
+        raise ValueError("Swarm integration rolling_run_limit must be positive or None")
+    return max_active, rolling_window_seconds, rolling_run_limit
+
+
+def _validated_integration_metadata(
+    metadata: Mapping[str, Any],
+    project_root: Path,
+) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        raise TypeError("Swarm integration metadata must be a mapping")
+    normalized = _normalized_json_value(metadata, label="Swarm integration metadata")
+    assert isinstance(normalized, dict)
+    for name in ("goal", "pack", "project_root", "autonomy"):
+        if name not in normalized:
+            raise ValueError(f"Swarm integration metadata is missing {name}")
+    for name in ("goal", "pack"):
+        value = normalized[name]
+        if not isinstance(value, str) or not value.strip() or len(value) > 4096:
+            raise ValueError(f"Swarm integration metadata has an invalid {name}")
+    if normalized["project_root"] != str(project_root):
+        raise ValueError("Swarm integration metadata belongs to a different project")
+    if normalized["autonomy"] not in {
+        "observe",
+        "suggest",
+        "execute_safe",
+        "reviewed_execution",
+        "autonomous",
+    }:
+        raise ValueError("Swarm integration metadata has an invalid autonomy")
+    return normalized
+
+
+def _normalized_json_value(value: Any, *, label: str) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError(f"{label} must contain finite JSON values")
+        return value
+    if isinstance(value, Mapping):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{label} keys must be strings")
+            normalized[key] = _normalized_json_value(item, label=label)
+        return normalized
+    if isinstance(value, (list, tuple)):
+        return [_normalized_json_value(item, label=label) for item in value]
+    raise TypeError(f"{label} must contain JSON-safe values")
+
+
+def _validated_admission_timestamp(now: datetime | None) -> datetime:
+    if now is None:
+        return _utc_now()
+    if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("Swarm integration admission timestamp must be timezone-aware")
+    return now.astimezone(timezone.utc)
+
+
+def _validated_integration_reason(reason: Any) -> str:
+    if not isinstance(reason, str):
+        raise TypeError("Swarm integration rejection reason must be a string")
+    reason = reason.strip()
+    if (
+        not reason
+        or len(reason) > 128
+        or any(ord(character) < 32 or ord(character) == 127 for character in reason)
+    ):
+        raise ValueError("Swarm integration rejection reason must be bounded text")
+    return reason
+
+
+def _seconds_delta(seconds: int) -> timedelta:
+    return timedelta(seconds=seconds)
 
 
 def _row_to_event(row: sqlite3.Row) -> SwarmEvent:

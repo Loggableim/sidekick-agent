@@ -12,13 +12,14 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 import errno
+import json
 import os
 from pathlib import Path
 import secrets
 import stat
 import threading
 import time
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 import yaml
 
@@ -259,6 +260,56 @@ def load_project_config(project_root: Path) -> SwarmConfig:
     if not isinstance(raw_config, dict):
         raise ValueError(f"Swarm configuration must be a mapping: {config_path}")
     return _to_config(project_root, config_path, raw_config)
+
+
+def load_integration_config(project_root: Path, namespace: str) -> dict[str, Any]:
+    """Read one integration's opt-in configuration without creating state."""
+    project_root = _resolved_project_root(project_root)
+    namespace = _validated_integration_namespace(namespace)
+    resolve_swarm_path(project_root, "swarm.yaml")
+    try:
+        with _pinned_swarm_directory(project_root, create=False) as lease:
+            raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
+    except FileNotFoundError:
+        return {}
+    if not isinstance(raw_config, dict):
+        raise ValueError("Swarm configuration must be a mapping")
+    integrations = raw_config.get("integrations", {})
+    if not isinstance(integrations, Mapping):
+        raise ValueError("Swarm integrations configuration must be a mapping")
+    integration_config = integrations.get(namespace, {})
+    if not isinstance(integration_config, Mapping):
+        raise ValueError(
+            f"Swarm integration configuration must be a mapping: {namespace}"
+        )
+    return _json_safe_mapping(integration_config, label="Swarm integration configuration")
+
+
+def save_integration_config(
+    project_root: Path,
+    namespace: str,
+    config: Mapping[str, Any],
+) -> None:
+    """Explicitly save one integration mapping while preserving all other config."""
+    project_root = _resolved_project_root(project_root)
+    namespace = _validated_integration_namespace(namespace)
+    integration_config = _json_safe_mapping(
+        config,
+        label="Swarm integration configuration",
+    )
+    with _CONFIG_INITIALIZATION_LOCK:
+        initialize_project(project_root)
+        with _pinned_swarm_directory(project_root, create=True) as lease:
+            raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
+            if not isinstance(raw_config, dict):
+                raise ValueError("Swarm configuration must be a mapping")
+            integrations = raw_config.get("integrations", {})
+            if not isinstance(integrations, Mapping):
+                raise ValueError("Swarm integrations configuration must be a mapping")
+            updated_integrations = dict(integrations)
+            updated_integrations[namespace] = integration_config
+            raw_config["integrations"] = updated_integrations
+            _write_project_config(lease.swarm, raw_config)
 
 
 def initialize_project(project_root: Path) -> SwarmConfig:
@@ -1063,6 +1114,51 @@ def _to_config(
         )
     except KeyError as exc:
         raise ValueError(f"Missing Swarm configuration value: {exc.args[0]}") from exc
+
+
+def _validated_integration_namespace(namespace: str) -> str:
+    if not isinstance(namespace, str):
+        raise TypeError("Swarm integration namespace must be a string")
+    namespace = namespace.strip()
+    if (
+        not namespace
+        or len(namespace) > 64
+        or not namespace.isascii()
+        or any(not (character.isalnum() or character in "._-") for character in namespace)
+    ):
+        raise ValueError("Swarm integration namespace must be bounded ASCII text")
+    return namespace
+
+
+def _json_safe_mapping(value: Mapping[str, Any], *, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{label} must be a mapping")
+    normalized = _json_safe_value(value, label=label)
+    assert isinstance(normalized, dict)
+    return normalized
+
+
+def _json_safe_value(value: Any, *, label: str) -> Any:
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):
+            raise ValueError(f"{label} must contain finite JSON values")
+        return value
+    if isinstance(value, Mapping):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{label} keys must be strings")
+            normalized[key] = _json_safe_value(item, label=label)
+        return normalized
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item, label=label) for item in value]
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"{label} must contain JSON/YAML-safe values") from exc
+    raise TypeError(f"{label} must contain JSON/YAML-safe values")
 
 
 # Native Windows constants are harmless on POSIX and keep the platform branch
