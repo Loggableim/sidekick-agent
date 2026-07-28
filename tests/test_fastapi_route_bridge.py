@@ -459,9 +459,13 @@ def test_space_management_get_is_authenticated_and_does_not_write(monkeypatch, t
         raise AssertionError("GET management must use the read-only resolver")
 
     monkeypatch.setattr(web_server, "resolve_trusted_workspace", unexpected_mutating_resolver)
-    monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", lambda _value: project)
+    monkeypatch.setattr(
+        web_server,
+        "resolve_enrollment_trusted_workspace_read_only",
+        lambda _value: project,
+    )
     space = space_engine.Space("alpha", "Alpha")
-    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    space.save_config({"name": "Alpha", "project_dir": str(project)}, mint_space_id=True)
     before = space.config_path.read_bytes()
 
     client = TestClient(web_server.app)
@@ -503,7 +507,7 @@ def test_space_management_enrollment_uses_server_resolved_root(monkeypatch, tmp_
     monkeypatch.setattr(web_server, "resolve_trusted_workspace_read_only", resolve_project)
     monkeypatch.setattr(web_server, "resolve_enrollment_trusted_workspace_read_only", resolve_project)
     space = space_engine.Space("alpha", "Alpha")
-    space.save_config({"name": "Alpha", "project_dir": str(project)})
+    space.save_config({"name": "Alpha", "project_dir": str(project)}, mint_space_id=True)
     client = TestClient(web_server.app)
     headers = _headers(web_server)
     snapshot = client.get(
@@ -669,3 +673,89 @@ def test_management_migrates_legacy_identity_and_exposes_append_only_audit(monke
     assert event["space_id"] == response.json()["space_id"]
     assert event["previous"] == {"yolo": False, "enrolled": False, "revision": 0}
     assert event["next"] == {"yolo": False, "enrolled": False, "revision": 1}
+
+
+def test_generic_config_does_not_mint_a_legacy_space_identity(monkeypatch, tmp_path):
+    """Only create or explicit management migration may mint a legacy Space ID."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    legacy = spaces_root / "alpha"
+    legacy.mkdir(parents=True)
+    (legacy / "space.yaml").write_text("name: Alpha\n", encoding="utf-8")
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+
+    response = TestClient(web_server.app).post(
+        "/api/space/config",
+        headers=_headers(web_server),
+        json={"slug": "alpha", "description": "ordinary edit"},
+    )
+
+    assert response.status_code == 200
+    assert space_engine.Space("alpha").load_config()["space_id"] == ""
+
+
+def test_generic_config_preserves_management_audit_and_refuses_malformed_evidence(monkeypatch, tmp_path):
+    """Ordinary config changes cannot erase governance evidence."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"}, mint_space_id=True)
+    space_engine.update_nova_management(
+        space,
+        yolo=True,
+        enrolled=False,
+        confirmation=None,
+        trusted_project_root=None,
+        actor="dashboard:test",
+    )
+    before = space.load_config()
+
+    response = TestClient(web_server.app).post(
+        "/api/space/config",
+        headers=_headers(web_server),
+        json={"slug": "alpha", "description": "ordinary edit"},
+    )
+
+    assert response.status_code == 200
+    after = space.load_config()
+    assert after["space_id"] == before["space_id"]
+    assert after["nova_management"] == before["nova_management"]
+    assert after["nova_management_audit"] == before["nova_management_audit"]
+
+    space.config_path.write_text("nova_management_audit: malformed\n", encoding="utf-8")
+    malformed_before = space.config_path.read_bytes()
+    malformed = TestClient(web_server.app).post(
+        "/api/space/config",
+        headers=_headers(web_server),
+        json={"slug": "alpha", "description": "must not overwrite"},
+    )
+
+    assert malformed.status_code == 409
+    assert space.config_path.read_bytes() == malformed_before
+
+
+def test_management_post_fails_closed_without_dashboard_principal(monkeypatch, tmp_path):
+    """A management write cannot use a request body or generic fallback actor."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space_engine.Space("alpha", "Alpha").save_config({"name": "Alpha"}, mint_space_id=True)
+    monkeypatch.setattr(web_server, "dashboard_session_principal", lambda _request: None)
+
+    response = TestClient(web_server.app).post(
+        "/api/space/nova-management",
+        headers=_headers(web_server),
+        json={"slug": "alpha", "yolo": False, "enrolled": False, "actor": "attacker"},
+    )
+
+    assert response.status_code == 403

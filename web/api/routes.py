@@ -6423,7 +6423,7 @@ def handle_post(handler, parsed) -> bool:
         slug = (body.get("slug") or "").strip().lower()
         if not slug:
             return bad(handler, "slug is required")
-        if "nova_management" in body or "space_id" in body:
+        if "nova_management" in body or "nova_management_audit" in body or "space_id" in body:
             return bad(
                 handler,
                 "Nova management must be changed through /api/space/nova-management",
@@ -6440,6 +6440,12 @@ def handle_post(handler, parsed) -> bool:
                 patch_data[key] = body[key]
         if patch_data:
             current = ws.load_config()
+            if current.get("_nova_management_audit_malformed"):
+                return bad(
+                    handler,
+                    "Nova management audit is malformed and cannot be rewritten by generic config",
+                    status=409,
+                )
             current.update(patch_data)
             ws.save_config(current)
         return j(handler, {"config": ws.load_config()})

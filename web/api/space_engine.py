@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import json
 import logging
 import json
 import os
@@ -35,6 +34,8 @@ import shutil
 import threading
 import time
 import uuid
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from web.api._home import get_active_webui_home, get_webui_home
@@ -263,6 +264,7 @@ class Space:
         },
         "space_id": "",
         "nova_management": {"yolo": False, "enrolled": False, "revision": 0},
+        "nova_management_audit": [],
     }
 
     def load_config(self) -> dict:
@@ -296,6 +298,12 @@ class Space:
             if key == "nova_management":
                 result["nova_management"] = _normalized_nova_management(raw.get("nova_management"))
                 continue
+            if key == "nova_management_audit":
+                audit = raw.get("nova_management_audit")
+                result["nova_management_audit"] = audit if isinstance(audit, list) else []
+                if audit is not None and not isinstance(audit, list):
+                    result["_nova_management_audit_malformed"] = True
+                continue
             if key in raw:
                 result[key] = raw[key]
         # Pass through app configs (per-space accounts/bots)
@@ -305,14 +313,16 @@ class Space:
             result["discord"] = raw["discord"]
         return result
 
-    def save_config(self, config: dict) -> None:
+    def save_config(self, config: dict, *, mint_space_id: bool = False) -> None:
         """Persist space.yaml (only known fields)."""
         import yaml
         self.root.mkdir(parents=True, exist_ok=True)
         out: dict = {}
         # Identity is minted only by an explicit create/write path. Reads of
         # legacy config must not silently persist a migration.
-        out["space_id"] = _normalized_space_id(config.get("space_id")) or uuid.uuid4().hex
+        existing_id = _normalized_space_id(config.get("space_id"))
+        if existing_id or mint_space_id:
+            out["space_id"] = existing_id or uuid.uuid4().hex
         # Save name if present and differs from slug
         if "name" in config:
             out["name"] = config["name"]
@@ -334,6 +344,9 @@ class Space:
                     config.get("nova_management")
                 )
                 continue
+            if key == "nova_management_audit":
+                out["nova_management_audit"] = config.get("nova_management_audit") if isinstance(config.get("nova_management_audit"), list) else []
+                continue
             if key in config:
                 out[key] = config[key]
         # App configs saved as top-level keys
@@ -341,7 +354,19 @@ class Space:
             out["gmail"] = config["gmail"]
         if "discord" in config:
             out["discord"] = config["discord"]
-        self.config_path.write_text(yaml.dump(out, default_flow_style=False), "utf-8")
+        self._atomic_write_config(yaml.dump(out, default_flow_style=False).encode("utf-8"))
+
+    def _atomic_write_config(self, payload: bytes) -> None:
+        fd, temp_path = tempfile.mkstemp(prefix="space-", suffix=".tmp", dir=self.root)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self.config_path)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
 
     def get_project_dir(self) -> str | None:
         """Return project_dir from config, or None if not set/invalid."""
@@ -485,7 +510,63 @@ class Space:
 # Registry (cached)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_NOVA_MANAGEMENT_THREAD_LOCK = threading.RLock()
+
+
+@contextmanager
+def _nova_management_lock(space: Space):
+    """Lock one Space's governance transaction across threads and processes.
+
+    The lock file is deliberately opened only by the management write path.
+    Management reads and all ordinary Space reads therefore remain side-effect
+    free.  A process-local re-entrant lock also protects platforms whose file
+    locks do not reliably serialize two handles in the same process.
+    """
+    with _NOVA_MANAGEMENT_THREAD_LOCK:
+        space.root.mkdir(parents=True, exist_ok=True)
+        lock_path = space.root / ".nova-management.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        locked = False
+        try:
+            # msvcrt locks byte ranges; ensure the first byte exists before
+            # locking it. POSIX flock locks the descriptor as a whole.
+            if os.name == "nt":
+                import msvcrt
+
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            locked = True
+            yield
+        finally:
+            if locked:
+                if os.name == "nt":
+                    import msvcrt
+
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+
 def update_nova_management(
+    space: Space,
+    **kwargs,
+) -> dict[str, bool | int]:
+    """Apply one fully serialized governance and audit transaction."""
+    with _nova_management_lock(space):
+        return _update_nova_management(space, **kwargs)
+
+
+def _update_nova_management(
     space: Space,
     *,
     yolo: object,
@@ -503,6 +584,8 @@ def update_nova_management(
         raise SpaceGovernanceError("enrollment requires yolo to be true")
 
     config = space.load_config()
+    if config.get("_nova_management_audit_malformed"):
+        raise SpaceGovernanceError("management audit is malformed; refusing to overwrite evidence")
     if enrolled is True:
         configured_project = space.get_project_dir()
         if not configured_project:
@@ -526,15 +609,14 @@ def update_nova_management(
             raise SpaceGovernanceError("confirmation root fingerprint does not match")
 
     current = _normalized_nova_management(config.get("nova_management"))
+    if not _normalized_space_id(config.get("space_id")):
+        config["space_id"] = uuid.uuid4().hex
     next_record: dict[str, bool | int] = {
         "yolo": yolo,
         "enrolled": enrolled,
         "revision": int(current["revision"]) + 1,
     }
-    original_config = space.config_path.read_bytes() if space.config_path.exists() else None
     config["nova_management"] = next_record
-    space.save_config(config)
-    persisted = space.load_config()
     root_fingerprint = ""
     if trusted_project_root is not None:
         try:
@@ -546,49 +628,22 @@ def update_nova_management(
     event = {
         "actor": actor,
         "timestamp": time.time(),
-        "space_id": persisted.get("space_id", ""),
+        "space_id": config["space_id"],
         "root_fingerprint": root_fingerprint,
         "policy_revision": next_record["revision"],
         "governance_revision": next_record["revision"],
         "previous": current,
         "next": next_record,
     }
-    try:
-        _append_nova_management_audit(space, event)
-    except OSError as exc:
-        try:
-            if original_config is None:
-                space.config_path.unlink(missing_ok=True)
-            else:
-                space.config_path.write_bytes(original_config)
-        except OSError:
-            logger.exception("failed to roll back management config after audit failure")
-        raise SpaceGovernanceError("management audit persistence failed") from exc
+    config["nova_management_audit"] = list(config.get("nova_management_audit") or []) + [event]
+    space.save_config(config, mint_space_id=True)
     return next_record
-
-
-def _append_nova_management_audit(space: Space, event: dict) -> None:
-    """Append a completed management transition without rewriting prior evidence."""
-    with (space.root / "nova-management-audit.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, sort_keys=True) + "\n")
 
 
 def list_nova_management_audit(space: Space) -> list[dict]:
     """Read append-only governance evidence without creating missing files."""
-    path = space.root / "nova-management-audit.jsonl"
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return []
-    events: list[dict] = []
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except (TypeError, ValueError):
-            continue
-        if isinstance(event, dict):
-            events.append(event)
-    return events
+    events = space.load_config().get("nova_management_audit", [])
+    return [dict(event) for event in events if isinstance(event, dict)]
 
 
 _SPACE_CACHE: list[Space] | None = None
@@ -671,7 +726,7 @@ def _seed_default_space_from_consciousness() -> None:
                 cfg["name"] = DEFAULT_SPACE_NAME
                 changed = True
             if changed:
-                target.save_config(cfg)
+                target.save_config(cfg, mint_space_id=True)
         return
 
     source = Space(source_slug, source_slug)
@@ -688,7 +743,7 @@ def _seed_default_space_from_consciousness() -> None:
             "source_space": DEFAULT_SPACE_SLUG,
             "communication_mode": "pingpong",
         }
-        target.save_config(cfg)
+        target.save_config(cfg, mint_space_id=True)
         return
 
     target = Space(DEFAULT_SPACE_SLUG, DEFAULT_SPACE_NAME)
@@ -735,7 +790,7 @@ def _seed_default_space_from_consciousness() -> None:
         cfg["nova"] = desired_nova
         changed = True
     if changed:
-        target.save_config(cfg)
+        target.save_config(cfg, mint_space_id=True)
 
 
 def seed_space_with_nova(
@@ -762,7 +817,7 @@ def seed_space_with_nova(
         current["nova"] = nova_cfg
         if not current.get("description"):
             current["description"] = "Space with its own Nova instance seeded from the bundled Sidekick template."
-        space.save_config(current)
+        space.save_config(current, mint_space_id=True)
         return
 
     space.root.mkdir(parents=True, exist_ok=True)
@@ -794,7 +849,7 @@ def seed_space_with_nova(
     current["nova"] = nova_cfg
     if not current.get("description"):
         current["description"] = f"Space with its own Nova instance seeded from {source_slug}."
-    space.save_config(current)
+    space.save_config(current, mint_space_id=True)
 
 
 def _scan_fs_for_spaces() -> list[Space]:
@@ -848,7 +903,7 @@ def _scan_fs_for_spaces() -> list[Space]:
             "emoji": "✨",
             "color": "#7c5cfc",
         })
-        space.save_config(cfg)
+        space.save_config(cfg, mint_space_id=True)
         spaces.append(space)
 
     return spaces
@@ -860,7 +915,7 @@ def _soft_migrate_workspace(space: Space, old_yaml: Path) -> None:
         import yaml
         data = yaml.safe_load(old_yaml.read_text("utf-8")) or {}
         space.root.mkdir(parents=True, exist_ok=True)
-        space.save_config(data)
+        space.save_config(data, mint_space_id=True)
         logger.info("migrated workspace.yaml → space.yaml for %s", space.slug)
     except Exception:
         logger.debug("soft-migrate failed for %s", space.slug)
@@ -933,7 +988,7 @@ def get_or_create_space(slug: str, name: str = "") -> Space:
     space.ensure_agent("default", create_soul=True)
     cfg = space.load_config()
     cfg["name"] = name or (DEFAULT_SPACE_NAME if space.slug == DEFAULT_SPACE_SLUG else space.slug)
-    space.save_config(cfg)
+    space.save_config(cfg, mint_space_id=True)
     if space.slug == DEFAULT_SPACE_SLUG:
         _seed_default_space_from_consciousness()
     _invalidate_space_cache()
@@ -960,7 +1015,7 @@ def create_space(
     cfg["name"] = name or (DEFAULT_SPACE_NAME if space.slug == DEFAULT_SPACE_SLUG else space.slug)
     if color:
         cfg["color"] = color
-    space.save_config(cfg)
+    space.save_config(cfg, mint_space_id=True)
     if space.slug == DEFAULT_SPACE_SLUG:
         _seed_default_space_from_consciousness()
     elif nova_instance:
