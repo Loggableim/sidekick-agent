@@ -9,8 +9,8 @@ from .models import ModelRegistry, OLLAMA_CLOUD_PROVIDER
 
 
 _ROLE_CHAINS = {
-    "default": ("deepseek-v4-flash",),
-    "scout": ("deepseek-v4-flash",),
+    "default": ("deepseek-v4-flash", "deepseek-v4-pro"),
+    "scout": ("deepseek-v4-flash", "deepseek-v4-pro"),
     "planner": ("deepseek-v4-pro", "kimi-k2.6"),
     # Kimi is an independently dispatched challenger only when the workflow
     # records an explicit conflict.  It is not called on a successful normal

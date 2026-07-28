@@ -203,7 +203,7 @@ _MODEL_SPECS = (
     ModelSpec(
         "deepseek-v4-pro",
         "deepseek-v4",
-        frozenset({"reasoning", "planning", "structured-output"}),
+        frozenset({"reasoning", "planning", "scouting", "structured-output"}),
         tools=True,
         thinking=True,
         json_capable=True,
