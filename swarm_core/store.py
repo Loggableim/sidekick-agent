@@ -39,6 +39,8 @@ _ALLOWED_TRANSITIONS = {
     "paused": frozenset({"running"}),
     "completed": frozenset(),
 }
+_MAX_INTEGRATION_VALUE_DEPTH = 32
+_MAX_INTEGRATION_VALUE_ITEMS = 10_000
 _SCHEMA_MIGRATION_LOCK = threading.RLock()
 
 
@@ -2355,7 +2357,13 @@ def _validated_integration_metadata(
 ) -> dict[str, Any]:
     if not isinstance(metadata, Mapping):
         raise TypeError("Swarm integration metadata must be a mapping")
-    normalized = _normalized_json_value(metadata, label="Swarm integration metadata")
+    normalized = _normalized_json_value(
+        metadata,
+        label="Swarm integration metadata",
+        depth=0,
+        ancestors=set(),
+        remaining_items=[_MAX_INTEGRATION_VALUE_ITEMS],
+    )
     assert isinstance(normalized, dict)
     for name in ("goal", "pack", "project_root", "autonomy"):
         if name not in normalized:
@@ -2377,22 +2385,63 @@ def _validated_integration_metadata(
     return normalized
 
 
-def _normalized_json_value(value: Any, *, label: str) -> Any:
+def _normalized_json_value(
+    value: Any,
+    *,
+    label: str,
+    depth: int,
+    ancestors: set[int],
+    remaining_items: list[int],
+) -> Any:
+    remaining_items[0] -= 1
+    if remaining_items[0] < 0:
+        raise ValueError(f"{label} must contain bounded JSON-safe values")
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
         if value != value or value in (float("inf"), float("-inf")):
             raise ValueError(f"{label} must contain finite JSON values")
         return value
+    if depth >= _MAX_INTEGRATION_VALUE_DEPTH:
+        raise ValueError(f"{label} must contain bounded JSON-safe values")
     if isinstance(value, Mapping):
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"{label} must contain bounded JSON-safe values")
+        ancestors.add(identity)
         normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError(f"{label} keys must be strings")
-            normalized[key] = _normalized_json_value(item, label=label)
+        try:
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise TypeError(f"{label} keys must be strings")
+                normalized[key] = _normalized_json_value(
+                    item,
+                    label=label,
+                    depth=depth + 1,
+                    ancestors=ancestors,
+                    remaining_items=remaining_items,
+                )
+        finally:
+            ancestors.remove(identity)
         return normalized
     if isinstance(value, (list, tuple)):
-        return [_normalized_json_value(item, label=label) for item in value]
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"{label} must contain bounded JSON-safe values")
+        ancestors.add(identity)
+        try:
+            return [
+                _normalized_json_value(
+                    item,
+                    label=label,
+                    depth=depth + 1,
+                    ancestors=ancestors,
+                    remaining_items=remaining_items,
+                )
+                for item in value
+            ]
+        finally:
+            ancestors.remove(identity)
     raise TypeError(f"{label} must contain JSON-safe values")
 
 

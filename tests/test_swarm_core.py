@@ -71,6 +71,35 @@ def test_integration_admission_coalesces_equal_concurrent_keys(
     assert results[0].run is not None
     assert results[1].run is not None
     assert results[0].run.run_id == results[1].run.run_id
+    verified_store = ProjectSwarmStore(nova_project)
+    assert len(verified_store.list_runs()) == 1
+    assert [event.event_type for event in verified_store.list_events(results[0].run.run_id)] == [
+        "run.started"
+    ]
+
+
+def test_integration_admission_serializes_concurrent_different_keys(
+    nova_project: Path,
+):
+    """Catches concurrent distinct intents bypassing the shared active limit."""
+    barrier = threading.Barrier(2)
+    results = []
+
+    def admit(key: str) -> None:
+        store = ProjectSwarmStore(nova_project)
+        barrier.wait(timeout=5)
+        results.append(store.admit_integration_run(_integration_request(nova_project, key)))
+
+    first = threading.Thread(target=admit, args=("first-intent",))
+    second = threading.Thread(target=admit, args=("second-intent",))
+    first.start()
+    second.start()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert first.is_alive() is False
+    assert second.is_alive() is False
+    assert sorted(result.status for result in results) == ["active_limit", "created"]
     assert len(ProjectSwarmStore(nova_project).list_runs()) == 1
 
 
@@ -170,6 +199,30 @@ def test_integration_rejection_has_no_run_and_only_a_bounded_reason(
     assert store.list_runs() == []
     with pytest.raises(ValueError, match="bounded"):
         store.record_integration_rejection("nova", "too-long", reason="x" * 129)
+
+
+def test_integration_admission_rejects_cyclic_metadata_without_writing(
+    nova_project: Path,
+):
+    """Catches unbounded metadata recursion leaving a partial admission behind."""
+    store = ProjectSwarmStore(nova_project)
+    request = _integration_request(nova_project, "cyclic-metadata")
+    metadata = dict(request.metadata)
+    metadata["cycle"] = metadata
+    cyclic_request = IntegrationAdmissionRequest(
+        namespace=request.namespace,
+        idempotency_key=request.idempotency_key,
+        metadata=metadata,
+        max_active=request.max_active,
+        rolling_window_seconds=request.rolling_window_seconds,
+        rolling_run_limit=request.rolling_run_limit,
+    )
+
+    with pytest.raises((TypeError, ValueError), match="JSON-safe"):
+        store.admit_integration_run(cyclic_request)
+
+    assert store.get_integration_admission("nova", "cyclic-metadata") is None
+    assert store.list_runs() == []
 
 
 def test_initialize_project_creates_versionable_default_configuration(tmp_path: Path):

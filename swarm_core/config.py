@@ -12,7 +12,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 import errno
-import json
 import os
 from pathlib import Path
 import secrets
@@ -44,6 +43,8 @@ _AUTONOMY_LEVELS = {
 _CONFIG_INITIALIZATION_LOCK = threading.RLock()
 _SWARM_DIRECTORY_PIN_LOCK = threading.RLock()
 _REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2)
+_MAX_INTEGRATION_VALUE_DEPTH = 32
+_MAX_INTEGRATION_VALUE_ITEMS = 10_000
 _SQLITE_RUNTIME_FILENAMES = (
     "swarm.sqlite",
     "swarm.sqlite-journal",
@@ -299,17 +300,25 @@ def save_integration_config(
     )
     with _CONFIG_INITIALIZATION_LOCK:
         initialize_project(project_root)
-        with _pinned_swarm_directory(project_root, create=True) as lease:
-            raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
-            if not isinstance(raw_config, dict):
-                raise ValueError("Swarm configuration must be a mapping")
-            integrations = raw_config.get("integrations", {})
-            if not isinstance(integrations, Mapping):
-                raise ValueError("Swarm integrations configuration must be a mapping")
-            updated_integrations = dict(integrations)
-            updated_integrations[namespace] = integration_config
-            raw_config["integrations"] = updated_integrations
-            _write_project_config(lease.swarm, raw_config)
+        with _pinned_swarm_directory(
+            project_root,
+            create=True,
+            runtime=True,
+        ) as lease:
+            runtime = lease.runtime
+            if runtime is None:  # pragma: no cover - protected by runtime=True
+                raise RuntimeError("Swarm runtime directory was not pinned")
+            with _exclusive_config_write_lock(runtime):
+                raw_config = yaml.safe_load(lease.swarm.read_text("swarm.yaml")) or {}
+                if not isinstance(raw_config, dict):
+                    raise ValueError("Swarm configuration must be a mapping")
+                integrations = raw_config.get("integrations", {})
+                if not isinstance(integrations, Mapping):
+                    raise ValueError("Swarm integrations configuration must be a mapping")
+                updated_integrations = dict(integrations)
+                updated_integrations[namespace] = integration_config
+                raw_config["integrations"] = updated_integrations
+                _write_project_config(lease.swarm, raw_config)
 
 
 def initialize_project(project_root: Path) -> SwarmConfig:
@@ -1025,6 +1034,50 @@ def _write_project_config(lease: _DirectoryLease, raw_config: dict[str, Any]) ->
     lease.write_text("swarm.yaml", yaml.safe_dump(raw_config, sort_keys=False))
 
 
+@contextmanager
+def _exclusive_config_write_lock(runtime: _DirectoryLease) -> Iterator[None]:
+    """Serialize integration config read-modify-write across Sidekick processes."""
+    with runtime.hold_regular_file(
+        "swarm-config.lock",
+        read_only=False,
+        create=True,
+        owner_only=True,
+        repair_owner_only=True,
+    ) as descriptor:
+        _lock_config_descriptor(descriptor)
+        try:
+            yield
+        finally:
+            _unlock_config_descriptor(descriptor)
+
+
+def _lock_config_descriptor(descriptor: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        if os.fstat(descriptor).st_size == 0:
+            os.write(descriptor, b"\0")
+            os.fsync(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+
+def _unlock_config_descriptor(descriptor: int) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+        return
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
 def _ensure_runtime_is_ignored(lease: _DirectoryLease) -> None:
     entry = "runtime/"
     try:
@@ -1133,31 +1186,74 @@ def _validated_integration_namespace(namespace: str) -> str:
 def _json_safe_mapping(value: Mapping[str, Any], *, label: str) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{label} must be a mapping")
-    normalized = _json_safe_value(value, label=label)
+    normalized = _json_safe_value(
+        value,
+        label=label,
+        depth=0,
+        ancestors=set(),
+        remaining_items=[_MAX_INTEGRATION_VALUE_ITEMS],
+    )
     assert isinstance(normalized, dict)
     return normalized
 
 
-def _json_safe_value(value: Any, *, label: str) -> Any:
+def _json_safe_value(
+    value: Any,
+    *,
+    label: str,
+    depth: int,
+    ancestors: set[int],
+    remaining_items: list[int],
+) -> Any:
+    remaining_items[0] -= 1
+    if remaining_items[0] < 0:
+        raise ValueError(f"{label} must contain bounded JSON/YAML-safe values")
     if value is None or isinstance(value, (bool, int, str)):
         return value
     if isinstance(value, float):
         if value != value or value in (float("inf"), float("-inf")):
             raise ValueError(f"{label} must contain finite JSON values")
         return value
+    if depth >= _MAX_INTEGRATION_VALUE_DEPTH:
+        raise ValueError(f"{label} must contain bounded JSON/YAML-safe values")
     if isinstance(value, Mapping):
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"{label} must contain bounded JSON/YAML-safe values")
+        ancestors.add(identity)
         normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError(f"{label} keys must be strings")
-            normalized[key] = _json_safe_value(item, label=label)
+        try:
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    raise TypeError(f"{label} keys must be strings")
+                normalized[key] = _json_safe_value(
+                    item,
+                    label=label,
+                    depth=depth + 1,
+                    ancestors=ancestors,
+                    remaining_items=remaining_items,
+                )
+        finally:
+            ancestors.remove(identity)
         return normalized
     if isinstance(value, (list, tuple)):
-        return [_json_safe_value(item, label=label) for item in value]
-    try:
-        json.dumps(value, allow_nan=False)
-    except (TypeError, ValueError) as exc:
-        raise TypeError(f"{label} must contain JSON/YAML-safe values") from exc
+        identity = id(value)
+        if identity in ancestors:
+            raise ValueError(f"{label} must contain bounded JSON/YAML-safe values")
+        ancestors.add(identity)
+        try:
+            return [
+                _json_safe_value(
+                    item,
+                    label=label,
+                    depth=depth + 1,
+                    ancestors=ancestors,
+                    remaining_items=remaining_items,
+                )
+                for item in value
+            ]
+        finally:
+            ancestors.remove(identity)
     raise TypeError(f"{label} must contain JSON/YAML-safe values")
 
 
