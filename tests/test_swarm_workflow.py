@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from swarm_core.engine import SwarmEngine
+from swarm_core.engine import (
+    PreCompletionContext,
+    PreCompletionResult,
+    SwarmEngine,
+)
 from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
 from swarm_core.router import ModelRouter
 from swarm_core.store import ProjectSwarmStore
@@ -1172,6 +1176,172 @@ def test_engine_does_not_overwrite_a_human_pause_after_the_final_model_call(
     assert persisted is not None
     assert persisted.status == "paused"
     assert not any(event.event_type == "run.completed" for event in events)
+
+
+def test_pre_completion_hook_runs_before_completed(tmp_path: Path):
+    """Catches a host hook observing incomplete checkpoints or a terminal run."""
+    observed: list[str] = []
+
+    class Hook:
+        hook_id = "test-hook-v1"
+
+        def run(self, context: PreCompletionContext) -> PreCompletionResult:
+            checkpoints = context.store.get_workflow_role_checkpoints(
+                context.run.run_id
+            )
+            assert {"verifier", "review_a", "review_b"} <= set(checkpoints)
+            persisted = context.store.get_run(context.run.run_id)
+            assert persisted is not None
+            assert persisted.status == "running"
+            context.store.append_event(
+                context.run.run_id, "test.pre_completion_hook", {}
+            )
+            observed.append(context.decision)
+            return PreCompletionResult(continue_completion=True)
+
+    engine = SwarmEngine(WorkflowTransport(), pre_completion_hook=Hook())
+    run = engine.start_run(
+        "verify hook order",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    event_types = [
+        event.event_type
+        for event in ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    ]
+    assert summary.status == "completed"
+    assert observed
+    assert event_types.index("test.pre_completion_hook") < event_types.index(
+        "run.completed"
+    )
+
+
+def test_pre_completion_hook_pause_resumes_from_durable_role_outputs(
+    tmp_path: Path,
+):
+    """Catches a paused hook replaying completed model work after explicit resume."""
+
+    class PausingHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            return PreCompletionResult(False, "awaiting_nova_approval")
+
+    initial_transport = WorkflowTransport()
+    initial_engine = SwarmEngine(
+        initial_transport,
+        pre_completion_hook=PausingHook(),
+    )
+    run = initial_engine.start_run(
+        "pause for a host approval",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    paused = initial_engine.execute_run(run.run_id, tmp_path)
+
+    store = ProjectSwarmStore(tmp_path)
+    events = store.list_events(run.run_id)
+    assert paused.status == "paused"
+    assert paused.pause_reason == "awaiting_nova_approval"
+    assert not any(event.event_type == "run.completed" for event in events)
+    assert len(initial_transport.requests) == 8
+
+    class ContinuingHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            return PreCompletionResult(True)
+
+    store.resume_run(run.run_id)
+    resumed_transport = WorkflowTransport()
+    resumed = SwarmEngine(
+        resumed_transport,
+        pre_completion_hook=ContinuingHook(),
+    ).execute_run(run.run_id, tmp_path)
+
+    assert resumed.status == "completed"
+    assert resumed_transport.requests == []
+
+
+def test_run_without_pre_completion_hook_keeps_terminal_event_sequence(tmp_path: Path):
+    """Catches ordinary runs gaining a new terminal event or pause requirement."""
+    run = SwarmEngine(WorkflowTransport()).start_run("normal completion", tmp_path)
+
+    summary = SwarmEngine(WorkflowTransport()).execute_run(run.run_id, tmp_path)
+
+    event_types = [
+        event.event_type
+        for event in ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    ]
+    assert summary.status == "completed"
+    assert event_types[-1] == "run.completed"
+    assert "run.paused" not in event_types
+
+
+def test_required_pre_completion_hook_fails_closed_when_unavailable(tmp_path: Path):
+    """Catches a durable host requirement silently bypassing its completion gate."""
+    transport = WorkflowTransport()
+    engine = SwarmEngine(transport)
+    run = engine.start_run(
+        "require a host hook",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "missing-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
+    assert len(transport.requests) == 8
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
+def test_pre_completion_hook_failure_uses_a_safe_pause_reason(tmp_path: Path):
+    """Catches hook exception text being exposed in durable run state."""
+
+    class FailingHook:
+        hook_id = "test-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            raise RuntimeError("private host failure detail")
+
+    engine = SwarmEngine(WorkflowTransport(), pre_completion_hook=FailingHook())
+    run = engine.start_run(
+        "contain host hook errors",
+        tmp_path,
+        host_metadata={"required_pre_completion_hook": "test-hook-v1"},
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    events = ProjectSwarmStore(tmp_path).list_events(run.run_id)
+    assert summary.status == "paused"
+    assert summary.pause_reason == "pre_completion_hook_failed"
+    assert "private host failure detail" not in str(events)
+    assert not any(event.event_type == "run.completed" for event in events)
+
+
+def test_start_run_rejects_unsafe_or_reserved_host_metadata(tmp_path: Path):
+    """Catches host metadata overwriting durable Core inputs or losing JSON shape."""
+    engine = SwarmEngine(WorkflowTransport())
+
+    with pytest.raises(ValueError, match="cannot override goal"):
+        engine.start_run(
+            "keep Core goal authoritative",
+            tmp_path,
+            host_metadata={"goal": "host override"},
+        )
+    with pytest.raises(ValueError, match="must be JSON-safe"):
+        engine.start_run(
+            "persist only JSON metadata",
+            tmp_path,
+            host_metadata={"opaque": object()},
+        )
 
 
 def test_engine_preserves_a_model_pause_when_a_human_pause_wins_the_transition_race(
