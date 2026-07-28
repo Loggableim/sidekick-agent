@@ -160,6 +160,15 @@ class SpaceGovernanceError(SpaceError):
     """A requested Nova management change is not safe to persist."""
 
 
+class SpaceConfigMalformedError(SpaceGovernanceError):
+    """The persisted top-level Space configuration cannot safely be rewritten."""
+
+
+def _raise_if_space_config_malformed(config: dict) -> None:
+    if config.get("_space_config_malformed"):
+        raise SpaceConfigMalformedError("Space config is malformed; refusing to overwrite source")
+
+
 def _normalized_space_id(value: object) -> str:
     """Return a persisted UUID identity, or empty when a read sees none."""
     if not isinstance(value, str):
@@ -189,6 +198,7 @@ def _normalized_nova_management(value: object) -> dict[str, bool | int]:
 
 
 _AUDIT_ROOT_FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
+_DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}")
 _AUDIT_EVENT_FIELDS = {
     "actor", "timestamp", "space_id", "root_fingerprint", "policy_revision",
     "governance_revision", "previous", "next",
@@ -296,14 +306,20 @@ class Space:
             return copy.deepcopy(self.CONFIG_DEFAULTS)
         try:
             import yaml
-            raw = yaml.safe_load(self.config_path.read_text("utf-8")) or {}
+            raw = yaml.safe_load(self.config_path.read_text("utf-8"))
         except Exception:
-            logger.exception("failed to parse %s, using defaults", self.config_path)
-            return copy.deepcopy(self.CONFIG_DEFAULTS)
+            logger.exception("failed to parse %s", self.config_path)
+            result = copy.deepcopy(self.CONFIG_DEFAULTS)
+            result["_space_config_malformed"] = True
+            return result
 
+        if raw is None:
+            raw = {}
         if not isinstance(raw, dict):
-            logger.warning("invalid space config in %s, using defaults", self.config_path)
-            return copy.deepcopy(self.CONFIG_DEFAULTS)
+            logger.warning("invalid space config in %s", self.config_path)
+            result = copy.deepcopy(self.CONFIG_DEFAULTS)
+            result["_space_config_malformed"] = True
+            return result
 
         result = copy.deepcopy(self.CONFIG_DEFAULTS)
         if isinstance(raw.get("model"), dict):
@@ -543,11 +559,13 @@ def _validate_and_merge_audit_events(
 ) -> list[dict]:
     """Strictly validate and merge YAML/JSONL evidence by revision.
 
-    JSONL is retained after migration.  A repeated revision is acceptable only
-    when it is byte-for-byte the same event; otherwise evidence conflicts and
-    no write may proceed.
+    JSONL is retained after migration. A repeated revision is acceptable only
+    when its canonical JSON representation is identical; otherwise evidence
+    conflicts and no write may proceed.
     """
     by_revision: dict[int, dict] = {}
+    canonical_by_revision: dict[int, str] = {}
+    canonical_space_id = ""
     for source in sources:
         if not isinstance(source, list):
             raise SpaceGovernanceError("management audit is malformed")
@@ -562,13 +580,16 @@ def _validate_and_merge_audit_events(
             governance_revision = raw_event.get("governance_revision")
             previous = _strict_nova_management_record(raw_event.get("previous"))
             next_record = _strict_nova_management_record(raw_event.get("next"))
-            if not isinstance(actor, str) or not actor.startswith("dashboard:"):
+            if not isinstance(actor, str) or not _DASHBOARD_ACTOR_RE.fullmatch(actor):
                 raise SpaceGovernanceError("management audit actor is malformed")
             if type(timestamp) not in (int, float) or not math.isfinite(timestamp):
                 raise SpaceGovernanceError("management audit timestamp is malformed")
             normalized_event_id = _normalized_space_id(event_space_id)
             if not normalized_event_id:
                 raise SpaceGovernanceError("management audit Space identity is malformed")
+            if canonical_space_id and normalized_event_id != canonical_space_id:
+                raise SpaceGovernanceError("management audit Space identities conflict")
+            canonical_space_id = normalized_event_id
             if expected_space_id and normalized_event_id != _normalized_space_id(expected_space_id):
                 raise SpaceGovernanceError("management audit Space identity conflicts")
             if root_fingerprint != "" and (
@@ -588,10 +609,18 @@ def _validate_and_merge_audit_events(
             ):
                 raise SpaceGovernanceError("management audit revision chain is malformed")
             event = copy.deepcopy(raw_event)
-            existing = by_revision.get(revision)
-            if existing is not None and existing != event:
+            canonical_event = json.dumps(
+                event,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+            existing = canonical_by_revision.get(revision)
+            if existing is not None and existing != canonical_event:
                 raise SpaceGovernanceError("management audit contains conflicting revisions")
             by_revision[revision] = event
+            canonical_by_revision[revision] = canonical_event
 
     events = [by_revision[revision] for revision in sorted(by_revision)]
     for index, event in enumerate(events):
@@ -612,6 +641,7 @@ def _validate_and_merge_audit_events(
 
 def _effective_audit_events(space: Space, config: dict) -> list[dict]:
     """Merge strict YAML and legacy evidence without taking a write lock."""
+    _raise_if_space_config_malformed(config)
     if config.get("_nova_management_malformed"):
         raise SpaceGovernanceError("current Nova management record is malformed")
     if config.get("_nova_management_audit_malformed"):
@@ -626,6 +656,10 @@ def _effective_audit_events(space: Space, config: dict) -> list[dict]:
     )
 
 
+def _audited_space_id(events: list[dict]) -> str:
+    return _normalized_space_id(events[0].get("space_id")) if events else ""
+
+
 def _prepare_audit_for_write(
     space: Space,
     config: dict,
@@ -634,6 +668,7 @@ def _prepare_audit_for_write(
 ) -> list[dict]:
     """Carry all valid historical evidence into the next atomic YAML write."""
     persisted = space.load_config()
+    _raise_if_space_config_malformed(persisted)
     if persisted.get("_nova_management_malformed"):
         raise SpaceGovernanceError("current Nova management record is malformed")
     if persisted.get("_nova_management_audit_malformed"):
@@ -708,7 +743,7 @@ def _update_nova_management(
     actor: str,
 ) -> dict[str, bool | int]:
     """Persist a validated management transition for one existing Space."""
-    if not isinstance(actor, str) or not actor.startswith("dashboard:"):
+    if not isinstance(actor, str) or not _DASHBOARD_ACTOR_RE.fullmatch(actor):
         raise SpaceGovernanceError("management transition requires an authenticated dashboard actor")
     if type(yolo) is not bool or type(enrolled) is not bool:
         raise SpaceGovernanceError("yolo and enrolled must be literal booleans")
@@ -717,6 +752,8 @@ def _update_nova_management(
 
     config = space.load_config()
     config["nova_management_audit"] = _effective_audit_events(space, config)
+    if not _normalized_space_id(config.get("space_id")):
+        config["space_id"] = _audited_space_id(config["nova_management_audit"]) or uuid.uuid4().hex
     if enrolled is True:
         configured_project = space.get_project_dir()
         if not configured_project:
@@ -740,8 +777,6 @@ def _update_nova_management(
             raise SpaceGovernanceError("confirmation root fingerprint does not match")
 
     current = _normalized_nova_management(config.get("nova_management"))
-    if not _normalized_space_id(config.get("space_id")):
-        config["space_id"] = uuid.uuid4().hex
     next_record: dict[str, bool | int] = {
         "yolo": yolo,
         "enrolled": enrolled,

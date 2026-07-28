@@ -8,9 +8,12 @@ import uuid
 import pytest
 
 
+DASHBOARD_ACTOR = "dashboard:" + "a" * 64
+
+
 def _audit_event(space_id: str, *, revision: int, previous: dict, next_record: dict) -> dict:
     return {
-        "actor": "dashboard:test",
+        "actor": DASHBOARD_ACTOR,
         "timestamp": 1_700_000_000.0 + revision,
         "space_id": space_id,
         "root_fingerprint": "",
@@ -104,7 +107,7 @@ def test_space_governance_defaults_off_and_malformed_records_fail_closed(monkeyp
             enrolled=False,
             confirmation=None,
             trusted_project_root=None,
-            actor="dashboard:test",
+            actor=DASHBOARD_ACTOR,
         )
 
 
@@ -132,7 +135,7 @@ def test_space_governance_persists_identity_and_increments_revision(monkeypatch,
         enrolled=True,
         confirmation=confirmation,
         trusted_project_root=project,
-        actor="dashboard:test",
+        actor=DASHBOARD_ACTOR,
     )
     disabled = space_engine.update_nova_management(
         space,
@@ -140,7 +143,7 @@ def test_space_governance_persists_identity_and_increments_revision(monkeypatch,
         enrolled=False,
         confirmation=None,
         trusted_project_root=project,
-        actor="dashboard:test",
+        actor=DASHBOARD_ACTOR,
     )
 
     assert space.load_config()["space_id"] == space_id
@@ -172,7 +175,7 @@ def test_space_governance_rejects_enrollment_without_a_trusted_project(monkeypat
                 "root_fingerprint": space_engine.space_root_fingerprint(project),
             },
             trusted_project_root=None,
-            actor="dashboard:test",
+            actor=DASHBOARD_ACTOR,
         )
 
 
@@ -200,7 +203,7 @@ def test_space_governance_rolls_back_when_atomic_management_write_fails(monkeypa
             enrolled=False,
             confirmation=None,
             trusted_project_root=None,
-            actor="dashboard:test",
+            actor=DASHBOARD_ACTOR,
         )
 
     assert space.config_path.read_bytes() == before
@@ -227,7 +230,7 @@ def test_management_rejects_a_malformed_audit_without_overwriting_it(monkeypatch
             enrolled=False,
             confirmation=None,
             trusted_project_root=None,
-            actor="dashboard:test",
+            actor=DASHBOARD_ACTOR,
         )
 
     assert space.config_path.read_bytes() == before
@@ -248,7 +251,7 @@ def test_management_persists_governance_and_audit_together_in_space_config(monke
         enrolled=False,
         confirmation=None,
         trusted_project_root=None,
-        actor="dashboard:test",
+        actor=DASHBOARD_ACTOR,
     )
 
     config = space.load_config()
@@ -281,7 +284,7 @@ def test_management_save_failure_leaves_config_and_audit_unchanged(monkeypatch, 
             enrolled=False,
             confirmation=None,
             trusted_project_root=None,
-            actor="dashboard:test",
+            actor=DASHBOARD_ACTOR,
         )
 
     assert space.config_path.read_bytes() == before
@@ -304,7 +307,7 @@ def test_concurrent_management_updates_form_one_strict_revision_chain(monkeypatc
             enrolled=False,
             confirmation=None,
             trusted_project_root=None,
-            actor="dashboard:test",
+            actor=DASHBOARD_ACTOR,
         )
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -374,7 +377,7 @@ def test_management_migrates_valid_legacy_audit_before_appending(monkeypatch, tm
         enrolled=False,
         confirmation=None,
         trusted_project_root=None,
-        actor="dashboard:test",
+        actor=DASHBOARD_ACTOR,
     )
 
     assert result["revision"] == 2
@@ -398,7 +401,7 @@ def test_management_rejects_malformed_audit_list_item(monkeypatch, tmp_path):
     with pytest.raises(space_engine.SpaceGovernanceError, match="audit"):
         space_engine.update_nova_management(
             space, yolo=True, enrolled=False, confirmation=None,
-            trusted_project_root=None, actor="dashboard:test",
+            trusted_project_root=None, actor=DASHBOARD_ACTOR,
         )
     with pytest.raises(space_engine.SpaceGovernanceError, match="audit"):
         space_engine.list_nova_management_audit(space)
@@ -432,7 +435,7 @@ def test_management_rejects_broken_audit_revision_chain(monkeypatch, tmp_path):
     with pytest.raises(space_engine.SpaceGovernanceError, match="audit"):
         space_engine.update_nova_management(
             space, yolo=False, enrolled=False, confirmation=None,
-            trusted_project_root=None, actor="dashboard:test",
+            trusted_project_root=None, actor=DASHBOARD_ACTOR,
         )
 
 
@@ -464,7 +467,7 @@ def test_shared_config_lock_prevents_stale_generic_overwrite(monkeypatch, tmp_pa
     management = threading.Thread(
         target=lambda: space_engine.update_nova_management(
             space, yolo=True, enrolled=False, confirmation=None,
-            trusted_project_root=None, actor="dashboard:test",
+            trusted_project_root=None, actor=DASHBOARD_ACTOR,
         ),
     )
     management.start()
@@ -478,3 +481,87 @@ def test_shared_config_lock_prevents_stale_generic_overwrite(monkeypatch, tmp_pa
     assert config["description"] == "kept"
     assert config["nova_management"]["revision"] == 1
     assert [event["governance_revision"] for event in config["nova_management_audit"]] == [1]
+
+
+def test_management_adopts_the_single_legacy_audit_space_identity(monkeypatch, tmp_path):
+    """An explicit management migration must keep the validated legacy audit ID."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    audited_id = uuid.uuid4().hex
+    legacy = _audit_event(
+        audited_id,
+        revision=1,
+        previous={"yolo": False, "enrolled": False, "revision": 0},
+        next_record={"yolo": True, "enrolled": False, "revision": 1},
+    )
+    space.root.mkdir(parents=True)
+    space.config_path.write_text(
+        "name: Alpha\nnova_management:\n  yolo: true\n  enrolled: false\n  revision: 1\n",
+        encoding="utf-8",
+    )
+    (space.root / "nova-management-audit.jsonl").write_text(
+        json.dumps(legacy) + "\n", encoding="utf-8"
+    )
+
+    result = space_engine.update_nova_management(
+        space,
+        yolo=False,
+        enrolled=False,
+        confirmation=None,
+        trusted_project_root=None,
+        actor=DASHBOARD_ACTOR,
+    )
+
+    assert result["revision"] == 2
+    assert space.load_config()["space_id"] == audited_id
+    assert [event["space_id"] for event in space_engine.list_nova_management_audit(space)] == [audited_id, audited_id]
+
+
+def test_management_rejects_non_digest_dashboard_actor(monkeypatch, tmp_path):
+    """Only a dashboard actor digest, not an arbitrary dashboard prefix, is valid."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"}, mint_space_id=True)
+
+    with pytest.raises(space_engine.SpaceGovernanceError, match="authenticated dashboard actor"):
+        space_engine.update_nova_management(
+            space, yolo=True, enrolled=False, confirmation=None,
+            trusted_project_root=None, actor="dashboard:test",
+        )
+
+
+def test_audit_duplicate_numeric_types_conflict_after_canonicalization(monkeypatch, tmp_path):
+    """JSON canonicalization keeps `1` and `1.0` from collapsing as duplicates."""
+    from web.api import space_engine
+
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", tmp_path / "spaces")
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space_id = uuid.uuid4().hex
+    yaml_event = _audit_event(
+        space_id,
+        revision=1,
+        previous={"yolo": False, "enrolled": False, "revision": 0},
+        next_record={"yolo": True, "enrolled": False, "revision": 1},
+    )
+    yaml_event["timestamp"] = 1
+    legacy_event = dict(yaml_event)
+    legacy_event["timestamp"] = 1.0
+    space.save_config({
+        "name": "Alpha",
+        "space_id": space_id,
+        "nova_management": yaml_event["next"],
+        "nova_management_audit": [yaml_event],
+    })
+    (space.root / "nova-management-audit.jsonl").write_text(
+        json.dumps(legacy_event) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(space_engine.SpaceGovernanceError, match="conflicting revisions"):
+        space_engine.list_nova_management_audit(space)

@@ -5,6 +5,10 @@ import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
+
+
+DASHBOARD_ACTOR = "dashboard:" + "a" * 64
 
 
 def _headers(web_server):
@@ -713,7 +717,7 @@ def test_generic_config_preserves_management_audit_and_refuses_malformed_evidenc
         enrolled=False,
         confirmation=None,
         trusted_project_root=None,
-        actor="dashboard:test",
+        actor=DASHBOARD_ACTOR,
     )
     before = space.load_config()
 
@@ -798,7 +802,7 @@ def test_audit_get_reads_legacy_then_generic_update_migrates_it(monkeypatch, tmp
     space = space_engine.Space("alpha", "Alpha")
     space_id = uuid.uuid4().hex
     event = {
-        "actor": "dashboard:test",
+        "actor": DASHBOARD_ACTOR,
         "timestamp": 1_700_000_001.0,
         "space_id": space_id,
         "root_fingerprint": "",
@@ -853,3 +857,44 @@ def test_audit_get_returns_conflict_for_corrupt_evidence(monkeypatch, tmp_path):
     )
 
     assert response.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "corrupt_yaml",
+    ["{not valid", "- not-a-mapping\n", "[]\n", "false\n"],
+)
+def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
+    monkeypatch, tmp_path, corrupt_yaml,
+):
+    """No management or generic route may replace syntactically invalid/non-mapping YAML."""
+    from cli import web_server
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.root.mkdir(parents=True)
+    space.config_path.write_text(corrupt_yaml, encoding="utf-8")
+    before = space.config_path.read_bytes()
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+
+    management_get = client.get("/api/space/nova-management?slug=alpha", headers=headers)
+    audit_get = client.get("/api/space/nova-management/audit?slug=alpha", headers=headers)
+    management_post = client.post(
+        "/api/space/nova-management",
+        headers=headers,
+        json={"slug": "alpha", "yolo": False, "enrolled": False},
+    )
+    generic_post = client.post(
+        "/api/space/config",
+        headers=headers,
+        json={"slug": "alpha", "description": "must not replace source"},
+    )
+
+    assert management_get.status_code == 409
+    assert audit_get.status_code == 409
+    assert management_post.status_code == 409
+    assert generic_post.status_code == 409
+    assert space.config_path.read_bytes() == before

@@ -452,9 +452,11 @@ async def auth_middleware(request: Request, call_next):
 
 def _nova_management_payload(space, trusted_project_root: Path | None = None) -> dict:
     """Serialize governance without creating config, a Space, or a workspace."""
-    from web.api.space_engine import space_root_fingerprint
+    from web.api.space_engine import SpaceConfigMalformedError, space_root_fingerprint
 
     config = space.load_config()
+    if config.get("_space_config_malformed"):
+        raise SpaceConfigMalformedError("Space config is malformed; refusing to use source")
     return {
         "slug": space.slug,
         "space_id": config.get("space_id", ""),
@@ -486,20 +488,28 @@ def _trusted_space_project_root(space, *, read_only: bool = False, enrollment: b
 @app.get("/api/space/nova-management")
 async def get_space_nova_management(slug: str = ""):
     """Read a Space's governance snapshot without triggering legacy bootstrap."""
-    from web.api.space_engine import get_existing_space_read_only
+    from web.api.space_engine import SpaceGovernanceError, get_existing_space_read_only
 
     space = get_existing_space_read_only(str(slug).strip().lower()) if slug else None
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
-    return _nova_management_payload(
-        space, _trusted_space_project_root(space, read_only=True, enrollment=True)
-    )
+    try:
+        return _nova_management_payload(
+            space, _trusted_space_project_root(space, read_only=True, enrollment=True)
+        )
+    except SpaceGovernanceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/space/nova-management")
 async def update_space_nova_management(request: Request):
     """Apply the explicitly confirmed, server-root-bound governance transition."""
-    from web.api.space_engine import SpaceGovernanceError, get_existing_space_read_only, update_nova_management
+    from web.api.space_engine import (
+        SpaceConfigMalformedError,
+        SpaceGovernanceError,
+        get_existing_space_read_only,
+        update_nova_management,
+    )
 
     try:
         body = await request.json()
@@ -523,6 +533,8 @@ async def update_space_nova_management(request: Request):
             trusted_project_root=_trusted_space_project_root(space, enrollment=True),
             actor=actor,
         )
+    except SpaceConfigMalformedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SpaceGovernanceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _nova_management_payload(space, _trusted_space_project_root(space, enrollment=True))
