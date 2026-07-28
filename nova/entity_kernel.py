@@ -117,6 +117,9 @@ class EntityKernel:
         except (OSError, ValueError, TypeError):
             return False
 
+    def is_yolo_enabled(self) -> bool:
+        return self._yolo_enabled()
+
     def scan(self) -> dict[str, Any]:
         if self.state_provider:
             snapshot = self.state_provider()
