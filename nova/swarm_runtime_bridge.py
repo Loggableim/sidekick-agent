@@ -691,6 +691,33 @@ class NovaSwarmRuntimeBridge:
             return False
         return True
 
+    def attach_admitted_run(self, run: SwarmRun) -> None:
+        """Explicit host seam for Task 6; it never discovers a live Nova process.
+
+        A caller that already owns the kernel and trusted-root capability may
+        attach a paused admitted run in this same process before an explicit
+        resume.  Persisted metadata alone is deliberately insufficient.
+        """
+        context = self._runtime_context()
+        store = ProjectSwarmStore.open_read_only(self._project_root)
+        durable = store.get_run(run.run_id)
+        if durable is None or durable.status == "completed":
+            raise ValueError("Nova runtime attachment requires a non-terminal run")
+        snapshot = _snapshot_from_metadata(durable.metadata, context)
+        adapter = NovaSwarmAdapter(
+            self._kernel, PolicyGate(ProjectSwarmStore(self._project_root)), enabled=True
+        )
+        proposal = adapter.translate(snapshot.to_suggestion(context))
+        register_nova_runtime_context(
+            self._project_root,
+            run=durable,
+            adapter=adapter,
+            trusted_project_root=context,
+        )
+        if proposal_digest(proposal) != durable.metadata.get("proposal_digest"):
+            _unregister_runtime_binding(self._project_root, durable.run_id)
+            raise ValueError("Nova runtime attachment proposal mismatch")
+
 
 def nova_execution_options_for_run(
     project_root: Path, run: SwarmRun
