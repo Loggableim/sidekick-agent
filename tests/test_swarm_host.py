@@ -159,14 +159,44 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
     assert all(call["provider"] == "ollama-cloud" for call in calls)
 
 
-def test_completion_observer_exception_keeps_the_durable_completed_result(
+@pytest.mark.parametrize(
+    ("observer_failure", "audit_failure", "expect_audit"),
+    [
+        (RuntimeError("private observer exception"), None, True),
+        (SystemExit("private observer system exit"), None, True),
+        (
+            RuntimeError("private observer before audit failure"),
+            KeyboardInterrupt("private audit interrupt"),
+            False,
+        ),
+    ],
+)
+def test_post_completion_observer_and_audit_failures_keep_the_durable_result(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    observer_failure: BaseException,
+    audit_failure: BaseException | None,
+    expect_audit: bool,
 ):
-    """Catches an optional integration observer turning completion into failure."""
-    secret_error = "private observer detail must not escape"
+    """Catches terminal observer cleanup changing an already completed result."""
 
     def raising_observer(_project_root: Path, _run) -> None:
-        raise RuntimeError(secret_error)
+        raise observer_failure
+
+    if audit_failure is not None:
+        append_event = ProjectSwarmStore.append_event
+
+        def fail_only_observer_audit(
+            store,
+            run_id: str,
+            event_type: str,
+            payload,
+        ):
+            if event_type == "run.completion_observer_failed":
+                raise audit_failure
+            return append_event(store, run_id, event_type, payload)
+
+        monkeypatch.setattr(ProjectSwarmStore, "append_event", fail_only_observer_audit)
 
     ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
         ModelCatalogSnapshot(
@@ -194,13 +224,15 @@ def test_completion_observer_exception_keeps_the_durable_completed_result(
     ]
     assert summary.status == "completed"
     assert persisted is not None and persisted.status == "completed"
-    assert [event.payload for event in observer_events] == [
-        {"reason": "completion_observer_failed"}
-    ]
-    assert secret_error not in json.dumps(
-        [event.payload for event in observer_events],
-        sort_keys=True,
+    expected_payloads = (
+        [{"reason": "completion_observer_failed"}] if expect_audit else []
     )
+    actual_payloads = [event.payload for event in observer_events]
+    assert actual_payloads == expected_payloads
+    rendered_payloads = json.dumps(actual_payloads, sort_keys=True)
+    assert str(observer_failure) not in rendered_payloads
+    if audit_failure is not None:
+        assert str(audit_failure) not in rendered_payloads
 
 
 def test_execution_options_required_hook_still_fails_closed_without_a_resolver(

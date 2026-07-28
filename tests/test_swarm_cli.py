@@ -165,7 +165,7 @@ def _paused_cli_nova_run(
 def _cli_nova_service(
     model_calls: list[dict[str, object]],
     *,
-    completion_observer_error: str | None = None,
+    completion_observer_failure: BaseException | None = None,
 ) -> SidekickSwarmService:
     @contextmanager
     def provider_slot(_run_id: str, _provider: str):
@@ -195,14 +195,14 @@ def _cli_nova_service(
         if (
             options is None
             or options.on_completed is None
-            or completion_observer_error is None
+            or completion_observer_failure is None
         ):
             return options
         cleanup = options.on_completed
 
         def cleanup_then_raise(root: Path, completed_run) -> None:
             cleanup(root, completed_run)
-            raise RuntimeError(completion_observer_error)
+            raise completion_observer_failure
 
         return replace(options, on_completed=cleanup_then_raise)
 
@@ -266,14 +266,14 @@ def test_cli_resume_keeps_completed_nova_success_when_cleanup_observer_raises(
     resume = _parse(
         ["swarm", "--project", str(project), "--json", "resume", run.run_id]
     )
-    observer_error = "private Nova cleanup detail"
+    observer_failure = SystemExit("private Nova cleanup system exit")
 
     assert (
         swarm_command(
             resume,
             service=_cli_nova_service(
                 model_calls,
-                completion_observer_error=observer_error,
+                completion_observer_failure=observer_failure,
             ),
         )
         == 0
@@ -291,7 +291,7 @@ def test_cli_resume_keeps_completed_nova_success_when_cleanup_observer_raises(
     assert [event.payload for event in completion_observer_events] == [
         {"reason": "completion_observer_failed"}
     ]
-    assert observer_error not in json.dumps(payload, sort_keys=True)
+    assert str(observer_failure) not in json.dumps(payload, sort_keys=True)
     assert len(model_calls) == 8
     assert len(kernel.govern_calls) == 1
     assert len(kernel.act_calls) == 1
