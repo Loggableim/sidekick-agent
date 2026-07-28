@@ -767,3 +767,74 @@ file changes.  It remains entirely versioned/non-live.
   ~~~
 
   Do not fetch, pull, push, release, or alter unrelated untracked files as part of this local merge.
+
+## Task 10: Resolve final review security boundaries before local integration
+
+**Files:**
+
+- Modify as needed: `cli/swarm_host.py`, `runtime/auxiliary_client.py`,
+  `nova/actions.py`, `nova/swarm_adapter.py`, `nova/swarm_runtime_bridge.py`,
+  `swarm_core/workflow.py`, and their focused tests.
+- Do not modify: `C:\sidekick\home\spaces\nova\*`, live processes, provider
+  configuration, or any network state.
+
+**Purpose:**
+
+The final whole-branch review found three merge-blocking security defects.  All
+three must be closed in one versioned, non-live remediation before the branch
+can merge or the live seam can change.
+
+- [ ] **Step 1: Bind every Swarm request to the canonical Cloud client**
+
+  Ensure that both reviewed and YOLO Swarm requests cannot reuse an existing
+  auxiliary `ollama-cloud` client created for a local or third-party endpoint.
+  Bind the call and cache identity to the exact canonical
+  `https://ollama.com/v1` endpoint, or prove the cached client's actual
+  endpoint immediately before dispatch and reject/evict noncanonical clients.
+  Add a regression that seeds a noncanonical auxiliary cache entry, restores
+  the canonical environment, and proves no Swarm prompt uses the stale client.
+
+- [ ] **Step 2: Contain automatic Nova output effects at the real filesystem boundary**
+
+  The allowlisted `mind_diary`, `agenda_update`, and `prioritize_thread`
+  handlers must fail closed before an external effect whenever an output file
+  or any path component is a symlink, junction, reparse point, or resolves
+  outside the code-owned Nova root.  Validate at the final write/open boundary,
+  not only when translating/verifying the intent; do not classify an escaped
+  target as local/reversible.  Cover a symlinked diary file, a parent
+  directory symlink/junction when supported, and a deterministic component-swap
+  or final-boundary regression without relying on the live Nova space.
+
+- [ ] **Step 3: Make reviewed reviewers authorize the exact canonical action**
+
+  Provide the workflow's two independent reviewers an immutable, bounded,
+  canonical authorization context containing the action, target, payload,
+  expected output scope, intent digest, and proposal digest.  Preserve that
+  context durably, bind each reviewer checkpoint explicitly to the same digest,
+  and require that binding in the Nova review quorum before the pre-completion
+  hook may execute `govern()` then `act()`.  The context must not make public
+  status/SSE endpoints mutate state or reveal raw model responses.  Add a
+  regression using a benign title with a materially different allowlisted
+  payload and prove execution pauses unless both reviewers reviewed and
+  approved the exact canonical context.
+
+- [ ] **Step 4: Tighten the action-result boundary**
+
+  Treat an action as executed only when its `executed` field is literally
+  boolean `True`; truthy non-booleans must fail closed.  Add a focused
+  regression.
+
+- [ ] **Step 5: Verify and commit the remediation**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_host.py tests/test_nova_swarm_adapter.py tests/test_nova_swarm_runtime_bridge.py tests/test_swarm_workflow.py tests/test_swarm_policy.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check cli\swarm_host.py runtime\auxiliary_client.py nova\actions.py nova\swarm_adapter.py nova\swarm_runtime_bridge.py swarm_core\workflow.py tests
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m compileall -q cli runtime nova swarm_core
+  git diff --check
+  ~~~
+
+  Commit only scoped versioned files with:
+
+  ~~~powershell
+  git commit -m "fix: harden Swarm runtime security boundaries"
+  ~~~
