@@ -861,7 +861,7 @@ def test_audit_get_returns_conflict_for_corrupt_evidence(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize(
     "corrupt_yaml",
-    ["{not valid", "- not-a-mapping\n", "[]\n", "false\n"],
+    ["{not valid", "- not-a-mapping\n", "[]\n", "false\n", "null\n", "~\n"],
 )
 def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
     monkeypatch, tmp_path, corrupt_yaml,
