@@ -954,8 +954,8 @@ function renderSpaceDetail(space) {
       <section class="space-nova-management-card" id="spaceNovaManagementCard" data-slug="${spaceEsc(space.slug)}">
         <div class="space-section-title">Nova supervision</div>
         <p class="space-nova-management-copy">Enable autonomous supervision only for this isolated Space. Enrollment is bound to this Space ID and its server-validated project root.</p>
-        <label class="space-nova-management-option"><input id="spaceNovaManagementYolo" type="checkbox" disabled><span>Allow YOLO supervision for this Space</span></label>
-        <label class="space-nova-management-option"><input id="spaceNovaManagementEnrolled" type="checkbox" disabled><span>Enroll this Space for Nova supervision</span></label>
+        <label class="space-nova-management-option"><input id="spaceNovaManagementYolo" type="checkbox" disabled><span>Allow YOLO supervision for this Space (does not enroll Nova)</span></label>
+        <label class="space-nova-management-option"><input id="spaceNovaManagementEnrolled" type="checkbox" disabled><span>Enroll this Space for Nova supervision (separate from YOLO permission)</span></label>
         <div class="space-nova-management-meta" id="spaceNovaManagementMeta">Loading management identity…</div>
         <div class="space-detail-actions">
           <button class="space-secondary-action" type="button" onclick="fetchSpaceNovaManagement('${spaceEsc(space.slug)}')">Refresh supervision status</button>
@@ -982,6 +982,8 @@ async function fetchSpaceNovaManagement(slug) {
   const meta = document.getElementById('spaceNovaManagementMeta');
   try {
     const data = await api('/api/space/nova-management?slug=' + encodeURIComponent(slug));
+    const currentCard = document.getElementById('spaceNovaManagementCard');
+    if (!currentCard || currentCard !== card || String(currentCard.dataset.slug || '') !== String(slug || '')) return null;
     const management = data && data.nova_management || {};
     card.dataset.spaceId = String(data && data.space_id || '');
     card.dataset.rootFingerprint = String(data && data.root_fingerprint || '');
@@ -990,8 +992,10 @@ async function fetchSpaceNovaManagement(slug) {
     const save = document.getElementById('spaceNovaManagementSave');
     if (yolo) { yolo.checked = management.yolo === true; yolo.disabled = false; }
     if (enrolled) { enrolled.checked = management.enrolled === true; enrolled.disabled = false; }
-    if (save) save.disabled = false;
-    if (meta) meta.textContent = 'Space ID: ' + (card.dataset.spaceId || 'not persisted yet') + ' · Root fingerprint: ' + (card.dataset.rootFingerprint || 'no trusted project directory');
+    if (save) { save.disabled = false; save.textContent = card.dataset.spaceId ? 'Save supervision' : 'Initialize Space identity'; }
+    if (meta) meta.textContent = card.dataset.spaceId
+      ? 'Space ID: ' + card.dataset.spaceId + ' · Root fingerprint: ' + (card.dataset.rootFingerprint || 'no independently trusted project directory')
+      : 'This legacy Space needs an explicit management save to create its durable identity; no unrelated configuration change is required.';
     return data;
   } catch (e) {
     if (meta) meta.textContent = 'Supervision status unavailable: ' + (e.message || e);

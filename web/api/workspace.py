@@ -720,6 +720,33 @@ def resolve_trusted_workspace_read_only(path: str | Path) -> Path:
     )
 
 
+def resolve_enrollment_trusted_workspace_read_only(path: str | Path) -> Path:
+    """Resolve an enrollment root without accepting mutable Space config as trust.
+
+    This intentionally excludes ``project_dir`` values from every Space YAML:
+    otherwise an operator could first patch that mutable field and then use it
+    as the evidence that the same patch target is trustworthy.
+    """
+    if path in (None, ""):
+        raise ValueError("An explicit workspace path is required for enrollment")
+    candidate = Path(path).expanduser().resolve()
+    access_error = _workspace_access_error(candidate)
+    if access_error:
+        raise ValueError(access_error)
+    home = Path.home().resolve()
+    if home != Path("/") and _is_within(candidate, home):
+        return candidate
+    if _is_blocked_workspace_path(candidate, path):
+        raise ValueError(f"Path points to a system directory: {candidate}")
+    profile_context = _read_only_profile_context()
+    if candidate in _read_only_saved_workspace_paths(profile_context):
+        return candidate
+    for default_workspace in _read_only_default_workspaces():
+        if _is_within(candidate, default_workspace):
+            return candidate
+    raise ValueError("Enrollment requires an independently trusted workspace root")
+
+
 def _read_only_saved_workspace_paths(
     profile_context: tuple[Path, Path, bool] | None = None,
 ) -> set[Path]:

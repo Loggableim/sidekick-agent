@@ -104,6 +104,7 @@ def test_space_governance_persists_identity_and_increments_revision(monkeypatch,
         enrolled=True,
         confirmation=confirmation,
         trusted_project_root=project,
+        actor="dashboard:test",
     )
     disabled = space_engine.update_nova_management(
         space,
@@ -111,6 +112,7 @@ def test_space_governance_persists_identity_and_increments_revision(monkeypatch,
         enrolled=False,
         confirmation=None,
         trusted_project_root=project,
+        actor="dashboard:test",
     )
 
     assert space.load_config()["space_id"] == space_id
@@ -142,4 +144,35 @@ def test_space_governance_rejects_enrollment_without_a_trusted_project(monkeypat
                 "root_fingerprint": space_engine.space_root_fingerprint(project),
             },
             trusted_project_root=None,
+            actor="dashboard:test",
         )
+
+
+def test_space_governance_rolls_back_when_its_required_audit_append_fails(monkeypatch, tmp_path):
+    """A management transition cannot persist when its append-only evidence fails."""
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    space = space_engine.Space("alpha", "Alpha")
+    space.save_config({"name": "Alpha"})
+    before = space.config_path.read_bytes()
+    monkeypatch.setattr(
+        space_engine,
+        "_append_nova_management_audit",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk full")),
+        raising=False,
+    )
+
+    with pytest.raises(space_engine.SpaceGovernanceError):
+        space_engine.update_nova_management(
+            space,
+            yolo=True,
+            enrolled=False,
+            confirmation=None,
+            trusted_project_root=None,
+            actor="dashboard:test",
+        )
+
+    assert space.config_path.read_bytes() == before

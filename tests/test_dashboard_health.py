@@ -2188,6 +2188,8 @@ def test_space_settings_exposes_confirmed_nova_management_controls():
     assert "confirm(" in spaces_js
     assert "space-nova-management-card" in spaces_js
     assert ".space-nova-management-card" in style_css
+    assert "separate from YOLO permission" in spaces_js
+    assert "currentCard !== card" in spaces_js
 
 
 def test_desktop_sidebar_nav_does_not_use_mobile_touch_compaction():

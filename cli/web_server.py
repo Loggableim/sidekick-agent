@@ -55,6 +55,7 @@ from web.api.workspace import (
     get_last_workspace,
     resolve_trusted_workspace,
     resolve_trusted_workspace_read_only,
+    resolve_enrollment_trusted_workspace_read_only,
 )
 from web.api.onboarding import (
     get_onboarding_status,
@@ -466,13 +467,16 @@ def _nova_management_payload(space, trusted_project_root: Path | None = None) ->
     }
 
 
-def _trusted_space_project_root(space, *, read_only: bool = False) -> Path | None:
+def _trusted_space_project_root(space, *, read_only: bool = False, enrollment: bool = False) -> Path | None:
     """Resolve only the persisted project directory; never inspect client paths."""
     project_dir = space.get_project_dir()
     if not project_dir:
         return None
     try:
-        resolver = resolve_trusted_workspace_read_only if read_only else resolve_trusted_workspace
+        if enrollment:
+            resolver = resolve_enrollment_trusted_workspace_read_only
+        else:
+            resolver = resolve_trusted_workspace_read_only if read_only else resolve_trusted_workspace
         resolved = Path(resolver(project_dir)).expanduser().resolve()
     except Exception:
         return None
@@ -482,20 +486,20 @@ def _trusted_space_project_root(space, *, read_only: bool = False) -> Path | Non
 @app.get("/api/space/nova-management")
 async def get_space_nova_management(slug: str = ""):
     """Read a Space's governance snapshot without triggering legacy bootstrap."""
-    from web.api.space_engine import get_workspace
+    from web.api.space_engine import get_existing_space_read_only
 
-    space = get_workspace(str(slug).strip().lower()) if slug else None
+    space = get_existing_space_read_only(str(slug).strip().lower()) if slug else None
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
     return _nova_management_payload(
-        space, _trusted_space_project_root(space, read_only=True)
+        space, _trusted_space_project_root(space, read_only=True, enrollment=True)
     )
 
 
 @app.post("/api/space/nova-management")
 async def update_space_nova_management(request: Request):
     """Apply the explicitly confirmed, server-root-bound governance transition."""
-    from web.api.space_engine import SpaceGovernanceError, get_workspace, update_nova_management
+    from web.api.space_engine import SpaceGovernanceError, get_existing_space_read_only, update_nova_management
 
     try:
         body = await request.json()
@@ -504,20 +508,35 @@ async def update_space_nova_management(request: Request):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="JSON body must be an object")
     slug = str(body.get("slug") or "").strip().lower()
-    space = get_workspace(slug) if slug else None
+    space = get_existing_space_read_only(slug) if slug else None
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
+    actor = dashboard_session_principal(request)
+    if actor is None:
+        raise HTTPException(status_code=403, detail="Authenticated dashboard actor required")
     try:
         update_nova_management(
             space,
             yolo=body.get("yolo"),
             enrolled=body.get("enrolled"),
             confirmation=body.get("confirmation"),
-            trusted_project_root=_trusted_space_project_root(space),
+            trusted_project_root=_trusted_space_project_root(space, enrollment=True),
+            actor=actor,
         )
     except SpaceGovernanceError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return _nova_management_payload(space, _trusted_space_project_root(space))
+    return _nova_management_payload(space, _trusted_space_project_root(space, enrollment=True))
+
+
+@app.get("/api/space/nova-management/audit")
+async def get_space_nova_management_audit(slug: str = ""):
+    """Return the append-only governance evidence without writing Space state."""
+    from web.api.space_engine import get_existing_space_read_only, list_nova_management_audit
+
+    space = get_existing_space_read_only(str(slug).strip().lower()) if slug else None
+    if not space:
+        raise HTTPException(status_code=404, detail="Space not found")
+    return {"slug": space.slug, "events": list_nova_management_audit(space)}
 
 
 @app.get("/login", include_in_schema=False)
