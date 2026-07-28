@@ -534,3 +534,21 @@ def test_runtime_verifier_rejects_a_wrong_workflow_goal_or_run(trusted_nova_proj
                     builder={}, critic={},
                 )
             )
+
+
+def test_attach_rejects_a_running_run_before_it_can_register_context(tmp_path: Path):
+    """Catches Task-6 attachment mutating the registry for a running worker."""
+    import nova.swarm_runtime_bridge as bridge
+    from swarm_core.store import ProjectSwarmStore
+
+    class Kernel:
+        space_dir = tmp_path
+        actions = type("Actions", (), {"space_dir": tmp_path})()
+
+    trusted = bridge._create_nova_bridge_context(tmp_path, validator=lambda root: root)
+    running = ProjectSwarmStore(tmp_path).create_run(metadata={"autonomy": "reviewed_execution"})
+
+    with pytest.raises(ValueError, match="paused"):
+        bridge.NovaSwarmRuntimeBridge(
+            Kernel(), project_root=tmp_path, trusted_project_root=trusted
+        ).attach_admitted_run(running)
