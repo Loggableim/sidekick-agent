@@ -935,3 +935,50 @@ provider.
   ~~~powershell
   git commit -m "fix: add the Scout Cloud fallback chain"
   ~~~
+
+## Task 13: Repair Scout-fallback contract consumers before integration
+
+**Files:**
+
+- Modify: the bounded `deepseek-v4-pro` role-quality metadata and focused
+  routing, RoleMarket, and workflow regression tests.
+- Do not modify: `C:\\sidekick\\home\\spaces\\nova\\*`, live processes,
+  provider credentials/configuration, or provider routing outside the approved
+  Flash-to-Pro Scout chain.
+
+**Purpose:**
+
+Task 12 correctly adds the Cloud-only Scout fallback, but its review found two
+contract consumers that must move with it: `RoleMarket.assess()` rejects Pro
+without an explicit quality for `default`/`scout`, and a routing regression
+still asserts the obsolete Flash-only route.  Add the conservative fallback
+quality below Flash's primary quality and update the exact route contract.
+Also make the two-schema-invalid pause behavior a durable regression rather
+than an ad-hoc reviewer observation.
+
+- [ ] **Step 1: Add failing consumer-contract tests**
+
+  Capture the current RoleMarket error, old route assertion, and both-invalid
+  Cloud-chain pause as focused RED tests.  Assert Pro remains a fallback, not
+  a primary selection, and no alternative provider/model appears.
+
+- [ ] **Step 2: Align the bounded quality and route contracts**
+
+  Give only `deepseek-v4-pro` the conservative `default`/`scout` quality
+  values necessary for the already-approved fallback chain, below Flash's
+  primary score.  Update focused route expectations without broadening the
+  catalog, role chains, budgets, or concurrency.
+
+- [ ] **Step 3: Verify and commit**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_routing.py tests/test_swarm_role_market.py tests/test_swarm_workflow.py tests/test_swarm_core.py tests/test_nova_swarm_runtime_bridge.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check swarm_core\models.py swarm_core\router.py tests/test_swarm_routing.py tests/test_swarm_role_market.py tests/test_swarm_workflow.py tests/test_swarm_core.py tests/test_nova_swarm_runtime_bridge.py
+  git diff --check
+  ~~~
+
+  Commit only the contract repair with:
+
+  ~~~powershell
+  git commit -m "fix: align Scout fallback route contracts"
+  ~~~
