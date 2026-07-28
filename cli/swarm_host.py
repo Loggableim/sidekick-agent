@@ -399,17 +399,17 @@ class SidekickSwarmService:
             return
         try:
             callback(project_root, durable)
-        except Exception:
-            # Completion is already durable. An optional process-only observer
-            # cannot turn that success into a caller-visible failure or leak
-            # its diagnostic details.
+        except BaseException:
+            # Completion is already durable. Unlike a Core execution hook,
+            # this optional post-terminal observer cannot turn that success
+            # into a caller-visible failure or leak its diagnostic details.
             try:
                 store.append_event(
                     run_id,
                     "run.completion_observer_failed",
                     {"reason": "completion_observer_failed"},
                 )
-            except Exception:
+            except BaseException:
                 pass
 
     def _wait_for_running(
