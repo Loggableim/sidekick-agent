@@ -7,6 +7,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -68,6 +69,104 @@ def test_save_integration_config_rejects_external_swarm_link_before_writing(
         save_integration_config(project, "nova", {"version": 1, "enabled": True})
 
     assert list(outside.iterdir()) == []
+
+
+def test_save_integration_config_rejects_cyclic_values_without_writing(
+    tmp_path: Path,
+):
+    """Catches unbounded config recursion publishing a partial YAML document."""
+    project = tmp_path / "project"
+    initialize_project(project)
+    config_path = project / ".swarm" / "swarm.yaml"
+    before = config_path.read_bytes()
+    cyclic: dict[str, object] = {}
+    cyclic["cycle"] = cyclic
+
+    with pytest.raises((TypeError, ValueError), match="JSON/YAML-safe"):
+        save_integration_config(project, "nova", cyclic)
+
+    assert config_path.read_bytes() == before
+    assert load_integration_config(project, "nova") == {}
+
+
+def test_two_process_integration_saves_preserve_different_namespaces(
+    tmp_path: Path,
+):
+    """Catches one process overwriting another namespace's config update."""
+    project = tmp_path / "project"
+    initialize_project(project)
+    ready = tmp_path / "first-ready"
+    release = tmp_path / "release-first"
+    started = tmp_path / "second-started"
+    source_root = Path(__file__).resolve().parents[1]
+    first_script = """
+import sys
+import time
+from pathlib import Path
+from swarm_core import config as config_module
+from swarm_core.config import save_integration_config
+
+project, ready, release = map(Path, sys.argv[1:4])
+original_write = config_module._write_project_config
+def hold_write(lease, raw_config):
+    ready.write_text("ready", encoding="utf-8")
+    deadline = time.monotonic() + 10
+    while not release.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("test did not release first writer")
+        time.sleep(0.01)
+    return original_write(lease, raw_config)
+config_module._write_project_config = hold_write
+save_integration_config(project, "nova", {"version": 1, "enabled": True})
+"""
+    second_script = """
+import sys
+from pathlib import Path
+from swarm_core.config import save_integration_config
+
+project, started = map(Path, sys.argv[1:3])
+started.write_text("started", encoding="utf-8")
+save_integration_config(project, "other", {"version": 1, "enabled": True})
+"""
+    first = subprocess.Popen(
+        [sys.executable, "-c", first_script, str(project), str(ready), str(release)],
+        cwd=source_root,
+    )
+    second = None
+    try:
+        _wait_for_file(ready)
+        second = subprocess.Popen(
+            [sys.executable, "-c", second_script, str(project), str(started)],
+            cwd=source_root,
+        )
+        _wait_for_file(started)
+        deadline = time.monotonic() + 1
+        while second.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert second.poll() is None
+
+        release.write_text("release", encoding="utf-8")
+        assert first.wait(timeout=10) == 0
+        assert second.wait(timeout=10) == 0
+    finally:
+        release.write_text("release", encoding="utf-8")
+        if first.poll() is None:
+            first.kill()
+            first.wait(timeout=10)
+        if second is not None and second.poll() is None:
+            second.kill()
+            second.wait(timeout=10)
+
+    assert load_integration_config(project, "nova") == {"version": 1, "enabled": True}
+    assert load_integration_config(project, "other") == {"version": 1, "enabled": True}
+
+
+def _wait_for_file(path: Path) -> None:
+    deadline = time.monotonic() + 10
+    while not path.exists():
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"timed out waiting for {path.name}")
+        time.sleep(0.01)
 
 
 def test_initialize_rejects_external_swarm_link_before_writing(tmp_path: Path):
