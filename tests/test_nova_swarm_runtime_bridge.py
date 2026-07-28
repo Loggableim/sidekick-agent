@@ -240,6 +240,10 @@ def test_action_specs_and_verifier_scope_match_the_real_action_handler(
         {"payload": {"content": "Y29tbWFuZA"}},
         {"payload": {"content": "base64url:Y29tbWFuZA"}},
         {"payload": {"content": "_2NvbW1hbmQ"}},
+        {"payload": {"content": "YXBwbHk="}},
+        {"payload": {"content": "c2VjcmV0"}},
+        {"payload": {"content": "dXJs"}},
+        {"payload": {"content": "LmVudg=="}},
         {"target": {"nested": {"%63ommand": "write"}}},
     ],
 )
