@@ -17,7 +17,7 @@ from swarm_core.router import ModelRouter
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.transport import ModelProviderError, ModelTransport
 from swarm_core.verifier import VerificationResult, VerifierAssessment
-from swarm_core.workflow import ModelExecutor, RoleCall, WorkflowPaused
+from swarm_core.workflow import CallBudget, ModelExecutor, RoleCall, WorkflowPaused
 
 
 class WorkflowTransport(ModelTransport):
@@ -48,6 +48,68 @@ class WorkflowTransport(ModelTransport):
 
 def _request_by_role(requests: list[ModelRequest], role: str) -> ModelRequest:
     return next(request for request in requests if request.role == role)
+
+
+def test_scout_schema_invalid_flash_response_uses_only_pro_cloud_fallback_and_budgets_it():
+    """Catches a malformed Scout response pausing after Flash instead of Pro fallback."""
+
+    class SchemaInvalidFlashTransport(ModelTransport):
+        def __init__(self) -> None:
+            self.requests: list[ModelRequest] = []
+
+        def complete(self, request: ModelRequest) -> ModelResponse:
+            self.requests.append(request)
+            if request.model == "deepseek-v4-flash":
+                return ModelResponse(
+                    model=request.model,
+                    content="Scout response missing required structured fields.",
+                    data={"work": "scout inspection"},
+                )
+            if request.model == "deepseek-v4-pro":
+                return ModelResponse(
+                    model=request.model,
+                    content="Scout completed with structured evidence.",
+                    data={
+                        "work": "scout inspection",
+                        "evidence": ["project:read-only"],
+                        "decision": "proceed",
+                    },
+                )
+            raise AssertionError(f"Unexpected Scout fallback model: {request.model}")
+
+    router = ModelRouter(ModelRegistry())
+    selection = router.select("scout", {"scouting", "structured-output"})
+    budget = CallBudget(limit=2)
+    transport = SchemaInvalidFlashTransport()
+    failures = []
+
+    response = ModelExecutor(router, transport, call_budget=budget).complete(
+        RoleCall(
+            "scout",
+            "Inspect the project.",
+            {},
+            frozenset({"scouting", "structured-output"}),
+        ),
+        run_id="scout-schema-fallback",
+        on_failure=failures.append,
+    )
+
+    assert selection.models == ("deepseek-v4-flash", "deepseek-v4-pro")
+    assert selection.provider == "ollama-cloud"
+    assert router.select("default", {"structured-output"}).models == (
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    )
+    assert response.model == "deepseek-v4-pro"
+    assert [request.model for request in transport.requests] == [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    ]
+    assert all(request.provider == "ollama-cloud" for request in transport.requests)
+    assert budget.used == 2
+    assert [(failure.model, failure.reason) for failure in failures] == [
+        ("deepseek-v4-flash", "schema_invalid")
+    ]
 
 
 def test_coding_team_runs_exact_stages_with_sharded_blackboard_context(tmp_path: Path):
