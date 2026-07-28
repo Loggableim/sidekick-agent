@@ -1027,3 +1027,56 @@ been attempted and failed.
   ~~~powershell
   git commit -m "fix: require Flash before Scout fallback"
   ~~~
+
+## Task 15: Give Cloud roles an explicit, fail-closed JSON output contract
+
+**Files:**
+
+- Modify: `swarm_core/models.py` and focused transport/routing regressions.
+- Do not modify: `C:\\sidekick\\home\\spaces\\nova\\*`, live processes,
+  credentials, model catalog contents, provider routing, or other fallback
+  behavior.
+
+**Purpose:**
+
+The live canary proved that the model executor correctly rejects an unstructured
+Cloud response, but `ModelRequest.render_prompt()` currently sends only the
+role prose and context.  It never tells a Cloud model that the response must
+be a JSON object with the fields enforced by `ModelExecutor`.  Because Ollama
+Cloud currently does not support enforced structured outputs, do not add a
+`response_format`/schema request option that could fail at the provider.
+Instead, append a stable, explicit output contract after the untrusted context:
+the exact required fields, JSON types for Swarm's fixed fields, and a strict
+"one JSON object, no prose or Markdown" instruction.  Preserve the existing
+strict JSON parser and schema gate so noncompliant output still consumes only
+the approved Cloud fallback chain and pauses fail-closed.
+
+- [ ] **Step 1: Capture the missing prompt contract in RED regressions**
+
+  Add focused tests showing that a request with context renders a strict JSON
+  output contract *after* that context, carries every `required_fields` entry,
+  and describes `work`/`evidence`/`decision`/`approved` with their enforced
+  types.  Keep the transport contract explicit: it must use only the injected
+  `call_llm` route and must not add `response_format` or another provider API
+  option.
+
+- [ ] **Step 2: Append the bounded Cloud-safe output contract**
+
+  Change only `ModelRequest.render_prompt()` to append the canonical contract.
+  Serialize the schema deterministically and preserve the existing context
+  serialization.  Do not relax `_structured_data()` to scrape prose or code
+  fences, and do not silently coerce field types.
+
+- [ ] **Step 3: Verify and commit**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_swarm_routing.py tests/test_swarm_workflow.py tests/test_swarm_host.py tests/test_nova_swarm_runtime_bridge.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check swarm_core\models.py swarm_core\transport.py tests/test_swarm_routing.py tests/test_swarm_workflow.py tests/test_swarm_host.py tests/test_nova_swarm_runtime_bridge.py
+  git diff --check
+  ~~~
+
+  Commit only the prompt-contract repair with:
+
+  ~~~powershell
+  git commit -m "fix: require structured Cloud role outputs"
+  ~~~
