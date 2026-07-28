@@ -1080,3 +1080,48 @@ the approved Cloud fallback chain and pauses fail-closed.
   ~~~powershell
   git commit -m "fix: require structured Cloud role outputs"
   ~~~
+
+## Task 16: Update Nova prompt-consumer regressions for the bounded context block
+
+**Files:**
+
+- Modify: focused parsing helpers/assertions in
+  `tests/test_nova_swarm_runtime_bridge.py` only.
+- Do not modify: `swarm_core/*`, `nova/*`, `C:\\sidekick\\home\\spaces\\nova\\*`,
+  processes, configuration, provider calls, or live data.
+
+**Purpose:**
+
+Task 15 intentionally appends the output contract after `Context:` so an
+untrusted context cannot become the final instruction.  Two Nova integration
+regressions currently parse the prompt by taking every character after
+`Context:` as JSON.  That test-only assumption now produces `JSONDecodeError`
+even though the context is unchanged and correctly bounded.  Update those
+read-only test consumers to extract precisely the context block before the
+required `Output contract:` delimiter.  Assert the delimiter exists, so this
+repair cannot silently accept a future removal of the Cloud output contract.
+
+- [ ] **Step 1: Capture the boundary failure locally**
+
+  Run the two affected tests after Task 15 and record their expected
+  `JSONDecodeError`; do not modify production parsing or model output behavior.
+
+- [ ] **Step 2: Bound only the test prompt parser**
+
+  Add one small test-local helper or equivalent exact extraction used by both
+  tests.  It must reject a prompt missing either delimiter and return the
+  unchanged serialized context for `json.loads`.
+
+- [ ] **Step 3: Verify and commit**
+
+  ~~~powershell
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m pytest -q tests/test_nova_swarm_runtime_bridge.py tests/test_swarm_routing.py tests/test_swarm_workflow.py tests/test_swarm_host.py
+  & C:\sidekick\sidekick\.venv\Scripts\python.exe -m ruff check tests/test_nova_swarm_runtime_bridge.py tests/test_swarm_routing.py swarm_core\models.py
+  git diff --check
+  ~~~
+
+  Commit only the test-contract repair with:
+
+  ~~~powershell
+  git commit -m "test: bound Nova prompt context parsing"
+  ~~~
