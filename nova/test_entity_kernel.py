@@ -80,6 +80,18 @@ class EntityKernelTests(unittest.TestCase):
         scan = kernel.scan()
         self.assertEqual(scan["memory"]["total_memories"], 42)
 
+    def test_is_yolo_enabled_reads_only_the_existing_lifecycle_file(self):
+        kernel = EntityKernel(space_dir=self.root, state_provider=self.fixture_state)
+        lifecycle = self.root / ".lifecycle"
+        lifecycle.mkdir()
+        yolo_state = lifecycle / "yolo.json"
+        yolo_state.write_text('{"enabled": true}', encoding="utf-8")
+
+        self.assertTrue(kernel.is_yolo_enabled())
+
+        yolo_state.write_text("{not-json", encoding="utf-8")
+        self.assertFalse(kernel.is_yolo_enabled())
+
     def test_blocked_action_records_blocked_result(self):
         kernel = EntityKernel(space_dir=self.root, state_provider=self.fixture_state)
         decision = kernel.decide(now_iso="2026-07-05T23:00:00")

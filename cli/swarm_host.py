@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import os
 from pathlib import Path
 import threading
@@ -17,7 +17,7 @@ import time
 from typing import Any, Callable, ContextManager, Iterator, Mapping
 from urllib.parse import urlsplit
 
-from swarm_core.engine import RunSummary, SwarmEngine
+from swarm_core.engine import PreCompletionHook, RunSummary, SwarmEngine
 from swarm_core.models import (
     ModelCatalogSnapshot,
     ModelRegistry,
@@ -34,12 +34,27 @@ from swarm_core.types import (
     RequestedToolAction,
     SwarmRun,
 )
+from swarm_core.verifier import ReadOnlyVerifier
 
 
 CatalogRefresher = Callable[[], ModelCatalogSnapshot]
 ProviderSlot = Callable[[str, str], ContextManager[None]]
 ActionClassifier = Callable[[RequestedToolAction], ActionCapabilities]
 PauseObserver = Callable[[], None]
+
+
+@dataclass(frozen=True)
+class SwarmExecutionOptions:
+    """Host-resolved limits and read-only lifecycle extensions for one run."""
+
+    max_calls: int = 48
+    max_concurrent: int = 3
+    verifier: ReadOnlyVerifier | None = None
+    pre_completion_hook: PreCompletionHook | None = None
+    blocked_reason: str | None = None
+
+
+ExecutionOptionsResolver = Callable[[Path, SwarmRun], SwarmExecutionOptions | None]
 
 OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE = "ollama-cloud-api-live-verified"
 OLLAMA_CLOUD_UNAVAILABLE_CATALOG_SOURCE = "ollama-cloud-api-live-unavailable"
@@ -96,6 +111,7 @@ class SidekickSwarmService:
         catalog_refresher: CatalogRefresher | None = None,
         provider_slot: ProviderSlot | None = None,
         action_classifier: ActionClassifier | None = None,
+        execution_options_resolver: ExecutionOptionsResolver | None = None,
         pause_poll_seconds: float = 0.05,
     ) -> None:
         # Constructor purity matters: GET route handlers may construct a
@@ -104,6 +120,7 @@ class SidekickSwarmService:
         self._catalog_refresher = catalog_refresher or _refresh_ollama_catalog
         self._provider_slot = provider_slot or _sidekick_ollama_provider_slot
         self._action_classifier = action_classifier or _conservative_classifier
+        self._execution_options_resolver = execution_options_resolver
         if pause_poll_seconds <= 0:
             raise ValueError("pause_poll_seconds must be positive")
         self._pause_poll_seconds = float(pause_poll_seconds)
@@ -123,9 +140,17 @@ class SidekickSwarmService:
         project_root: Path,
         *,
         pack: str = "coding-team",
+        autonomy: str | None = None,
+        host_metadata: Mapping[str, Any] | None = None,
     ) -> RunSummary:
         """Synchronously run the same durable lifecycle used by the CLI."""
-        run = self.start_run(goal, project_root, pack=pack)
+        run = self.start_run(
+            goal,
+            project_root,
+            pack=pack,
+            autonomy=autonomy,
+            host_metadata=host_metadata,
+        )
         return self.execute_run(project_root, run.run_id)
 
     def start_run(
@@ -134,11 +159,19 @@ class SidekickSwarmService:
         project_root: Path,
         *,
         pack: str = "coding-team",
+        autonomy: str | None = None,
+        host_metadata: Mapping[str, Any] | None = None,
     ) -> SwarmRun:
         """Persist a running Swarm identity without starting a model call."""
         project_root = Path(project_root).resolve()
         engine, _snapshot, _store = self._engine_for(project_root)
-        return engine.start_run(goal, project_root, pack=pack)
+        return engine.start_run(
+            goal,
+            project_root,
+            pack=pack,
+            autonomy=autonomy,
+            host_metadata=host_metadata,
+        )
 
     def execute_run(
         self,
@@ -150,7 +183,17 @@ class SidekickSwarmService:
     ) -> RunSummary:
         """Continue a durable run, waiting at model boundaries while paused."""
         project_root = Path(project_root).resolve()
-        engine, snapshot, store = self._engine_for(project_root)
+        run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
+        if run is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        options = self._resolve_execution_options(project_root, run)
+        if options.blocked_reason is not None:
+            return self._pause_before_execution_options(
+                project_root,
+                run_id,
+                options.blocked_reason,
+            )
+        engine, snapshot, store = self._engine_for(project_root, options=options)
         summary = engine.execute_run(
             run_id,
             project_root,
@@ -166,6 +209,8 @@ class SidekickSwarmService:
     def _engine_for(
         self,
         project_root: Path,
+        *,
+        options: SwarmExecutionOptions | None = None,
     ) -> tuple[SwarmEngine, ModelCatalogSnapshot | None, ProjectSwarmStore]:
         """Build from the only persisted healthy cloud catalog.
 
@@ -196,9 +241,82 @@ class SidekickSwarmService:
             SwarmEngine(
                 transport,
                 registry=ModelRegistry(catalog=catalog),
+                max_calls=options.max_calls if options is not None else 48,
+                max_concurrent=options.max_concurrent if options is not None else 3,
+                verifier=options.verifier if options is not None else None,
+                pre_completion_hook=(
+                    options.pre_completion_hook if options is not None else None
+                ),
             ),
             snapshot,
             store,
+        )
+
+    def _resolve_execution_options(
+        self,
+        project_root: Path,
+        run: SwarmRun,
+    ) -> SwarmExecutionOptions:
+        """Resolve once from durable state, failing closed without error detail."""
+        resolver = self._execution_options_resolver
+        if resolver is None:
+            return SwarmExecutionOptions()
+        try:
+            resolved = resolver(project_root, run)
+        except Exception:
+            return SwarmExecutionOptions(blocked_reason="execution_options_unavailable")
+        if resolved is None:
+            return SwarmExecutionOptions()
+        if not isinstance(resolved, SwarmExecutionOptions):
+            return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
+        if not _valid_execution_limits(resolved):
+            return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
+        if resolved.blocked_reason is not None:
+            return replace(
+                resolved,
+                blocked_reason=_bounded_execution_options_reason(
+                    resolved.blocked_reason
+                ),
+            )
+        return resolved
+
+    @staticmethod
+    def _pause_before_execution_options(
+        project_root: Path,
+        run_id: str,
+        reason: str,
+    ) -> RunSummary:
+        """Durably pause a bridge-blocked run before constructing an engine."""
+        store = ProjectSwarmStore(project_root)
+        run = store.get_run(run_id)
+        if run is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        if run.status == "completed":
+            raise ValueError("Completed Swarm runs cannot be executed again")
+        if run.status == "running":
+            try:
+                store.set_run_status(run_id, "paused")
+            except (RuntimeError, ValueError):
+                # A human pause may win the transition.  Either way this host
+                # must not build an engine or make a model request.
+                pass
+        current = store.get_run(run_id)
+        if current is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        if current.status != "completed":
+            store.append_event(
+                run_id,
+                "run.execution_blocked",
+                {"reason": _bounded_execution_options_reason(reason)},
+            )
+        return RunSummary(
+            run_id=run_id,
+            status=current.status,
+            call_count=0,
+            evidence={},
+            decision=None,
+            pause_reason=_bounded_execution_options_reason(reason),
+            events=tuple(store.list_events(run_id)),
         )
 
     @staticmethod
@@ -462,6 +580,28 @@ def _safe_execution_error_type(error_type: str) -> str:
         if character.isascii() and (character.isalnum() or character in {"_", "-"})
     )
     return (cleaned or "Exception")[:128]
+
+
+def _valid_execution_limits(options: SwarmExecutionOptions) -> bool:
+    """Keep resolver tuning inside the established host-wide resource caps."""
+    return (
+        type(options.max_calls) is int
+        and 1 <= options.max_calls <= 128
+        and type(options.max_concurrent) is int
+        and 1 <= options.max_concurrent <= 3
+    )
+
+
+def _bounded_execution_options_reason(reason: object) -> str:
+    """Persist a stable token, never resolver-controlled diagnostic text."""
+    if not isinstance(reason, str):
+        return "execution_options_blocked"
+    cleaned = "".join(
+        character
+        for character in reason.strip()
+        if character.isascii() and (character.isalnum() or character in {"_", "-"})
+    )
+    return (cleaned or "execution_options_blocked")[:128]
 
 
 def _validated_host_recovery_actor(actor_id: str) -> str:

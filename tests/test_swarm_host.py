@@ -14,11 +14,13 @@ from cli.swarm_host import (
     OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
     SidekickSwarmService,
 )
+from swarm_core.engine import PreCompletionResult
 from swarm_core.models import ModelCatalogSnapshot, ModelRegistry
 from swarm_core.router import ModelRouter
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.transport import ModelProviderError
 from swarm_core.types import ActionCapabilities
+from swarm_core.verifier import VerificationResult
 
 
 _ROUTED_MODELS = (
@@ -49,6 +51,171 @@ def _valid_response(*_args, **_kwargs):
             }
         ]
     }
+
+
+def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A per-run bridge may tune Core limits but cannot bypass host routing."""
+    calls: list[dict] = []
+    slots: list[tuple[str, str]] = []
+    resolver_runs = []
+    engine_limits: list[tuple[int, int]] = []
+    original_engine = swarm_host.SwarmEngine
+
+    class RecordingEngine(original_engine):
+        def __init__(self, *args, **kwargs):
+            engine_limits.append((kwargs["max_calls"], kwargs["max_concurrent"]))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(swarm_host, "SwarmEngine", RecordingEngine)
+
+    class VerifiedReadOnlyVerifier:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def verify(self, request):
+            self.requests.append(request)
+            return VerificationResult(
+                work="Verified locally without mutation.",
+                evidence=("verifier:bridge-test",),
+                decision="verified",
+                provenance={"adapter": "bridge-test", "mode": "read_only"},
+            )
+
+    class Hook:
+        hook_id = "bridge-test-hook-v1"
+
+        def __init__(self) -> None:
+            self.run_ids: list[str] = []
+
+        def run(self, context):
+            self.run_ids.append(context.run.run_id)
+            return PreCompletionResult(continue_completion=True)
+
+    verifier = VerifiedReadOnlyVerifier()
+    hook = Hook()
+
+    @contextmanager
+    def provider_slot(run_id: str, provider: str):
+        slots.append((run_id, provider))
+        yield
+
+    def unexpected_refresh():
+        raise AssertionError("executing a durable run must not refresh the catalog")
+
+    def resolve_execution_options(project_root: Path, run):
+        assert project_root == tmp_path.resolve()
+        resolver_runs.append(run)
+        return swarm_host.SwarmExecutionOptions(
+            max_calls=128,
+            verifier=verifier,
+            pre_completion_hook=hook,
+        )
+
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    service = SidekickSwarmService(
+        call_llm=lambda **kwargs: calls.append(kwargs) or _valid_response(),
+        catalog_refresher=unexpected_refresh,
+        provider_slot=provider_slot,
+        execution_options_resolver=resolve_execution_options,
+    )
+    run = service.start_run(
+        "run the bridge options",
+        tmp_path,
+        autonomy="autonomous",
+        host_metadata={"required_pre_completion_hook": "bridge-test-hook-v1"},
+    )
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    assert summary.status == "completed"
+    assert resolver_runs == [run]
+    assert resolver_runs[0].metadata["autonomy"] == "autonomous"
+    assert engine_limits == [(48, 3), (128, 3)]
+    assert verifier.requests and verifier.requests[0].run_id == run.run_id
+    assert hook.run_ids == [run.run_id]
+    assert calls
+    assert len(slots) == len(calls)
+    assert all(provider == "ollama-cloud" for _run_id, provider in slots)
+    assert all(call["provider"] == "ollama-cloud" for call in calls)
+
+
+def test_execution_options_required_hook_still_fails_closed_without_a_resolver(
+    tmp_path: Path,
+):
+    """A marked integration run cannot complete when no host hook is installed."""
+    calls: list[dict] = []
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    service = SidekickSwarmService(
+        call_llm=lambda **kwargs: calls.append(kwargs) or _valid_response()
+    )
+    run = service.start_run(
+        "require a bridge hook",
+        tmp_path,
+        autonomy="autonomous",
+        host_metadata={"required_pre_completion_hook": "bridge-test-hook-v1"},
+    )
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
+    assert calls
+
+
+def test_execution_options_blocked_reason_pauses_before_engine_or_model_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Resolver failures remain bounded durable pauses with no dispatch path."""
+    calls: list[dict] = []
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    service = SidekickSwarmService(
+        call_llm=lambda **kwargs: calls.append(kwargs) or _valid_response(),
+        execution_options_resolver=lambda _project, _run: swarm_host.SwarmExecutionOptions(
+            blocked_reason="nova bridge is disabled: private detail"
+        ),
+    )
+    run = service.start_run("wait for the bridge", tmp_path)
+    monkeypatch.setattr(
+        swarm_host,
+        "SwarmEngine",
+        lambda *_args, **_kwargs: pytest.fail(
+            "blocked options must pause before constructing an engine"
+        ),
+    )
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "novabridgeisdisabledprivatedetail"
+    assert calls == []
+    event = ProjectSwarmStore(tmp_path).list_events(run.run_id)[-1]
+    assert event.event_type == "run.execution_blocked"
+    assert event.payload == {"reason": "novabridgeisdisabledprivatedetail"}
 
 
 def test_run_never_refreshes_an_absent_catalog_or_calls_another_provider(
