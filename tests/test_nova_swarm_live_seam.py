@@ -26,6 +26,45 @@ _LIVE_CONTRACT_REASON = (
 )
 
 
+def _argument_definition_expressions(arguments: ast.arguments) -> list[ast.AST]:
+    expressions: list[ast.AST] = list(arguments.defaults)
+    expressions.extend(
+        default for default in arguments.kw_defaults if default is not None
+    )
+    all_arguments = (
+        list(arguments.posonlyargs)
+        + list(arguments.args)
+        + list(arguments.kwonlyargs)
+    )
+    if arguments.vararg is not None:
+        all_arguments.append(arguments.vararg)
+    if arguments.kwarg is not None:
+        all_arguments.append(arguments.kwarg)
+    expressions.extend(
+        argument.annotation
+        for argument in all_arguments
+        if argument.annotation is not None
+    )
+    return expressions
+
+
+def _definition_time_expressions(node: ast.AST) -> list[ast.AST]:
+    expressions: list[ast.AST] = []
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        expressions.extend(node.decorator_list)
+        expressions.extend(_argument_definition_expressions(node.args))
+        if node.returns is not None:
+            expressions.append(node.returns)
+    elif isinstance(node, ast.Lambda):
+        expressions.extend(_argument_definition_expressions(node.args))
+    elif isinstance(node, ast.ClassDef):
+        expressions.extend(node.decorator_list)
+        expressions.extend(node.bases)
+        expressions.extend(node.keywords)
+    expressions.extend(getattr(node, "type_params", ()))
+    return expressions
+
+
 def _execution_scope_nodes(body: list[ast.stmt]) -> list[ast.AST]:
     class ScopeVisitor(ast.NodeVisitor):
         def __init__(self) -> None:
@@ -37,15 +76,23 @@ def _execution_scope_nodes(body: list[ast.stmt]) -> list[ast.AST]:
 
         def visit_FunctionDef(self, node):
             self.nodes.append(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_AsyncFunctionDef(self, node):
             self.nodes.append(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_ClassDef(self, node):
             self.nodes.append(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_Lambda(self, node):
             self.nodes.append(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
     visitor = ScopeVisitor()
     for statement in body:
@@ -110,15 +157,22 @@ def _top_level_name_bindings(tree: ast.Module, name: str) -> list[ast.AST]:
 
         def visit_FunctionDef(self, node):
             self._definition(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_AsyncFunctionDef(self, node):
             self._definition(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_ClassDef(self, node):
             self._definition(node)
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_Lambda(self, node):
-            return
+            for expression in _definition_time_expressions(node):
+                self.visit(expression)
 
         def visit_Name(self, node):
             if node.id == name and isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -353,6 +407,22 @@ def submit_intent_proposal(proposal):
     result = submit_nova_intent(EntityKernel(), proposal, source_slot=1)
     from nova.swarm_runtime_bridge import submit_nova_intent
     return result
+""",
+        """
+def submit_intent_proposal(proposal):
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    def helper(
+        ignored=submit_nova_intent(EntityKernel(), proposal, source_slot=1),
+    ):
+        return ignored
+    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
+""",
+        """
+def submit_intent_proposal(proposal):
+    from nova.swarm_runtime_bridge import submit_nova_intent
+    def helper(ignored=(submit_nova_intent := fake_entry)):
+        return ignored
+    return submit_nova_intent(EntityKernel(), proposal, source_slot=1)
 """,
     ],
 )
