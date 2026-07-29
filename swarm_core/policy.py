@@ -60,17 +60,6 @@ class PolicyGate:
     }
     _APPROVING_REVIEW_DECISIONS = frozenset({"approve", "approved"})
     _NOVA_PROPOSAL_ID = re.compile(r"^nova-([0-9a-f]{64})$")
-    _MANAGED_OPERATION_FAMILIES = {
-        "local.apply_patch": "target_local_worktree",
-        "local.write_file": "target_local_worktree",
-        "local.format": "target_local_worktree",
-        "local.test": "target_local_worktree",
-        "github.commit": "github_publication",
-        "github.push": "github_publication",
-        "github.pull_request": "github_publication",
-        "github.release": "github_publication",
-        "deployment.deploy": "target_deployment_worker",
-    }
 
     def __init__(
         self,
@@ -144,200 +133,6 @@ class PolicyGate:
                 "execution_already_claimed",
             )
         return decision
-
-    def authorize_managed_yolo_and_claim(
-        self,
-        proposal: ActionProposal,
-        context: object,
-        *,
-        worktree_identity: str,
-        artifact_digest: str,
-    ) -> PolicyDecision:
-        """Claim one managed-Space action from durable, artifact-bound evidence.
-
-        This is deliberately not a generic autonomy override. Only a
-        supervisor-owned action context can select this path, and all remaining
-        authority is reconstructed under the store's atomic claim transaction.
-        """
-        from nova.space_supervisor import ManagedSpaceActionContext
-
-        if not isinstance(context, ManagedSpaceActionContext):
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_action_context_required",
-            )
-        canonical_root = context.canonical_root
-        run_id = context.run_id
-        family = self._MANAGED_OPERATION_FAMILIES.get(
-            proposal.requested_action.name
-        )
-        if (
-            family is None
-            or family not in context.allowed_action_families
-            or proposal.category != "managed"
-            or proposal.requested_action.workspace != canonical_root
-            or not proposal.requested_action.use_worktree
-            or self.store.project_root != canonical_root
-        ):
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_policy_scope_mismatch",
-            )
-        if (
-            not isinstance(worktree_identity, str)
-            or not worktree_identity.strip()
-            or not isinstance(artifact_digest, str)
-            or re.fullmatch(r"[0-9a-f]{64}", artifact_digest) is None
-        ):
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_evidence_binding_invalid",
-            )
-        digest = proposal_digest(proposal)
-
-        def authorize(
-            durable_run: SwarmRun | None,
-            approvals: list[ApprovalRecord],
-            checkpoints: Mapping[str, WorkflowRoleCheckpoint],
-        ) -> tuple[PolicyDecision, bool]:
-            decision = self._evaluate_managed_yolo(
-                proposal,
-                durable_run,
-                [
-                    approval
-                    for approval in approvals
-                    if approval.proposal_digest == digest
-                ],
-                checkpoints,
-                run_id=run_id,
-                worktree_identity=worktree_identity,
-                artifact_digest=artifact_digest,
-                proposal_digest_value=digest,
-            )
-            return decision, decision.status is PolicyStatus.ALLOWED
-
-        decision, claimed = self.store.authorize_and_claim(
-            run_id,
-            proposal.proposal_id,
-            digest,
-            authorize,
-        )
-        if decision.status is not PolicyStatus.ALLOWED:
-            return decision
-        if not claimed:
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "execution_already_claimed",
-            )
-        return decision
-
-    def _evaluate_managed_yolo(
-        self,
-        proposal: ActionProposal,
-        durable_run: SwarmRun | None,
-        approvals: list[ApprovalRecord],
-        checkpoints: Mapping[str, WorkflowRoleCheckpoint],
-        *,
-        run_id: str,
-        worktree_identity: str,
-        artifact_digest: str,
-        proposal_digest_value: str,
-    ) -> PolicyDecision:
-        if durable_run is None or durable_run.run_id != run_id:
-            return self._decision(proposal, PolicyStatus.BLOCKED, "unknown_run")
-        if durable_run.status != "running":
-            return self._decision(proposal, PolicyStatus.BLOCKED, "run_not_running")
-        if any(not approval.approved for approval in approvals):
-            return self._decision(proposal, PolicyStatus.BLOCKED, "approval_denied")
-
-        verifier = checkpoints.get("verifier")
-        if verifier is None or verifier.model is not None:
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_verifier_required",
-            )
-        try:
-            result = verification_result_from_checkpoint_data(verifier.data)
-        except InvalidVerifierResult:
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_verifier_invalid",
-            )
-        if not is_positive_verification_decision(result.decision):
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_verifier_not_positive",
-            )
-        if not (set(result.evidence) & set(proposal.evidence_refs)):
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "managed_verifier_evidence_mismatch",
-            )
-        test_evidence = result.test_evidence
-        if test_evidence is None:
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "test_evidence_required",
-            )
-        if test_evidence.passed is not True:
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "test_evidence_not_positive",
-            )
-        if (
-            test_evidence.run_id != run_id
-            or test_evidence.worktree_identity != worktree_identity
-            or test_evidence.artifact_digest != artifact_digest
-            or test_evidence.report_ref not in proposal.evidence_refs
-            or proposal.requested_action.arguments.get("artifact_digest")
-            != artifact_digest
-        ):
-            return self._decision(
-                proposal,
-                PolicyStatus.BLOCKED,
-                "test_evidence_mismatch",
-            )
-
-        review_bindings = {
-            "run_id": run_id,
-            "worktree_identity": worktree_identity,
-            "artifact_digest": artifact_digest,
-            "proposal_digest": proposal_digest_value,
-        }
-        for role, (expected_model, _family) in self._REQUIRED_REVIEW_MODELS.items():
-            checkpoint = checkpoints.get(role)
-            if (
-                checkpoint is None
-                or checkpoint.model != expected_model
-                or not self._valid_checkpoint_evidence(checkpoint)
-                or not self._has_positive_review_vote(checkpoint)
-                or test_evidence.report_ref
-                not in self._valid_checkpoint_evidence(checkpoint)
-                or any(
-                    checkpoint.data.get(field) != expected
-                    for field, expected in review_bindings.items()
-                )
-            ):
-                return self._decision(
-                    proposal,
-                    PolicyStatus.NEEDS_MODEL_QUORUM,
-                    "managed_review_quorum_required",
-                )
-        return self._decision(
-            proposal,
-            PolicyStatus.ALLOWED,
-            "managed_policy_satisfied",
-        )
 
     def _evaluate_canonical(
         self,
@@ -444,7 +239,10 @@ class PolicyGate:
             and required_bindings is None
         ):
             return False
-        for role, (expected_model, expected_family) in cls._REQUIRED_REVIEW_MODELS.items():
+        for role, (
+            expected_model,
+            expected_family,
+        ) in cls._REQUIRED_REVIEW_MODELS.items():
             checkpoint = checkpoints.get(role)
             if (
                 checkpoint is None

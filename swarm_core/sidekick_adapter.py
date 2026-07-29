@@ -3,22 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Mapping
+from typing import Any, Callable, Mapping
 
-from .tools import RoutedToolExecution
 from .types import (
     ActionCapabilities,
-    ActionProposal,
     RequestedToolAction,
-    SwarmRun,
     thaw_json_value,
 )
-
-if TYPE_CHECKING:
-    from nova.managed_space_gateway import (
-        GatewayResult,
-        ManagedSpaceActionGateway,
-    )
 
 
 TrustedWorkspaceResolver = Callable[[str | Path], Path]
@@ -40,20 +31,13 @@ class SidekickToolAdapter:
         worktree_creator: WorktreeCreator | None = None,
         worktree_validator: WorktreeValidator | None = None,
         action_classifier: ActionClassifier | None = None,
-        managed_gateway: ManagedSpaceActionGateway | None = None,
     ) -> None:
-        if managed_gateway is not None:
-            from nova.managed_space_gateway import ManagedSpaceActionGateway
-
-            if not isinstance(managed_gateway, ManagedSpaceActionGateway):
-                raise TypeError("managed_gateway must be ManagedSpaceActionGateway")
         self._resolve_trusted_workspace = trusted_workspace_resolver
         self._execute_action = action_executor
         self._preview_action = action_previewer
         self._create_worktree = worktree_creator
         self._validate_worktree = worktree_validator
         self._classify_action = action_classifier
-        self._managed_gateway = managed_gateway
 
     def classify(self, action: RequestedToolAction) -> ActionCapabilities:
         if self._classify_action is None:
@@ -86,29 +70,6 @@ class SidekickToolAdapter:
             workspace,
             thaw_json_value(action.arguments),
         )
-
-    def route_execution(
-        self,
-        proposal: ActionProposal,
-        run: SwarmRun,
-    ) -> RoutedToolExecution | None:
-        """Handle only runs currently bound to the injected managed gateway."""
-        if self._managed_gateway is None:
-            return None
-        result = self._managed_gateway.try_execute_for_run(proposal, run)
-        if result is None:
-            return None
-        return RoutedToolExecution(result)
-
-    def execute_managed(
-        self,
-        proposal: ActionProposal,
-        run: SwarmRun,
-    ) -> GatewayResult:
-        """Route managed proposals only through the injected safety gateway."""
-        if self._managed_gateway is None:
-            raise RuntimeError("managed gateway is not configured")
-        return self._managed_gateway.execute_for_run(proposal, run)
 
     def _resolve_action_workspace(self, action: RequestedToolAction) -> Path:
         trusted = Path(self._resolve_trusted_workspace(action.workspace)).expanduser()

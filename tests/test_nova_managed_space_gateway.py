@@ -1129,7 +1129,7 @@ def test_fix_round1_invalid_typed_operation_arguments_are_hard_denied(
     assert local.calls == github.calls == deployment.calls == []
 
 
-def test_fix_round1_sidekick_adapter_can_use_explicit_managed_gateway_handoff(
+def test_fix_round1_host_route_can_use_explicit_managed_gateway_handoff(
     tmp_path: Path,
 ) -> None:
     """Catches the explicit managed handoff bypassing the generic executor."""
@@ -1153,12 +1153,15 @@ def test_fix_round1_sidekick_adapter_can_use_explicit_managed_gateway_handoff(
     adapter = SidekickToolAdapter(
         trusted_workspace_resolver=lambda workspace: Path(workspace),
         action_executor=lambda *args: generic_calls.append(args),
-        managed_gateway=gateway,
     )
 
     run = store.get_run(admission.run_id)
     assert run is not None
-    result = adapter.execute_managed(proposal, run)
+    result = GatedToolExecutor(
+        PolicyGate(store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    ).execute(proposal, run)
 
     assert result.ok is True
     assert generic_calls == []
@@ -1325,10 +1328,14 @@ def test_fix_round2_gated_executor_never_generically_claims_managed_proposal(
     configured = SidekickToolAdapter(
         trusted_workspace_resolver=lambda workspace: Path(workspace),
         action_executor=lambda *args: generic_calls.append(args),
-        managed_gateway=gateway,
     )
-    first = GatedToolExecutor(PolicyGate(store), configured).execute(proposal, run)
-    replay = GatedToolExecutor(PolicyGate(store), configured).execute(proposal, run)
+    executor = GatedToolExecutor(
+        PolicyGate(store),
+        configured,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    )
+    first = executor.execute(proposal, run)
+    replay = executor.execute(proposal, run)
 
     assert first.ok is True
     assert replay.code == "execution_already_claimed"
@@ -1495,13 +1502,13 @@ def test_fix_round3_sidekick_without_matching_binding_executes_generically(
             external=False,
             cost_increasing=False,
         ),
-        managed_gateway=gateway,
     )
 
-    result = GatedToolExecutor(PolicyGate(ordinary_store), adapter).execute(
-        proposal,
-        ordinary_run,
-    )
+    result = GatedToolExecutor(
+        PolicyGate(ordinary_store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(_admission.capability),
+    ).execute(proposal, ordinary_run)
 
     assert result == {"result": "generic"}
     assert generic_calls == [
@@ -1544,11 +1551,15 @@ def test_fix_round3_active_managed_run_mismatch_fails_closed_before_generic_clai
             external=False,
             cost_increasing=False,
         ),
-        managed_gateway=gateway,
     )
 
-    denied = GatedToolExecutor(PolicyGate(store), adapter).execute(wrong, run)
-    allowed = GatedToolExecutor(PolicyGate(store), adapter).execute(correct, run)
+    executor = GatedToolExecutor(
+        PolicyGate(store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    )
+    denied = executor.execute(wrong, run)
+    allowed = executor.execute(correct, run)
 
     assert denied.code == "target_root_mismatch"
     assert allowed.ok is True
@@ -1656,3 +1667,240 @@ def test_fix_round3_github_credential_prefixes_are_hard_denied(
     assert result.code == "operation_hard_denied"
     assert provider.calls == []
     assert github.calls == []
+
+
+def test_fix_round4_injected_route_uses_managed_workers_not_raw_adapter(
+    tmp_path: Path,
+) -> None:
+    """Catches bound managed work escaping through Sidekick's raw executor."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(root, proposal_id="trusted-managed-route")
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    raw_calls: list[object] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *arguments: raw_calls.append(arguments),
+    )
+
+    result = GatedToolExecutor(
+        PolicyGate(store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    ).execute(proposal, run)
+
+    assert result.ok is True
+    assert raw_calls == []
+    assert len(provider.calls) == 1
+    assert len(github.calls) == 1
+
+
+def test_fix_round4_bound_route_mismatch_fails_closed_without_generic_claim(
+    tmp_path: Path,
+) -> None:
+    """Catches a bad bound proposal falling back to generic policy/execution."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    wrong_root = (tmp_path / "wrong-route-target").resolve()
+    wrong_root.mkdir()
+    wrong = _proposal(wrong_root, proposal_id="bound-route-target")
+    correct = _proposal(root, proposal_id=wrong.proposal_id)
+    _record_bound_evidence(store, correct, run_id=admission.run_id)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    raw_calls: list[object] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *arguments: raw_calls.append(arguments),
+    )
+    executor = GatedToolExecutor(
+        PolicyGate(store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    )
+
+    denied = executor.execute(wrong, run)
+    allowed = executor.execute(correct, run)
+
+    assert denied.code == "target_root_mismatch"
+    assert allowed.ok is True
+    assert raw_calls == []
+    assert len(provider.calls) == 1
+    assert len(github.calls) == 1
+
+
+def test_fix_round4_bound_route_unknown_operation_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Catches a bound unknown operation falling through to the raw adapter."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        provider,
+        _local,
+        _github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(
+        root,
+        proposal_id="bound-unknown-operation",
+        operation="shell.exec",
+        arguments={"command": "whoami"},
+    )
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    raw_calls: list[object] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *arguments: raw_calls.append(arguments),
+    )
+
+    result = GatedToolExecutor(
+        PolicyGate(store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    ).execute(proposal, run)
+
+    assert result.code == "operation_hard_denied"
+    assert raw_calls == []
+    assert provider.calls == []
+
+
+def test_fix_round4_injected_route_leaves_unbound_run_on_generic_policy(
+    tmp_path: Path,
+) -> None:
+    """Catches a trusted route capturing an unrelated run by operation name."""
+    (
+        _api,
+        _root,
+        _records,
+        _supervisor,
+        _admission,
+        _store,
+        _provider,
+        _local,
+        _github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path / "managed")
+    ordinary_root = (tmp_path / "ordinary").resolve()
+    ordinary_store = ProjectSwarmStore(ordinary_root)
+    ordinary_run = ordinary_store.create_run(metadata={"autonomy": "autonomous"})
+    proposal = ActionProposal(
+        proposal_id="unbound-generic-local-test",
+        category="project",
+        reversible=True,
+        external=False,
+        cost_increasing=False,
+        evidence_refs=("evidence:ordinary",),
+        requested_action=RequestedToolAction(
+            name="local.test",
+            workspace=ordinary_root,
+            arguments={"selector": "tests/test_ordinary.py"},
+            use_worktree=False,
+        ),
+    )
+    raw_calls: list[tuple[str, Path, dict[str, Any]]] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda name, workspace, arguments: (
+            raw_calls.append((name, workspace, arguments)) or {"result": "generic"}
+        ),
+        action_classifier=lambda _action: ActionCapabilities(
+            category="project",
+            reversible=True,
+            external=False,
+            cost_increasing=False,
+        ),
+    )
+
+    result = GatedToolExecutor(
+        PolicyGate(ordinary_store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(_admission.capability),
+    ).execute(proposal, ordinary_run)
+
+    assert result == {"result": "generic"}
+    assert raw_calls == [
+        ("local.test", ordinary_root, {"selector": "tests/test_ordinary.py"})
+    ]
+
+
+def test_fix_round4_revoked_latched_route_still_fails_in_gateway(
+    tmp_path: Path,
+) -> None:
+    """Catches post-revocation routing falling back to generic policy."""
+    (
+        _api,
+        root,
+        _records,
+        supervisor,
+        admission,
+        store,
+        provider,
+        _local,
+        _github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(root, proposal_id="revoked-host-route")
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    assert admission.admission_id is not None
+    raw_calls: list[object] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *arguments: raw_calls.append(arguments),
+    )
+    executor = GatedToolExecutor(
+        PolicyGate(store),
+        adapter,
+        host_bound_route=gateway.host_bound_execution_route(admission.capability),
+    )
+    assert (
+        supervisor.cancel(
+            admission.admission_id,
+            actor="dashboard:" + ("a" * 64),
+        )
+        is True
+    )
+
+    result = executor.execute(proposal, run)
+
+    assert result.code == "capability_invalid"
+    assert raw_calls == []
+    assert provider.calls == []

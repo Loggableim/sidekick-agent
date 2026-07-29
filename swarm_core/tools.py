@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any, Callable, Protocol
 
 from .policy import PolicyDecision, PolicyGate, PolicyStatus
 from .types import ActionCapabilities, ActionProposal, RequestedToolAction, SwarmRun
@@ -17,11 +17,56 @@ class ToolAdapter(Protocol):
     def execute(self, action: RequestedToolAction) -> Any: ...
 
 
-@dataclass(frozen=True)
-class RoutedToolExecution:
-    """One adapter-owned execution that must bypass the generic policy path."""
+class HostBoundExecutionRoute:
+    """Opaque host route for execution outside the generic adapter boundary."""
 
-    result: Any
+    __slots__ = ("_dispatch", "_project_root", "_run_id")
+
+    def __init__(
+        self,
+        seal: object,
+        *,
+        project_root: Path,
+        run_id: str,
+        dispatch: Callable[[ActionProposal, SwarmRun], Any],
+    ) -> None:
+        if seal is not _HOST_ROUTE_SEAL:
+            raise TypeError("Host-bound execution routes are created by trusted hosts")
+        object.__setattr__(self, "_project_root", project_root)
+        object.__setattr__(self, "_run_id", run_id)
+        object.__setattr__(self, "_dispatch", dispatch)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        del name, value
+        raise AttributeError("HostBoundExecutionRoute is immutable")
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        del kwargs
+        raise TypeError("HostBoundExecutionRoute cannot be subclassed")
+
+
+_HOST_ROUTE_SEAL = object()
+
+
+def create_host_bound_execution_route(
+    *,
+    project_root: Path,
+    run_id: str,
+    dispatch: Callable[[ActionProposal, SwarmRun], Any],
+) -> HostBoundExecutionRoute:
+    canonical_root = Path(project_root).resolve()
+    if canonical_root != Path(project_root) or not canonical_root.is_absolute():
+        raise ValueError("Host-bound route requires a canonical project root")
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("Host-bound route requires a run id")
+    if not callable(dispatch):
+        raise TypeError("Host-bound route dispatch must be callable")
+    return HostBoundExecutionRoute(
+        _HOST_ROUTE_SEAL,
+        project_root=canonical_root,
+        run_id=run_id,
+        dispatch=dispatch,
+    )
 
 
 class ActionNotAllowed(RuntimeError):
@@ -35,24 +80,37 @@ class ActionNotAllowed(RuntimeError):
 class GatedToolExecutor:
     """Evaluate policy before crossing the injected adapter boundary."""
 
-    def __init__(self, policy_gate: PolicyGate, adapter: ToolAdapter) -> None:
+    def __init__(
+        self,
+        policy_gate: PolicyGate,
+        adapter: ToolAdapter,
+        *,
+        host_bound_route: HostBoundExecutionRoute | None = None,
+    ) -> None:
+        if (
+            host_bound_route is not None
+            and type(host_bound_route) is not HostBoundExecutionRoute
+        ):
+            raise TypeError(
+                "host_bound_route must be a trusted host-bound execution route"
+            )
         self.policy_gate = policy_gate
         self.adapter = adapter
+        self._host_bound_route = host_bound_route
 
     def preview(self, proposal: ActionProposal) -> Any:
         return self.adapter.preview(proposal.requested_action)
 
     def execute(self, proposal: ActionProposal, run: SwarmRun) -> Any:
-        route_execution = getattr(self.adapter, "route_execution", None)
-        if callable(route_execution):
-            routed = route_execution(proposal, run)
-            if routed is not None:
-                if not isinstance(routed, RoutedToolExecution):
-                    raise TypeError(
-                        "Tool adapter route_execution must return "
-                        "RoutedToolExecution or None"
-                    )
-                return routed.result
+        route = self._host_bound_route
+        if route is not None:
+            durable_run = self.policy_gate.store.get_run(run.run_id)
+            if (
+                durable_run is not None
+                and route._project_root == self.policy_gate.store.project_root
+                and route._run_id == durable_run.run_id
+            ):
+                return route._dispatch(proposal, durable_run)
         decision = self.policy_gate.authorize_and_claim(
             proposal,
             run,

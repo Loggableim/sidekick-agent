@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import subprocess
+import sys
+import textwrap
 import threading
 
 import pytest
@@ -12,6 +16,100 @@ from swarm_core.events import SwarmEventBus
 from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.types import IntegrationAdmissionRequest
+
+
+def test_fix_round4_swarm_core_has_no_nova_import_edges() -> None:
+    """Catches generic Core importing a host-specific Nova package."""
+    core_root = Path(__file__).resolve().parents[1] / "swarm_core"
+    violations: list[str] = []
+    for source in sorted(core_root.rglob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            if any(
+                module == "nova" or module.startswith("nova.") for module in modules
+            ):
+                violations.append(f"{source.relative_to(core_root)}:{node.lineno}")
+
+    assert violations == []
+
+
+def test_fix_round4_generic_core_executes_when_nova_imports_are_unavailable() -> None:
+    """Catches a lazy Nova dependency hidden behind generic Core execution."""
+    script = textwrap.dedent(
+        """
+        import builtins
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        original_import = builtins.__import__
+        def guarded_import(name, *args, **kwargs):
+            if name == "nova" or name.startswith("nova."):
+                raise AssertionError(f"forbidden Nova import: {name}")
+            return original_import(name, *args, **kwargs)
+        builtins.__import__ = guarded_import
+
+        from swarm_core.policy import PolicyGate
+        from swarm_core.sidekick_adapter import SidekickToolAdapter
+        from swarm_core.store import ProjectSwarmStore
+        from swarm_core.tools import GatedToolExecutor
+        from swarm_core.types import (
+            ActionCapabilities,
+            ActionProposal,
+            RequestedToolAction,
+        )
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            store = ProjectSwarmStore(root)
+            run = store.create_run(metadata={"autonomy": "autonomous"})
+            proposal = ActionProposal(
+                proposal_id="core-without-nova",
+                category="project",
+                reversible=True,
+                external=False,
+                cost_increasing=False,
+                evidence_refs=("evidence:core",),
+                requested_action=RequestedToolAction(
+                    name="local.test",
+                    workspace=root,
+                    arguments={"selector": "tests/test_core.py"},
+                    use_worktree=False,
+                ),
+            )
+            adapter = SidekickToolAdapter(
+                trusted_workspace_resolver=lambda workspace: Path(workspace),
+                action_executor=lambda name, workspace, arguments: name,
+                action_classifier=lambda action: ActionCapabilities(
+                    category="project",
+                    reversible=True,
+                    external=False,
+                    cost_increasing=False,
+                ),
+            )
+            result = GatedToolExecutor(PolicyGate(store), adapter).execute(
+                proposal,
+                run,
+            )
+            assert result == "local.test"
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 @pytest.fixture
@@ -73,9 +171,9 @@ def test_integration_admission_coalesces_equal_concurrent_keys(
     assert results[0].run.run_id == results[1].run.run_id
     verified_store = ProjectSwarmStore(nova_project)
     assert len(verified_store.list_runs()) == 1
-    assert [event.event_type for event in verified_store.list_events(results[0].run.run_id)] == [
-        "run.started"
-    ]
+    assert [
+        event.event_type for event in verified_store.list_events(results[0].run.run_id)
+    ] == ["run.started"]
 
 
 def test_integration_admission_serializes_concurrent_different_keys(
@@ -88,7 +186,9 @@ def test_integration_admission_serializes_concurrent_different_keys(
     def admit(key: str) -> None:
         store = ProjectSwarmStore(nova_project)
         barrier.wait(timeout=5)
-        results.append(store.admit_integration_run(_integration_request(nova_project, key)))
+        results.append(
+            store.admit_integration_run(_integration_request(nova_project, key))
+        )
 
     first = threading.Thread(target=admit, args=("first-intent",))
     second = threading.Thread(target=admit, args=("second-intent",))
