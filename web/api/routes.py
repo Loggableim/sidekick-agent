@@ -4129,14 +4129,14 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, _load_nova_route_status())
 
     if parsed.path == "/api/nova/status":
-        from web.api.nova_lifecycle import get_nova_status
+        from web.api.nova_presence import build_status_projection
 
-        return j(handler, get_nova_status())
+        return j(handler, build_status_projection())
 
     if parsed.path == "/api/nova/presence":
-        from nova.presence import PresenceCoordinator
+        from web.api.nova_presence import build_presence_status
 
-        return j(handler, PresenceCoordinator().status())
+        return j(handler, build_presence_status())
 
     if parsed.path == "/api/nova/yolo":
         from web.api.nova_lifecycle import load_nova_yolo_state
