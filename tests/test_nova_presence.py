@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from hashlib import sha256
 import json
 import sqlite3
 from pathlib import Path
@@ -37,29 +38,41 @@ def _write_space(path: Path, *, slug: str, name: str, revision: int, enrolled: b
 
 
 def _write_marker_space(path: Path, *, slug: str, revision: int = 7) -> tuple[str, str]:
-    """Write the smallest audited binding a marker reader may trust."""
+    """Write a fully chained audit and independently trusted project root."""
     space_id = uuid4().hex
-    root_fingerprint = "a" * 64
+    project_root = path / "trusted-project"
+    project_root.mkdir(parents=True, exist_ok=True)
+    root_fingerprint = sha256(str(project_root.resolve()).encode("utf-8")).hexdigest()
     management = {"yolo": True, "enrolled": True, "revision": revision}
+    prior = {"yolo": False, "enrolled": False, "revision": 0}
+    audit: list[dict[str, object]] = []
+    for event_revision in range(1, revision + 1):
+        following = {
+            "yolo": event_revision == revision,
+            "enrolled": event_revision == revision,
+            "revision": event_revision,
+        }
+        audit.append(
+            {
+                "actor": "dashboard:" + "b" * 64,
+                "timestamp": float(event_revision),
+                "space_id": space_id,
+                "root_fingerprint": root_fingerprint if event_revision == revision else "",
+                "policy_revision": event_revision,
+                "governance_revision": event_revision,
+                "previous": prior,
+                "next": following,
+            }
+        )
+        prior = following
     _write_json(
         path / "space.yaml",
         {
             "name": slug.title(),
-            "project_dir": "C:/private/project-root",
+            "project_dir": str(project_root.resolve()),
             "space_id": space_id,
             "nova_management": management,
-            "nova_management_audit": [
-                {
-                    "actor": "dashboard:" + "b" * 64,
-                    "timestamp": 1.0,
-                    "space_id": space_id,
-                    "root_fingerprint": root_fingerprint,
-                    "policy_revision": revision,
-                    "governance_revision": revision,
-                    "previous": {"yolo": False, "enrolled": False, "revision": revision - 1},
-                    "next": management,
-                }
-            ],
+            "nova_management_audit": audit,
         },
     )
     return space_id, root_fingerprint
@@ -72,7 +85,7 @@ def _write_scheduler_marker_state(
     space_id: str,
     root_fingerprint: str,
     revision: int,
-    pending_digest: str = "",
+    pending_digest: object = "",
     current_reference_digest: str = "c" * 64,
     last_evaluated_reference_digest: str = "e" * 64,
     last_checked_at: object = None,
@@ -84,7 +97,7 @@ def _write_scheduler_marker_state(
                 target_key TEXT PRIMARY KEY,
                 target_space_id TEXT NOT NULL,
                 root_fingerprint TEXT NOT NULL,
-                pending_digest TEXT NOT NULL,
+                pending_digest TEXT,
                 pending_reason_code TEXT NOT NULL,
                 pending_count INTEGER NOT NULL,
                 governance_revision INTEGER NOT NULL,
@@ -366,6 +379,8 @@ def test_presence_card_projects_valid_unchanged_marker_with_utc_checkpoint(tmp_p
     (
         ("root_fingerprint", "f" * 64),
         ("revision", 8),
+        ("pending_digest", "malformed"),
+        ("pending_digest", None),
         ("current_reference_digest", "invalid"),
         ("last_check_code", "model_output"),
         ("last_checked_at", float("nan")),
@@ -402,6 +417,43 @@ def test_presence_card_omits_invalid_or_mismatched_scheduler_marker_only(
         {"space": "alpha", "name": "Alpha", "governance_revision": 7, "state": "paused"}
     ]
     assert payload["change_markers"] == []
+
+
+@pytest.mark.parametrize("mutation", ("root_changed", "untrusted_root", "truncated_audit"))
+def test_presence_card_omits_marker_when_current_governance_binding_cannot_be_proven(
+    tmp_path, mutation: str
+):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_path = home / "spaces" / "alpha"
+    space_id, root_fingerprint = _write_marker_space(space_path, slug="alpha")
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        current_reference_digest="d" * 64,
+        last_evaluated_reference_digest="d" * 64,
+        last_checked_at=1.0,
+        last_check_code="unchanged",
+    )
+    config_path = space_path / "space.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    if mutation == "root_changed":
+        replacement = home / "replacement-trusted-root"
+        replacement.mkdir()
+        config["project_dir"] = str(replacement.resolve())
+    elif mutation == "untrusted_root":
+        config["project_dir"] = str(home / "missing-untrusted-root")
+    else:
+        config["nova_management_audit"] = [config["nova_management_audit"][-1]]
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    assert build_presence_card(home=home)["change_markers"] == []
 
 
 def test_presence_card_omits_marker_from_partial_or_wal_backed_scheduler_state(tmp_path):
@@ -444,6 +496,41 @@ def test_presence_card_omits_marker_from_partial_or_wal_backed_scheduler_state(t
 
     assert build_presence_card(home=home)["change_markers"] == []
     assert _tree_snapshot(home) == before_wal
+
+
+def test_presence_card_treats_a_live_sqlite_wal_as_unknown_without_side_effects(tmp_path):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(
+        home / "spaces" / "alpha", slug="alpha"
+    )
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        current_reference_digest="d" * 64,
+        last_evaluated_reference_digest="d" * 64,
+        last_checked_at=1.0,
+        last_check_code="unchanged",
+    )
+
+    connection = sqlite3.connect(ledger)
+    try:
+        assert connection.execute("PRAGMA journal_mode = WAL").fetchone()[0].lower() == "wal"
+        connection.execute("UPDATE nova_supervision_space_state SET updated_at = 2.0")
+        connection.commit()
+        assert ledger.with_name(ledger.name + "-wal").is_file()
+        before = _tree_snapshot(home)
+
+        assert build_presence_card(home=home)["change_markers"] == []
+        assert _tree_snapshot(home) == before
+    finally:
+        connection.close()
 
 
 def test_presence_card_does_not_create_missing_runtime_state(tmp_path):
