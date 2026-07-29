@@ -2192,6 +2192,7 @@ def test_attach_admitted_run_accepts_only_a_matching_paused_durable_run(
     assert options.max_calls == 48
     assert options.verifier is not None
     assert options.pre_completion_hook is not None
+    assert options.required_pre_completion_hook_id == bridge._RUNTIME_HOOK_ID
 
 
 @pytest.mark.parametrize(

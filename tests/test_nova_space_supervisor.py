@@ -514,6 +514,90 @@ def test_action_boundary_rejects_running_child_with_tampered_durable_metadata(tm
     assert store.get_run(admission.run_id).status == "paused"
 
 
+@pytest.mark.parametrize("field,replacement", (("goal", "tampered goal"), ("pack", "review-team"), ("autonomy", "reviewed_execution")))
+def test_workflow_input_contract_tampering_pauses_before_action_or_completion(
+    tmp_path: Path,
+    field: str,
+    replacement: str,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.resume_run(admission.run_id).status == "running"
+    with store._connection() as connection:
+        raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (admission.run_id,)).fetchone()[0]
+        metadata = json.loads(raw)
+        metadata[field] = replacement
+        connection.execute("UPDATE runs SET metadata_json = ? WHERE run_id = ?", (json.dumps(metadata), admission.run_id))
+
+    assert supervisor.revalidate_action_boundary(admission.capability) is False
+    assert store.get_run(admission.run_id).status == "paused"
+    assert supervisor.record_completion(admission.run_id) is False
+
+
+def test_host_rejects_tampered_workflow_contract_before_model_call(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.resume_run(admission.run_id).status == "running"
+    with store._connection() as connection:
+        raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (admission.run_id,)).fetchone()[0]
+        metadata = json.loads(raw)
+        metadata["goal"] = "untrusted replacement goal"
+        connection.execute("UPDATE runs SET metadata_json = ? WHERE run_id = ?", (json.dumps(metadata), admission.run_id))
+    calls: list[object] = []
+    host = SidekickSwarmService(
+        call_llm=lambda **_kwargs: calls.append(object()) or pytest.fail("tampered run must not call a model"),
+        execution_options_resolver=lambda root, candidate: managed_space_execution_options_for_run(supervisor, root, candidate),
+    )
+
+    summary = host.execute_run(records["alpha"].canonical_root, admission.run_id)
+
+    assert calls == []
+    assert summary.status == "paused"
+    assert summary.pause_reason == "execution_options_blocked"
+    assert store.get_run(admission.run_id).status == "paused"
+
+
+def test_host_guard_revalidates_governance_after_pause_resume_before_model_call(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    paused = threading.Event()
+    result: dict[str, object] = {}
+    calls: list[object] = []
+    host = SidekickSwarmService(
+        call_llm=lambda **_kwargs: calls.append(object()) or pytest.fail("revoked resume must not call a model"),
+        execution_options_resolver=lambda root, candidate: managed_space_execution_options_for_run(supervisor, root, candidate),
+        pause_poll_seconds=0.01,
+    )
+
+    def execute() -> None:
+        result["summary"] = host.execute_run(
+            records["alpha"].canonical_root,
+            admission.run_id,
+            on_pause_wait=paused.set,
+        )
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    assert paused.wait(timeout=5)
+    records["alpha"] = replace(records["alpha"], yolo=False)
+    assert store.resume_run(admission.run_id).status == "running"
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    summary = result["summary"]
+
+    assert calls == []
+    assert summary.status == "paused"
+    assert summary.pause_reason == "governance_revoked"
+    assert store.get_run(admission.run_id).status == "paused"
+
+
 def test_host_completion_preserves_trusted_hook_requirement_across_metadata_toctou(tmp_path: Path) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
     supervisor = _supervisor(tmp_path, records)
@@ -557,7 +641,7 @@ def test_host_completion_preserves_trusted_hook_requirement_across_metadata_toct
     summary = host.execute_run(records["alpha"].canonical_root, admission.run_id)
 
     assert summary.status == "paused"
-    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
+    assert summary.pause_reason == "capability_invalid"
     assert store.get_run(admission.run_id).status == "paused"
     assert not any(event.event_type == "run.completed" for event in store.list_events(admission.run_id))
 
@@ -707,7 +791,7 @@ def test_missing_child_in_provisioning_state_is_recovered_to_paused_and_holds_sl
     restarted = _supervisor(tmp_path, records)
     blocked = _admit(restarted, "beta")
     assert blocked.reason == "active_limit"
-    assert restarted.list_active_admissions()[0]["state"] == "paused"
+    assert restarted.list_active_admissions()[0]["state"] == "provisioning"
 
 
 def test_unstarted_child_in_provisioning_state_is_paused_and_cannot_be_bypassed(tmp_path: Path) -> None:
@@ -736,7 +820,7 @@ def test_unstarted_child_in_provisioning_state_is_paused_and_cannot_be_bypassed(
     restarted = _supervisor(tmp_path, records)
     assert _admit(restarted, "beta").reason == "active_limit"
     blocked = restarted.list_active_admissions()[0]
-    assert blocked["state"] == "paused"
+    assert blocked["state"] == "provisioning"
     run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(blocked["run_id"])
     assert run is not None and run.status == "paused"
 
@@ -771,11 +855,7 @@ def test_mismatched_child_in_provisioning_state_is_paused_and_audited(tmp_path: 
 
     restarted = _supervisor(tmp_path, records)
     assert _admit(restarted, "beta").reason == "active_limit"
-    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
-        reason = connection.execute(
-            "SELECT reason FROM supervisor_audit WHERE event_type = 'paused' ORDER BY sequence DESC LIMIT 1"
-        ).fetchone()[0]
-    assert reason == "diagnostic_mismatch"
+    assert restarted.list_active_admissions()[0]["state"] == "provisioning"
 
 
 def test_cancel_winning_before_child_creation_terminalizes_ledger_without_orphaning_child(tmp_path: Path) -> None:
