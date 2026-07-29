@@ -33,39 +33,15 @@ def _write_space(path: Path, *, slug: str, name: str, revision: int, enrolled: b
 
 
 def _write_ledger(path: Path) -> None:
+    """Create the exact normal supervisor schema before seeding fixture data."""
+    from nova.space_supervisor import ManagedSpaceSupervisor
+
     path.parent.mkdir(parents=True, exist_ok=True)
+    ManagedSpaceSupervisor(
+        ledger_path=path,
+        governance_resolver=lambda _target: None,
+    ).start()
     with sqlite3.connect(path) as connection:
-        connection.executescript(
-            """
-            CREATE TABLE supervisor_admissions (
-                admission_id TEXT PRIMARY KEY,
-                target_key TEXT NOT NULL,
-                target_space_id TEXT NOT NULL,
-                intent_digest TEXT NOT NULL,
-                canonical_root TEXT NOT NULL,
-                root_fingerprint TEXT NOT NULL,
-                governance_revision INTEGER NOT NULL,
-                policy_identity TEXT NOT NULL,
-                allowed_action_families_json TEXT NOT NULL,
-                workflow_contract_digest TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                state TEXT NOT NULL,
-                attachment_generation INTEGER NOT NULL,
-                record_version INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                terminal_actor TEXT
-            );
-            CREATE TABLE supervisor_audit (
-                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                admission_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                actor TEXT,
-                reason TEXT,
-                created_at TEXT NOT NULL
-            );
-            """
-        )
         connection.execute(
             """
             INSERT INTO supervisor_admissions (
@@ -111,6 +87,64 @@ def _write_ledger(path: Path) -> None:
                 "2026-07-29T10:05:00+00:00",
             ),
         )
+
+
+def _insert_admission(
+    connection: sqlite3.Connection,
+    *,
+    admission_id: str,
+    space: str,
+    state: str,
+    updated_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO supervisor_admissions (
+            admission_id, target_key, target_space_id, intent_digest,
+            canonical_root, root_fingerprint, governance_revision,
+            policy_identity, allowed_action_families_json,
+            workflow_contract_digest, run_id, state,
+            attachment_generation, record_version, created_at, updated_at,
+            terminal_actor
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            admission_id,
+            space,
+            f"space-{space}",
+            f"intent-{admission_id}",
+            f"C:/private/{space}",
+            f"fingerprint-{space}",
+            1,
+            "policy",
+            "[]",
+            "contract",
+            f"run-{admission_id}",
+            state,
+            1,
+            1,
+            "2025-01-01T00:00:00+00:00",
+            updated_at,
+            None,
+        ),
+    )
+
+
+def _insert_audit(
+    connection: sqlite3.Connection,
+    *,
+    admission_id: str,
+    event_type: str,
+    created_at: str,
+) -> None:
+    connection.execute(
+        """
+        INSERT INTO supervisor_audit (
+            admission_id, event_type, actor, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (admission_id, event_type, "test:actor", "private detail", created_at),
+    )
 
 
 def _tree_snapshot(root: Path) -> dict[str, bytes]:
@@ -185,6 +219,27 @@ def test_presence_card_does_not_create_missing_runtime_state(tmp_path):
 
     assert build_presence_card(home=home)["managed_spaces"] == []
     assert not home.exists()
+
+
+def test_presence_card_fails_closed_when_legacy_ledger_lacks_read_indexes(tmp_path):
+    """A page read must never fall back to scanning an unmigrated history."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_space(home / "spaces" / "alpha", slug="alpha", name="Alpha", revision=7)
+    ledger_path = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute("DROP INDEX idx_supervisor_admissions_target_updated")
+        connection.execute("DROP INDEX idx_supervisor_audit_admission_sequence")
+    before = _tree_snapshot(home)
+
+    payload = build_presence_card(home=home)
+
+    assert payload["managed_spaces"][0]["state"] == "idle"
+    assert payload["activity"] == []
+    assert payload["audited_results"] == []
+    assert _tree_snapshot(home) == before
 
 
 def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tmp_path):
@@ -302,8 +357,95 @@ def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tm
     assert "raw terminal detail" not in json.dumps(payload)
 
 
-def test_presence_admissions_query_is_bounded_to_managed_current_rows(monkeypatch, tmp_path):
-    """The presence read must not scan unbounded historical admissions."""
+def test_presence_card_keeps_last_audited_result_while_newer_run_is_paused(tmp_path):
+    """Current activity and the last terminal result are separate projections."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_space(home / "spaces" / "alpha", slug="alpha", name="Alpha", revision=7)
+    ledger_path = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        _insert_admission(
+            connection,
+            admission_id="admission-alpha-completed",
+            space="alpha",
+            state="completed",
+            updated_at="2026-07-28T10:00:00+00:00",
+        )
+        _insert_audit(
+            connection,
+            admission_id="admission-alpha-completed",
+            event_type="completed",
+            created_at="2026-07-28T10:00:00+00:00",
+        )
+
+    payload = build_presence_card(home=home)
+
+    assert payload["activity"] == [
+        {"kind": "paused", "space": "alpha", "at": "2026-07-29T10:05:00+00:00"}
+    ]
+    assert payload["audited_results"] == [
+        {"space": "alpha", "result": "completed", "at": "2026-07-28T10:00:00+00:00"}
+    ]
+
+
+def test_presence_card_keeps_each_managed_space_visible_over_large_history(tmp_path):
+    """One busy Space cannot consume the public activity/result read budget."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_space(home / "spaces" / "alpha", slug="alpha", name="Alpha", revision=3)
+    _write_space(home / "spaces" / "beta", slug="beta", name="Beta", revision=4)
+    ledger_path = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        for index in range(512):
+            admission_id = f"old-alpha-{index:04d}"
+            _insert_admission(
+                connection,
+                admission_id=admission_id,
+                space="alpha",
+                state="completed",
+                updated_at=f"2025-01-{(index % 28) + 1:02d}T00:00:00+00:00",
+            )
+            _insert_audit(
+                connection,
+                admission_id=admission_id,
+                event_type="completed",
+                created_at=f"2025-01-{(index % 28) + 1:02d}T00:00:00+00:00",
+            )
+        _insert_admission(
+            connection,
+            admission_id="admission-beta-current",
+            space="beta",
+            state="completed",
+            updated_at="2026-07-29T10:06:00+00:00",
+        )
+        _insert_audit(
+            connection,
+            admission_id="admission-beta-current",
+            event_type="completed",
+            created_at="2026-07-29T10:06:00+00:00",
+        )
+        for index in range(128):
+            _insert_audit(
+                connection,
+                admission_id="admission-secret-id",
+                event_type="completed",
+                created_at=(
+                    f"2026-07-29T11:{index // 60:02d}:{index % 60:02d}+00:00"
+                ),
+            )
+
+    payload = build_presence_card(home=home)
+
+    assert {entry["space"] for entry in payload["activity"]} == {"alpha", "beta"}
+    assert {entry["space"] for entry in payload["audited_results"]} == {"alpha", "beta"}
+
+
+def test_presence_admissions_query_is_one_indexed_lookup_per_managed_space(monkeypatch, tmp_path):
+    """The presence read must seek one latest admission per managed Space."""
     import web.api.nova_presence as presence
 
     calls: list[tuple[str, tuple[object, ...]]] = []
@@ -316,6 +458,9 @@ def test_presence_admissions_query_is_bounded_to_managed_current_rows(monkeypatc
         def fetchall(self):
             return []
 
+        def fetchone(self):
+            return None
+
         def close(self):
             return None
 
@@ -325,12 +470,62 @@ def test_presence_admissions_query_is_bounded_to_managed_current_rows(monkeypatc
         tmp_path / "ledger.sqlite",
         [{"space": "alpha"}, {"space": "beta"}],
     ) == []
-    assert len(calls) == 1
-    query, params = calls[0]
-    normalized_query = " ".join(query.split())
-    assert "WHERE target_key IN (?, ?)" in normalized_query
-    assert "LIMIT ?" in normalized_query
-    assert params == ("alpha", "beta", 2)
+    assert len(calls) == 2
+    assert [params for _, params in calls] == [("alpha",), ("beta",)]
+    for query, _params in calls:
+        normalized_query = " ".join(query.split())
+        assert "WHERE target_key = ?" in normalized_query
+        assert "ORDER BY updated_at DESC" in normalized_query
+        assert "LIMIT 1" in normalized_query
+
+    calls.clear()
+    assert presence._read_latest_terminal_events(
+        tmp_path / "ledger.sqlite",
+        [{"space": "alpha"}, {"space": "beta"}],
+    ) == []
+    assert len(calls) == 2
+    assert [params for _, params in calls] == [
+        ("alpha", "completed", "cancelled", "abandoned"),
+        ("beta", "completed", "cancelled", "abandoned"),
+    ]
+    for query, _params in calls:
+        normalized_query = " ".join(query.split())
+        assert "WHERE target_key = ?" in normalized_query
+        assert "state IN (?, ?, ?)" in normalized_query
+        assert "ORDER BY updated_at DESC" in normalized_query
+        assert "LIMIT 1" in normalized_query
+
+
+def test_presence_latest_queries_use_supervisor_history_indexes(tmp_path):
+    """The bounded per-Space lookups use normal-initializer indexes, never GET DDL."""
+    import web.api.nova_presence as presence
+
+    ledger_path = tmp_path / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute("PRAGMA automatic_index = OFF")
+        admission_plan = connection.execute(
+            f"EXPLAIN QUERY PLAN {presence._LATEST_ADMISSION_SQL}",
+            ("alpha",),
+        ).fetchall()
+        audit_plan = connection.execute(
+            f"EXPLAIN QUERY PLAN {presence._LATEST_AUDIT_SQL}",
+            ("admission-secret-id",),
+        ).fetchall()
+        terminal_admission_plan = connection.execute(
+            f"EXPLAIN QUERY PLAN {presence._LATEST_TERMINAL_ADMISSION_SQL}",
+            ("alpha", *presence._TERMINAL_ADMISSION_STATES),
+        ).fetchall()
+
+    admission_details = "\n".join(str(row[3]) for row in admission_plan)
+    audit_details = "\n".join(str(row[3]) for row in audit_plan)
+    terminal_admission_details = "\n".join(str(row[3]) for row in terminal_admission_plan)
+    assert "USING INDEX idx_supervisor_admissions_target_updated" in admission_details
+    assert "USING INDEX idx_supervisor_audit_admission_sequence" in audit_details
+    assert "USING INDEX idx_supervisor_admissions_target_updated" in terminal_admission_details
+    assert "TEMP B-TREE" not in admission_details
+    assert "TEMP B-TREE" not in audit_details
+    assert "TEMP B-TREE" not in terminal_admission_details
 
 
 def test_presence_card_is_native_authenticated_fastapi_read(monkeypatch, tmp_path):

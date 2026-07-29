@@ -21,9 +21,44 @@ import yaml
 
 
 _NOVA_SLUG = "nova"
-_MAX_ACTIVITY = 8
-_MAX_RESULTS = 6
 _MAX_SPACES = 12
+# Each enrolled Space receives one current admission/event projection.  The
+# response is still bounded, while a noisy Space cannot hide another one.
+_MAX_ACTIVITY = _MAX_SPACES
+_MAX_RESULTS = _MAX_SPACES
+_LATEST_ADMISSION_SQL = """
+    SELECT admission_id, target_key, state, updated_at
+    FROM supervisor_admissions
+    WHERE target_key = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+"""
+_TERMINAL_ADMISSION_STATES = ("completed", "cancelled", "abandoned")
+_LATEST_TERMINAL_ADMISSION_SQL = """
+    SELECT admission_id, target_key
+    FROM supervisor_admissions
+    WHERE target_key = ?
+      AND state IN (?, ?, ?)
+    ORDER BY updated_at DESC
+    LIMIT 1
+"""
+_LATEST_AUDIT_SQL = """
+    SELECT event_type, created_at, sequence
+    FROM supervisor_audit
+    WHERE admission_id = ?
+    ORDER BY sequence DESC
+    LIMIT 1
+"""
+_REQUIRED_LEDGER_INDEX_SQL = {
+    "idx_supervisor_admissions_target_updated": (
+        "createindexidx_supervisor_admissions_target_updated"
+        "onsupervisor_admissions(target_key,updated_atdesc)"
+    ),
+    "idx_supervisor_audit_admission_sequence": (
+        "createindexidx_supervisor_audit_admission_sequence"
+        "onsupervisor_audit(admission_id,sequencedesc)"
+    ),
+}
 _PUBLIC_PRESENCE_STATES = frozenset(
     {"sleeping", "available", "listening", "thinking", "speaking", "do_not_disturb"}
 )
@@ -90,8 +125,9 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
         summary["state"] = admission_by_space.get(summary["space"], {}).get("state", "idle")
 
     focus = _focus_for(admissions, managed_spaces, presence)
-    activity = _read_supervisor_activity(ledger_path, managed_spaces)
-    results = _read_audited_results(ledger_path, managed_spaces)
+    events = _read_latest_supervisor_events(ledger_path, admissions)
+    activity = _activity_for(events)
+    results = _audited_results_for(_read_latest_terminal_events(ledger_path, managed_spaces))
     blockers = _blockers_for(managed_spaces)
     return {
         "identity": {
@@ -215,12 +251,41 @@ def _managed_space_keys(managed_spaces: Iterable[Mapping[str, Any]]) -> tuple[st
 def _open_read_only_ledger(path: Path) -> sqlite3.Connection | None:
     if not path.is_file():
         return None
+    connection: sqlite3.Connection | None = None
     try:
         connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
+        # An older ledger must be migrated on the normal supervisor write path.
+        # Presence deliberately returns no ledger projection rather than issuing
+        # an unbounded history read or applying DDL from a page load.
+        if not _has_required_ledger_indexes(connection):
+            connection.close()
+            return None
         return connection
     except (OSError, sqlite3.Error, ValueError):
+        if connection is not None:
+            connection.close()
         return None
+
+
+def _has_required_ledger_indexes(connection: sqlite3.Connection) -> bool:
+    placeholders = ", ".join("?" for _ in _REQUIRED_LEDGER_INDEX_SQL)
+    try:
+        rows = connection.execute(
+            f"""
+            SELECT name, sql
+            FROM sqlite_master
+            WHERE type = 'index' AND name IN ({placeholders})
+            """,
+            tuple(_REQUIRED_LEDGER_INDEX_SQL),
+        ).fetchall()
+    except sqlite3.Error:
+        return False
+    found = {
+        str(row["name"]): "".join(str(row["sql"] or "").lower().split())
+        for row in rows
+    }
+    return found == _REQUIRED_LEDGER_INDEX_SQL
 
 
 def _read_supervisor_admissions(
@@ -232,37 +297,31 @@ def _read_supervisor_admissions(
     connection = _open_read_only_ledger(path)
     if connection is None:
         return []
-    placeholders = ", ".join("?" for _ in allowed_spaces)
     try:
-        rows = connection.execute(
-            f"""
-            SELECT target_key, state, updated_at
-            FROM supervisor_admissions
-            WHERE target_key IN ({placeholders})
-              AND rowid = (
-                SELECT candidate.rowid
-                FROM supervisor_admissions AS candidate
-                WHERE candidate.target_key = supervisor_admissions.target_key
-                ORDER BY candidate.updated_at DESC, candidate.rowid DESC
-                LIMIT 1
-              )
-            ORDER BY updated_at DESC, rowid DESC
-            LIMIT ?
-            """,
-            (*allowed_spaces, len(allowed_spaces)),
-        ).fetchall()
+        rows = [
+            row
+            for space in allowed_spaces
+            if (row := connection.execute(_LATEST_ADMISSION_SQL, (space,)).fetchone()) is not None
+        ]
     except sqlite3.Error:
         return []
     finally:
         connection.close()
-    return [
-        {
-            "space": _safe_space(row["target_key"]),
-            "state": _safe_run_state(row["state"]),
-            "at": _safe_timestamp(row["updated_at"]),
-        }
-        for row in rows
-    ]
+    admissions = []
+    for row in rows:
+        space = _safe_space(row["target_key"])
+        admission_id = str(row["admission_id"] or "")
+        if not space or not admission_id:
+            continue
+        admissions.append(
+            {
+                "admission_id": admission_id,
+                "space": space,
+                "state": _safe_run_state(row["state"]),
+                "at": _safe_timestamp(row["updated_at"]),
+            }
+        )
+    return sorted(admissions, key=lambda item: (item["at"], item["space"]), reverse=True)
 
 
 def _latest_admission_by_space(
@@ -291,85 +350,101 @@ def _focus_for(
     return {"kind": "presence", "state": presence}
 
 
-def _read_supervisor_activity(path: Path, managed_spaces: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
-    allowed_space_keys = _managed_space_keys(managed_spaces)
-    allowed_spaces = set(allowed_space_keys)
+def _read_latest_supervisor_events(
+    path: Path, admissions: Iterable[Mapping[str, str]]
+) -> list[dict[str, str]]:
+    latest_by_space: dict[str, str] = {}
+    for admission in admissions:
+        space = _safe_space(admission.get("space"))
+        admission_id = str(admission.get("admission_id") or "")
+        if space and admission_id:
+            latest_by_space.setdefault(space, admission_id)
+    if not latest_by_space:
+        return []
+    connection = _open_read_only_ledger(path)
+    if connection is None:
+        return []
+    try:
+        return _read_latest_audit_events(connection, latest_by_space)
+    except sqlite3.Error:
+        return []
+    finally:
+        connection.close()
+
+
+def _read_latest_terminal_events(
+    path: Path, managed_spaces: Iterable[Mapping[str, Any]]
+) -> list[dict[str, str]]:
+    allowed_spaces = _managed_space_keys(managed_spaces)
     if not allowed_spaces:
         return []
     connection = _open_read_only_ledger(path)
     if connection is None:
         return []
-    placeholders = ", ".join("?" for _ in allowed_space_keys)
     try:
-        rows = connection.execute(
-            f"""
-            SELECT admissions.target_key, audit.event_type, audit.created_at
-            FROM supervisor_audit AS audit
-            JOIN supervisor_admissions AS admissions
-              ON admissions.admission_id = audit.admission_id
-            WHERE admissions.target_key IN ({placeholders})
-            ORDER BY audit.sequence DESC
-            LIMIT ?
-            """,
-            (*allowed_space_keys, _MAX_ACTIVITY * 3),
-        ).fetchall()
+        # The supervisor permits only one non-terminal admission globally, so
+        # this descending index seek reaches a Space's latest terminal record
+        # without reading an unbounded run history.
+        terminal_admissions = {
+            space: str(row["admission_id"] or "")
+            for space in allowed_spaces
+            if (
+                row := connection.execute(
+                    _LATEST_TERMINAL_ADMISSION_SQL,
+                    (space, *_TERMINAL_ADMISSION_STATES),
+                ).fetchone()
+            )
+            is not None
+            and str(row["admission_id"] or "")
+        }
+        return _read_latest_audit_events(connection, terminal_admissions)
     except sqlite3.Error:
         return []
     finally:
         connection.close()
+
+
+def _read_latest_audit_events(
+    connection: sqlite3.Connection, admission_by_space: Mapping[str, str]
+) -> list[dict[str, str]]:
+    rows = [
+        (space, row)
+        for space, admission_id in admission_by_space.items()
+        if (row := connection.execute(_LATEST_AUDIT_SQL, (admission_id,)).fetchone()) is not None
+    ]
+    events = []
+    for space, row in rows:
+        events.append(
+            {
+                "space": space,
+                "event_type": str(row["event_type"] or "").strip().lower(),
+                "at": _safe_timestamp(row["created_at"]),
+                "sequence": str(row["sequence"] or ""),
+            }
+        )
+    return sorted(events, key=lambda item: int(item["sequence"] or 0), reverse=True)
+
+
+def _activity_for(events: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
     activity: list[dict[str, str]] = []
-    for row in rows:
-        space = _safe_space(row["target_key"])
-        raw_kind = str(row["event_type"] or "").strip().lower()
-        kind = _PUBLIC_ACTIVITY_KINDS.get(raw_kind)
-        if space not in allowed_spaces or kind is None:
-            continue
-        activity.append({"kind": kind, "space": space, "at": _safe_timestamp(row["created_at"])})
+    for event in events:
+        kind = _PUBLIC_ACTIVITY_KINDS.get(event.get("event_type", ""))
+        space = _safe_space(event.get("space"))
+        if kind is not None and space:
+            activity.append({"kind": kind, "space": space, "at": event.get("at", "")})
         if len(activity) >= _MAX_ACTIVITY:
             break
     return activity
 
 
-def _read_audited_results(
-    path: Path, managed_spaces: Iterable[Mapping[str, Any]]
-) -> list[dict[str, str]]:
-    allowed_space_keys = _managed_space_keys(managed_spaces)
-    allowed_spaces = set(allowed_space_keys)
-    if not allowed_spaces:
-        return []
-    connection = _open_read_only_ledger(path)
-    if connection is None:
-        return []
-    terminal_events = tuple(_RESULT_BY_EVENT)
-    space_placeholders = ", ".join("?" for _ in allowed_space_keys)
-    placeholders = ", ".join("?" for _ in terminal_events)
-    try:
-        rows = connection.execute(
-            f"""
-            SELECT admissions.target_key, audit.event_type, audit.created_at
-            FROM supervisor_audit AS audit
-            JOIN supervisor_admissions AS admissions
-              ON admissions.admission_id = audit.admission_id
-            WHERE admissions.target_key IN ({space_placeholders})
-              AND audit.event_type IN ({placeholders})
-            ORDER BY audit.sequence DESC
-            LIMIT ?
-            """,
-            (*allowed_space_keys, *terminal_events, _MAX_RESULTS * 8),
-        ).fetchall()
-    except sqlite3.Error:
-        return []
-    finally:
-        connection.close()
+def _audited_results_for(events: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
-    seen_spaces: set[str] = set()
-    for row in rows:
-        space = _safe_space(row["target_key"])
-        result = _RESULT_BY_EVENT.get(str(row["event_type"] or "").strip().lower())
-        if space not in allowed_spaces or result is None or space in seen_spaces:
+    for event in events:
+        space = _safe_space(event.get("space"))
+        result = _RESULT_BY_EVENT.get(event.get("event_type", ""))
+        if not space or result is None:
             continue
-        results.append({"space": space, "result": result, "at": _safe_timestamp(row["created_at"])})
-        seen_spaces.add(space)
+        results.append({"space": space, "result": result, "at": event.get("at", "")})
         if len(results) >= _MAX_RESULTS:
             break
     return results
