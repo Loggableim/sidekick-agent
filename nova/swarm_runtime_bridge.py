@@ -1011,7 +1011,7 @@ def _register_runtime_binding(project_root: Path, binding: _NovaRuntimeBinding) 
     with _RUNTIME_BINDINGS_LOCK:
         root = Path(project_root).resolve()
         durable = ProjectSwarmStore.open_read_only(root).get_run(binding.run_id)
-        if durable is None or durable.status == "completed":
+        if durable is None or durable.status in {"completed", "cancelled", "abandoned"}:
             raise ValueError("Nova runtime binding requires a non-terminal run")
         existing = _RUNTIME_BINDINGS.get(root)
         if existing is not None and existing.run_id != binding.run_id:
@@ -1022,6 +1022,9 @@ def _register_runtime_binding(project_root: Path, binding: _NovaRuntimeBinding) 
 
 
 def _runtime_binding_for(project_root: Path, run: SwarmRun) -> _NovaRuntimeBinding | None:
+    if run.status in {"completed", "cancelled", "abandoned"}:
+        _unregister_runtime_binding(project_root, run.run_id)
+        return None
     with _RUNTIME_BINDINGS_LOCK:
         binding = _RUNTIME_BINDINGS.get(Path(project_root).resolve())
     if binding is None:
@@ -1132,13 +1135,13 @@ def _run_worker(dispatcher: Callable[[Path, str], Any], project_root: Path, run_
     except BaseException:
         store = ProjectSwarmStore(project_root)
         completed = store.get_run(run_id)
-        if completed is not None and completed.status == "completed":
+        if completed is not None and completed.status in {"completed", "cancelled", "abandoned"}:
             _unregister_runtime_binding(project_root, run_id)
             return
         _pause_dispatch_failure(store, run_id)
         return
     run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
-    if run is not None and run.status == "completed":
+    if run is not None and run.status in {"completed", "cancelled", "abandoned"}:
         _unregister_runtime_binding(project_root, run_id)
 
 

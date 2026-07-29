@@ -205,8 +205,8 @@ class SidekickSwarmService:
             run = store.get_run(run_id)
             if run is None:
                 raise KeyError(f"Unknown Swarm run: {run_id}")
-            if run.status == "completed":
-                raise ValueError("Completed Swarm runs cannot be executed again")
+            if run.status in {"completed", "cancelled", "abandoned"}:
+                raise ValueError("Terminal Swarm runs cannot be executed again")
             options = self._resolve_execution_options(project_root, run)
             if options.blocked_reason is not None:
                 return self._pause_before_execution_options(
@@ -324,8 +324,8 @@ class SidekickSwarmService:
         run = store.get_run(run_id)
         if run is None:
             raise KeyError(f"Unknown Swarm run: {run_id}")
-        if run.status == "completed":
-            raise ValueError("Completed Swarm runs cannot be executed again")
+        if run.status in {"completed", "cancelled", "abandoned"}:
+            raise ValueError("Terminal Swarm runs cannot be executed again")
         if run.status == "running":
             try:
                 store.set_run_status(run_id, "paused")
@@ -336,8 +336,8 @@ class SidekickSwarmService:
         current = store.get_run(run_id)
         if current is None:
             raise KeyError(f"Unknown Swarm run: {run_id}")
-        if current.status == "completed":
-            raise ValueError("Completed Swarm runs cannot be executed again")
+        if current.status in {"completed", "cancelled", "abandoned"}:
+            raise ValueError("Terminal Swarm runs cannot be executed again")
         if current.status != "paused":
             raise RuntimeError("Swarm run state changed during execution option resolution")
         store.append_event(
@@ -436,7 +436,7 @@ class SidekickSwarmService:
                 waiting = True
                 time.sleep(self._pause_poll_seconds)
                 continue
-            raise RuntimeError("Cannot execute a completed Swarm run")
+            raise RuntimeError("Cannot execute a terminal Swarm run")
 
     def list_runs(self, project_root: Path) -> list[SwarmRun]:
         return ProjectSwarmStore.open_read_only(project_root).list_runs()
@@ -509,7 +509,7 @@ class SidekickSwarmService:
         run = store.get_run(run_id)
         if run is None:
             raise KeyError(f"Unknown Swarm run: {run_id}")
-        if run.status == "completed":
+        if run.status in {"completed", "cancelled", "abandoned"}:
             return run
         if run.status == "running":
             try:
@@ -521,7 +521,7 @@ class SidekickSwarmService:
         current = store.get_run(run_id)
         if current is None:
             raise KeyError(f"Unknown Swarm run: {run_id}")
-        if current.status != "completed":
+        if current.status not in {"completed", "cancelled", "abandoned"}:
             store.append_event(
                 run_id,
                 "run.execution_failed",
