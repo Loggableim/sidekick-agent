@@ -33,10 +33,15 @@ def test_importing_cron_jobs_keeps_gateway_forwarders_importable():
 
 def test_cron_scheduler_script_runs_outside_repo_cwd(tmp_path):
     scheduler = Path(__file__).resolve().parents[1] / "runtime" / "cron" / "scheduler.py"
+    isolated_home = tmp_path / "sidekick-home"
+    env = os.environ.copy()
+    env["SIDEKICK_HOME"] = str(isolated_home)
+    env["SIDEKICK_BASE_HOME"] = str(isolated_home)
 
     result = subprocess.run(
         [sys.executable, str(scheduler)],
         cwd=tmp_path,
+        env=env,
         capture_output=True,
         text=True,
         encoding="utf-8",
