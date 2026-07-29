@@ -316,6 +316,53 @@ def test_pause_race_reconciles_a_matching_completed_child_instead_of_stranding_s
     assert _admit(supervisor, "beta").status == "created"
 
 
+def test_completion_after_pause_probe_is_reconciled_from_paused_on_next_admission(
+    tmp_path: Path,
+) -> None:
+    """Catches a completed child stranded behind a raced paused ledger row."""
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    probe_finished = threading.Event()
+    continue_pause = threading.Event()
+
+    class CompletionRaceSupervisor(ManagedSpaceSupervisor):
+        def _reconcile_completed_record(self, record, *, allowed_states, event_type):
+            reconciled = super()._reconcile_completed_record(
+                record,
+                allowed_states=allowed_states,
+                event_type=event_type,
+            )
+            if event_type == "reconciled_completed_during_pause":
+                probe_finished.set()
+                assert continue_pause.wait(timeout=5)
+            return reconciled
+
+    supervisor = CompletionRaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
+
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        pausing = workers.submit(
+            supervisor._pause,
+            admission.capability,
+            "completion_race",
+        )
+        assert probe_finished.wait(timeout=5)
+        store.set_run_status(admission.run_id, "completed")
+        continue_pause.set()
+        pausing.result(timeout=5)
+
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+    assert _admit(supervisor, "beta").status == "created"
+
+
 def test_fresh_supervisor_reconciles_a_matching_completed_child_before_admission(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
@@ -424,6 +471,32 @@ def test_host_execution_options_adapter_exposes_supervisor_hooks_and_pauses_revo
     blocked = host._resolve_execution_options(records["alpha"].canonical_root, run)
     assert blocked.blocked_reason == "execution_options_blocked"
     assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
+
+
+def test_host_resume_revalidates_supervisor_governance_before_running_transition(
+    tmp_path: Path,
+) -> None:
+    """Catches resume publishing running before managed authority is revalidated."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    records["alpha"] = replace(records["alpha"], enrolled=False)
+    host = SidekickSwarmService(
+        execution_options_resolver=lambda root, candidate: (
+            managed_space_execution_options_for_run(supervisor, root, candidate)
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="execution_options_blocked"):
+        host.resume(records["alpha"].canonical_root, admission.run_id)
+
+    run = store.get_run(admission.run_id)
+    assert run is not None and run.status == "paused"
+    assert not any(
+        event.event_type == "run.resumed_by_human"
+        for event in store.list_events(admission.run_id)
+    )
 
 
 def test_host_completion_executes_required_supervisor_hook_and_pauses_revocation(tmp_path: Path) -> None:
@@ -1174,6 +1247,73 @@ def test_cancel_commits_nonexecutable_ledger_state_before_slow_child_terminaliza
     assert store.get_run(admission.run_id).status == "cancelled"
 
 
+@pytest.mark.parametrize(
+    "terminal_action,transitional_state,final_state",
+    (
+        ("cancel", "cancelling", "cancelled"),
+        ("abandon", "abandoning", "abandoned"),
+    ),
+)
+def test_human_terminalization_retries_after_child_store_write_failure(
+    tmp_path: Path,
+    terminal_action: str,
+    transitional_state: str,
+    final_state: str,
+) -> None:
+    """Catches a transient child write permanently stranding a global slot."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    attempts = 0
+
+    def failing_once_store(root: Path):
+        store = ProjectSwarmStore(root)
+
+        class FailingOnceStore:
+            def cancel_run_by_human(self, *args, **kwargs):
+                return terminal("cancel", store.cancel_run_by_human, *args, **kwargs)
+
+            def abandon_run_by_human(self, *args, **kwargs):
+                return terminal("abandon", store.abandon_run_by_human, *args, **kwargs)
+
+            def __getattr__(self, name: str):
+                return getattr(store, name)
+
+        return FailingOnceStore()
+
+    def terminal(mode: str, operation, *args, **kwargs):
+        nonlocal attempts
+        if mode == terminal_action:
+            attempts += 1
+            if attempts == 1:
+                raise OSError("transient child write failure")
+        return operation(*args, **kwargs)
+
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=failing_once_store,
+    )
+    admission = _admit(supervisor)
+    transition = getattr(supervisor, terminal_action)
+
+    with pytest.raises(OSError, match="transient child write failure"):
+        transition(admission.admission_id, actor=_DASHBOARD_ACTOR)
+    assert supervisor.list_active_admissions()[0]["state"] == transitional_state
+
+    assert transition(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None and run.status == final_state
+    assert supervisor.list_active_admissions() == (
+        [] if final_state == "cancelled" else [
+            {
+                "admission_id": admission.admission_id,
+                "target_space_id": records["alpha"].space_id,
+                "run_id": admission.run_id,
+                "state": "abandoned",
+            }
+        ]
+    )
+
+
 def test_ledger_read_connection_cannot_recreate_a_deleted_database(tmp_path: Path) -> None:
     """Catches a read-only status race recreating an empty supervisor ledger."""
     supervisor = _supervisor(tmp_path, {"alpha": _governance(tmp_path / "alpha")})
@@ -1218,9 +1358,9 @@ def test_host_router_delegates_only_ledger_unknown_nonmanaged_runs(tmp_path: Pat
             "autonomy": "autonomous",
         },
     )
-    blocked = router(tmp_path / "generic", orphan)
-    assert blocked.blocked_reason == "supervisor_binding_unavailable"
-    assert fallbacks == [generic.run_id]
+    delegated = router(tmp_path / "generic", orphan)
+    assert delegated is not None and delegated.max_calls == 48
+    assert fallbacks == [generic.run_id, orphan.run_id]
 
     admission = _admit(supervisor)
     managed = ProjectSwarmStore(records["alpha"].canonical_root).get_run(
@@ -1237,7 +1377,7 @@ def test_host_router_delegates_only_ledger_unknown_nonmanaged_runs(tmp_path: Pat
     )
     blocked = router(records["alpha"].canonical_root, stripped)
     assert blocked.blocked_reason == "capability_invalid"
-    assert fallbacks == [generic.run_id]
+    assert fallbacks == [generic.run_id, orphan.run_id]
 
 
 def test_host_router_fails_closed_when_existing_ledger_is_unreadable(

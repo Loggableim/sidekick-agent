@@ -444,20 +444,21 @@ def test_cli_resume_fresh_process_nova_run_blocks_before_model_dispatch(
         ["swarm", "--project", str(project), "--json", "resume", run.run_id]
     )
 
-    assert swarm_command(resume, service=_cli_nova_service(model_calls)) == 0
+    assert swarm_command(resume, service=_cli_nova_service(model_calls)) == 1
 
-    payload = json.loads(capsys.readouterr().out)
+    payload = json.loads(capsys.readouterr().err)
     events = ProjectSwarmStore.open_read_only(project).list_events(run.run_id)
-    assert payload["status"] == "paused"
-    assert payload["pause_reason"] == "nova_bridge_unavailable"
+    persisted = ProjectSwarmStore.open_read_only(project).get_run(run.run_id)
+    assert payload["error"] == "Swarm resume blocked: nova_bridge_unavailable"
+    assert persisted is not None and persisted.status == "paused"
     assert model_calls == []
     assert kernel.govern_calls == []
     assert kernel.act_calls == []
-    assert [
+    assert not [
         event.payload
         for event in events
-        if event.event_type == "run.execution_blocked"
-    ] == [{"reason": "nova_bridge_unavailable"}]
+        if event.event_type in {"run.execution_blocked", "run.resumed_by_human"}
+    ]
     with nova_bridge._RUNTIME_BINDINGS_LOCK:
         assert project.resolve() not in nova_bridge._RUNTIME_BINDINGS
 
