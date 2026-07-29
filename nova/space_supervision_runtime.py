@@ -29,6 +29,7 @@ _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _TARGET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _MIN_CHECK_SECONDS = 15 * 60
 _MAX_PENDING_SIGNALS = 256
+_MAX_DEDUPLICATED_SIGNAL_IDENTITIES = 2_048
 
 # Task 5 can render this fixed, non-model identity data without making a
 # presence GET a write or a model invocation.
@@ -100,6 +101,8 @@ class NovaSpaceSupervisionRuntime:
 
         The external event identity is hashed before storage; only its opaque
         digest and a fixed reason code remain in the central supervisor ledger.
+        ``False`` means either an already-known identity or a fail-closed
+        capacity rejection; neither case mutates pending work.
         """
         target = _target_key(target_key)
         normalized_source = _source(source)
@@ -121,6 +124,16 @@ class NovaSpaceSupervisionRuntime:
                 (signal_digest,),
             ).fetchone()
             if existing is not None:
+                return False
+            stored_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM nova_supervision_signals"
+                ).fetchone()[0]
+            )
+            if stored_count >= _MAX_DEDUPLICATED_SIGNAL_IDENTITIES:
+                # Never evict an identity and thereby make an old external
+                # event a new autonomous trigger. Without a trusted monotonic
+                # upstream cursor, saturation must fail closed instead.
                 return False
             connection.execute(
                 """INSERT INTO nova_supervision_signals
@@ -340,10 +353,11 @@ class NovaSpaceSupervisionRuntime:
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
-    # These opaque identity tombstones are intentionally retained. Evicting a
-    # digest turns an old external event into a fresh autonomous trigger and
-    # violates exactly-once semantics. Pending state below is separately
-    # bounded, so event volume cannot inflate an individual intent.
+    # These opaque identity tombstones are retained up to a fixed admission
+    # cap. Evicting a digest turns an old external event into a fresh autonomous
+    # trigger and violates exactly-once semantics, so capacity is fail-closed.
+    # Pending state below is separately bounded, preventing one Space from
+    # inflating an individual intent.
     connection.execute(
         """CREATE TABLE IF NOT EXISTS nova_supervision_signals (
             signal_digest TEXT PRIMARY KEY,
