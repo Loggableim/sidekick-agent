@@ -39,22 +39,29 @@ _PUBLIC_RUN_STATES = frozenset(
         "completed",
     }
 )
-_PUBLIC_ACTIVITY_KINDS = frozenset(
-    {
-        "provisioning",
-        "admitted",
-        "paused",
-        "completed",
-        "reconciled_completed",
-        "cancelled",
-        "abandoned",
-        "cancelling",
-        "abandoning",
-    }
-)
-_RESULT_EVENT_TYPES = frozenset(
-    {"completed", "reconciled_completed", "cancelled", "abandoned"}
-)
+_PUBLIC_ACTIVITY_KINDS = {
+    "provisioning": "provisioning",
+    "admitted": "admitted",
+    "paused": "paused",
+    "completed": "completed",
+    "reconciled_completed": "reconciled_completed",
+    "reconciled_completed_during_action_gate": "completed",
+    "reconciled_completed_after_human_terminal": "completed",
+    "reconciled_completed_during_pause": "completed",
+    "cancelled": "cancelled",
+    "abandoned": "abandoned",
+    "cancelling": "cancelling",
+    "abandoning": "abandoning",
+}
+_RESULT_BY_EVENT = {
+    "completed": "completed",
+    "reconciled_completed": "completed",
+    "reconciled_completed_during_action_gate": "completed",
+    "reconciled_completed_after_human_terminal": "completed",
+    "reconciled_completed_during_pause": "completed",
+    "cancelled": "cancelled",
+    "abandoned": "abandoned",
+}
 _BLOCKER_CODES = {
     "paused": "supervisor_paused",
     "abandoned": "supervisor_abandoned",
@@ -76,19 +83,15 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
     entity_state = _read_json(nova_root / "nova_data" / "entity" / "entity_state.json")
     presence = _public_presence_state(entity_state)
     managed_spaces = _managed_space_summaries(spaces_root)
-    admissions = _read_supervisor_admissions(
-        resolved_home / "state" / "nova-space-supervisor.sqlite"
-    )
+    ledger_path = resolved_home / "state" / "nova-space-supervisor.sqlite"
+    admissions = _read_supervisor_admissions(ledger_path)
     admission_by_space = _latest_admission_by_space(admissions, managed_spaces)
     for summary in managed_spaces:
         summary["state"] = admission_by_space.get(summary["space"], {}).get("state", "idle")
 
-    focus = _focus_for(managed_spaces, admission_by_space, presence)
-    activity = _read_supervisor_activity(
-        resolved_home / "state" / "nova-space-supervisor.sqlite",
-        managed_spaces,
-    )
-    results = _audited_results(admissions, activity, managed_spaces)
+    focus = _focus_for(admissions, managed_spaces, presence)
+    activity = _read_supervisor_activity(ledger_path, managed_spaces)
+    results = _read_audited_results(ledger_path, managed_spaces)
     blockers = _blockers_for(managed_spaces)
     return {
         "identity": {
@@ -247,15 +250,16 @@ def _latest_admission_by_space(
 
 
 def _focus_for(
+    admissions: Iterable[Mapping[str, str]],
     managed_spaces: Iterable[Mapping[str, Any]],
-    admission_by_space: Mapping[str, Mapping[str, str]],
     presence: str,
 ) -> dict[str, str]:
-    for space in managed_spaces:
-        slug = str(space["space"])
-        admission = admission_by_space.get(slug)
-        if admission is not None:
-            return {"kind": "supervision", "space": slug, "state": str(admission["state"])}
+    allowed_spaces = {str(space["space"]) for space in managed_spaces}
+    for admission in admissions:
+        space = str(admission.get("space") or "")
+        state = str(admission.get("state") or "")
+        if space in allowed_spaces and state in _PUBLIC_RUN_STATES:
+            return {"kind": "supervision", "space": space, "state": state}
     return {"kind": "presence", "state": presence}
 
 
@@ -285,8 +289,9 @@ def _read_supervisor_activity(path: Path, managed_spaces: Iterable[Mapping[str, 
     activity: list[dict[str, str]] = []
     for row in rows:
         space = _safe_space(row["target_key"])
-        kind = str(row["event_type"] or "").strip().lower()
-        if space not in allowed_spaces or kind not in _PUBLIC_ACTIVITY_KINDS:
+        raw_kind = str(row["event_type"] or "").strip().lower()
+        kind = _PUBLIC_ACTIVITY_KINDS.get(raw_kind)
+        if space not in allowed_spaces or kind is None:
             continue
         activity.append({"kind": kind, "space": space, "at": _safe_timestamp(row["created_at"])})
         if len(activity) >= _MAX_ACTIVITY:
@@ -294,29 +299,43 @@ def _read_supervisor_activity(path: Path, managed_spaces: Iterable[Mapping[str, 
     return activity
 
 
-def _audited_results(
-    admissions: Iterable[Mapping[str, str]],
-    activity: Iterable[Mapping[str, str]],
-    managed_spaces: Iterable[Mapping[str, Any]],
+def _read_audited_results(
+    path: Path, managed_spaces: Iterable[Mapping[str, Any]]
 ) -> list[dict[str, str]]:
     allowed_spaces = {str(space["space"]) for space in managed_spaces}
-    audited_terminal = {
-        (str(item["space"]), str(item["kind"]))
-        for item in activity
-        if item.get("kind") in _RESULT_EVENT_TYPES
-    }
+    if not allowed_spaces:
+        return []
+    connection = _open_read_only_ledger(path)
+    if connection is None:
+        return []
+    terminal_events = tuple(_RESULT_BY_EVENT)
+    placeholders = ", ".join("?" for _ in terminal_events)
+    try:
+        rows = connection.execute(
+            f"""
+            SELECT admissions.target_key, audit.event_type, audit.created_at
+            FROM supervisor_audit AS audit
+            JOIN supervisor_admissions AS admissions
+              ON admissions.admission_id = audit.admission_id
+            WHERE audit.event_type IN ({placeholders})
+            ORDER BY audit.sequence DESC
+            LIMIT ?
+            """,
+            (*terminal_events, _MAX_RESULTS * 8),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        connection.close()
     results: list[dict[str, str]] = []
-    for admission in admissions:
-        state = admission.get("state")
-        space = admission.get("space", "")
-        if state not in {"completed", "cancelled", "abandoned"} or space not in allowed_spaces:
+    seen_spaces: set[str] = set()
+    for row in rows:
+        space = _safe_space(row["target_key"])
+        result = _RESULT_BY_EVENT.get(str(row["event_type"] or "").strip().lower())
+        if space not in allowed_spaces or result is None or space in seen_spaces:
             continue
-        matching_event = "completed" if state == "completed" else state
-        if (space, matching_event) not in audited_terminal and not (
-            state == "completed" and (space, "reconciled_completed") in audited_terminal
-        ):
-            continue
-        results.append({"space": space, "result": state, "at": admission.get("at", "")})
+        results.append({"space": space, "result": result, "at": _safe_timestamp(row["created_at"])})
+        seen_spaces.add(space)
         if len(results) >= _MAX_RESULTS:
             break
     return results

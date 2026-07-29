@@ -187,6 +187,86 @@ def test_presence_card_does_not_create_missing_runtime_state(tmp_path):
     assert not home.exists()
 
 
+def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tmp_path):
+    """A busy feed must not hide a prior audited completion or stale focus."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_space(home / "spaces" / "alpha", slug="alpha", name="Alpha", revision=3)
+    _write_space(home / "spaces" / "beta", slug="beta", name="Beta", revision=4)
+    ledger_path = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger_path)
+    with sqlite3.connect(ledger_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO supervisor_admissions (
+                admission_id, target_key, target_space_id, intent_digest,
+                canonical_root, root_fingerprint, governance_revision,
+                policy_identity, allowed_action_families_json,
+                workflow_contract_digest, run_id, state,
+                attachment_generation, record_version, created_at, updated_at,
+                terminal_actor
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "admission-beta",
+                "beta",
+                "space-beta",
+                "intent-beta",
+                "C:/private/beta",
+                "fingerprint-beta",
+                4,
+                "policy",
+                "[]",
+                "contract",
+                "run-beta-secret",
+                "completed",
+                1,
+                1,
+                "2026-07-29T10:01:00+00:00",
+                "2026-07-29T10:06:00+00:00",
+                None,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO supervisor_audit (
+                admission_id, event_type, actor, reason, created_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "admission-beta",
+                "reconciled_completed",
+                "dashboard:actor",
+                "raw terminal detail must stay private",
+                "2026-07-29T10:06:00+00:00",
+            ),
+        )
+        for index in range(60):
+            connection.execute(
+                """
+                INSERT INTO supervisor_audit (
+                    admission_id, event_type, actor, reason, created_at
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    "admission-secret-id",
+                    "admitted",
+                    "dashboard:actor",
+                    "no public detail",
+                    f"2026-07-29T11:{index:02d}:00+00:00",
+                ),
+            )
+
+    payload = build_presence_card(home=home)
+
+    assert payload["focus"] == {"kind": "supervision", "space": "beta", "state": "completed"}
+    assert payload["audited_results"] == [
+        {"space": "beta", "result": "completed", "at": "2026-07-29T10:06:00+00:00"}
+    ]
+    assert "raw terminal detail" not in json.dumps(payload)
+
+
 def test_presence_card_is_native_authenticated_fastapi_read(monkeypatch, tmp_path):
     """Catches a presence read falling through to the mutating legacy bridge."""
     from cli import web_server
