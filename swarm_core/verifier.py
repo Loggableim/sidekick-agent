@@ -13,15 +13,63 @@ from hashlib import sha256
 import json
 import math
 from pathlib import Path
+import re
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol
 
 
 VERIFIED_DECISION = "verified"
+_SHA256_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class InvalidVerifierResult(ValueError):
     """A verifier result cannot safely become durable workflow evidence."""
+
+
+@dataclass(frozen=True)
+class TestEvidenceBinding:
+    """Literal test result bound to one run, worktree and artifact."""
+
+    run_id: str
+    worktree_identity: str
+    artifact_digest: str
+    runner_identity: str
+    report_ref: str
+    passed: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "run_id", _required_text(self.run_id, "Test run id"))
+        object.__setattr__(
+            self,
+            "worktree_identity",
+            _required_text(self.worktree_identity, "Test worktree identity"),
+        )
+        digest = _required_text(self.artifact_digest, "Test artifact digest")
+        if _SHA256_DIGEST.fullmatch(digest) is None:
+            raise ValueError("Test artifact digest must be a lowercase SHA-256 digest")
+        object.__setattr__(self, "artifact_digest", digest)
+        object.__setattr__(
+            self,
+            "runner_identity",
+            _required_text(self.runner_identity, "Test runner identity"),
+        )
+        object.__setattr__(
+            self,
+            "report_ref",
+            _required_text(self.report_ref, "Test report reference"),
+        )
+        if type(self.passed) is not bool:
+            raise TypeError("Test passed result must be a literal bool")
+
+    def to_data(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "worktree_identity": self.worktree_identity,
+            "artifact_digest": self.artifact_digest,
+            "runner_identity": self.runner_identity,
+            "report_ref": self.report_ref,
+            "passed": self.passed,
+        }
 
 
 @dataclass(frozen=True)
@@ -102,6 +150,7 @@ class VerificationResult:
     decision: str
     provenance: Mapping[str, Any]
     assessments: tuple[VerifierAssessment, ...] = ()
+    test_evidence: TestEvidenceBinding | None = None
 
     def __post_init__(self) -> None:
         work = _required_text(self.work, "Verifier work")
@@ -120,10 +169,21 @@ class VerificationResult:
         assessments = tuple(self.assessments)
         if any(not isinstance(item, VerifierAssessment) for item in assessments):
             raise TypeError("Verifier assessments must be VerifierAssessment values")
+        if self.test_evidence is not None and not isinstance(
+            self.test_evidence, TestEvidenceBinding
+        ):
+            raise TypeError("Verifier test evidence must be TestEvidenceBinding")
         evidence_set = set(evidence)
         if any(item.source_ref not in evidence_set for item in assessments):
             raise ValueError(
                 "Verifier assessments must reference their own verifier evidence"
+            )
+        if (
+            self.test_evidence is not None
+            and self.test_evidence.report_ref not in evidence_set
+        ):
+            raise ValueError(
+                "Verifier test report must reference its own verifier evidence"
             )
         object.__setattr__(self, "work", work)
         object.__setattr__(self, "decision", decision)
@@ -133,13 +193,16 @@ class VerificationResult:
 
     def to_checkpoint_data(self) -> dict[str, Any]:
         """Return the JSON-safe checkpoint shape accepted by the workflow store."""
-        return {
+        data = {
             "work": self.work,
             "evidence": list(self.evidence),
             "decision": self.decision,
             "provenance": _thaw_json(self.provenance),
             "assessments": [assessment.to_data() for assessment in self.assessments],
         }
+        if self.test_evidence is not None:
+            data["test_evidence"] = self.test_evidence.to_data()
+        return data
 
 
 class ReadOnlyVerifier(Protocol):
@@ -224,6 +287,26 @@ def verification_result_from_checkpoint_data(
             raise InvalidVerifierResult(
                 "Verifier assessment checkpoint is invalid"
             ) from exc
+    raw_test_evidence = data.get("test_evidence")
+    test_evidence: TestEvidenceBinding | None = None
+    if raw_test_evidence is not None:
+        if not isinstance(raw_test_evidence, Mapping):
+            raise InvalidVerifierResult(
+                "Verifier test evidence checkpoint must be a mapping"
+            )
+        try:
+            test_evidence = TestEvidenceBinding(
+                run_id=raw_test_evidence.get("run_id"),
+                worktree_identity=raw_test_evidence.get("worktree_identity"),
+                artifact_digest=raw_test_evidence.get("artifact_digest"),
+                runner_identity=raw_test_evidence.get("runner_identity"),
+                report_ref=raw_test_evidence.get("report_ref"),
+                passed=raw_test_evidence.get("passed"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise InvalidVerifierResult(
+                "Verifier test evidence checkpoint is invalid"
+            ) from exc
     try:
         return VerificationResult(
             work=data.get("work"),
@@ -231,6 +314,7 @@ def verification_result_from_checkpoint_data(
             decision=data.get("decision"),
             provenance=data.get("provenance"),
             assessments=tuple(assessments),
+            test_evidence=test_evidence,
         )
     except (TypeError, ValueError) as exc:
         raise InvalidVerifierResult("Verifier checkpoint is invalid") from exc
