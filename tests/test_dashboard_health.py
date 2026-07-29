@@ -26,6 +26,25 @@ def test_dashboard_health_endpoint_returns_readiness(monkeypatch, tmp_path):
     assert "web_dist_ready" in payload
 
 
+def test_nova_presence_empty_state_contract_keeps_the_composer_and_other_spaces_generic():
+    """Catches Nova's entity card leaking into normal Space empty states."""
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+    style_css = Path("web/static/style.css").read_text(encoding="utf-8")
+
+    assert 'id="genericEmptyStateContent"' in index_html
+    assert 'id="novaPresenceCard"' in index_html
+    assert 'id="composerWrap"' in index_html
+    assert "function syncNovaPresenceCard" in ui_js
+    assert "api('/api/nova/presence-card',{logError:false})" in ui_js
+    assert "activeSpace === 'nova'" in ui_js
+    assert "window.syncNovaPresenceCard = syncNovaPresenceCard" in ui_js
+    assert "syncNovaPresenceCard({visible:false})" in spaces_js
+    assert ".nova-presence-card{" in style_css
+    assert "#genericEmptyStateContent[hidden],.nova-presence-card[hidden]{display:none!important;}" in style_css
+
+
 def test_agent_health_exposes_sanitized_gateway_startup_reason():
     from web.api.agent_health import _runtime_detail_subset
 

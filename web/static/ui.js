@@ -7279,6 +7279,191 @@ function _expandLargeMessage(btn, key){
   });
 }
 
+// ── Nova Space entity card ────────────────────────────────────────────────
+// This is presentation-only. It never starts Nova, creates a session, or
+// writes local state; it merely fetches the explicitly read-only card when the
+// canonical Nova Space has an otherwise empty conversation pane.
+const _NOVA_CARD_SPACE_RE=/^[a-z0-9][a-z0-9_-]{0,63}$/;
+const _NOVA_CARD_PRESENCE=new Set(['sleeping','available','listening','thinking','speaking','do_not_disturb']);
+const _NOVA_CARD_RUN_STATE=new Set(['provisioning','active','paused','cancelling','cancelled','abandoning','abandoned','completed','idle']);
+const _NOVA_CARD_ACTIVITY={
+  provisioning:'Vorbereitung dokumentiert',
+  admitted:'Betreuung aufgenommen',
+  paused:'Supervision pausiert',
+  completed:'Verifiziert abgeschlossen',
+  reconciled_completed:'Verifiziert abgeschlossen',
+  cancelled:'Von einer Person beendet',
+  abandoned:'Als dauerhaft blockiert markiert',
+  cancelling:'Menschliche Beendigung läuft',
+  abandoning:'Menschliche Klärung läuft',
+};
+const _NOVA_CARD_BLOCKERS={
+  supervisor_paused:'Supervision wartet auf Klärung',
+  supervisor_abandoned:'Run wartet auf menschliche Entscheidung',
+  supervisor_abandoning:'Abbruch wird nachvollziehbar abgeschlossen',
+};
+let _novaPresenceRequestId=0;
+let _novaPresenceLoading=null;
+let _novaPresenceLoaded=false;
+
+function _novaPresenceActiveSpace(){
+  const activeSpace=String(window._activeSpace||'').trim().toLowerCase();
+  return activeSpace === 'nova';
+}
+
+function _novaPresenceVisible(){
+  const empty=$('emptyState');
+  return !!empty&&empty.style.display!=='none';
+}
+
+function _novaCardSpace(value){
+  const candidate=String(value||'').trim().toLowerCase();
+  return _NOVA_CARD_SPACE_RE.test(candidate)?candidate:'';
+}
+
+function _novaCardState(value, fallback){
+  const candidate=String(value||'').trim().toLowerCase();
+  return _NOVA_CARD_RUN_STATE.has(candidate)?candidate:fallback;
+}
+
+function _novaCardPresence(value){
+  const candidate=String(value||'').trim().toLowerCase();
+  return _NOVA_CARD_PRESENCE.has(candidate)?candidate:'available';
+}
+
+function _novaCardSpaceLabel(space){
+  return String(space||'').replace(/[-_]/g,' ').replace(/\b\w/g,(letter)=>letter.toUpperCase());
+}
+
+function _novaCardTimestamp(value){
+  const candidate=String(value||'').trim();
+  if(!/^[0-9T:+.\-Z]{1,40}$/.test(candidate)) return '';
+  return candidate.replace('T',' ').replace(/\+00:00$/,' UTC').slice(0,24);
+}
+
+function _novaCardList(id, rows, emptyText){
+  const list=$(id);
+  if(!list) return;
+  list.replaceChildren();
+  if(!rows.length){
+    const item=document.createElement('li');
+    item.className='nova-presence-empty';
+    item.textContent=emptyText;
+    list.appendChild(item);
+    return;
+  }
+  for(const row of rows){
+    const item=document.createElement('li');
+    item.className='nova-presence-item';
+    const title=document.createElement('span');
+    title.className='nova-presence-item-title';
+    title.textContent=row.title;
+    item.appendChild(title);
+    if(row.meta){
+      const meta=document.createElement('span');
+      meta.className='nova-presence-item-meta';
+      meta.textContent=row.meta;
+      item.appendChild(meta);
+    }
+    list.appendChild(item);
+  }
+}
+
+function _renderNovaPresenceCard(payload){
+  const state=_novaCardPresence(payload&&payload.state);
+  const stateEl=$('novaPresenceState');
+  if(stateEl) stateEl.textContent=state;
+  const focusEl=$('novaPresenceFocus');
+  const focus=payload&&payload.focus&&typeof payload.focus==='object'?payload.focus:{};
+  const focusSpace=_novaCardSpace(focus.space);
+  const focusState=_novaCardState(focus.state,state);
+  if(focusEl){
+    focusEl.textContent=focus.kind==='supervision'&&focusSpace
+      ? `Ich halte ${_novaCardSpaceLabel(focusSpace)} im Blick · ${focusState}.`
+      : `Ich bin ${state} und halte den Kontext zusammen.`;
+  }
+
+  const rawSpaces=Array.isArray(payload&&payload.managed_spaces)?payload.managed_spaces:[];
+  const managed=[];
+  for(const item of rawSpaces.slice(0,12)){
+    const space=_novaCardSpace(item&&item.space);
+    if(!space) continue;
+    managed.push({title:_novaCardSpaceLabel(space),meta:_novaCardState(item&&item.state,'idle')});
+  }
+  _novaCardList('novaManagedSpaces',managed,'Noch kein YOLO-Space ist eingeschrieben.');
+
+  const rawResults=Array.isArray(payload&&payload.audited_results)?payload.audited_results:[];
+  const results=[];
+  for(const item of rawResults.slice(0,6)){
+    const space=_novaCardSpace(item&&item.space);
+    const result=_novaCardState(item&&item.result,'');
+    if(!space||!['completed','cancelled','abandoned'].includes(result)) continue;
+    results.push({title:`${_novaCardSpaceLabel(space)} · ${result}`,meta:_novaCardTimestamp(item&&item.at)});
+  }
+  _novaCardList('novaAuditedResults',results,'Noch keine abgeschlossene, auditierte Arbeit.');
+
+  const rawBlockers=Array.isArray(payload&&payload.blockers)?payload.blockers:[];
+  const blockers=[];
+  for(const item of rawBlockers.slice(0,6)){
+    const space=_novaCardSpace(item&&item.space);
+    const code=String(item&&item.code||'').trim();
+    if(!space||!_NOVA_CARD_BLOCKERS[code]) continue;
+    blockers.push({title:_novaCardSpaceLabel(space),meta:_NOVA_CARD_BLOCKERS[code]});
+  }
+  _novaCardList('novaBlockers',blockers,'Keine offenen Blocker.');
+
+  const rawActivity=Array.isArray(payload&&payload.activity)?payload.activity:[];
+  const activity=[];
+  for(const item of rawActivity.slice(0,8)){
+    const space=_novaCardSpace(item&&item.space);
+    const kind=String(item&&item.kind||'').trim();
+    if(!space||!_NOVA_CARD_ACTIVITY[kind]) continue;
+    activity.push({title:`${_novaCardSpaceLabel(space)} · ${_NOVA_CARD_ACTIVITY[kind]}`,meta:_novaCardTimestamp(item&&item.at)});
+  }
+  _novaCardList('novaActivity',activity,'Noch keine veröffentlichte Aktivität.');
+}
+
+function syncNovaPresenceCard(options={}){
+  const empty=$('emptyState');
+  const generic=$('genericEmptyStateContent');
+  const card=$('novaPresenceCard');
+  if(!empty||!generic||!card) return Promise.resolve();
+  const visible=Object.prototype.hasOwnProperty.call(options,'visible')?!!options.visible:_novaPresenceVisible();
+  const shouldShow=visible&&_novaPresenceActiveSpace();
+  generic.hidden=shouldShow;
+  card.hidden=!shouldShow;
+  if(!shouldShow){
+    _novaPresenceRequestId++;
+    _novaPresenceLoaded=false;
+    return Promise.resolve();
+  }
+  if(_novaPresenceLoaded||_novaPresenceLoading) return _novaPresenceLoading||Promise.resolve();
+  const requestId=++_novaPresenceRequestId;
+  const request=typeof api==='function'
+    ? api('/api/nova/presence-card',{logError:false})
+    : Promise.reject(new Error('presence API unavailable'));
+  _novaPresenceLoading=Promise.resolve(request).then((payload)=>{
+    if(requestId!==_novaPresenceRequestId||!_novaPresenceActiveSpace()||!_novaPresenceVisible()) return;
+    _renderNovaPresenceCard(payload&&typeof payload==='object'?payload:{});
+    _novaPresenceLoaded=true;
+  }).catch(()=>{
+    // A failed read is deliberately quiet: no raw provider/error text belongs
+    // in Nova's public presence card, and the static card stays usable.
+    if(requestId===_novaPresenceRequestId&&_novaPresenceActiveSpace()&&_novaPresenceVisible()) _renderNovaPresenceCard({});
+  }).finally(()=>{
+    _novaPresenceLoading=null;
+  });
+  return _novaPresenceLoading;
+}
+
+function refreshNovaPresenceCard(){
+  _novaPresenceLoaded=false;
+  return syncNovaPresenceCard();
+}
+
+window.syncNovaPresenceCard = syncNovaPresenceCard;
+window.refreshNovaPresenceCard = refreshNovaPresenceCard;
+
 function renderMessages(options){
   const preserveScroll=!!(options&&options.preserveScroll);
   const scrollSnapshot=preserveScroll?_captureMessageScrollSnapshot():null;
@@ -7352,7 +7537,9 @@ function renderMessages(options){
     }
     return m._statusCard||msgContent(m)||m.attachments?.length;
   });
-  $('emptyState').style.display=(vis.length||preservedCompressionTaskMessages.length)?'none':'';
+  const emptyVisible=!(vis.length||preservedCompressionTaskMessages.length);
+  $('emptyState').style.display=emptyVisible?'':'none';
+  syncNovaPresenceCard({visible:emptyVisible});
   _saveExpandedCodeBlocks();
   inner.innerHTML='';
   const compressionNode=compressionState?_compressionCardsNode(compressionState):null;

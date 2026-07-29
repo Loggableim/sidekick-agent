@@ -169,7 +169,7 @@ def run_smoke() -> Result:
                     page.on("response", record_cast_response)
                     # The WebUI keeps event streams open after rendering, so
                     # networkidle is not a meaningful readiness condition.
-                    page.goto(f"http://127.0.0.1:{port}/session/{session_id}", wait_until="domcontentloaded", timeout=15000)
+                    page.goto(f"http://127.0.0.1:{port}/session/{session_id}?workspace=nova", wait_until="domcontentloaded", timeout=15000)
                     # The settings request applies the persisted appearance
                     # asynchronously. Wait for that hydration rather than
                     # racing a click against a late theme reset.
@@ -187,6 +187,31 @@ def run_smoke() -> Result:
                         "cast monitor does not start cast on load",
                         not any(method == "POST" for method, _ in cast_responses),
                         f"responses={cast_responses}",
+                    )
+
+                    # Nova's entity card is an empty-chat presentation for
+                    # the canonical Nova Space only. Exercise the actual
+                    # space switch handler: a regular Space must retain the
+                    # generic empty state and the composer in both cases.
+                    nova_card = page.locator("#novaPresenceCard").first
+                    generic_empty = page.locator("#genericEmptyStateContent").first
+                    nova_composer = page.locator("#composerWrap").first
+                    page.wait_for_function(
+                        "window._activeSpace === 'nova' && !document.getElementById('novaPresenceCard')?.hidden",
+                        timeout=10000,
+                    )
+                    nova_entity_visible = nova_card.is_visible() and not generic_empty.is_visible() and nova_composer.is_visible()
+                    page.evaluate("() => selectSpace('default')")
+                    page.wait_for_function(
+                        "window._activeSpace === 'default' && document.getElementById('novaPresenceCard')?.hidden && !document.getElementById('genericEmptyStateContent')?.hidden",
+                        timeout=10000,
+                    )
+                    regular_space_unchanged = not nova_card.is_visible() and generic_empty.is_visible() and nova_composer.is_visible()
+                    _mark(
+                        result,
+                        "Nova entity card is exclusive to Nova and preserves the composer",
+                        nova_entity_visible and regular_space_unchanged,
+                        f"nova_entity_visible={nova_entity_visible} regular_space_unchanged={regular_space_unchanged}",
                     )
 
                     composer = page.locator("#composerBox").first

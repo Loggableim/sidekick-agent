@@ -446,6 +446,9 @@ async function selectSpace(slug) {
     }
     const previousSpace = _activeSpace;
     _activeSpace = slug;
+    // The entity card is exclusive to the literal canonical Nova Space. Hide
+    // it before the asynchronous session switch can render a target Space.
+    if(typeof syncNovaPresenceCard==='function') syncNovaPresenceCard({visible:false});
     const switchRev = _beginSpaceSwitch();
     _startSpaceSwitchTiming(slug, switchRev);
     localStorage.setItem('sidekick-active-workspace', slug);

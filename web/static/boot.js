@@ -2059,6 +2059,7 @@ async function _syncGameModeStateFromServer() {
         S._bootReady=true;
         syncTopbar();syncWorkspacePanelState();
         $('emptyState').style.display='';
+        if(typeof syncNovaPresenceCard==='function') void syncNovaPresenceCard({visible:true});
         await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();
         return;
       }
@@ -2108,6 +2109,7 @@ async function _syncGameModeStateFromServer() {
         _applyFileTreePanelPref();
         syncTopbar();syncWorkspacePanelState();
         $('emptyState').style.display='';
+        if(typeof syncNovaPresenceCard==='function') void syncNovaPresenceCard({visible:true});
         await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();
         return;
       }
@@ -2137,6 +2139,7 @@ async function _syncGameModeStateFromServer() {
   _applyFileTreePanelPref();
   syncWorkspacePanelState();
   $('emptyState').style.display='';
+  if(typeof syncNovaPresenceCard==='function') void syncNovaPresenceCard({visible:true});
   await renderSessionList();
   // Start real-time gateway session sync if setting is enabled
   if(typeof startGatewaySSE==='function') startGatewaySSE();
@@ -2182,7 +2185,7 @@ async function _syncGameModeStateFromServer() {
   try{S._bootReady=true;}catch(_){}
   try{syncTopbar();}catch(_){}
   try{syncWorkspacePanelState();}catch(_){}
-  try{$('emptyState').style.display='';}catch(_){}
+  try{$('emptyState').style.display='';if(typeof syncNovaPresenceCard==='function')void syncNovaPresenceCard({visible:true});}catch(_){}
   try{if(typeof renderSessionList==='function') void renderSessionList();}catch(_){}
 });
 
