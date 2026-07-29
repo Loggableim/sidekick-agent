@@ -188,7 +188,7 @@ def test_presence_card_does_not_create_missing_runtime_state(tmp_path):
 
 
 def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tmp_path):
-    """A busy feed must not hide a prior audited completion or stale focus."""
+    """Unmanaged history must not starve managed focus, feed, or results."""
     from web.api.nova_presence import build_presence_card
 
     home = tmp_path / "home"
@@ -242,6 +242,37 @@ def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tm
                 "2026-07-29T10:06:00+00:00",
             ),
         )
+        connection.execute(
+            """
+            INSERT INTO supervisor_admissions (
+                admission_id, target_key, target_space_id, intent_digest,
+                canonical_root, root_fingerprint, governance_revision,
+                policy_identity, allowed_action_families_json,
+                workflow_contract_digest, run_id, state,
+                attachment_generation, record_version, created_at, updated_at,
+                terminal_actor
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "admission-ghost",
+                "ghost",
+                "space-ghost",
+                "intent-ghost",
+                "C:/private/ghost",
+                "fingerprint-ghost",
+                1,
+                "policy",
+                "[]",
+                "contract",
+                "run-ghost-secret",
+                "completed",
+                1,
+                1,
+                "2026-07-29T10:02:00+00:00",
+                "2026-07-29T12:00:00+00:00",
+                None,
+            ),
+        )
         for index in range(60):
             connection.execute(
                 """
@@ -250,8 +281,8 @@ def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tm
                 ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
-                    "admission-secret-id",
-                    "admitted",
+                    "admission-ghost",
+                    "completed",
                     "dashboard:actor",
                     "no public detail",
                     f"2026-07-29T11:{index:02d}:00+00:00",
@@ -261,10 +292,45 @@ def test_presence_card_uses_latest_supervisor_focus_and_keeps_audited_results(tm
     payload = build_presence_card(home=home)
 
     assert payload["focus"] == {"kind": "supervision", "space": "beta", "state": "completed"}
+    assert payload["activity"] == [
+        {"kind": "reconciled_completed", "space": "beta", "at": "2026-07-29T10:06:00+00:00"},
+        {"kind": "paused", "space": "alpha", "at": "2026-07-29T10:05:00+00:00"}
+    ]
     assert payload["audited_results"] == [
         {"space": "beta", "result": "completed", "at": "2026-07-29T10:06:00+00:00"}
     ]
     assert "raw terminal detail" not in json.dumps(payload)
+
+
+def test_presence_admissions_query_is_bounded_to_managed_current_rows(monkeypatch, tmp_path):
+    """The presence read must not scan unbounded historical admissions."""
+    import web.api.nova_presence as presence
+
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class _ReadOnlyLedger:
+        def execute(self, query, params):
+            calls.append((str(query), tuple(params)))
+            return self
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(presence, "_open_read_only_ledger", lambda _path: _ReadOnlyLedger())
+
+    assert presence._read_supervisor_admissions(
+        tmp_path / "ledger.sqlite",
+        [{"space": "alpha"}, {"space": "beta"}],
+    ) == []
+    assert len(calls) == 1
+    query, params = calls[0]
+    normalized_query = " ".join(query.split())
+    assert "WHERE target_key IN (?, ?)" in normalized_query
+    assert "LIMIT ?" in normalized_query
+    assert params == ("alpha", "beta", 2)
 
 
 def test_presence_card_is_native_authenticated_fastapi_read(monkeypatch, tmp_path):

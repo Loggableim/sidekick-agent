@@ -7304,6 +7304,7 @@ const _NOVA_CARD_BLOCKERS={
 };
 let _novaPresenceRequestId=0;
 let _novaPresenceLoading=null;
+let _novaPresenceLoadingRequestId=0;
 let _novaPresenceLoaded=false;
 
 function _novaPresenceActiveSpace(){
@@ -7437,12 +7438,13 @@ function syncNovaPresenceCard(options={}){
     _novaPresenceLoaded=false;
     return Promise.resolve();
   }
-  if(_novaPresenceLoaded||_novaPresenceLoading) return _novaPresenceLoading||Promise.resolve();
+  if(_novaPresenceLoaded) return Promise.resolve();
+  if(_novaPresenceLoading&&_novaPresenceLoadingRequestId===_novaPresenceRequestId) return _novaPresenceLoading;
   const requestId=++_novaPresenceRequestId;
   const request=typeof api==='function'
     ? api('/api/nova/presence-card',{logError:false})
     : Promise.reject(new Error('presence API unavailable'));
-  _novaPresenceLoading=Promise.resolve(request).then((payload)=>{
+  const loading=Promise.resolve(request).then((payload)=>{
     if(requestId!==_novaPresenceRequestId||!_novaPresenceActiveSpace()||!_novaPresenceVisible()) return;
     _renderNovaPresenceCard(payload&&typeof payload==='object'?payload:{});
     _novaPresenceLoaded=true;
@@ -7451,9 +7453,17 @@ function syncNovaPresenceCard(options={}){
     // in Nova's public presence card, and the static card stays usable.
     if(requestId===_novaPresenceRequestId&&_novaPresenceActiveSpace()&&_novaPresenceVisible()) _renderNovaPresenceCard({});
   }).finally(()=>{
-    _novaPresenceLoading=null;
+    if(_novaPresenceLoadingRequestId===requestId){
+      _novaPresenceLoading=null;
+      _novaPresenceLoadingRequestId=0;
+    }
+    if(requestId!==_novaPresenceRequestId&&_novaPresenceActiveSpace()&&_novaPresenceVisible()&&!_novaPresenceLoaded&&!_novaPresenceLoading){
+      void syncNovaPresenceCard();
+    }
   });
-  return _novaPresenceLoading;
+  _novaPresenceLoading=loading;
+  _novaPresenceLoadingRequestId=requestId;
+  return loading;
 }
 
 function refreshNovaPresenceCard(){

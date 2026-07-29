@@ -84,7 +84,7 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
     presence = _public_presence_state(entity_state)
     managed_spaces = _managed_space_summaries(spaces_root)
     ledger_path = resolved_home / "state" / "nova-space-supervisor.sqlite"
-    admissions = _read_supervisor_admissions(ledger_path)
+    admissions = _read_supervisor_admissions(ledger_path, managed_spaces)
     admission_by_space = _latest_admission_by_space(admissions, managed_spaces)
     for summary in managed_spaces:
         summary["state"] = admission_by_space.get(summary["space"], {}).get("state", "idle")
@@ -200,6 +200,18 @@ def _display_name(slug: str) -> str:
     return slug.replace("-", " ").replace("_", " ").title()
 
 
+def _managed_space_keys(managed_spaces: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                space
+                for item in managed_spaces
+                if (space := _safe_space(item.get("space")))
+            }
+        )
+    )
+
+
 def _open_read_only_ledger(path: Path) -> sqlite3.Connection | None:
     if not path.is_file():
         return None
@@ -211,17 +223,33 @@ def _open_read_only_ledger(path: Path) -> sqlite3.Connection | None:
         return None
 
 
-def _read_supervisor_admissions(path: Path) -> list[dict[str, str]]:
+def _read_supervisor_admissions(
+    path: Path, managed_spaces: Iterable[Mapping[str, Any]]
+) -> list[dict[str, str]]:
+    allowed_spaces = _managed_space_keys(managed_spaces)
+    if not allowed_spaces:
+        return []
     connection = _open_read_only_ledger(path)
     if connection is None:
         return []
+    placeholders = ", ".join("?" for _ in allowed_spaces)
     try:
         rows = connection.execute(
-            """
+            f"""
             SELECT target_key, state, updated_at
             FROM supervisor_admissions
-            ORDER BY updated_at DESC
-            """
+            WHERE target_key IN ({placeholders})
+              AND rowid = (
+                SELECT candidate.rowid
+                FROM supervisor_admissions AS candidate
+                WHERE candidate.target_key = supervisor_admissions.target_key
+                ORDER BY candidate.updated_at DESC, candidate.rowid DESC
+                LIMIT 1
+              )
+            ORDER BY updated_at DESC, rowid DESC
+            LIMIT ?
+            """,
+            (*allowed_spaces, len(allowed_spaces)),
         ).fetchall()
     except sqlite3.Error:
         return []
@@ -240,7 +268,7 @@ def _read_supervisor_admissions(path: Path) -> list[dict[str, str]]:
 def _latest_admission_by_space(
     admissions: Iterable[Mapping[str, str]], managed_spaces: Iterable[Mapping[str, Any]]
 ) -> dict[str, Mapping[str, str]]:
-    allowed_spaces = {str(space["space"]) for space in managed_spaces}
+    allowed_spaces = set(_managed_space_keys(managed_spaces))
     latest: dict[str, Mapping[str, str]] = {}
     for admission in admissions:
         space = admission.get("space", "")
@@ -254,7 +282,7 @@ def _focus_for(
     managed_spaces: Iterable[Mapping[str, Any]],
     presence: str,
 ) -> dict[str, str]:
-    allowed_spaces = {str(space["space"]) for space in managed_spaces}
+    allowed_spaces = set(_managed_space_keys(managed_spaces))
     for admission in admissions:
         space = str(admission.get("space") or "")
         state = str(admission.get("state") or "")
@@ -264,23 +292,26 @@ def _focus_for(
 
 
 def _read_supervisor_activity(path: Path, managed_spaces: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
-    allowed_spaces = {str(space["space"]) for space in managed_spaces}
+    allowed_space_keys = _managed_space_keys(managed_spaces)
+    allowed_spaces = set(allowed_space_keys)
     if not allowed_spaces:
         return []
     connection = _open_read_only_ledger(path)
     if connection is None:
         return []
+    placeholders = ", ".join("?" for _ in allowed_space_keys)
     try:
         rows = connection.execute(
-            """
+            f"""
             SELECT admissions.target_key, audit.event_type, audit.created_at
             FROM supervisor_audit AS audit
             JOIN supervisor_admissions AS admissions
               ON admissions.admission_id = audit.admission_id
+            WHERE admissions.target_key IN ({placeholders})
             ORDER BY audit.sequence DESC
             LIMIT ?
             """,
-            (_MAX_ACTIVITY * 3,),
+            (*allowed_space_keys, _MAX_ACTIVITY * 3),
         ).fetchall()
     except sqlite3.Error:
         return []
@@ -302,13 +333,15 @@ def _read_supervisor_activity(path: Path, managed_spaces: Iterable[Mapping[str, 
 def _read_audited_results(
     path: Path, managed_spaces: Iterable[Mapping[str, Any]]
 ) -> list[dict[str, str]]:
-    allowed_spaces = {str(space["space"]) for space in managed_spaces}
+    allowed_space_keys = _managed_space_keys(managed_spaces)
+    allowed_spaces = set(allowed_space_keys)
     if not allowed_spaces:
         return []
     connection = _open_read_only_ledger(path)
     if connection is None:
         return []
     terminal_events = tuple(_RESULT_BY_EVENT)
+    space_placeholders = ", ".join("?" for _ in allowed_space_keys)
     placeholders = ", ".join("?" for _ in terminal_events)
     try:
         rows = connection.execute(
@@ -317,11 +350,12 @@ def _read_audited_results(
             FROM supervisor_audit AS audit
             JOIN supervisor_admissions AS admissions
               ON admissions.admission_id = audit.admission_id
-            WHERE audit.event_type IN ({placeholders})
+            WHERE admissions.target_key IN ({space_placeholders})
+              AND audit.event_type IN ({placeholders})
             ORDER BY audit.sequence DESC
             LIMIT ?
             """,
-            (*terminal_events, _MAX_RESULTS * 8),
+            (*allowed_space_keys, *terminal_events, _MAX_RESULTS * 8),
         ).fetchall()
     except sqlite3.Error:
         return []
