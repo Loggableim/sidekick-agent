@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 from uuid import uuid4
 
 import pytest
@@ -380,7 +381,7 @@ def test_inert_pulse_without_signal_does_not_create_a_ledger_or_schedule_work(
     assert dispatched == []
 
 
-def test_deduped_signal_identity_cannot_be_reaccepted_after_more_than_2048_events(
+def test_signal_identity_capacity_rejects_new_events_without_evicting_replay_tombstones(
     tmp_path: Path,
 ) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
@@ -388,18 +389,30 @@ def test_deduped_signal_identity_cannot_be_reaccepted_after_more_than_2048_event
     dispatched: list[tuple[Path, str]] = []
     runtime = _runtime(supervisor, dispatched)
 
-    for index in range(2_050):
+    for index in range(2_048):
         assert runtime.ingest_signal(
             "alpha",
             source="git",
-            event_id=f"commit-{index}",
+            event_id=f"capacity-{index}",
             reason_code="git_change",
         )
 
     assert not runtime.ingest_signal(
         "alpha",
         source="git",
-        event_id="commit-0",
+        event_id="capacity-new",
         reason_code="git_change",
     )
+    assert not runtime.ingest_signal(
+        "alpha",
+        source="git",
+        event_id="capacity-0",
+        reason_code="git_change",
+    )
+
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        stored_count = connection.execute(
+            "SELECT COUNT(*) FROM nova_supervision_signals"
+        ).fetchone()[0]
+    assert stored_count == 2_048
     assert dispatched == []
