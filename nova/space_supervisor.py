@@ -924,7 +924,9 @@ def _diagnostic_metadata(capability: ManagedSpaceCapability, intent: Mapping[str
         "goal": str(intent.get("goal", "Nova managed Space supervision")),
         "pack": "coding-team",
         "autonomy": "autonomous",
+        "project_root": str(capability._canonical_root),
         "integration_namespace": "nova-space-supervisor",
+        "required_pre_completion_hook": ManagedSpacePreCompletionHook.hook_id,
         "nova_supervisor": {
             "admission_id": capability._admission_id,
             "target_space_id": capability._target_space_id,
@@ -972,7 +974,12 @@ def _capability_matches_record(capability: ManagedSpaceCapability, record: Mappi
 
 
 def _diagnostic_metadata_matches_capability(metadata: Mapping[str, Any], capability: ManagedSpaceCapability) -> bool:
-    if not isinstance(metadata, Mapping) or metadata.get("integration_namespace") != "nova-space-supervisor":
+    if (
+        not isinstance(metadata, Mapping)
+        or metadata.get("project_root") != str(capability._canonical_root)
+        or metadata.get("integration_namespace") != "nova-space-supervisor"
+        or metadata.get("required_pre_completion_hook") != ManagedSpacePreCompletionHook.hook_id
+    ):
         return False
     diagnostic = metadata.get("nova_supervisor")
     return isinstance(diagnostic, Mapping) and diagnostic == {
@@ -997,7 +1004,9 @@ def _diagnostic_metadata_matches_record(metadata: Mapping[str, Any], record: Map
     diagnostic = metadata.get("nova_supervisor") if isinstance(metadata, Mapping) else None
     return (
         isinstance(diagnostic, Mapping)
+        and metadata.get("project_root") == record["canonical_root"]
         and metadata.get("integration_namespace") == "nova-space-supervisor"
+        and metadata.get("required_pre_completion_hook") == ManagedSpacePreCompletionHook.hook_id
         and diagnostic == {
             "admission_id": record["admission_id"],
             "target_space_id": record["target_space_id"],
