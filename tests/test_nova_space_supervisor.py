@@ -1,0 +1,267 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from pathlib import Path
+import pickle
+import threading
+from uuid import uuid4
+
+import pytest
+
+from nova.space_supervisor import (
+    DASHBOARD_ACTOR_RE,
+    ManagedSpaceGovernance,
+    ManagedSpaceSupervisor,
+)
+from swarm_core.engine import PreCompletionContext
+from swarm_core.store import ProjectSwarmStore
+
+
+_DASHBOARD_ACTOR = "dashboard:" + ("a" * 64)
+
+
+def _governance(root: Path, *, space_id: str | None = None, **overrides: object) -> ManagedSpaceGovernance:
+    values: dict[str, object] = {
+        "space_id": space_id or str(uuid4()),
+        "canonical_root": root.resolve(),
+        "root_fingerprint": "",
+        "yolo": True,
+        "enrolled": True,
+        "revision": 7,
+        "policy_identity": "policy:target-v1",
+    }
+    values.update(overrides)
+    return ManagedSpaceGovernance.from_values(**values)
+
+
+def _supervisor(tmp_path: Path, records: dict[str, ManagedSpaceGovernance]) -> ManagedSpaceSupervisor:
+    return ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+
+
+def _admit(supervisor: ManagedSpaceSupervisor, target: str = "alpha"):
+    return supervisor.admit(target, {"goal": "repair flaky test", "kind": "maintenance"})
+
+
+def test_global_ledger_allows_only_one_active_target_across_concurrent_spaces(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    first = _supervisor(tmp_path, records)
+    second = _supervisor(tmp_path, records)
+    barrier = threading.Barrier(2)
+
+    def admit(target: str):
+        barrier.wait()
+        return _admit(first if target == "alpha" else second, target)
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(admit, ("alpha", "beta")))
+
+    assert [result.status for result in results].count("created") == 1
+    assert [result.reason for result in results].count("active_limit") == 1
+    assert len(first.list_active_admissions()) == 1
+
+
+def test_restart_coalesces_the_same_durable_target_intent_admission(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    created = _admit(_supervisor(tmp_path, records))
+    resumed = _admit(_supervisor(tmp_path, records))
+
+    assert created.status == "created"
+    assert resumed.status == "coalesced"
+    assert resumed.run_id == created.run_id
+    assert resumed.capability is None
+
+
+def test_capability_is_opaque_nonserializable_and_tampering_pauses_the_child(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    capability = admission.capability
+
+    assert not hasattr(capability, "__dict__")
+    with pytest.raises((AttributeError, TypeError)):
+        capability._intent_digest = "0" * 64
+    with pytest.raises(TypeError):
+        pickle.dumps(capability)
+
+    foreign_root = tmp_path / "foreign"
+    object.__setattr__(capability, "_canonical_root", foreign_root)
+    assert supervisor.revalidate_action_boundary(capability) is False
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None and run.status == "paused"
+    assert not (foreign_root / ".swarm").exists()
+    assert any(event.event_type == "nova.supervisor.paused" for event in ProjectSwarmStore(records["alpha"].canonical_root).list_events(admission.run_id))
+
+
+def test_revocation_blocks_resume_and_changed_root_blocks_precompletion(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    first = _admit(supervisor)
+    first_run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(first.run_id)
+    assert first_run is not None
+
+    records["alpha"] = replace(records["alpha"], yolo=False)
+    blocked = supervisor.execution_options_for_run(records["alpha"].canonical_root, first_run)
+    assert blocked.blocked_reason == "governance_revoked"
+    assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(first.run_id).status == "paused"
+
+    assert supervisor.cancel(first.admission_id, actor=_DASHBOARD_ACTOR) is True
+    records["alpha"] = _governance(tmp_path / "alpha", space_id=records["alpha"].space_id)
+    second = supervisor.admit("alpha", {"goal": "repair a second flaky test", "kind": "maintenance"})
+    records["alpha"] = _governance(tmp_path / "moved-alpha", space_id=records["alpha"].space_id)
+    hook = supervisor.pre_completion_hook_for_run(second.run_id)
+    child_store = ProjectSwarmStore(tmp_path / "alpha")
+    child_run = child_store.get_run(second.run_id)
+    assert child_run is not None
+    outcome = hook.run(
+        PreCompletionContext(
+            run=child_run,
+            project_root=tmp_path / "alpha",
+            store=child_store,
+            goal="repair flaky test",
+            pack="coding-team",
+            autonomy="autonomous",
+            call_count=1,
+            decision="verified",
+            evidence={},
+        )
+    )
+    assert outcome.continue_completion is False
+    assert outcome.pause_reason == "root_mismatch"
+    assert child_store.get_run(second.run_id).status == "paused"
+
+
+def test_non_yolo_space_performs_no_admission_or_child_store_work(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha", yolo=False, enrolled=False)}
+    calls = 0
+
+    def store_factory(root: Path):
+        nonlocal calls
+        calls += 1
+        return ProjectSwarmStore(root)
+
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=store_factory,
+    )
+    result = _admit(supervisor)
+
+    assert result.status == "rejected"
+    assert result.reason == "not_yolo_enrolled"
+    assert calls == 0
+    assert not (tmp_path / "supervisor.sqlite").exists()
+
+
+def test_human_cancellation_audits_actor_and_releases_the_global_slot_once(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+
+    assert DASHBOARD_ACTOR_RE.fullmatch(_DASHBOARD_ACTOR)
+    assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
+    assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is False
+    run_store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert run_store.get_run(admission.run_id).status == "cancelled"
+    cancelled = [event for event in run_store.list_events(admission.run_id) if event.event_type == "run.cancelled"]
+    assert len(cancelled) == 1 and cancelled[0].payload["actor"] == _DASHBOARD_ACTOR
+    assert _admit(supervisor, "beta").status == "created"
+
+
+def test_human_abandonment_holds_the_slot_until_explicit_dashboard_cancellation(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+
+    assert supervisor.abandon(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.get_run(admission.run_id).status == "abandoned"
+    with pytest.raises(ValueError):
+        store.resume_run(admission.run_id)
+    with pytest.raises(ValueError):
+        store.claim_run_execution_lease(admission.run_id, "worker")
+    with pytest.raises(ValueError):
+        store.recover_run_execution_lease(admission.run_id, actor_id="dashboard-operator")
+    assert _admit(supervisor, "beta").reason == "active_limit"
+    assert supervisor.record_completion(admission.run_id) is False
+    assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
+    assert _admit(supervisor, "beta").status == "created"
+
+
+def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    running = store.get_run(admission.run_id)
+    assert running is not None
+    options = supervisor.execution_options_for_run(records["alpha"].canonical_root, running)
+    assert options.on_completed is not None
+    run = store.set_run_status(admission.run_id, "completed")
+
+    options.on_completed(records["alpha"].canonical_root, run)
+    assert _admit(supervisor, "beta").status == "created"
+
+
+def test_tampered_capability_cannot_complete_or_release_a_supervisor_slot(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.set_run_status(admission.run_id, "completed")
+    foreign_root = tmp_path / "foreign"
+    object.__setattr__(admission.capability, "_canonical_root", foreign_root)
+
+    assert supervisor.record_completion(admission.run_id) is False
+    assert _admit(supervisor, "beta").reason == "active_limit"
+    assert not (foreign_root / ".swarm").exists()
+
+
+def test_worker_or_model_actor_cannot_cancel_or_abandon_a_supervisor_run(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+
+    with pytest.raises(PermissionError):
+        supervisor.cancel(admission.admission_id, actor="worker:executor")
+    with pytest.raises(PermissionError):
+        supervisor.abandon(admission.admission_id, actor="model:nova")
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    with pytest.raises(PermissionError):
+        store.set_run_status(admission.run_id, "cancelled")
+    with pytest.raises(PermissionError):
+        store.set_run_status(admission.run_id, "abandoned")
+    assert store.get_run(admission.run_id).status == "running"
+
+
+def test_child_metadata_is_diagnostic_only_and_cannot_reconstruct_a_capability(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None
+
+    assert "capability" not in repr(run.metadata).lower()
+    restarted = _supervisor(tmp_path, records)
+    options = restarted.execution_options_for_run(records["alpha"].canonical_root, run)
+    assert options.blocked_reason == "supervisor_binding_unavailable"

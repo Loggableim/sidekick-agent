@@ -239,8 +239,8 @@ class SwarmEngine:
             run = store.get_run(run_id)
             if run is None:  # Defensive: the claim already checked this.
                 raise KeyError(f"Unknown Swarm run: {run_id}")
-            if run.status == "completed":
-                raise ValueError("Completed Swarm runs cannot be executed again")
+            if run.status in {"completed", "cancelled", "abandoned"}:
+                raise ValueError("Terminal Swarm runs cannot be executed again")
             if run.status == "paused" and checkpoint is None:
                 raise ValueError("Paused Swarm runs require a checkpoint-aware host")
             # The lease deliberately covers human pause waits as well as

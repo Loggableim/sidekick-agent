@@ -469,7 +469,7 @@ def _record_background_execution_failure(
     try:
         store = ProjectSwarmStore(project_root)
         run = store.get_run(run_id)
-        if run is None or run.status == "completed":
+        if run is None or run.status in {"completed", "cancelled", "abandoned"}:
             return
         if run.status == "running":
             try:
@@ -478,7 +478,7 @@ def _record_background_execution_failure(
                 # A concurrent human pause wins the durable state transition.
                 pass
         run = store.get_run(run_id)
-        if run is not None and run.status != "completed":
+        if run is not None and run.status not in {"completed", "cancelled", "abandoned"}:
             store.append_event(
                 run_id,
                 "run.execution_failed",

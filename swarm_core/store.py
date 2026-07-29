@@ -10,6 +10,7 @@ import sqlite3
 import threading
 from typing import Any, Callable, Iterator, Mapping, TypeVar
 from uuid import uuid4
+import re
 
 from .config import (
     SwarmProjectPathError,
@@ -33,12 +34,18 @@ from .types import (
 
 AuthorizationResult = TypeVar("AuthorizationResult")
 
-_RUN_STATUSES = frozenset({"running", "paused", "completed"})
+_RUN_STATUSES = frozenset({"running", "paused", "completed", "cancelled", "abandoned"})
 _ALLOWED_TRANSITIONS = {
-    "running": frozenset({"paused", "completed"}),
-    "paused": frozenset({"running"}),
+    "running": frozenset({"paused", "completed", "cancelled", "abandoned"}),
+    "paused": frozenset({"running", "cancelled", "abandoned"}),
     "completed": frozenset(),
+    "cancelled": frozenset(),
+    # An abandoned run is intentionally retained for diagnosis.  A dashboard
+    # human may later clean it up through the dedicated cancellation path.
+    "abandoned": frozenset({"cancelled"}),
 }
+_HUMAN_ONLY_TERMINAL_STATUSES = frozenset({"cancelled", "abandoned"})
+_DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}\Z")
 _MAX_INTEGRATION_VALUE_DEPTH = 32
 _MAX_INTEGRATION_VALUE_ITEMS = 10_000
 _SCHEMA_MIGRATION_LOCK = threading.RLock()
@@ -551,13 +558,13 @@ class ProjectSwarmStore:
         if not owner_token:
             raise ValueError("Swarm execution lease owner_token is required")
         with self._immediate_connection() as connection:
-            if (
-                connection.execute(
-                    "SELECT 1 FROM runs WHERE run_id = ?", (run_id,)
-                ).fetchone()
-                is None
-            ):
+            run = connection.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if run is None:
                 raise KeyError(f"Unknown Swarm run: {run_id}")
+            if run["status"] in {"completed", "cancelled", "abandoned"}:
+                raise ValueError("Terminal Swarm runs cannot claim an execution lease")
             try:
                 connection.execute(
                     """
@@ -630,9 +637,9 @@ class ProjectSwarmStore:
             ).fetchone()
             if row is None:
                 raise KeyError(f"Unknown Swarm run: {run_id}")
-            if row["status"] == "completed":
+            if row["status"] in {"completed", "cancelled", "abandoned"}:
                 raise ValueError(
-                    "Completed Swarm runs cannot recover an execution lease"
+                    "Terminal Swarm runs cannot recover an execution lease"
                 )
             lease = connection.execute(
                 "SELECT owner_token FROM run_execution_leases WHERE run_id = ?",
@@ -770,6 +777,10 @@ class ProjectSwarmStore:
     def set_run_status(self, run_id: str, status: str) -> SwarmRun:
         if status not in _RUN_STATUSES:
             raise ValueError(f"Unsupported Swarm run status: {status}")
+        if status in _HUMAN_ONLY_TERMINAL_STATUSES:
+            raise PermissionError(
+                "cancelled and abandoned Swarm states require a dashboard human transition"
+            )
         updated_at = _utc_now()
         with self._immediate_connection() as connection:
             row = connection.execute(
@@ -808,6 +819,74 @@ class ProjectSwarmStore:
 
     def resume_run(self, run_id: str) -> SwarmRun:
         return self.set_run_status(run_id, "running")
+
+    def cancel_run_by_human(self, run_id: str, actor: str) -> tuple[SwarmRun, bool]:
+        """Atomically record a dashboard cancellation and release local slots.
+
+        Worker/model paths only expose ``set_run_status`` and consequently
+        cannot forge this terminal state or its actor-attributed audit event.
+        """
+        return self._human_terminal_transition(run_id, "cancelled", actor)
+
+    def abandon_run_by_human(self, run_id: str, actor: str) -> tuple[SwarmRun, bool]:
+        """Atomically preserve an abandoned run without releasing its slot."""
+        return self._human_terminal_transition(run_id, "abandoned", actor)
+
+    def _human_terminal_transition(
+        self,
+        run_id: str,
+        target_status: str,
+        actor: str,
+    ) -> tuple[SwarmRun, bool]:
+        if target_status not in _HUMAN_ONLY_TERMINAL_STATUSES:
+            raise ValueError("human terminal transition is invalid")
+        if not isinstance(actor, str) or _DASHBOARD_ACTOR_RE.fullmatch(actor) is None:
+            raise PermissionError("terminal Swarm transitions require a dashboard human actor")
+        updated_at = _utc_now()
+        with self._immediate_connection() as connection:
+            row = connection.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            current_status = row["status"]
+            if current_status == target_status:
+                changed = False
+            else:
+                if target_status not in _ALLOWED_TRANSITIONS.get(current_status, frozenset()):
+                    raise ValueError(
+                        f"Illegal Swarm run transition: {current_status} -> {target_status}"
+                    )
+                cursor = connection.execute(
+                    "UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ? AND status = ?",
+                    (target_status, _timestamp_text(updated_at), run_id, current_status),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("Swarm run status changed during terminal transition")
+                changed = True
+                event_type = "run.cancelled" if target_status == "cancelled" else "run.abandoned"
+                connection.execute(
+                    """INSERT INTO events (
+                        event_id, timestamp, event_type, run_id, payload_json, visibility
+                    ) VALUES (?, ?, ?, ?, ?, 'project')""",
+                    (
+                        str(uuid4()),
+                        _timestamp_text(updated_at),
+                        event_type,
+                        run_id,
+                        json.dumps({"actor": actor}, sort_keys=True),
+                    ),
+                )
+                if target_status == "cancelled":
+                    connection.execute(
+                        """UPDATE integration_admissions
+                           SET active_slot = NULL, updated_at = ?
+                           WHERE run_id = ? AND active_slot IS NOT NULL""",
+                        (_timestamp_text(updated_at), run_id),
+                    )
+        run = self.get_run(run_id)
+        assert run is not None
+        return run, changed
 
     def record_approval(
         self,
