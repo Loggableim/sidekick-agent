@@ -412,6 +412,7 @@ class ManagedSpaceSupervisor:
             max_calls=128,
             max_concurrent=3,
             pre_completion_hook=ManagedSpacePreCompletionHook(self, capability),
+            required_pre_completion_hook_id=ManagedSpacePreCompletionHook.hook_id,
             on_completed=self.completion_observer_for_run(run.run_id),
         )
 
@@ -485,6 +486,9 @@ class ManagedSpaceSupervisor:
         status = self._read_action_boundary_child_status(capability)
         if status == "running":
             return True
+        if status == "metadata_invalid":
+            self._pause(capability, "capability_invalid")
+            return False
         # A paused child is already safe.  Preserve its active ledger record
         # so the authenticated host can explicitly resume it later, but never
         # grant an action at this boundary until the read-only status says it
@@ -508,7 +512,11 @@ class ManagedSpaceSupervisor:
             run = reader.get_run(record["run_id"])
         except (OSError, RuntimeError, ValueError, sqlite3.Error):
             return None
-        return run.status if run is not None else None
+        if run is None:
+            return None
+        if not _diagnostic_metadata_matches_capability(run.metadata, capability):
+            return "metadata_invalid"
+        return run.status
 
     def _pause_ledger_only(self, capability: ManagedSpaceCapability, reason: str) -> None:
         """Fail closed from an action gate without writing through capability data."""
