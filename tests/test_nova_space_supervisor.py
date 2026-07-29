@@ -555,7 +555,7 @@ def test_host_completion_preserves_trusted_hook_requirement_across_metadata_toct
     summary = host.execute_run(records["alpha"].canonical_root, admission.run_id)
 
     assert summary.status == "paused"
-    assert summary.pause_reason == "capability_invalid"
+    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
     assert store.get_run(admission.run_id).status == "paused"
     assert not any(event.event_type == "run.completed" for event in store.list_events(admission.run_id))
 
