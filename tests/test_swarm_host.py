@@ -266,6 +266,49 @@ def test_execution_options_required_hook_still_fails_closed_without_a_resolver(
     assert calls
 
 
+def test_execution_options_cannot_replace_a_durable_required_hook_contract(
+    tmp_path: Path,
+):
+    """A resolver may confirm a durable gate, never substitute a new one."""
+    calls: list[dict] = []
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=_ROUTED_MODELS,
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+
+    class ReplacementHook:
+        hook_id = "replacement-hook-v1"
+
+        def run(self, _context):
+            raise AssertionError("replacement hook must not bypass the durable requirement")
+
+    service = SidekickSwarmService(
+        call_llm=lambda **kwargs: calls.append(kwargs) or _valid_response(),
+        execution_options_resolver=lambda _root, _run: swarm_host.SwarmExecutionOptions(
+            max_calls=128,
+            pre_completion_hook=ReplacementHook(),
+            required_pre_completion_hook_id="replacement-hook-v1",
+        ),
+    )
+    run = service.start_run(
+        "reject a replacement completion gate",
+        tmp_path,
+        autonomy="autonomous",
+        host_metadata={"required_pre_completion_hook": "original-hook-v1"},
+    )
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    assert summary.status == "paused"
+    assert summary.pause_reason == "invalid_execution_options"
+    assert calls == []
+    assert not any(event.event_type == "run.completed" for event in ProjectSwarmStore(tmp_path).list_events(run.run_id))
+
+
 def test_execution_options_blocked_reason_pauses_before_engine_or_model_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

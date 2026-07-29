@@ -454,8 +454,18 @@ class SwarmEngine:
     ) -> WorkflowPaused | None:
         """Run a host-neutral durable completion gate, when the run requires it."""
         required_hook_id = self.required_pre_completion_hook_id
-        if required_hook_id is None:
-            required_hook_key = "required_pre_completion_hook"
+        required_hook_key = "required_pre_completion_hook"
+        if required_hook_id is not None:
+            # Resolver options can carry a trusted requirement across a later
+            # metadata read, but may only confirm the durable contract that
+            # made this run require a completion hook in the first place.
+            durable_required_hook_id = run.metadata.get(required_hook_key)
+            if durable_required_hook_id != required_hook_id:
+                return WorkflowPaused(
+                    "required_pre_completion_hook_unavailable",
+                    role="pre_completion_hook",
+                )
+        else:
             if required_hook_key not in run.metadata:
                 return None
             required_hook_id = run.metadata[required_hook_key]
