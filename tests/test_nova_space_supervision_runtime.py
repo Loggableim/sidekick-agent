@@ -275,6 +275,43 @@ def test_concurrent_duplicate_signal_identity_coalesces_to_one_pending_dispatch(
     assert len(dispatched) == 1
 
 
+def test_restart_and_concurrent_pulses_dispatch_one_pending_signal_once(
+    tmp_path: Path,
+) -> None:
+    """A persisted event may survive restart, but never become duplicate work."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    first_supervisor = _supervisor(tmp_path, records)
+    second_supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    first_runtime = _runtime(first_supervisor, dispatched)
+    second_runtime = _runtime(second_supervisor, dispatched)
+
+    assert first_runtime.ingest_signal(
+        "alpha", source="ci", event_id="restart-build-1", reason_code="ci_change"
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        outcomes = list(
+            workers.map(
+                lambda runtime: runtime.pulse(now_epoch=0.0),
+                (first_runtime, second_runtime),
+            )
+        )
+
+    started = [outcome for batch in outcomes for outcome in batch if outcome.status == "started"]
+    assert len(started) == 1
+    run_id = started[0].run_id
+    assert run_id is not None
+    assert dispatched == [(records["alpha"].canonical_root, run_id)]
+
+    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(run_id, "completed")
+    assert first_supervisor.record_completion(run_id) or second_supervisor.record_completion(run_id)
+
+    restarted_runtime = _runtime(_supervisor(tmp_path, records), dispatched)
+    assert restarted_runtime.pulse(now_epoch=1.0) == ()
+    assert dispatched == [(records["alpha"].canonical_root, run_id)]
+
+
 def test_periodic_check_waits_fifteen_minutes_but_pending_event_bypasses_floor(
     tmp_path: Path,
 ) -> None:
@@ -318,13 +355,32 @@ def test_ineligible_spaces_never_create_a_child_dispatch_or_consult_global_nova_
         "is_yolo_enabled",
         lambda _self: (_ for _ in ()).throw(AssertionError("global YOLO consulted")),
     )
-    assert runtime.ingest_signal(
+    assert not runtime.ingest_signal(
         "alpha", source="git", event_id="commit-1", reason_code="git_change"
     )
 
     outcomes = runtime.pulse(now_epoch=0.0)
 
-    assert [outcome.status for outcome in outcomes] == ["ineligible"]
+    assert outcomes == ()
+    assert dispatched == []
+    assert not (tmp_path / "alpha" / ".swarm").exists()
+
+
+def test_ineligible_signal_is_not_replayed_after_later_yolo_enrollment(
+    tmp_path: Path,
+) -> None:
+    """Catches an old non-YOLO event becoming a new autonomous trigger later."""
+    records = {"alpha": _governance(tmp_path / "alpha", yolo=False, enrolled=False)}
+    supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    assert not runtime.ingest_signal(
+        "alpha", source="ci", event_id="build-before-enrollment", reason_code="ci_change"
+    )
+    records["alpha"] = replace(records["alpha"], yolo=True, enrolled=True)
+
+    assert runtime.pulse(now_epoch=0.0) == ()
     assert dispatched == []
     assert not (tmp_path / "alpha" / ".swarm").exists()
 

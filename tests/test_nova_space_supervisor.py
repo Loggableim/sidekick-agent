@@ -195,7 +195,7 @@ def test_human_cancellation_audits_actor_and_releases_the_global_slot_once(tmp_p
     assert _admit(supervisor, "beta").status == "created"
 
 
-def test_human_abandonment_holds_the_slot_until_explicit_dashboard_cancellation(tmp_path: Path) -> None:
+def test_human_abandonment_releases_the_slot_without_silent_resume(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
         "beta": _governance(tmp_path / "beta"),
@@ -233,10 +233,11 @@ def test_human_abandonment_holds_the_slot_until_explicit_dashboard_cancellation(
         )
     )
     assert stale_outcome.continue_completion is False
-    assert _admit(supervisor, "beta").reason == "active_limit"
+    next_admission = _admit(supervisor, "beta")
+    assert next_admission.status == "created"
+    assert next_admission.run_id != admission.run_id
     assert supervisor.record_completion(admission.run_id) is False
-    assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
-    assert _admit(supervisor, "beta").status == "created"
+    assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is False
 
 
 def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path) -> None:
@@ -1302,16 +1303,7 @@ def test_human_terminalization_retries_after_child_store_write_failure(
     assert transition(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
     run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
     assert run is not None and run.status == final_state
-    assert supervisor.list_active_admissions() == (
-        [] if final_state == "cancelled" else [
-            {
-                "admission_id": admission.admission_id,
-                "target_space_id": records["alpha"].space_id,
-                "run_id": admission.run_id,
-                "state": "abandoned",
-            }
-        ]
-    )
+    assert supervisor.list_active_admissions() == []
 
 
 def test_ledger_read_connection_cannot_recreate_a_deleted_database(tmp_path: Path) -> None:

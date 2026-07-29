@@ -34,7 +34,6 @@ _OCCUPIED_STATES = frozenset(
         "paused",
         "cancelling",
         "abandoning",
-        "abandoned",
     }
 )
 _EXECUTABLE_STATES = frozenset({"active"})
@@ -42,6 +41,9 @@ _ALLOWED_ACTION_FAMILIES = (
     "target_local_worktree",
     "github_publication",
     "target_deployment_worker",
+)
+_SPACE_CHANGE_PAUSE_REASONS = frozenset(
+    {"governance_changed", "root_changed", "space_deleted"}
 )
 _SUPERVISOR_ADMISSION_COLUMNS = frozenset(
     {
@@ -72,7 +74,7 @@ _SUPERVISOR_REQUIRED_INDEX_SQL = {
     "idx_supervisor_one_active": (
         "createuniqueindexidx_supervisor_one_active"
         "onsupervisor_admissions((1))wherestatein("
-        "'provisioning','active','paused','cancelling','abandoning','abandoned')"
+        "'provisioning','active','paused','cancelling','abandoning')"
     ),
     "idx_supervisor_admissions_target_updated": (
         "createindexidx_supervisor_admissions_target_updated"
@@ -358,7 +360,7 @@ class ManagedSpaceSupervisor:
                ON supervisor_admissions((1))
                WHERE state IN (
                    'provisioning', 'active', 'paused',
-                   'cancelling', 'abandoning', 'abandoned'
+                   'cancelling', 'abandoning'
                )"""
         )
         connection.execute(
@@ -423,7 +425,7 @@ class ManagedSpaceSupervisor:
                 """SELECT 1 FROM supervisor_admissions
                    WHERE state IN (
                        'provisioning', 'active', 'paused',
-                       'cancelling', 'abandoning', 'abandoned'
+                       'cancelling', 'abandoning'
                    )"""
             ).fetchone()
             if active is not None:
@@ -525,7 +527,7 @@ class ManagedSpaceSupervisor:
                    FROM supervisor_admissions
                    WHERE state IN (
                        'provisioning', 'active', 'paused',
-                       'cancelling', 'abandoning', 'abandoned'
+                       'cancelling', 'abandoning'
                    )"""
             ).fetchall()
         return [dict(row) for row in rows]
@@ -779,6 +781,94 @@ class ManagedSpaceSupervisor:
     def current_governance(self, target_key: str) -> ManagedSpaceGovernance | None:
         """Resolve target governance read-only for the host supervision pulse."""
         return _resolved_governance(self._governance_resolver, _target_key(target_key))
+
+    def pause_for_space_change(
+        self,
+        target_key: str,
+        *,
+        reason: str,
+        actor: str | None = None,
+    ) -> bool:
+        """Fail closed before a managed Space's governance/root is changed.
+
+        This host-only lifecycle transition always obtains the target root and
+        child run from the durable ledger.  It intentionally does not resolve
+        current governance: the caller is about to replace or remove that
+        evidence, so a successful fresh lookup would be the wrong authority.
+        ``False`` means the caller must not persist the Space change.
+        """
+        try:
+            target = _target_key(target_key)
+        except (TypeError, ValueError):
+            return False
+        if reason not in _SPACE_CHANGE_PAUSE_REASONS:
+            return False
+        if actor is not None:
+            try:
+                _dashboard_actor(actor)
+            except PermissionError:
+                return False
+        if not self._ledger_path.exists():
+            return True
+        try:
+            with self._read_connection() as connection:
+                record = connection.execute(
+                    """SELECT * FROM supervisor_admissions
+                       WHERE target_key = ?
+                       ORDER BY updated_at DESC
+                       LIMIT 1""",
+                    (target,),
+                ).fetchone()
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            return False
+        if record is None:
+            return True
+        terminal_states = {"completed", "cancelled", "abandoned"}
+        if record["state"] in terminal_states:
+            return True
+        if record["state"] == "paused":
+            # A prior fail-closed ledger transition may have raced its child
+            # store write.  Do not use the stale ledger label alone as proof
+            # that the child is stopped before replacing its Space authority.
+            return self._pause_existing_child(record, reason)
+        if record["state"] in {"cancelling", "abandoning"}:
+            return False
+        if record["state"] not in {"provisioning", "active"}:
+            return False
+        try:
+            with self._immediate_connection() as connection:
+                current = connection.execute(
+                    "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
+                    (record["admission_id"],),
+                ).fetchone()
+                if current is None:
+                    return True
+                if current["state"] in terminal_states:
+                    return True
+                if current["state"] == "paused":
+                    # A concurrent pause changed the generation after our
+                    # read snapshot.  Do not touch a child store while the
+                    # ledger transaction is held; reject this lifecycle
+                    # write so its caller retries from a fresh snapshot.
+                    return False
+                if (
+                    current["target_key"] != target
+                    or not _same_record_generation(current, record)
+                    or current["state"] not in {"provisioning", "active"}
+                ):
+                    return False
+                changed = self._pause_record_in_connection(
+                    connection,
+                    current,
+                    reason,
+                    actor=actor,
+                )
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            return False
+        if not changed:
+            return False
+        self._remove_binding_for_record(record)
+        return self._pause_existing_child(record, reason)
 
     def _ledger_schema_ready_read_only(self) -> bool:
         """Check core ledger readiness without opening a write-capable database."""
@@ -1172,15 +1262,25 @@ class ManagedSpaceSupervisor:
         self,
         record: Mapping[str, Any],
         reason: str,
-    ) -> None:
-        """Write only after a read-only probe confirms the child already exists."""
+    ) -> bool:
+        """Stop and confirm the ledger-rooted child without creating a store.
+
+        ``False`` deliberately leaves the ledger paused but tells lifecycle
+        callers not to replace/delete the Space evidence while a running child
+        cannot be proved stopped.  Other fail-closed paths may ignore the
+        result because their only safe action is the ledger pause itself.
+        """
         try:
             reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
             run = reader.get_run(record["run_id"])
         except (OSError, RuntimeError, ValueError, sqlite3.Error):
-            return
-        if run is None or run.status in {"completed", "cancelled", "abandoned"}:
-            return
+            return record["state"] == "provisioning"
+        if run is None:
+            return record["state"] == "provisioning"
+        if run.status in {"completed", "cancelled", "abandoned"}:
+            return True
+        if run.status not in {"running", "paused"}:
+            return False
         try:
             store = self._child_store_factory(Path(record["canonical_root"]))
             if run.status == "running":
@@ -1192,7 +1292,21 @@ class ManagedSpaceSupervisor:
                 idempotency_key="supervisor-pause:" + reason,
             )
         except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+            # A status write can succeed before the optional child event
+            # append fails.  Re-open below instead of trusting the exception.
             pass
+        try:
+            confirmed = ProjectSwarmStore.open_read_only(
+                Path(record["canonical_root"])
+            ).get_run(record["run_id"])
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            return False
+        return confirmed is not None and confirmed.status in {
+            "paused",
+            "completed",
+            "cancelled",
+            "abandoned",
+        }
 
     def record_completion(self, run_id: str) -> bool:
         with self._bindings_lock:
@@ -1338,7 +1452,7 @@ class ManagedSpaceSupervisor:
                     )
                 return cursor.rowcount == 1
             if record["state"] != "cancelling":
-                if record["state"] not in {"active", "paused", "abandoned"}:
+                if record["state"] not in {"active", "paused"}:
                     return False
                 cursor = connection.execute(
                     """UPDATE supervisor_admissions
@@ -2022,7 +2136,12 @@ def _resolved_governance(
             revision=result.revision,
             policy_identity=result.policy_identity,
         )
-    except (OSError, TypeError, ValueError):
+    except Exception:
+        # Governance comes from independently parsed Space/audit evidence.
+        # Any malformed or unavailable resolver result must reject admission
+        # without propagating a partially trusted configuration into a host
+        # execution path.  Do not catch BaseException: shutdown/interrupt
+        # semantics remain owned by the host process.
         return None
 
 

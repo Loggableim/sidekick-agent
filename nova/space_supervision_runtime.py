@@ -113,6 +113,17 @@ class NovaSpaceSupervisionRuntime:
         normalized_source = _source(source)
         normalized_event_id = _event_id(event_id)
         normalized_reason = _reason_code(reason_code)
+        governance = self._supervisor.current_governance(target)
+        if (
+            governance is None
+            or governance.yolo is not True
+            or governance.enrolled is not True
+        ):
+            # A signal that arrived before explicit enrollment must never be
+            # retained and turned into an autonomous run if a human enables
+            # the Space later.  The caller can submit a fresh bounded signal
+            # after enrollment; no model or ledger write happens here.
+            return False
         signal_digest = _digest(
             {
                 "target_key": target,

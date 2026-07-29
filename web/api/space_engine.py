@@ -816,6 +816,13 @@ def _update_nova_management(
             raise SpaceGovernanceError("confirmation root fingerprint does not match")
 
     current = _normalized_nova_management(config.get("nova_management"))
+    if _managed_space_requires_pause(config):
+        _pause_managed_space_before_change(
+            space,
+            config,
+            reason="governance_changed",
+            actor=actor,
+        )
     next_record: dict[str, bool | int] = {
         "yolo": yolo,
         "enrolled": enrolled,
@@ -843,6 +850,74 @@ def _update_nova_management(
     config["nova_management_audit"] = list(config.get("nova_management_audit") or []) + [event]
     space.save_config(config, mint_space_id=True)
     return next_record
+
+
+def update_space_config(space: Space, patch: dict) -> dict:
+    """Apply an ordinary config patch without racing governance evidence."""
+    if not isinstance(patch, dict):
+        raise SpaceGovernanceError("Space config patch must be an object")
+    with space_config_lock(space):
+        config = space.load_config()
+        config["nova_management_audit"] = _effective_audit_events(space, config)
+        if (
+            "project_dir" in patch
+            and patch.get("project_dir") != config.get("project_dir")
+            and _managed_space_requires_pause(config)
+        ):
+            _pause_managed_space_before_change(
+                space,
+                config,
+                reason="root_changed",
+            )
+        config.update(patch)
+        space.save_config(config)
+        return space.load_config()
+
+
+def _managed_space_requires_pause(config: dict) -> bool:
+    """Return whether a Space write can invalidate managed-run authority."""
+    if config.get("_nova_management_malformed"):
+        return True
+    management = _strict_nova_management_record(config.get("nova_management"))
+    return bool(
+        management is not None
+        and management["yolo"] is True
+        and management["enrolled"] is True
+    )
+
+
+def _pause_managed_space_before_change(
+    space: Space,
+    config: dict,
+    *,
+    reason: str,
+    actor: str | None = None,
+) -> None:
+    """Pause the ledger-owned child before invalidating Space authority.
+
+    This dynamic host import keeps ordinary Space reads/writes independent of
+    Nova.  A missing or unreadable ledger is handled fail-closed by the
+    supervisor method, so a managed root/governance change never races an
+    executing child.
+    """
+    del config
+    try:
+        from nova.space_supervisor import get_production_managed_space_supervisor
+
+        paused = get_production_managed_space_supervisor().pause_for_space_change(
+            space.slug,
+            reason=reason,
+            actor=actor,
+        )
+    except Exception:
+        # Nova is optional for ordinary Spaces, but a managed Space must not
+        # downgrade an unavailable host authority into an unchecked write.
+        # Preserve process-control exceptions by not catching BaseException.
+        paused = False
+    if paused is not True:
+        raise SpaceGovernanceError(
+            "managed Space supervision could not be paused before this change"
+        )
 
 
 def list_nova_management_audit(space: Space) -> list[dict]:
@@ -1235,6 +1310,19 @@ def delete_space(slug: str) -> bool:
     if slug in PROTECTED_SPACE_SLUGS:
         logger.warning("refusing to delete protected default space %s", slug)
         return False
+    existing = get_existing_space_read_only(slug)
+    if existing is not None:
+        try:
+            config = existing.load_config()
+            if _managed_space_requires_pause(config):
+                _pause_managed_space_before_change(
+                    existing,
+                    config,
+                    reason="space_deleted",
+                )
+        except SpaceGovernanceError:
+            logger.error("refusing to delete managed Space %s before safe pause", slug)
+            return False
     candidates = []
     for root in (_spaces_root(), _old_root()):
         path = root / slug
