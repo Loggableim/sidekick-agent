@@ -388,6 +388,7 @@ class SwarmEngine:
             decision=outcome.decision,
             evidence=outcome.evidence,
             checkpoint=boundary_checkpoint,
+            can_wait_for_resume=checkpoint is not None,
         )
         if pre_completion_pause is not None:
             return self._pause_summary(
@@ -467,6 +468,7 @@ class SwarmEngine:
         decision: str,
         evidence: Mapping[str, list[Any]],
         checkpoint: Callable[[], None] | None,
+        can_wait_for_resume: bool,
     ) -> WorkflowPaused | None:
         """Run a host-neutral durable completion gate, when the run requires it."""
         required_hook_id = self.required_pre_completion_hook_id
@@ -517,7 +519,7 @@ class SwarmEngine:
                 raise KeyError(f"Unknown Swarm run: {run.run_id}")
             if active_run.status == "running":
                 break
-            if active_run.status == "paused" and checkpoint is not None:
+            if active_run.status == "paused" and can_wait_for_resume:
                 # A cooperative host may resume while waiting.  Re-enter the
                 # required hook gate rather than letting the terminal
                 # transition complete after a pause/resume race.

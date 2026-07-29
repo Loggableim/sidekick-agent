@@ -478,7 +478,17 @@ class SidekickSwarmService:
         return run
 
     def resume(self, project_root: Path, run_id: str) -> SwarmRun:
-        ProjectSwarmStore.open_read_only(project_root)
+        project_root = Path(project_root).resolve()
+        reader = ProjectSwarmStore.open_read_only(project_root)
+        current = reader.get_run(run_id)
+        if current is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        options = self._resolve_execution_options(project_root, current)
+        if options.blocked_reason is not None:
+            raise RuntimeError(
+                "Swarm resume blocked: "
+                + _bounded_execution_options_reason(options.blocked_reason)
+            )
         store = ProjectSwarmStore(project_root)
         run = store.resume_run(run_id)
         store.append_event(run_id, "run.resumed_by_human", {})

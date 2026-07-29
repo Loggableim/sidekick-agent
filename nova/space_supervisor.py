@@ -37,7 +37,6 @@ _OCCUPIED_STATES = frozenset(
     }
 )
 _EXECUTABLE_STATES = frozenset({"active"})
-_MANAGED_NAMESPACE = "nova-space-supervisor"
 _ALLOWED_ACTION_FAMILIES = (
     "target_local_worktree",
     "github_publication",
@@ -401,7 +400,8 @@ class ManagedSpaceSupervisor:
         validates the immutable ledger and child diagnostic contract instead.
         """
         records = connection.execute(
-            "SELECT * FROM supervisor_admissions WHERE state = 'active'"
+            """SELECT * FROM supervisor_admissions
+               WHERE state IN ('active', 'paused')"""
         ).fetchall()
         for record in records:
             try:
@@ -416,11 +416,12 @@ class ManagedSpaceSupervisor:
                            attachment_generation = attachment_generation + 1,
                            record_version = record_version + 1,
                            updated_at = ?
-                       WHERE admission_id = ? AND state = 'active'
-                         AND attachment_generation = ? AND record_version = ?""",
+                       WHERE admission_id = ? AND state = ?
+                          AND attachment_generation = ? AND record_version = ?""",
                     (
                         _timestamp(),
                         record["admission_id"],
+                        record["state"],
                         record["attachment_generation"],
                         record["record_version"],
                     ),
@@ -899,7 +900,6 @@ class ManagedSpaceSupervisor:
                 or record["state"] in {
                     "cancelled",
                     "completed",
-                    "cancelling",
                     "abandoning",
                 }
             ):
@@ -923,34 +923,35 @@ class ManagedSpaceSupervisor:
                 if cursor.rowcount:
                     _audit(connection, admission_id, "cancelled", actor, "cancelled_before_child_create", _timestamp())
                 return cursor.rowcount == 1
-            if record["state"] not in {"active", "paused", "abandoned"}:
-                return False
-            cursor = connection.execute(
-                """UPDATE supervisor_admissions
-                   SET state = 'cancelling', terminal_actor = ?,
-                       attachment_generation = attachment_generation + 1,
-                       record_version = record_version + 1, updated_at = ?
-                   WHERE admission_id = ? AND state = ?
-                     AND attachment_generation = ? AND record_version = ?""",
-                (
-                    actor,
-                    _timestamp(),
+            if record["state"] != "cancelling":
+                if record["state"] not in {"active", "paused", "abandoned"}:
+                    return False
+                cursor = connection.execute(
+                    """UPDATE supervisor_admissions
+                       SET state = 'cancelling', terminal_actor = ?,
+                           attachment_generation = attachment_generation + 1,
+                           record_version = record_version + 1, updated_at = ?
+                       WHERE admission_id = ? AND state = ?
+                         AND attachment_generation = ? AND record_version = ?""",
+                    (
+                        actor,
+                        _timestamp(),
+                        admission_id,
+                        record["state"],
+                        record["attachment_generation"],
+                        record["record_version"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    return False
+                _audit(
+                    connection,
                     admission_id,
-                    record["state"],
-                    record["attachment_generation"],
-                    record["record_version"],
-                ),
-            )
-            if cursor.rowcount != 1:
-                return False
-            _audit(
-                connection,
-                admission_id,
-                "cancelling",
-                actor,
-                "cancel_requested",
-                _timestamp(),
-            )
+                    "cancelling",
+                    actor,
+                    "cancel_requested",
+                    _timestamp(),
+                )
         self._remove_binding_for_record(record)
         child = self._existing_child(record)
         if child is not None and child.status == "completed":
@@ -995,7 +996,6 @@ class ManagedSpaceSupervisor:
                     "completed",
                     "abandoned",
                     "cancelling",
-                    "abandoning",
                 }
             ):
                 return False
@@ -1018,34 +1018,35 @@ class ManagedSpaceSupervisor:
                 if cursor.rowcount:
                     _audit(connection, admission_id, "abandoned", actor, "abandoned_before_child_create", _timestamp())
                 return cursor.rowcount == 1
-            if record["state"] not in {"active", "paused"}:
-                return False
-            cursor = connection.execute(
-                """UPDATE supervisor_admissions
-                   SET state = 'abandoning', terminal_actor = ?,
-                       attachment_generation = attachment_generation + 1,
-                       record_version = record_version + 1, updated_at = ?
-                   WHERE admission_id = ? AND state = ?
-                     AND attachment_generation = ? AND record_version = ?""",
-                (
-                    actor,
-                    _timestamp(),
+            if record["state"] != "abandoning":
+                if record["state"] not in {"active", "paused"}:
+                    return False
+                cursor = connection.execute(
+                    """UPDATE supervisor_admissions
+                       SET state = 'abandoning', terminal_actor = ?,
+                           attachment_generation = attachment_generation + 1,
+                           record_version = record_version + 1, updated_at = ?
+                       WHERE admission_id = ? AND state = ?
+                         AND attachment_generation = ? AND record_version = ?""",
+                    (
+                        actor,
+                        _timestamp(),
+                        admission_id,
+                        record["state"],
+                        record["attachment_generation"],
+                        record["record_version"],
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    return False
+                _audit(
+                    connection,
                     admission_id,
-                    record["state"],
-                    record["attachment_generation"],
-                    record["record_version"],
-                ),
-            )
-            if cursor.rowcount != 1:
-                return False
-            _audit(
-                connection,
-                admission_id,
-                "abandoning",
-                actor,
-                "abandon_requested",
-                _timestamp(),
-            )
+                    "abandoning",
+                    actor,
+                    "abandon_requested",
+                    _timestamp(),
+                )
         self._remove_binding_for_record(record)
         child = self._existing_child(record)
         if child is not None and child.status == "completed":
@@ -1345,10 +1346,6 @@ class ManagedSpaceHostRouter:
         if status == "known":
             return self._supervisor.execution_options_for_run(project_root, run)
         if status in {"unreadable", "root_mismatch"}:
-            return SwarmExecutionOptions(
-                blocked_reason="supervisor_binding_unavailable"
-            )
-        if run.metadata.get("integration_namespace") == _MANAGED_NAMESPACE:
             return SwarmExecutionOptions(
                 blocked_reason="supervisor_binding_unavailable"
             )

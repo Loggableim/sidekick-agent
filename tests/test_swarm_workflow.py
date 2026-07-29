@@ -1494,6 +1494,55 @@ def test_final_human_pause_without_host_checkpoint_returns_instead_of_waiting(
     assert summary.pause_reason == "human_paused"
 
 
+def test_required_hook_guard_without_host_checkpoint_does_not_wait_for_resume(
+    tmp_path: Path,
+):
+    """Catches a guard-only hook boundary looping on a raced human pause."""
+    hook_calls: list[str] = []
+    guard_pause_calls = 0
+
+    class ContinuingHook:
+        hook_id = "guard-only-hook-v1"
+
+        def run(self, _context: PreCompletionContext) -> PreCompletionResult:
+            hook_calls.append("called")
+            return PreCompletionResult(True)
+
+    store = ProjectSwarmStore(tmp_path)
+    transport = WorkflowTransport()
+
+    def pause_at_hook_boundary(_root: Path, run) -> str | None:
+        nonlocal guard_pause_calls
+        if len(transport.requests) < 8:
+            return None
+        guard_pause_calls += 1
+        if guard_pause_calls > 1:
+            raise AssertionError("guard-only boundary cannot wait for resume")
+        store.set_run_status(run.run_id, "paused")
+        return None
+
+    engine = SwarmEngine(
+        transport,
+        pre_completion_hook=ContinuingHook(),
+        required_pre_completion_hook_id="guard-only-hook-v1",
+        execution_guard=pause_at_hook_boundary,
+    )
+    run = engine.start_run(
+        "respect a hook-boundary human pause",
+        tmp_path,
+        host_metadata={
+            "required_pre_completion_hook": "guard-only-hook-v1",
+        },
+    )
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    assert guard_pause_calls == 1
+    assert hook_calls == []
+    assert summary.status == "paused"
+    assert summary.pause_reason == "human_paused"
+
+
 def test_required_pre_completion_hook_fails_closed_when_unavailable(tmp_path: Path):
     """Catches a durable host requirement silently bypassing its completion gate."""
     transport = WorkflowTransport()
