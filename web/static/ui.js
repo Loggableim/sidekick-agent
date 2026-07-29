@@ -7302,6 +7302,10 @@ const _NOVA_CARD_BLOCKERS={
   supervisor_abandoned:'Run wartet auf menschliche Entscheidung',
   supervisor_abandoning:'Abbruch wird nachvollziehbar abgeschlossen',
 };
+const _NOVA_CARD_CHANGE_MARKERS={
+  change_detected:'Änderung erkannt.',
+  reference_unchanged:'Stand geprüft. Nix Neues.',
+};
 let _novaPresenceRequestId=0;
 let _novaPresenceLoading=null;
 let _novaPresenceLoadingRequestId=0;
@@ -7384,12 +7388,33 @@ function _renderNovaPresenceCard(payload){
       : `Ich bin ${state} und halte den Kontext zusammen.`;
   }
 
+  const rawMarkers=Array.isArray(payload&&payload.change_markers)?payload.change_markers:[];
+  const seenMarkerSpaces=Object.create(null);
+  const markerMetaBySpace=Object.create(null);
+  for(const item of rawMarkers.slice(0,12)){
+    const space=_novaCardSpace(item&&item.space);
+    if(!space||Object.prototype.hasOwnProperty.call(seenMarkerSpaces,space)) continue;
+    seenMarkerSpaces[space]=true;
+    const stateCode=String(item&&item.state_code||'').trim();
+    if(!Object.prototype.hasOwnProperty.call(_NOVA_CARD_CHANGE_MARKERS,stateCode)) continue;
+    const timestamp=stateCode==='reference_unchanged'
+      ? _novaCardTimestamp(item&&item.checked_at)
+      : '';
+    markerMetaBySpace[space]=_NOVA_CARD_CHANGE_MARKERS[stateCode]
+      +(timestamp?` · ${timestamp}`:'');
+  }
+
   const rawSpaces=Array.isArray(payload&&payload.managed_spaces)?payload.managed_spaces:[];
   const managed=[];
   for(const item of rawSpaces.slice(0,12)){
     const space=_novaCardSpace(item&&item.space);
     if(!space) continue;
-    managed.push({title:_novaCardSpaceLabel(space),meta:_novaCardState(item&&item.state,'idle')});
+    const stateMeta=_novaCardState(item&&item.state,'idle');
+    const markerMeta=markerMetaBySpace[space]||'';
+    managed.push({
+      title:_novaCardSpaceLabel(space),
+      meta:markerMeta?`${stateMeta} · ${markerMeta}`:stateMeta,
+    });
   }
   _novaCardList('novaManagedSpaces',managed,'Noch kein YOLO-Space ist eingeschrieben.');
 

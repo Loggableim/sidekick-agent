@@ -125,6 +125,17 @@ async function settle() {
   pending.shift()({
     state: 'thinking',
     focus: {kind: 'supervision', space: 'beta', state: 'active'},
+    managed_spaces: [
+      {space: 'beta', state: 'active'},
+      {space: 'alpha', state: 'idle'},
+      {space: 'gamma', state: 'paused'},
+    ],
+    change_markers: [
+      {space: 'beta', state_code: 'change_detected', checked_at: 'not-for-change'},
+      {space: 'alpha', state_code: 'reference_unchanged', checked_at: '2026-07-29T20:30:00+00:00'},
+      {space: 'gamma', state_code: '__proto__', checked_at: '2026-07-29T20:30:00+00:00'},
+      {space: 'alpha', state_code: 'change_detected', checked_at: null},
+    ],
   });
   await settle();
 
@@ -133,6 +144,21 @@ async function settle() {
   }
   if (elements.novaPresenceCard.hidden || !elements.genericEmptyStateContent.hidden) {
     throw new Error('Nova card visibility was not restored after the fresh read');
+  }
+  const managedRows = elements.novaManagedSpaces.children.map((item) =>
+    item.children.map((child) => child.textContent).join(' · ')
+  );
+  const beta = managedRows.find((row) => row.startsWith('Beta')) || '';
+  const alpha = managedRows.find((row) => row.startsWith('Alpha')) || '';
+  const gamma = managedRows.find((row) => row.startsWith('Gamma')) || '';
+  if (!beta.includes('Änderung erkannt.') || beta.includes('not-for-change')) {
+    throw new Error(`changed marker was not safely rendered for beta: ${beta}`);
+  }
+  if (!alpha.includes('Stand geprüft. Nix Neues.') || !alpha.includes('2026-07-29 20:30:00 UTC')) {
+    throw new Error(`unchanged marker/timestamp was not rendered for alpha: ${alpha}`);
+  }
+  if (gamma.includes('__proto__') || gamma.includes('Änderung erkannt.') || gamma.includes('Stand geprüft. Nix Neues.')) {
+    throw new Error(`unknown marker code leaked into gamma: ${gamma}`);
   }
 })().catch((error) => {
   console.error(error && error.stack || error);
