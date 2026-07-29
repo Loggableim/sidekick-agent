@@ -112,6 +112,8 @@ DEFAULT_NOVA_CHARACTER = (
     or "nova"
 )
 _GENERIC_DEFAULT_SOUL_MARKER = "Customize this SOUL.md to define your personality and behavior."
+_SPACE_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
+_SYSTEM_SPACE_LIFECYCLE_ACTOR = "system:space-lifecycle"
 
 
 def _normalize_space_slug(slug: str) -> str:
@@ -119,6 +121,11 @@ def _normalize_space_slug(slug: str) -> str:
     if value in DEFAULT_SPACE_ALIASES:
         return DEFAULT_SPACE_SLUG
     return value
+
+
+def _is_valid_space_slug(slug: str) -> bool:
+    """Return whether a normalized slug is safe to join below a Space root."""
+    return _SPACE_SLUG_RE.fullmatch(slug) is not None
 
 
 def _is_empty_configless_space_dir(path: Path) -> bool:
@@ -852,7 +859,12 @@ def _update_nova_management(
     return next_record
 
 
-def update_space_config(space: Space, patch: dict) -> dict:
+def update_space_config(
+    space: Space,
+    patch: dict,
+    *,
+    actor: str | None = _SYSTEM_SPACE_LIFECYCLE_ACTOR,
+) -> dict:
     """Apply an ordinary config patch without racing governance evidence."""
     if not isinstance(patch, dict):
         raise SpaceGovernanceError("Space config patch must be an object")
@@ -868,6 +880,7 @@ def update_space_config(space: Space, patch: dict) -> dict:
                 space,
                 config,
                 reason="root_changed",
+                actor=actor,
             )
         config.update(patch)
         space.save_config(config)
@@ -876,7 +889,14 @@ def update_space_config(space: Space, patch: dict) -> dict:
 
 def _managed_space_requires_pause(config: dict) -> bool:
     """Return whether a Space write can invalidate managed-run authority."""
-    if config.get("_nova_management_malformed"):
+    if any(
+        config.get(marker)
+        for marker in (
+            "_space_config_malformed",
+            "_nova_management_malformed",
+            "_nova_management_audit_malformed",
+        )
+    ):
         return True
     management = _strict_nova_management_record(config.get("nova_management"))
     return bool(
@@ -1304,9 +1324,16 @@ def create_space(
     return space
 
 
-def delete_space(slug: str) -> bool:
+def delete_space(
+    slug: str,
+    *,
+    actor: str | None = _SYSTEM_SPACE_LIFECYCLE_ACTOR,
+) -> bool:
     """Remove a space entirely. The fresh default and legacy default are protected."""
-    slug = slug.strip().lower()
+    slug = _normalize_space_slug(slug)
+    if not _is_valid_space_slug(slug):
+        logger.warning("refusing to delete invalid Space slug %r", slug)
+        return False
     if slug in PROTECTED_SPACE_SLUGS:
         logger.warning("refusing to delete protected default space %s", slug)
         return False
@@ -1319,13 +1346,25 @@ def delete_space(slug: str) -> bool:
                     existing,
                     config,
                     reason="space_deleted",
+                    actor=actor,
                 )
         except SpaceGovernanceError:
             logger.error("refusing to delete managed Space %s before safe pause", slug)
             return False
     candidates = []
     for root in (_spaces_root(), _old_root()):
-        path = root / slug
+        try:
+            resolved_root = root.resolve()
+            requested = resolved_root / slug
+            if requested.is_symlink() or (
+                hasattr(requested, "is_junction") and requested.is_junction()
+            ):
+                logger.warning("refusing to delete reparse-point Space %s", requested)
+                continue
+            path = requested.resolve()
+            path.relative_to(resolved_root)
+        except (OSError, RuntimeError, ValueError):
+            continue
         if path.is_dir() and path not in candidates:
             candidates.append(path)
     if not candidates:
@@ -1433,9 +1472,13 @@ def create_workspace(slug: str, name: str = "", color: str = "", **extra):
     return create_space(slug, name, color, **extra)
 
 
-def delete_workspace(slug: str) -> bool:
+def delete_workspace(
+    slug: str,
+    *,
+    actor: str | None = _SYSTEM_SPACE_LIFECYCLE_ACTOR,
+) -> bool:
     """Alias — delegates to delete_space()."""
-    return delete_space(slug)
+    return delete_space(slug, actor=actor)
 
 
 def set_active_workspace(slug_or_none: str | None) -> None:

@@ -120,6 +120,36 @@ def test_blocker_claim_is_durable_redacted_and_at_most_once(tmp_path: Path) -> N
     assert row == ("blocker", "sent")
 
 
+def test_fixed_templates_ignore_arbitrary_caller_display_names(tmp_path: Path) -> None:
+    """Caller/model text must not become an outbound Telegram message field."""
+    sender = _Sender()
+    notifier = _notifier(tmp_path, sender)
+    untrusted_label = "model output: violet-harbor-493-send-this-verbatim"
+
+    assert (
+        notifier.send_blocker(
+            space_id="space-alpha",
+            display_name=untrusted_label,
+            run_id="run-1",
+            blocker_code="dispatch_failed",
+        )
+        == "sent"
+    )
+    assert (
+        notifier.send_daily_digest(
+            space_id="space-alpha",
+            display_name=untrusted_label,
+            status_counts={"completed": 1},
+            utc_date="2026-07-29",
+        )
+        == "sent"
+    )
+
+    assert len(sender.messages) == 2
+    assert all(untrusted_label not in text for _chat_id, text in sender.messages)
+    assert all("Space " in text for _chat_id, text in sender.messages)
+
+
 def test_daily_digest_allows_only_fixed_statuses_and_claims_once_per_utc_day(
     tmp_path: Path,
 ) -> None:

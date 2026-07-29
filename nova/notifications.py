@@ -36,10 +36,6 @@ _BLOCKER_CODES = frozenset(
 _DIGEST_STATUSES = frozenset({"completed", "blocked", "paused", "active"})
 _MAX_MESSAGE_LENGTH = 280
 _NOTIFICATION_CLAIM_SCHEMA_OBJECTS = ("nova_notification_claims",)
-_DISPLAY_NAME_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b([a-z0-9_-]*(?:api[_-]?key|token|secret|password|credential|authorization)[a-z0-9_-]*\s*=\s*)[^\s,;]+"
-)
-_DISPLAY_NAME_URL = re.compile(r"(?i)\b(?:https?|wss?)://[^\s<>()]+")
 
 
 class PrivateTelegramSender(Protocol):
@@ -96,6 +92,9 @@ class NovaTelegramNotifications:
         blocker_code: str,
     ) -> str:
         """Send one fixed blocker template, at most once for its durable key."""
+        # Callers may retain a UI label for compatibility, but no caller/model
+        # text is allowed to become part of an external notification.
+        del display_name
         space = _opaque_id(space_id, "space id")
         run = _opaque_id(run_id, "run id")
         if blocker_code not in _BLOCKER_CODES:
@@ -110,7 +109,7 @@ class NovaTelegramNotifications:
         )
         if not self._claim("blocker", claim_digest):
             return "already_claimed"
-        message = _render_blocker(_display_name(display_name), run, blocker_code)
+        message = _render_blocker(_space_label(space), run, blocker_code)
         return self._send_claimed(claim_digest, message)
 
     def send_daily_digest(
@@ -122,6 +121,9 @@ class NovaTelegramNotifications:
         utc_date: str,
     ) -> str:
         """Send one UTC-dated fixed status digest, at most once locally."""
+        # See ``send_blocker``: only a deterministic opaque Space label is
+        # permitted in the fixed external template.
+        del display_name
         space = _opaque_id(space_id, "space id")
         day = _utc_date(utc_date)
         counts = _status_counts(status_counts)
@@ -130,7 +132,7 @@ class NovaTelegramNotifications:
         )
         if not self._claim("daily_digest", claim_digest):
             return "already_claimed"
-        message = _render_daily_digest(_display_name(display_name), counts)
+        message = _render_daily_digest(_space_label(space), counts)
         return self._send_claimed(claim_digest, message)
 
     def _claim(self, kind: str, claim_digest: str) -> bool:
@@ -209,21 +211,9 @@ def _private_chat_id(value: object) -> int:
     return value
 
 
-def _display_name(value: object) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError("Nova notification display name is required")
-    # The name is the only human-facing field. Redact before bounding and keep
-    # it one line so it cannot escape the fixed template shape.  The shared
-    # redactor intentionally avoids broad lowercase ``key=value`` matching to
-    # reduce logging false positives; Telegram display labels are a narrower
-    # boundary, so mask those values and URLs before invoking it.
-    boundary_redacted = _DISPLAY_NAME_SECRET_ASSIGNMENT.sub(r"\1[redacted]", value)
-    boundary_redacted = _DISPLAY_NAME_URL.sub("[redacted-url]", boundary_redacted)
-    redacted = redact_sensitive_text(boundary_redacted, force=True)
-    normalized = " ".join(redacted.split())[:80]
-    if not normalized:
-        raise ValueError("Nova notification display name is invalid")
-    return normalized
+def _space_label(space_id: str) -> str:
+    """Render an opaque deterministic Space label without exposing caller text."""
+    return "Space " + sha256(space_id.encode("utf-8")).hexdigest()[:8]
 
 
 def _utc_date(value: object) -> str:

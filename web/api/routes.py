@@ -6417,8 +6417,11 @@ def handle_post(handler, parsed) -> bool:
         slug = (body.get("slug") or "").strip().lower()
         if not slug:
             return bad(handler, "slug is required")
+        if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", slug) is None:
+            return bad(handler, "Invalid slug. Use a-z, 0-9, _, -")
         from web.api.space_engine import delete_workspace
-        if delete_workspace(slug):
+        actor = getattr(handler, "dashboard_host_actor", None)
+        if delete_workspace(slug, actor=actor):
             return j(handler, {"deleted": True})
         return bad(handler, "Space not found or protected", status=404)
 
@@ -6426,6 +6429,8 @@ def handle_post(handler, parsed) -> bool:
         slug = (body.get("slug") or "").strip().lower()
         if not slug:
             return bad(handler, "slug is required")
+        if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", slug) is None:
+            return bad(handler, "Invalid slug. Use a-z, 0-9, _, -")
         if "nova_management" in body or "nova_management_audit" in body or "space_id" in body:
             return bad(
                 handler,
@@ -6442,15 +6447,14 @@ def handle_post(handler, parsed) -> bool:
             if key in body:
                 patch_data[key] = body[key]
         if patch_data:
-            current = ws.load_config()
-            if current.get("_nova_management_audit_malformed"):
-                return bad(
-                    handler,
-                    "Nova management audit is malformed and cannot be rewritten by generic config",
-                    status=409,
+            try:
+                update_space_config(
+                    ws,
+                    patch_data,
+                    actor=getattr(handler, "dashboard_host_actor", None),
                 )
-            current.update(patch_data)
-            ws.save_config(current)
+            except SpaceGovernanceError as exc:
+                return bad(handler, str(exc), status=409)
         return j(handler, {"config": ws.load_config()})
 
     # â”€â”€ Space Agent API (POST) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

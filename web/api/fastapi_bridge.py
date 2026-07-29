@@ -43,6 +43,14 @@ def _is_swarm_human_actor_post(method: str, path: str) -> bool:
     )
 
 
+def _requires_dashboard_actor_post(method: str, path: str) -> bool:
+    """Return whether a legacy write needs the trusted dashboard principal."""
+    return _is_swarm_human_actor_post(method, path) or (
+        method.upper() == "POST"
+        and path in {"/api/space/config", "/api/space/delete"}
+    )
+
+
 def _prepare_webui_runtime() -> None:
     """Initialize file-backed route state for the current Sidekick home.
 
@@ -201,12 +209,14 @@ class _RouteExecution:
 
             if not check_auth(self.handler, parsed, read_only=pure_swarm_get):
                 return
-            if _is_swarm_human_actor_post(self.handler.command, parsed.path):
+            if _requires_dashboard_actor_post(self.handler.command, parsed.path):
                 from cli.web_server import dashboard_session_principal
 
                 actor_id = dashboard_session_principal(self.request)
                 if actor_id is not None:
-                    self.handler.swarm_host_actor = actor_id
+                    self.handler.dashboard_host_actor = actor_id
+                    if _is_swarm_human_actor_post(self.handler.command, parsed.path):
+                        self.handler.swarm_host_actor = actor_id
             route = route_for_method.get(self.handler.command)
             if route is None:
                 j(self.handler, {"error": "method not allowed"}, status=405)

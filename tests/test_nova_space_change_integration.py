@@ -90,6 +90,18 @@ def _pause_reasons(supervisor: ManagedSpaceSupervisor, admission_id: str) -> lis
     return [str(row["reason"]) for row in rows if row["reason"] is not None]
 
 
+def _pause_actors(supervisor: ManagedSpaceSupervisor, admission_id: str) -> list[str]:
+    """Return the durable actor attached to each lifecycle pause."""
+    with supervisor._read_connection() as connection:
+        rows = connection.execute(
+            """SELECT actor FROM supervisor_audit
+               WHERE admission_id = ? AND event_type = 'paused'
+               ORDER BY sequence""",
+            (admission_id,),
+        ).fetchall()
+    return [str(row["actor"]) for row in rows if row["actor"] is not None]
+
+
 def test_confirmed_management_revocation_pauses_the_active_child_before_returning(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -134,6 +146,9 @@ def test_project_root_change_pauses_the_active_child_before_persisting_new_root(
     assert changed["project_dir"] == str(replacement_root)
     assert run is not None and run.status == "paused"
     assert "root_changed" in _pause_reasons(supervisor, admission.admission_id)
+    assert _pause_actors(supervisor, admission.admission_id) == [
+        "system:space-lifecycle"
+    ]
 
 
 def test_root_change_fails_closed_when_the_child_pause_cannot_be_confirmed(
@@ -174,6 +189,46 @@ def test_deleting_an_enrolled_space_pauses_its_active_child_before_removing_spac
     space_engine, space, project_root, _records, supervisor, admission = _active_managed_space(
         monkeypatch, tmp_path
     )
+
+    assert space_engine.delete_space(space.slug) is True
+
+    run = ProjectSwarmStore(project_root).get_run(admission.run_id)
+    assert not space.root.exists()
+    assert run is not None and run.status == "paused"
+    assert "space_deleted" in _pause_reasons(supervisor, admission.admission_id)
+    assert _pause_actors(supervisor, admission.admission_id) == [
+        "system:space-lifecycle"
+    ]
+
+
+def test_delete_rejects_path_traversal_before_resolving_space_directories(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A raw delete slug must never make ``shutil.rmtree`` leave a Space root."""
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    marker = victim / "must-survive.txt"
+    marker.write_text("outside the Space root", encoding="utf-8")
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "legacy-spaces")
+
+    assert space_engine.delete_space("../victim") is False
+    assert marker.read_text(encoding="utf-8") == "outside the Space root"
+
+
+def test_malformed_space_config_still_pauses_active_child_before_delete(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Corrupt YAML cannot bypass the ledger-owned deletion pause gate."""
+    space_engine, space, project_root, _records, supervisor, admission = _active_managed_space(
+        monkeypatch, tmp_path
+    )
+    space.config_path.write_text("{not valid", encoding="utf-8")
 
     assert space_engine.delete_space(space.slug) is True
 

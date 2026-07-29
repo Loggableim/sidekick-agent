@@ -25,6 +25,7 @@ from swarm_core.types import SwarmRun
 
 DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}\Z")
 _INTENT_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+SYSTEM_SPACE_LIFECYCLE_ACTOR = "system:space-lifecycle"
 _CAPABILITY_TOKEN = object()
 _ACTION_CONTEXT_TOKEN = object()
 _OCCUPIED_STATES = frozenset(
@@ -803,11 +804,14 @@ class ManagedSpaceSupervisor:
             return False
         if reason not in _SPACE_CHANGE_PAUSE_REASONS:
             return False
-        if actor is not None:
+        if actor == SYSTEM_SPACE_LIFECYCLE_ACTOR:
+            lifecycle_actor = actor
+        else:
             try:
                 _dashboard_actor(actor)
             except PermissionError:
                 return False
+            lifecycle_actor = actor
         if not self._ledger_path.exists():
             return True
         try:
@@ -861,7 +865,7 @@ class ManagedSpaceSupervisor:
                     connection,
                     current,
                     reason,
-                    actor=actor,
+                    actor=lifecycle_actor,
                 )
         except (OSError, RuntimeError, ValueError, sqlite3.Error):
             return False
