@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
-from typing import ClassVar, Protocol, TypeAlias
+import subprocess
+from typing import Callable, ClassVar, Protocol, TypeAlias
 
 from nova.space_supervisor import (
     ManagedSpaceActionContext,
@@ -13,12 +16,16 @@ from nova.space_supervisor import (
     ManagedSpaceSupervisor,
 )
 from swarm_core.policy import PolicyGate, PolicyStatus
-from swarm_core.types import ActionProposal, thaw_json_value
+from swarm_core.types import ActionProposal, SwarmRun, thaw_json_value
 
 
 _SHA256_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_SAFE_SELECTOR = re.compile(r"[A-Za-z0-9_./:\\\-\[\]]{1,256}\Z")
+_SAFE_TEST_NODE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[A-Za-z0-9_.:-]{1,128}\])?\Z")
 _SAFE_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
+_CURRENT_SECRET_TOKEN = re.compile(
+    r"(?:github_pat_|glpat-|xox[a-z]-)[A-Za-z0-9_-]{8,}",
+    re.IGNORECASE,
+)
 _MANAGED_MODEL_CALL_BUDGET = 128
 _FORBIDDEN_REF_PARTS = ("..", "@{", "//", ".lock")
 
@@ -81,7 +88,8 @@ class LocalFormatRequest:
 
 @dataclass(frozen=True, slots=True)
 class LocalTestRequest:
-    selector: str
+    path: str
+    nodes: tuple[str, ...]
     operation: ClassVar[str] = "local.test"
 
 
@@ -167,6 +175,85 @@ class TargetWorktreeAttestor(Protocol):
         worktree_root: Path,
         run_id: str,
     ) -> WorktreeAttestation | None: ...
+
+
+RunTargetResolver = Callable[[Path, str], Path | None]
+
+
+class GitWorktreeAttestor:
+    """Read-only Git attestation for one host-bound linked worktree."""
+
+    def __init__(self, *, run_target_resolver: RunTargetResolver) -> None:
+        if not callable(run_target_resolver):
+            raise TypeError("Git worktree attestor requires a run target resolver")
+        self._resolve_run_target = run_target_resolver
+
+    def attest(
+        self,
+        source_root: Path,
+        worktree_root: Path,
+        run_id: str,
+    ) -> WorktreeAttestation | None:
+        if not isinstance(run_id, str) or not run_id.strip():
+            return None
+        source_input = Path(source_root)
+        target_input = Path(worktree_root)
+        try:
+            source = source_input.resolve(strict=True)
+            target = target_input.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+        # The gateway supplies canonical paths. Direct attestor callers cannot
+        # smuggle aliases that resolve to an otherwise valid member.
+        if source_input != source or target_input != target or source == target:
+            return None
+        try:
+            expected_input = self._resolve_run_target(source, run_id)
+            if expected_input is None:
+                return None
+            expected_path = Path(expected_input)
+            expected = expected_path.resolve(strict=True)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+        if expected_path != expected or expected != target:
+            return None
+        try:
+            source_top = _git_path(
+                source,
+                _run_git(source, "rev-parse", "--show-toplevel"),
+            )
+            target_top = _git_path(
+                target,
+                _run_git(target, "rev-parse", "--show-toplevel"),
+            )
+            source_common = _git_path(
+                source,
+                _run_git(source, "rev-parse", "--git-common-dir"),
+            )
+            target_common = _git_path(
+                target,
+                _run_git(target, "rev-parse", "--git-common-dir"),
+            )
+            members = _git_worktree_members(source)
+            artifact_digest = _git_artifact_digest(target)
+        except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
+            return None
+        if (
+            source_top != source
+            or target_top != target
+            or source_common != target_common
+            or source not in members
+            or target not in members
+        ):
+            return None
+        identity_payload = f"{source_common}\0{target}\0{run_id}".encode("utf-8")
+        return WorktreeAttestation(
+            source_root=source,
+            worktree_root=target,
+            run_id=run_id,
+            identity=f"git-worktree:{sha256(identity_payload).hexdigest()}",
+            artifact_digest=artifact_digest,
+        )
 
 
 class ManagedWorker(Protocol):
@@ -353,6 +440,22 @@ class ManagedSpaceActionGateway:
             return GatewayResult(False, "worker_failed")
         return self._recover_deployment_failure(capability, context)
 
+    def execute_for_run(
+        self,
+        proposal: ActionProposal,
+        run: SwarmRun,
+    ) -> GatewayResult:
+        """Resolve managed authority from trusted supervisor run identity."""
+        if not isinstance(proposal, ActionProposal) or not isinstance(run, SwarmRun):
+            return GatewayResult(False, "proposal_invalid")
+        capability = self._supervisor.resolve_action_capability(
+            proposal.requested_action.workspace,
+            run,
+        )
+        if capability is None:
+            return GatewayResult(False, "capability_invalid")
+        return self.execute(capability, proposal)
+
     def _create_worktree(
         self,
         context: ManagedSpaceActionContext,
@@ -433,10 +536,7 @@ class ManagedSpaceActionGateway:
         context: ManagedSpaceActionContext,
     ) -> GatewayResult:
         events = self._policy_gate.store.list_events(context.run_id)
-        used = sum(
-            event.event_type == "model.attempt_started"
-            for event in events
-        )
+        used = sum(event.event_type == "model.attempt_started" for event in events)
         remaining = max(0, _MANAGED_MODEL_CALL_BUDGET - used)
         if remaining == 0:
             self._supervisor.pause_action_context(
@@ -509,10 +609,8 @@ def _build_request(operation: str, value: object) -> ManagedRequest | None:
     if operation == "local.test":
         if set(value) != {"artifact_digest", "selector"}:
             return None
-        selector = value["selector"]
-        if not isinstance(selector, str) or _SAFE_SELECTOR.fullmatch(selector) is None:
-            return None
-        return LocalTestRequest(selector)
+        selector = _test_selector(value["selector"])
+        return LocalTestRequest(*selector) if selector is not None else None
     if operation == "github.commit":
         if set(value) != {"artifact_digest", "message"}:
             return None
@@ -571,6 +669,8 @@ def _request_is_contained(request: ManagedRequest, worktree: Path) -> bool:
         paths = (request.path,)
     elif isinstance(request, LocalFormatRequest):
         paths = request.paths
+    elif isinstance(request, LocalTestRequest):
+        paths = (request.path,)
     for relative in paths:
         try:
             target = (worktree / relative).resolve(strict=False)
@@ -597,9 +697,26 @@ def _bounded_text(
 def _safe_ref(value: object) -> str | None:
     if not isinstance(value, str) or _SAFE_REF.fullmatch(value) is None:
         return None
-    if value.endswith(("/", ".")) or any(part in value for part in _FORBIDDEN_REF_PARTS):
+    if value.endswith(("/", ".")) or any(
+        part in value for part in _FORBIDDEN_REF_PARTS
+    ):
         return None
     return value
+
+
+def _test_selector(value: object) -> tuple[str, tuple[str, ...]] | None:
+    if not isinstance(value, str) or not value or len(value) > 512 or "\\" in value:
+        return None
+    components = value.split("::")
+    if not 1 <= len(components) <= 9:
+        return None
+    path = _relative_path(components[0])
+    if path is None or PurePosixPath(path).suffix != ".py":
+        return None
+    nodes = tuple(components[1:])
+    if any(_SAFE_TEST_NODE.fullmatch(node) is None for node in nodes):
+        return None
+    return path, nodes
 
 
 def _contains_sensitive_value(value: object) -> bool:
@@ -607,13 +724,10 @@ def _contains_sensitive_value(value: object) -> bool:
         for key, item in value.items():
             normalized = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", str(key))
             parts = [
-                part
-                for part in re.split(r"[^a-z0-9]+", normalized.lower())
-                if part
+                part for part in re.split(r"[^a-z0-9]+", normalized.lower()) if part
             ]
             singular_parts = {
-                part[:-1] if part.endswith("s") else part
-                for part in parts
+                part[:-1] if part.endswith("s") else part for part in parts
             }
             if (set(parts) | singular_parts) & _SENSITIVE_FIELD_PARTS:
                 return True
@@ -624,5 +738,103 @@ def _contains_sensitive_value(value: object) -> bool:
         return any(_contains_sensitive_value(item) for item in value)
     if isinstance(value, str):
         normalized = value.strip().lower()
-        return any(marker in normalized for marker in _SENSITIVE_VALUE_MARKERS)
+        return (
+            any(marker in normalized for marker in _SENSITIVE_VALUE_MARKERS)
+            or _CURRENT_SECRET_TOKEN.search(value) is not None
+        )
     return False
+
+
+def _run_git(cwd: Path, *arguments: str) -> bytes:
+    completed = subprocess.run(
+        ["git", "-C", str(cwd), *arguments],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    return completed.stdout.rstrip(b"\r\n")
+
+
+def _git_path(cwd: Path, raw: bytes) -> Path:
+    value = os.fsdecode(raw)
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = cwd / candidate
+    return candidate.resolve(strict=True)
+
+
+def _git_worktree_members(source: Path) -> frozenset[Path]:
+    raw = _run_git(source, "worktree", "list", "--porcelain", "-z")
+    members: set[Path] = set()
+    for field in raw.split(b"\0"):
+        if not field.startswith(b"worktree "):
+            continue
+        member = Path(os.fsdecode(field.removeprefix(b"worktree ")))
+        members.add(member.resolve(strict=True))
+    return frozenset(members)
+
+
+def _git_artifact_digest(worktree: Path) -> str:
+    digest = sha256()
+    digest.update(b"git-managed-artifact-v1\0")
+    digest.update(_run_git(worktree, "rev-parse", "HEAD"))
+    digest.update(b"\0index\0")
+    digest.update(_run_git(worktree, "ls-files", "--stage", "-z"))
+    raw_paths = _run_git(
+        worktree,
+        "ls-files",
+        "-z",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    )
+    for raw_path in sorted(filter(None, raw_paths.split(b"\0"))):
+        relative_text = os.fsdecode(raw_path)
+        relative = _relative_path(relative_text)
+        if relative is None:
+            raise ValueError("Git worktree contains an unsafe path")
+        candidate = worktree / relative
+        resolved = candidate.resolve(strict=False)
+        if not resolved.is_relative_to(worktree):
+            raise ValueError("Git worktree path escapes its root")
+        digest.update(b"\0path\0")
+        digest.update(raw_path)
+        if candidate.is_symlink():
+            digest.update(b"\0symlink\0")
+            digest.update(os.fsencode(os.readlink(candidate)))
+        elif candidate.is_file():
+            digest.update(b"\0file\0")
+            with candidate.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024):
+                    digest.update(chunk)
+        elif candidate.exists():
+            digest.update(b"\0gitlink-or-directory\0")
+        else:
+            digest.update(b"\0missing\0")
+    return digest.hexdigest()
+
+
+def create_managed_space_action_gateway(
+    *,
+    supervisor: ManagedSpaceSupervisor,
+    policy_gate: PolicyGate,
+    worktree_provider: TargetWorktreeProvider,
+    run_target_resolver: RunTargetResolver,
+    local_worker: ManagedWorker,
+    github_worker: ManagedWorker,
+    deployment_worker: ManagedWorker,
+    diagnosis_runner: DiagnosisRunner,
+) -> ManagedSpaceActionGateway:
+    """Build the gateway with the production Git worktree attestor."""
+    return ManagedSpaceActionGateway(
+        supervisor=supervisor,
+        policy_gate=policy_gate,
+        worktree_provider=worktree_provider,
+        worktree_attestor=GitWorktreeAttestor(
+            run_target_resolver=run_target_resolver,
+        ),
+        local_worker=local_worker,
+        github_worker=github_worker,
+        deployment_worker=deployment_worker,
+        diagnosis_runner=diagnosis_runner,
+    )

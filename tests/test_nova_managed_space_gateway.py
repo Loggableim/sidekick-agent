@@ -4,6 +4,7 @@ from dataclasses import replace
 import importlib
 import os
 from pathlib import Path
+import subprocess
 from typing import Any
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from nova.space_supervisor import ManagedSpaceGovernance, ManagedSpaceSupervisor
 from swarm_core.policy import PolicyGate, proposal_digest
 from swarm_core.sidekick_adapter import SidekickToolAdapter
 from swarm_core.store import ProjectSwarmStore
+from swarm_core.tools import GatedToolExecutor
 from swarm_core.types import ActionProposal, RequestedToolAction
 
 
@@ -232,9 +234,7 @@ def _gateway(
     root, records, supervisor, admission, store = _managed_run(tmp_path)
     supplied = dict(provider_kwargs or {})
     provider_values = {
-        key: supplied.pop(key)
-        for key in ("path", "after_create")
-        if key in supplied
+        key: supplied.pop(key) for key in ("path", "after_create") if key in supplied
     }
     provider_values.setdefault(
         "path",
@@ -692,7 +692,11 @@ def test_allowed_operation_routes_only_to_named_worker_with_narrow_request(
 
     assert result.ok is True
     assert result.code == result_code
-    calls = {"local": local.calls, "github": github.calls, "deployment": deployment.calls}
+    calls = {
+        "local": local.calls,
+        "github": github.calls,
+        "deployment": deployment.calls,
+    }
     assert len(calls[worker_name]) == 1
     assert all(calls[name] == [] for name in calls if name != worker_name)
     _handle, request = calls[worker_name][0]
@@ -1154,8 +1158,293 @@ def test_fix_round1_generic_sidekick_adapter_requires_managed_gateway_handoff(
 
     with pytest.raises(RuntimeError, match="managed gateway"):
         adapter.execute(proposal.requested_action)
-    result = adapter.execute_managed(admission.capability, proposal)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    result = adapter.execute_managed(proposal, run)
 
     assert result.ok is True
     assert generic_calls == []
     assert len(github.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("operation", "arguments"),
+    [
+        (
+            "local.test",
+            {
+                "artifact_digest": "a" * 64,
+                "selector": "../outside/test_escape.py::test_escape",
+            },
+        ),
+        (
+            "local.test",
+            {
+                "artifact_digest": "a" * 64,
+                "selector": "C:\\Windows\\System32\\test_escape.py",
+            },
+        ),
+        (
+            "local.test",
+            {
+                "artifact_digest": "a" * 64,
+                "selector": "tests/test_safe.py\\..\\outside.py",
+            },
+        ),
+        (
+            "local.test",
+            {
+                "artifact_digest": "a" * 64,
+                "selector": "tests/test_safe.py::test_ok;whoami",
+            },
+        ),
+        (
+            "github.pull_request",
+            {
+                "artifact_digest": "a" * 64,
+                "title": "Unsafe token",
+                "body": "github_pat_" + "11AA22BB33CC44DD55EE",
+            },
+        ),
+        (
+            "github.pull_request",
+            {
+                "artifact_digest": "a" * 64,
+                "title": "Unsafe token",
+                "body": "xox" + "b-" + "1234567890" + "-" + "abcdefghijklmnop",
+            },
+        ),
+    ],
+)
+def test_fix_round2_selector_and_current_token_forms_are_hard_denied(
+    tmp_path: Path,
+    operation: str,
+    arguments: dict[str, object],
+) -> None:
+    """Catches path-like selectors and current token prefixes reaching workers."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        _store,
+        provider,
+        local,
+        github,
+        deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+
+    result = gateway.execute(
+        admission.capability,
+        _proposal(root, operation=operation, arguments=arguments),
+    )
+
+    assert result.code == "operation_hard_denied"
+    assert provider.calls == []
+    assert local.calls == github.calls == deployment.calls == []
+
+
+def test_fix_round2_safe_test_selector_is_typed_and_worktree_contained(
+    tmp_path: Path,
+) -> None:
+    """Catches a valid node selector losing its contained path binding."""
+    (
+        api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        _provider,
+        local,
+        _github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(
+        root,
+        operation="local.test",
+        arguments={
+            "artifact_digest": "a" * 64,
+            "selector": "tests/test_safe.py::TestSafe::test_ok[param-1]",
+        },
+    )
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+
+    result = gateway.execute(admission.capability, proposal)
+
+    assert result.ok is True
+    assert len(local.calls) == 1
+    _handle, request = local.calls[0]
+    assert isinstance(request, api.LocalTestRequest)
+    assert request.path == "tests/test_safe.py"
+    assert request.nodes == ("TestSafe", "test_ok[param-1]")
+    assert not hasattr(request, "selector")
+
+
+def test_fix_round2_gated_executor_never_generically_claims_managed_proposal(
+    tmp_path: Path,
+) -> None:
+    """Catches policy-first generic claim making later gateway use impossible."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        _provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(root)
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    gate = PolicyGate(store)
+    gate.record_approval(
+        proposal,
+        run,
+        approval_type="human",
+        approver_id="dashboard:user",
+    )
+    generic_calls: list[object] = []
+    unavailable = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *args: generic_calls.append(args),
+    )
+
+    with pytest.raises(RuntimeError, match="managed gateway is not configured"):
+        GatedToolExecutor(gate, unavailable).execute(proposal, run)
+
+    configured = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *args: generic_calls.append(args),
+        managed_gateway=gateway,
+    )
+    first = GatedToolExecutor(PolicyGate(store), configured).execute(proposal, run)
+    replay = GatedToolExecutor(PolicyGate(store), configured).execute(proposal, run)
+
+    assert first.ok is True
+    assert replay.code == "execution_already_claimed"
+    assert generic_calls == []
+    assert len(github.calls) == 1
+
+
+def _git(cwd: Path, *arguments: str) -> str:
+    result = subprocess.run(
+        ["git", *arguments],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.stdout.strip()
+
+
+def _git_repository(tmp_path: Path, name: str) -> Path:
+    repository = tmp_path / name
+    repository.mkdir()
+    _git(repository, "init")
+    _git(repository, "config", "user.email", "test@example.invalid")
+    _git(repository, "config", "user.name", "Managed Gateway Test")
+    (repository / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    _git(repository, "add", "tracked.txt")
+    _git(repository, "commit", "-m", "initial")
+    return repository.resolve()
+
+
+def test_fix_round2_git_attestor_accepts_only_bound_same_repository_worktree(
+    tmp_path: Path,
+) -> None:
+    """Catches path-only attestation accepting a foreign or plain directory."""
+    api = _gateway_api()
+    source = _git_repository(tmp_path, "source")
+    worktree = (tmp_path / "managed-worktree").resolve()
+    _git(source, "worktree", "add", "-b", "managed-test", str(worktree))
+    foreign = _git_repository(tmp_path, "foreign")
+    plain = (source / "plain-directory").resolve()
+    plain.mkdir()
+    bindings = {"run-1": worktree}
+    attestor = api.GitWorktreeAttestor(
+        run_target_resolver=lambda _source, run_id: bindings.get(run_id),
+    )
+
+    valid = attestor.attest(source, worktree, "run-1")
+
+    assert valid is not None
+    assert valid.source_root == source
+    assert valid.worktree_root == worktree
+    assert valid.run_id == "run-1"
+    assert valid.identity.startswith("git-worktree:")
+    assert len(valid.artifact_digest) == 64
+    assert attestor.attest(source, source, "run-1") is None
+    bindings["run-1"] = foreign
+    assert attestor.attest(source, foreign, "run-1") is None
+    bindings["run-1"] = plain
+    assert attestor.attest(source, plain, "run-1") is None
+
+
+def test_fix_round2_git_attestor_rejects_symlink_alias_and_wrong_run_binding(
+    tmp_path: Path,
+) -> None:
+    """Catches aliases or another run borrowing a valid worktree membership."""
+    api = _gateway_api()
+    source = _git_repository(tmp_path, "source")
+    worktree = (tmp_path / "managed-worktree").resolve()
+    _git(source, "worktree", "add", "-b", "managed-test", str(worktree))
+    alias = tmp_path / "worktree-alias"
+    try:
+        os.symlink(worktree, alias, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    attestor = api.GitWorktreeAttestor(
+        run_target_resolver=lambda _source, run_id: (
+            worktree if run_id == "run-1" else None
+        ),
+    )
+
+    assert attestor.attest(source, alias, "run-1") is None
+    assert attestor.attest(source, worktree, "run-2") is None
+
+
+def test_fix_round2_gateway_factory_builds_repository_backed_attestor(
+    tmp_path: Path,
+) -> None:
+    """Catches host construction still requiring a test-only attestor."""
+    (
+        _api,
+        root,
+        _records,
+        supervisor,
+        _admission,
+        store,
+        provider,
+        local,
+        github,
+        deployment,
+        diagnosis,
+        _gateway_instance,
+    ) = _gateway(tmp_path)
+
+    gateway = _api.create_managed_space_action_gateway(
+        supervisor=supervisor,
+        policy_gate=PolicyGate(store),
+        worktree_provider=provider,
+        run_target_resolver=lambda _source, _run_id: root / "bound-worktree",
+        local_worker=local,
+        github_worker=github,
+        deployment_worker=deployment,
+        diagnosis_runner=diagnosis,
+    )
+
+    assert isinstance(gateway, _api.ManagedSpaceActionGateway)
+    assert isinstance(gateway._worktree_attestor, _api.GitWorktreeAttestor)
