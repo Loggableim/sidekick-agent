@@ -731,6 +731,17 @@ class ProjectSwarmStore:
             ).fetchall()
         return [_row_to_event(row) for row in rows]
 
+    def has_run_execution_lease(self, run_id: str) -> bool:
+        """Read whether a run remains owned by any executing host."""
+        with self._connection() as connection:
+            return (
+                connection.execute(
+                    "SELECT 1 FROM run_execution_leases WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                is not None
+            )
+
     def list_events_after(
         self,
         run_id: str,
@@ -1933,6 +1944,17 @@ class ReadOnlyProjectSwarmStore:
                 (run_id,),
             ).fetchone()
         return _row_to_run(row) if row is not None else None
+
+    def has_run_execution_lease(self, run_id: str) -> bool:
+        """Read whether a run remains owned by any executing host."""
+        with self._connection() as connection:
+            return (
+                connection.execute(
+                    "SELECT 1 FROM run_execution_leases WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                is not None
+            )
 
     def list_runs(self) -> list[SwarmRun]:
         with self._connection() as connection:

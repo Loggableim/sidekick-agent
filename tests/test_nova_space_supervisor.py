@@ -50,6 +50,13 @@ def _admit(supervisor: ManagedSpaceSupervisor, target: str = "alpha"):
     return supervisor.admit(target, {"goal": "repair flaky test", "kind": "maintenance"})
 
 
+def _resume_for_completion(store: ProjectSwarmStore, run_id: str):
+    """Model an explicit host resume before a worker can complete a run."""
+    run = store.get_run(run_id)
+    assert run is not None
+    return store.resume_run(run_id) if run.status == "paused" else run
+
+
 def test_global_ledger_allows_only_one_active_target_across_concurrent_spaces(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
@@ -238,6 +245,7 @@ def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path
     assert running is not None
     options = supervisor.execution_options_for_run(records["alpha"].canonical_root, running)
     assert options.on_completed is not None
+    _resume_for_completion(store, admission.run_id)
     run = store.set_run_status(admission.run_id, "completed")
 
     options.on_completed(records["alpha"].canonical_root, run)
@@ -256,6 +264,7 @@ def test_human_terminal_race_reconciles_an_already_completed_child_without_overw
     supervisor = _supervisor(tmp_path, records)
     admission = _admit(supervisor)
     store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
     store.set_run_status(admission.run_id, "completed")
 
     transition = getattr(supervisor, terminal)
@@ -276,6 +285,7 @@ def test_completion_observer_reconciles_durable_completion_after_post_hook_revoc
     assert active is not None
     options = supervisor.execution_options_for_run(records["alpha"].canonical_root, active)
     assert options.on_completed is not None
+    _resume_for_completion(store, admission.run_id)
     completed = store.set_run_status(admission.run_id, "completed")
     records["alpha"] = replace(records["alpha"], yolo=False)
 
@@ -291,7 +301,9 @@ def test_pause_race_reconciles_a_matching_completed_child_instead_of_stranding_s
     supervisor = _supervisor(tmp_path, records)
     admission = _admit(supervisor)
     assert admission.capability is not None
-    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(admission.run_id, "completed")
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
+    store.set_run_status(admission.run_id, "completed")
     records["alpha"] = replace(records["alpha"], yolo=False)
 
     assert supervisor.revalidate_action_boundary(admission.capability) is False
@@ -305,7 +317,9 @@ def test_fresh_supervisor_reconciles_a_matching_completed_child_before_admission
     }
     original = _supervisor(tmp_path, records)
     admission = _admit(original)
-    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(admission.run_id, "completed")
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
+    store.set_run_status(admission.run_id, "completed")
 
     restarted = _supervisor(tmp_path, records)
     assert _admit(restarted, "beta").status == "created"
@@ -318,6 +332,7 @@ def test_restart_keeps_slot_when_completed_child_metadata_does_not_match_ledger(
     }
     admission = _admit(_supervisor(tmp_path, records))
     store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
     store.set_run_status(admission.run_id, "completed")
     with store._connection() as connection:
         raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (admission.run_id,)).fetchone()[0]
@@ -337,7 +352,9 @@ def test_restart_keeps_slot_when_ledger_root_cannot_find_the_completed_child(tmp
     }
     supervisor = _supervisor(tmp_path, records)
     admission = _admit(supervisor)
-    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(admission.run_id, "completed")
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
+    store.set_run_status(admission.run_id, "completed")
     with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
         connection.execute(
             "UPDATE supervisor_admissions SET canonical_root = ? WHERE admission_id = ?",
@@ -412,6 +429,7 @@ def test_tampered_capability_cannot_directly_complete_but_verified_child_complet
     admission = _admit(supervisor)
     assert admission.capability is not None
     store = ProjectSwarmStore(records["alpha"].canonical_root)
+    _resume_for_completion(store, admission.run_id)
     store.set_run_status(admission.run_id, "completed")
     foreign_root = tmp_path / "foreign"
     object.__setattr__(admission.capability, "_canonical_root", foreign_root)
@@ -435,7 +453,7 @@ def test_worker_or_model_actor_cannot_cancel_or_abandon_a_supervisor_run(tmp_pat
         store.set_run_status(admission.run_id, "cancelled")
     with pytest.raises(PermissionError):
         store.set_run_status(admission.run_id, "abandoned")
-    assert store.get_run(admission.run_id).status == "running"
+    assert store.get_run(admission.run_id).status == "paused"
 
 
 def test_child_metadata_is_diagnostic_only_and_cannot_reconstruct_a_capability(tmp_path: Path) -> None:
@@ -449,3 +467,144 @@ def test_child_metadata_is_diagnostic_only_and_cannot_reconstruct_a_capability(t
     restarted = _supervisor(tmp_path, records)
     options = restarted.execution_options_for_run(records["alpha"].canonical_root, run)
     assert options.blocked_reason == "supervisor_binding_unavailable"
+
+
+def test_dashboard_recovery_reattaches_only_a_verified_paused_child_after_restart(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    original = _supervisor(tmp_path, records)
+    admission = _admit(original)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+
+    restarted = _supervisor(tmp_path, records)
+    with pytest.raises(PermissionError):
+        restarted.recover_and_reattach(admission.admission_id, actor="worker:previous-host")
+    capability = restarted.recover_and_reattach(admission.admission_id, actor=_DASHBOARD_ACTOR)
+    assert capability is not None
+    paused = store.get_run(admission.run_id)
+    assert paused is not None and paused.status == "paused"
+    options = restarted.execution_options_for_run(records["alpha"].canonical_root, paused)
+    assert options.max_calls == 128
+    assert store.resume_run(admission.run_id).status == "running"
+
+
+@pytest.mark.parametrize("defect", ("revoked", "root", "metadata", "lease"))
+def test_recovery_reattach_rejects_unverified_child_and_keeps_it_paused(tmp_path: Path, defect: str) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    original = _supervisor(tmp_path, records)
+    admission = _admit(original)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    if defect == "revoked":
+        records["alpha"] = replace(records["alpha"], yolo=False)
+    elif defect == "root":
+        records["alpha"] = _governance(tmp_path / "wrong-root", space_id=records["alpha"].space_id)
+    elif defect == "lease":
+        assert store.claim_run_execution_lease(admission.run_id, "previous-host") is True
+    else:
+        with store._connection() as connection:
+            raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (admission.run_id,)).fetchone()[0]
+            metadata = json.loads(raw)
+            metadata["nova_supervisor"]["policy_identity"] = "tampered"
+            connection.execute("UPDATE runs SET metadata_json = ? WHERE run_id = ?", (json.dumps(metadata), admission.run_id))
+
+    restarted = _supervisor(tmp_path, records)
+    assert restarted.recover_and_reattach(admission.admission_id, actor=_DASHBOARD_ACTOR) is None
+    run = store.get_run(admission.run_id)
+    assert run is not None and run.status == "paused"
+    assert restarted.list_active_admissions()[0]["state"] == "paused"
+    if defect == "lease":
+        assert store.has_run_execution_lease(admission.run_id) is True
+    assert restarted.execution_options_for_run(records["alpha"].canonical_root, run).blocked_reason == "supervisor_binding_unavailable"
+
+
+def test_missing_child_in_provisioning_state_is_recovered_to_paused_and_holds_slot(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+
+    def missing_child_store(_root: Path):
+        class MissingChildStore:
+            def create_run(self, *_args, **_kwargs):
+                raise RuntimeError("simulated process death before child create")
+        return MissingChildStore()
+
+    crashing = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=missing_child_store,
+    )
+    with pytest.raises(RuntimeError, match="simulated process death"):
+        _admit(crashing)
+
+    restarted = _supervisor(tmp_path, records)
+    blocked = _admit(restarted, "beta")
+    assert blocked.reason == "active_limit"
+    assert restarted.list_active_admissions()[0]["state"] == "paused"
+
+
+def test_unstarted_child_in_provisioning_state_is_paused_and_cannot_be_bypassed(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+
+    def child_then_crash(root: Path):
+        store = ProjectSwarmStore(root)
+
+        class ChildThenCrash:
+            def create_run(self, *args, **kwargs):
+                store.create_run(*args, **kwargs)
+                raise RuntimeError("simulated process death after child create")
+        return ChildThenCrash()
+
+    crashing = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=child_then_crash,
+    )
+    with pytest.raises(RuntimeError, match="simulated process death"):
+        _admit(crashing)
+
+    restarted = _supervisor(tmp_path, records)
+    assert _admit(restarted, "beta").reason == "active_limit"
+    blocked = restarted.list_active_admissions()[0]
+    assert blocked["state"] == "paused"
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(blocked["run_id"])
+    assert run is not None and run.status == "paused"
+
+
+def test_mismatched_child_in_provisioning_state_is_paused_and_audited(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+
+    def mismatched_child_then_crash(root: Path):
+        store = ProjectSwarmStore(root)
+
+        class MismatchedChildThenCrash:
+            def create_run(self, run_id, *args, **kwargs):
+                store.create_run(run_id, *args, **kwargs)
+                with store._connection() as connection:
+                    connection.execute(
+                        "UPDATE runs SET metadata_json = ? WHERE run_id = ?",
+                        (json.dumps({"integration_namespace": "wrong"}), run_id),
+                    )
+                raise RuntimeError("simulated process death after mismatched child create")
+        return MismatchedChildThenCrash()
+
+    crashing = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=mismatched_child_then_crash,
+    )
+    with pytest.raises(RuntimeError, match="mismatched child"):
+        _admit(crashing)
+
+    restarted = _supervisor(tmp_path, records)
+    assert _admit(restarted, "beta").reason == "active_limit"
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        reason = connection.execute(
+            "SELECT reason FROM supervisor_audit WHERE event_type = 'paused' ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()[0]
+    assert reason == "diagnostic_mismatch"

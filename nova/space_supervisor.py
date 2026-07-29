@@ -183,40 +183,32 @@ class ManagedSpaceSupervisor:
     def start(self) -> None:
         """Initialize the central ledger only on a write-capable start path."""
         self._ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._ledger_path) as connection:
-            connection.executescript(
-                """
-                PRAGMA foreign_keys = ON;
-                CREATE TABLE IF NOT EXISTS supervisor_admissions (
-                    admission_id TEXT PRIMARY KEY,
-                    target_key TEXT NOT NULL,
-                    target_space_id TEXT NOT NULL,
-                    intent_digest TEXT NOT NULL,
-                    canonical_root TEXT NOT NULL,
-                    root_fingerprint TEXT NOT NULL,
-                    governance_revision INTEGER NOT NULL,
-                    policy_identity TEXT NOT NULL,
+        connection = sqlite3.connect(self._ledger_path, timeout=30, isolation_level=None)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS supervisor_admissions (
+                    admission_id TEXT PRIMARY KEY, target_key TEXT NOT NULL,
+                    target_space_id TEXT NOT NULL, intent_digest TEXT NOT NULL,
+                    canonical_root TEXT NOT NULL, root_fingerprint TEXT NOT NULL,
+                    governance_revision INTEGER NOT NULL, policy_identity TEXT NOT NULL,
                     allowed_action_families_json TEXT NOT NULL DEFAULT '[]',
-                    run_id TEXT NOT NULL UNIQUE,
-                    state TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
+                    run_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
                     terminal_actor TEXT
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_target_intent
-                    ON supervisor_admissions(target_space_id, intent_digest);
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_one_active
-                    ON supervisor_admissions((1))
-                    WHERE state IN ('active', 'paused', 'abandoned');
-                CREATE TABLE IF NOT EXISTS supervisor_audit (
+                )"""
+            )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS supervisor_audit (
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT,
                     admission_id TEXT NOT NULL REFERENCES supervisor_admissions(admission_id),
-                    event_type TEXT NOT NULL,
-                    actor TEXT,
-                    reason TEXT,
-                    created_at TEXT NOT NULL
-                );
-                """
+                    event_type TEXT NOT NULL, actor TEXT, reason TEXT, created_at TEXT NOT NULL
+                )"""
+            )
+            connection.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_target_intent
+                   ON supervisor_admissions(target_space_id, intent_digest)"""
             )
             columns = {
                 row[1]
@@ -226,6 +218,18 @@ class ManagedSpaceSupervisor:
                 connection.execute(
                     "ALTER TABLE supervisor_admissions ADD COLUMN allowed_action_families_json TEXT NOT NULL DEFAULT '[]'"
                 )
+            connection.execute("DROP INDEX IF EXISTS idx_supervisor_one_active")
+            connection.execute(
+                """CREATE UNIQUE INDEX idx_supervisor_one_active
+                   ON supervisor_admissions((1))
+                   WHERE state IN ('provisioning', 'active', 'paused', 'abandoned')"""
+            )
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
     def admit(self, target_key: str, intent: Mapping[str, Any]) -> SupervisorAdmission:
         target_key = _target_key(target_key)
@@ -236,8 +240,10 @@ class ManagedSpaceSupervisor:
         self.start()
         admission_id = str(uuid4())
         run_id = str(uuid4())
+        capability = _capability(admission_id, target_key, governance, run_id, intent_digest)
         now = _timestamp()
         with self._immediate_connection() as connection:
+            self._reconcile_provisioning_admissions(connection)
             self._reconcile_completed_admissions(connection)
             existing = connection.execute(
                 """SELECT admission_id, run_id, state FROM supervisor_admissions
@@ -249,7 +255,7 @@ class ManagedSpaceSupervisor:
                     return SupervisorAdmission("coalesced", existing["admission_id"], existing["run_id"], None, None)
                 return SupervisorAdmission("rejected", existing["admission_id"], existing["run_id"], None, "terminal_admission")
             active = connection.execute(
-                "SELECT 1 FROM supervisor_admissions WHERE state IN ('active', 'paused', 'abandoned')"
+                "SELECT 1 FROM supervisor_admissions WHERE state IN ('provisioning', 'active', 'paused', 'abandoned')"
             ).fetchone()
             if active is not None:
                 return SupervisorAdmission("rejected", None, None, None, "active_limit")
@@ -258,7 +264,7 @@ class ManagedSpaceSupervisor:
                     admission_id, target_key, target_space_id, intent_digest, canonical_root,
                     root_fingerprint, governance_revision, policy_identity, allowed_action_families_json, run_id, state,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'provisioning', ?, ?)""",
                 (
                     admission_id, target_key, governance.space_id, intent_digest,
                     str(governance.canonical_root), governance.root_fingerprint,
@@ -266,19 +272,22 @@ class ManagedSpaceSupervisor:
                     _allowed_action_families_json(), run_id, now, now,
                 ),
             )
-            _audit(connection, admission_id, "admitted", None, None, now)
-        capability = _capability(admission_id, target_key, governance, run_id, intent_digest)
-        try:
-            store = self._child_store_factory(governance.canonical_root)
-            store.create_run(run_id, metadata=_diagnostic_metadata(capability, intent))
-        except BaseException:
-            with self._immediate_connection() as connection:
-                connection.execute(
-                    "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ?",
-                    (_timestamp(), admission_id),
-                )
-                _audit(connection, admission_id, "paused", None, "child_store_failure", _timestamp())
-            raise
+            _audit(connection, admission_id, "provisioning", None, None, now)
+        store = self._child_store_factory(governance.canonical_root)
+        store.create_run(run_id, status="paused", metadata=_diagnostic_metadata(capability, intent))
+        if not self._activate_provisioning(admission_id):
+            # A concurrent admission may recover this still-provisioning
+            # record before we activate it.  That recovery intentionally
+            # leaves the child paused and the global slot occupied; return
+            # the durable admission without minting an executable binding.
+            record = self._record(admission_id)
+            if (
+                record is not None
+                and record["state"] == "paused"
+                and record["run_id"] == run_id
+            ):
+                return SupervisorAdmission("created", admission_id, run_id, None, "provisioning_interrupted")
+            raise RuntimeError("managed Space child provisioning could not be activated")
         with self._bindings_lock:
             self._bindings[run_id] = capability
         return SupervisorAdmission("created", admission_id, run_id, capability, None)
@@ -288,7 +297,7 @@ class ManagedSpaceSupervisor:
             return []
         with self._read_connection() as connection:
             rows = connection.execute(
-                "SELECT admission_id, target_space_id, run_id, state FROM supervisor_admissions WHERE state IN ('active', 'paused', 'abandoned')"
+                "SELECT admission_id, target_space_id, run_id, state FROM supervisor_admissions WHERE state IN ('provisioning', 'active', 'paused', 'abandoned')"
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -318,6 +327,65 @@ class ManagedSpaceSupervisor:
             elif run is not None and run.status == "completed":
                 _audit(connection, record["admission_id"], "reconciliation_failed", None, "diagnostic_mismatch", _timestamp())
 
+    def _reconcile_provisioning_admissions(self, connection: sqlite3.Connection) -> None:
+        """Fail closed after a crash between ledger reservation and activation."""
+        records = connection.execute(
+            "SELECT * FROM supervisor_admissions WHERE state = 'provisioning'"
+        ).fetchall()
+        for record in records:
+            try:
+                reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
+                run = reader.get_run(record["run_id"])
+            except (OSError, RuntimeError, ValueError, sqlite3.Error):
+                run = None
+            if run is None:
+                reason = "missing_child"
+            elif not _diagnostic_metadata_matches_record(run.metadata, record):
+                reason = "diagnostic_mismatch"
+            else:
+                reason = "unstarted_child"
+            if run is not None and run.status == "running":
+                try:
+                    writer = ProjectSwarmStore(Path(record["canonical_root"]))
+                    writer.set_run_status(record["run_id"], "paused")
+                    writer.append_event_once(
+                        record["run_id"],
+                        "nova.supervisor.paused",
+                        {"reason": "provisioning_recovery"},
+                        idempotency_key="supervisor-provisioning-recovery",
+                    )
+                except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+                    reason = "unstarted_child_pause_failed"
+            connection.execute(
+                "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ? AND state = 'provisioning'",
+                (_timestamp(), record["admission_id"]),
+            )
+            _audit(connection, record["admission_id"], "paused", None, reason, _timestamp())
+
+    def _activate_provisioning(self, admission_id: str) -> bool:
+        record = self._record(admission_id)
+        if record is None or record["state"] != "provisioning":
+            return False
+        try:
+            reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
+            run = reader.get_run(record["run_id"])
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            return False
+        if (
+            run is None
+            or run.status != "paused"
+            or not _diagnostic_metadata_matches_record(run.metadata, record)
+        ):
+            return False
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                "UPDATE supervisor_admissions SET state = 'active', updated_at = ? WHERE admission_id = ? AND state = 'provisioning'",
+                (_timestamp(), admission_id),
+            )
+            if cursor.rowcount:
+                _audit(connection, admission_id, "admitted", None, None, _timestamp())
+        return cursor.rowcount == 1
+
     def execution_options_for_run(self, project_root: Path, run: SwarmRun):
         """Return host-compatible options only for a live, active binding."""
         from cli.swarm_host import SwarmExecutionOptions
@@ -346,12 +414,97 @@ class ManagedSpaceSupervisor:
             raise ValueError("managed Space supervisor binding is unavailable")
         return ManagedSpacePreCompletionHook(self, capability)
 
+    def recover_and_reattach(
+        self,
+        admission_id: str,
+        *,
+        actor: str,
+    ) -> ManagedSpaceCapability | None:
+        """Explicit dashboard-only remint of a paused child-run capability.
+
+        This only restores an in-memory binding; it neither resumes nor
+        dispatches the child. A host must still perform its normal explicit
+        resume after this audited handoff.
+        """
+        _dashboard_actor(actor)
+        record = self._record(admission_id)
+        if record is None or record["state"] not in {"active", "paused"}:
+            return None
+        try:
+            reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
+            run = reader.get_run(record["run_id"])
+            lease_held = reader.has_run_execution_lease(record["run_id"])
+            governance = _resolved_governance(self._governance_resolver, record["target_key"])
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            run = None
+            lease_held = True
+            governance = None
+        if (
+            run is None
+            or run.status != "paused"
+            or lease_held
+            or not _diagnostic_metadata_matches_record(run.metadata, record)
+            or not _governance_matches_record(governance, record)
+        ):
+            self._pause_record(record, "recovery_validation_failed", actor=actor)
+            return None
+        capability = _capability_from_record(record)
+        if capability is None:
+            self._pause_record(record, "recovery_validation_failed", actor=actor)
+            return None
+        with self._bindings_lock:
+            if record["run_id"] in self._bindings:
+                return None
+            self._bindings[record["run_id"]] = capability
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                "UPDATE supervisor_admissions SET state = 'active', updated_at = ? WHERE admission_id = ? AND state IN ('active', 'paused')",
+                (_timestamp(), admission_id),
+            )
+            if cursor.rowcount:
+                _audit(connection, admission_id, "recovery_reattached", actor, None, _timestamp())
+        if cursor.rowcount != 1:
+            with self._bindings_lock:
+                self._bindings.pop(record["run_id"], None)
+            return None
+        return capability
+
     def revalidate_action_boundary(self, capability: ManagedSpaceCapability) -> bool:
         reason = self._revalidate(capability)
         if reason is None:
             return True
         self._pause(capability, reason)
         return False
+
+    def _pause_record(
+        self,
+        record: Mapping[str, Any],
+        reason: str,
+        *,
+        actor: str | None = None,
+    ) -> None:
+        """Pause only the ledger-recorded child root/run, never caller input."""
+        try:
+            store = ProjectSwarmStore(Path(record["canonical_root"]))
+            run = store.get_run(record["run_id"])
+            if run is not None and run.status == "running":
+                store.set_run_status(record["run_id"], "paused")
+            if run is not None and run.status not in {"completed", "cancelled", "abandoned"}:
+                store.append_event_once(
+                    record["run_id"],
+                    "nova.supervisor.paused",
+                    {"reason": reason},
+                    idempotency_key="supervisor-pause:" + reason,
+                )
+        except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+            pass
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ? AND state IN ('active', 'paused', 'provisioning')",
+                (_timestamp(), record["admission_id"]),
+            )
+            if cursor.rowcount:
+                _audit(connection, record["admission_id"], "paused", actor, reason, _timestamp())
 
     def record_completion(self, run_id: str) -> bool:
         with self._bindings_lock:
@@ -651,6 +804,22 @@ def _capability(admission_id: str, target_key: str, governance: ManagedSpaceGove
     )
 
 
+def _capability_from_record(record: Mapping[str, Any]) -> ManagedSpaceCapability | None:
+    try:
+        families = tuple(json.loads(record["allowed_action_families_json"]))
+        if families != _ALLOWED_ACTION_FAMILIES:
+            return None
+        return ManagedSpaceCapability(
+            record["admission_id"], record["target_key"], record["target_space_id"],
+            Path(record["canonical_root"]).resolve(), record["root_fingerprint"],
+            record["governance_revision"], record["policy_identity"], record["run_id"],
+            record["intent_digest"], families, _allowed_action_families_digest(families),
+            _token=_CAPABILITY_TOKEN,
+        )
+    except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return None
+
+
 def _diagnostic_metadata(capability: ManagedSpaceCapability, intent: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "goal": str(intent.get("goal", "Nova managed Space supervision")),
@@ -740,6 +909,21 @@ def _diagnostic_metadata_matches_record(metadata: Mapping[str, Any], record: Map
             "allowed_action_families": list(families),
             "allowed_action_families_digest": _allowed_action_families_digest(families),
         }
+    )
+
+
+def _governance_matches_record(
+    governance: ManagedSpaceGovernance | None,
+    record: Mapping[str, Any],
+) -> bool:
+    return governance is not None and (
+        governance.yolo is True
+        and governance.enrolled is True
+        and governance.space_id == record["target_space_id"]
+        and governance.canonical_root == Path(record["canonical_root"]).resolve()
+        and governance.root_fingerprint == record["root_fingerprint"]
+        and governance.revision == record["governance_revision"]
+        and governance.policy_identity == record["policy_identity"]
     )
 
 
