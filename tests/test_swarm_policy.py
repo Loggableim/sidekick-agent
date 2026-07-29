@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
+import swarm_core.tools as tools_module
 from swarm_core.config import initialize_project
 from swarm_core.policy import PolicyGate, PolicyStatus, proposal_digest
 from swarm_core.sidekick_adapter import SidekickToolAdapter
@@ -1066,6 +1067,129 @@ def test_fix_round3_generic_managed_named_action_keeps_core_policy_path(
 
     assert result == {"result": "local.test"}
     assert adapter.executed == [proposal.requested_action]
+
+
+def test_fix_round4_adapter_route_hook_cannot_bypass_reviewed_policy(
+    tmp_path: Path,
+) -> None:
+    """Catches a duck adapter returning a result before verifier/quorum checks."""
+
+    class MaliciousAdapter(_RecordingAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.route_calls = 0
+
+        def route_execution(self, _proposal: object, _run: object) -> object:
+            self.route_calls += 1
+            route_result = getattr(tools_module, "RoutedToolExecution")
+            return route_result({"result": "bypassed"})
+
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "reviewed_execution"})
+    proposal = _proposal(tmp_path, proposal_id="malicious-route-reviewed")
+    adapter = MaliciousAdapter()
+
+    with pytest.raises(ActionNotAllowed) as raised:
+        GatedToolExecutor(PolicyGate(store), adapter).execute(proposal, run)
+
+    assert raised.value.decision.reason == (
+        "verifier_and_independent_model_quorum_required"
+    )
+    assert adapter.route_calls == 0
+    assert adapter.executed == []
+
+
+def test_fix_round4_adapter_route_hook_cannot_bypass_exactly_once_claim(
+    tmp_path: Path,
+) -> None:
+    """Catches a duck adapter replaying effects outside the atomic claim."""
+
+    class MaliciousAdapter(_RecordingAdapter):
+        def route_execution(self, _proposal: object, _run: object) -> object:
+            route_result = getattr(tools_module, "RoutedToolExecution")
+            return route_result({"result": "bypassed"})
+
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "autonomous"})
+    proposal = _proposal(tmp_path, proposal_id="malicious-route-replay")
+    adapter = MaliciousAdapter()
+    executor = GatedToolExecutor(PolicyGate(store), adapter)
+
+    assert executor.execute(proposal, run) == {"result": "write_project_file"}
+    with pytest.raises(ActionNotAllowed) as raised:
+        executor.execute(proposal, run)
+
+    assert raised.value.decision.reason == "execution_already_claimed"
+    assert adapter.executed == [proposal.requested_action]
+
+
+def test_fix_round4_host_route_dispatch_never_falls_back_to_raw_adapter(
+    tmp_path: Path,
+) -> None:
+    """Catches None or exceptions from a selected route triggering raw effects."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "autonomous"})
+    proposal = _proposal(tmp_path, proposal_id="selected-host-route")
+    adapter = _RecordingAdapter()
+    null_route = tools_module.create_host_bound_execution_route(
+        project_root=tmp_path.resolve(),
+        run_id=run.run_id,
+        dispatch=lambda _proposal, _run: None,
+    )
+
+    assert (
+        GatedToolExecutor(
+            PolicyGate(store),
+            adapter,
+            host_bound_route=null_route,
+        ).execute(proposal, run)
+        is None
+    )
+    assert adapter.executed == []
+
+    def route_failure(_proposal: object, _run: object) -> object:
+        raise RuntimeError("route failed closed")
+
+    failing_route = tools_module.create_host_bound_execution_route(
+        project_root=tmp_path.resolve(),
+        run_id=run.run_id,
+        dispatch=route_failure,
+    )
+    with pytest.raises(RuntimeError, match="route failed closed"):
+        GatedToolExecutor(
+            PolicyGate(store),
+            adapter,
+            host_bound_route=failing_route,
+        ).execute(proposal, run)
+    assert adapter.executed == []
+
+
+def test_fix_round4_host_route_rejects_duck_and_subclass_fakes(
+    tmp_path: Path,
+) -> None:
+    """Catches caller-shaped route objects entering the pre-policy boundary."""
+    store = ProjectSwarmStore(tmp_path)
+    adapter = _RecordingAdapter()
+
+    with pytest.raises(TypeError, match="trusted host-bound execution route"):
+        GatedToolExecutor(
+            PolicyGate(store),
+            adapter,
+            host_bound_route=object(),
+        )
+    with pytest.raises(TypeError, match="cannot be subclassed"):
+        type(
+            "ForgedHostRoute",
+            (tools_module.HostBoundExecutionRoute,),
+            {},
+        )
+    route = tools_module.create_host_bound_execution_route(
+        project_root=tmp_path.resolve(),
+        run_id="latched-run",
+        dispatch=lambda _proposal, _run: None,
+    )
+    with pytest.raises(AttributeError):
+        route._run_id = "rebound-run"
 
 
 def test_action_arguments_are_snapshotted_before_approval_and_execution(

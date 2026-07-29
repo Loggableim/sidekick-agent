@@ -8,15 +8,36 @@ import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
-from typing import Callable, ClassVar, Protocol, TypeAlias
+from typing import Callable, ClassVar, Mapping, Protocol, TypeAlias
 
 from nova.space_supervisor import (
     ManagedSpaceActionContext,
     ManagedSpaceCapability,
     ManagedSpaceSupervisor,
 )
-from swarm_core.policy import PolicyGate, PolicyStatus
-from swarm_core.types import ActionProposal, SwarmRun, thaw_json_value
+from swarm_core.policy import (
+    PolicyDecision,
+    PolicyGate,
+    PolicyStatus,
+    proposal_digest,
+)
+from swarm_core.store import ProjectSwarmStore
+from swarm_core.tools import (
+    HostBoundExecutionRoute,
+    create_host_bound_execution_route,
+)
+from swarm_core.types import (
+    ActionProposal,
+    ApprovalRecord,
+    SwarmRun,
+    WorkflowRoleCheckpoint,
+    thaw_json_value,
+)
+from swarm_core.verifier import (
+    InvalidVerifierResult,
+    is_positive_verification_decision,
+    verification_result_from_checkpoint_data,
+)
 
 
 _SHA256_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -28,6 +49,11 @@ _CURRENT_SECRET_TOKEN = re.compile(
 )
 _MANAGED_MODEL_CALL_BUDGET = 128
 _FORBIDDEN_REF_PARTS = ("..", "@{", "//", ".lock")
+_REQUIRED_MANAGED_REVIEW_MODELS = {
+    "review_a": "glm-5.2",
+    "review_b": "kimi-k2.7-code",
+}
+_APPROVING_REVIEW_DECISIONS = frozenset({"approve", "approved"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -416,7 +442,8 @@ class ManagedSpaceActionGateway:
         current = self._resolve_same_context(capability, context)
         if current is None:
             return GatewayResult(False, "capability_invalid")
-        policy = self._policy_gate.authorize_managed_yolo_and_claim(
+        policy = _authorize_managed_yolo_and_claim(
+            self._policy_gate.store,
             proposal,
             current,
             worktree_identity=handle.identity,
@@ -440,30 +467,25 @@ class ManagedSpaceActionGateway:
             return GatewayResult(False, "worker_failed")
         return self._recover_deployment_failure(capability, context)
 
-    def execute_for_run(
+    def host_bound_execution_route(
         self,
-        proposal: ActionProposal,
-        run: SwarmRun,
-    ) -> GatewayResult:
-        """Resolve managed authority from trusted supervisor run identity."""
-        if not isinstance(proposal, ActionProposal) or not isinstance(run, SwarmRun):
-            return GatewayResult(False, "proposal_invalid")
-        capability = self._supervisor.resolve_action_capability_for_run(run)
-        if capability is None:
-            return GatewayResult(False, "capability_invalid")
-        return self.execute(capability, proposal)
+        capability: ManagedSpaceCapability | None,
+    ) -> HostBoundExecutionRoute:
+        """Latch one exact supervisor attachment into a Core-neutral host route."""
+        context = self._supervisor.resolve_action_context(capability)
+        if context is None or capability is None:
+            raise ValueError("A current managed capability is required")
 
-    def try_execute_for_run(
-        self,
-        proposal: ActionProposal,
-        run: SwarmRun,
-    ) -> GatewayResult | None:
-        """Return None only when this process has no managed binding for run."""
-        if not isinstance(proposal, ActionProposal) or not isinstance(run, SwarmRun):
-            return GatewayResult(False, "proposal_invalid")
-        if not self._supervisor.has_action_binding(run):
-            return None
-        return self.execute_for_run(proposal, run)
+        def dispatch(proposal: ActionProposal, run: SwarmRun) -> GatewayResult:
+            if run.run_id != context.run_id:
+                return GatewayResult(False, "capability_invalid")
+            return self.execute(capability, proposal)
+
+        return create_host_bound_execution_route(
+            project_root=context.canonical_root,
+            run_id=context.run_id,
+            dispatch=dispatch,
+        )
 
     def _create_worktree(
         self,
@@ -752,6 +774,228 @@ def _contains_sensitive_value(value: object) -> bool:
             or _CURRENT_SECRET_TOKEN.search(value) is not None
         )
     return False
+
+
+def _authorize_managed_yolo_and_claim(
+    store: ProjectSwarmStore,
+    proposal: ActionProposal,
+    context: ManagedSpaceActionContext,
+    *,
+    worktree_identity: str,
+    artifact_digest: str,
+) -> PolicyDecision:
+    """Authorize one managed action from Nova-owned, artifact-bound evidence."""
+    if not isinstance(context, ManagedSpaceActionContext):
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_action_context_required",
+        )
+    operation = _OPERATIONS.get(proposal.requested_action.name)
+    if (
+        operation is None
+        or operation.family not in context.allowed_action_families
+        or proposal.category != "managed"
+        or proposal.requested_action.workspace != context.canonical_root
+        or not proposal.requested_action.use_worktree
+        or store.project_root != context.canonical_root
+    ):
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_policy_scope_mismatch",
+        )
+    if (
+        not isinstance(worktree_identity, str)
+        or not worktree_identity.strip()
+        or not isinstance(artifact_digest, str)
+        or _SHA256_DIGEST.fullmatch(artifact_digest) is None
+    ):
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_evidence_binding_invalid",
+        )
+    digest = proposal_digest(proposal)
+
+    def authorize(
+        durable_run: SwarmRun | None,
+        approvals: list[ApprovalRecord],
+        checkpoints: Mapping[str, WorkflowRoleCheckpoint],
+    ) -> tuple[PolicyDecision, bool]:
+        decision = _evaluate_managed_yolo(
+            proposal,
+            durable_run,
+            [approval for approval in approvals if approval.proposal_digest == digest],
+            checkpoints,
+            run_id=context.run_id,
+            worktree_identity=worktree_identity,
+            artifact_digest=artifact_digest,
+            proposal_digest_value=digest,
+        )
+        return decision, decision.status is PolicyStatus.ALLOWED
+
+    decision, claimed = store.authorize_and_claim(
+        context.run_id,
+        proposal.proposal_id,
+        digest,
+        authorize,
+    )
+    if decision.status is not PolicyStatus.ALLOWED:
+        return decision
+    if not claimed:
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "execution_already_claimed",
+        )
+    return decision
+
+
+def _evaluate_managed_yolo(
+    proposal: ActionProposal,
+    durable_run: SwarmRun | None,
+    approvals: list[ApprovalRecord],
+    checkpoints: Mapping[str, WorkflowRoleCheckpoint],
+    *,
+    run_id: str,
+    worktree_identity: str,
+    artifact_digest: str,
+    proposal_digest_value: str,
+) -> PolicyDecision:
+    if durable_run is None or durable_run.run_id != run_id:
+        return _managed_decision(proposal, PolicyStatus.BLOCKED, "unknown_run")
+    if durable_run.status != "running":
+        return _managed_decision(proposal, PolicyStatus.BLOCKED, "run_not_running")
+    if any(not approval.approved for approval in approvals):
+        return _managed_decision(proposal, PolicyStatus.BLOCKED, "approval_denied")
+
+    verifier = checkpoints.get("verifier")
+    if verifier is None or verifier.model is not None:
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_verifier_required",
+        )
+    try:
+        result = verification_result_from_checkpoint_data(verifier.data)
+    except InvalidVerifierResult:
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_verifier_invalid",
+        )
+    if not is_positive_verification_decision(result.decision):
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_verifier_not_positive",
+        )
+    if not (set(result.evidence) & set(proposal.evidence_refs)):
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "managed_verifier_evidence_mismatch",
+        )
+    test_evidence = result.test_evidence
+    if test_evidence is None:
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "test_evidence_required",
+        )
+    if test_evidence.passed is not True:
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "test_evidence_not_positive",
+        )
+    if (
+        test_evidence.run_id != run_id
+        or test_evidence.worktree_identity != worktree_identity
+        or test_evidence.artifact_digest != artifact_digest
+        or test_evidence.report_ref not in proposal.evidence_refs
+        or proposal.requested_action.arguments.get("artifact_digest") != artifact_digest
+    ):
+        return _managed_decision(
+            proposal,
+            PolicyStatus.BLOCKED,
+            "test_evidence_mismatch",
+        )
+
+    review_bindings = {
+        "run_id": run_id,
+        "worktree_identity": worktree_identity,
+        "artifact_digest": artifact_digest,
+        "proposal_digest": proposal_digest_value,
+    }
+    for role, expected_model in _REQUIRED_MANAGED_REVIEW_MODELS.items():
+        checkpoint = checkpoints.get(role)
+        evidence = _valid_checkpoint_evidence(checkpoint)
+        if (
+            checkpoint is None
+            or checkpoint.model != expected_model
+            or not evidence
+            or not _has_positive_review_vote(checkpoint)
+            or test_evidence.report_ref not in evidence
+            or any(
+                checkpoint.data.get(field) != expected
+                for field, expected in review_bindings.items()
+            )
+        ):
+            return _managed_decision(
+                proposal,
+                PolicyStatus.NEEDS_MODEL_QUORUM,
+                "managed_review_quorum_required",
+            )
+    return _managed_decision(
+        proposal,
+        PolicyStatus.ALLOWED,
+        "managed_policy_satisfied",
+    )
+
+
+def _valid_checkpoint_evidence(
+    checkpoint: WorkflowRoleCheckpoint | None,
+) -> set[str]:
+    if checkpoint is None:
+        return set()
+    data = checkpoint.data
+    work = data.get("work")
+    decision = data.get("decision")
+    evidence = data.get("evidence")
+    if (
+        not isinstance(work, str)
+        or not work.strip()
+        or not isinstance(decision, str)
+        or not decision.strip()
+        or not isinstance(evidence, list)
+        or not evidence
+        or any(not isinstance(ref, str) or not ref.strip() for ref in evidence)
+    ):
+        return set()
+    return {ref.strip() for ref in evidence}
+
+
+def _has_positive_review_vote(checkpoint: WorkflowRoleCheckpoint) -> bool:
+    decision = checkpoint.data.get("decision")
+    return (
+        checkpoint.data.get("approved") is True
+        and isinstance(decision, str)
+        and decision.strip().lower() in _APPROVING_REVIEW_DECISIONS
+    )
+
+
+def _managed_decision(
+    proposal: ActionProposal,
+    status: PolicyStatus,
+    reason: str,
+) -> PolicyDecision:
+    return PolicyDecision(
+        proposal_id=proposal.proposal_id,
+        status=status,
+        reason=reason,
+    )
 
 
 def _run_git(cwd: Path, *arguments: str) -> bytes:
