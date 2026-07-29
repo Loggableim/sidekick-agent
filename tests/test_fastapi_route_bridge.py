@@ -570,6 +570,70 @@ def test_generic_space_config_refuses_nova_management_patch(monkeypatch, tmp_pat
     }
 
 
+def test_generic_space_config_uses_dashboard_actor_for_lifecycle_writes(monkeypatch):
+    """A root-change request must carry the authenticated dashboard actor."""
+    from cli import web_server
+    from web.api import routes, space_engine
+
+    class FakeSpace:
+        def __init__(self) -> None:
+            self.config = {"project_dir": "before"}
+
+        def load_config(self):
+            return dict(self.config)
+
+    space = FakeSpace()
+    seen: list[tuple[dict, object]] = []
+
+    def fake_update(target, patch, *, actor=None):
+        assert target is space
+        seen.append((dict(patch), actor))
+        space.config.update(patch)
+        return space.load_config()
+
+    monkeypatch.setattr(routes, "_setup_workspace_from_request", lambda *_args: None)
+    monkeypatch.setattr(routes, "_teardown_workspace_context", lambda: None)
+    monkeypatch.setattr(space_engine, "get_workspace", lambda _slug: space)
+    monkeypatch.setattr(space_engine, "update_space_config", fake_update)
+
+    response = TestClient(web_server.app).post(
+        "/api/space/config",
+        headers=_headers(web_server),
+        json={"slug": "alpha", "project_dir": "after"},
+    )
+
+    assert response.status_code == 200
+    assert [patch for patch, _actor in seen] == [{"project_dir": "after"}]
+    actor = seen[0][1]
+    assert isinstance(actor, str) and actor.startswith("dashboard:")
+    assert web_server._SESSION_TOKEN not in actor
+
+
+def test_legacy_space_delete_rejects_path_traversal_before_delegating(monkeypatch):
+    """The broad legacy route rejects traversal before it reaches deletion code."""
+    from cli import web_server
+    from web.api import routes, space_engine
+
+    delegated: list[str] = []
+
+    def fake_delete(slug, **_kwargs):
+        delegated.append(slug)
+        return True
+
+    monkeypatch.setattr(routes, "_setup_workspace_from_request", lambda *_args: None)
+    monkeypatch.setattr(routes, "_teardown_workspace_context", lambda: None)
+    monkeypatch.setattr(space_engine, "delete_workspace", fake_delete)
+
+    response = TestClient(web_server.app).post(
+        "/api/space/delete",
+        headers=_headers(web_server),
+        json={"slug": "../outside"},
+    )
+
+    assert response.status_code == 400
+    assert delegated == []
+
+
 def test_space_management_get_is_pure_with_a_cold_space_cache(monkeypatch, tmp_path):
     """A management read must not scan/seed or create any Space-side state."""
     from cli import web_server

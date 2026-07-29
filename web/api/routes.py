@@ -6132,8 +6132,11 @@ def handle_post(handler, parsed) -> bool:
         slug = (body.get("slug") or "").strip().lower()
         if not slug:
             return bad(handler, "slug is required")
+        if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", slug) is None:
+            return bad(handler, "Invalid slug. Use a-z, 0-9, _, -")
         from web.api.space_engine import delete_workspace
-        if delete_workspace(slug):
+        actor = getattr(handler, "dashboard_host_actor", None)
+        if delete_workspace(slug, actor=actor):
             return j(handler, {"deleted": True})
         return bad(handler, "Space not found or protected", status=404)
 
@@ -6141,6 +6144,8 @@ def handle_post(handler, parsed) -> bool:
         slug = (body.get("slug") or "").strip().lower()
         if not slug:
             return bad(handler, "slug is required")
+        if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", slug) is None:
+            return bad(handler, "Invalid slug. Use a-z, 0-9, _, -")
         if "nova_management" in body or "nova_management_audit" in body or "space_id" in body:
             return bad(
                 handler,
@@ -6158,7 +6163,11 @@ def handle_post(handler, parsed) -> bool:
                 patch_data[key] = body[key]
         if patch_data:
             try:
-                update_space_config(ws, patch_data)
+                update_space_config(
+                    ws,
+                    patch_data,
+                    actor=getattr(handler, "dashboard_host_actor", None),
+                )
             except SpaceGovernanceError as exc:
                 return bad(handler, str(exc), status=409)
         return j(handler, {"config": ws.load_config()})
