@@ -634,3 +634,75 @@ def test_mismatched_child_in_provisioning_state_is_paused_and_audited(tmp_path: 
             "SELECT reason FROM supervisor_audit WHERE event_type = 'paused' ORDER BY sequence DESC LIMIT 1"
         ).fetchone()[0]
     assert reason == "diagnostic_mismatch"
+
+
+def test_cancel_winning_before_child_creation_terminalizes_ledger_without_orphaning_child(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    reserved = threading.Event()
+    continue_admission = threading.Event()
+
+    class ReservationPausedSupervisor(ManagedSpaceSupervisor):
+        def _after_provisioning_reservation(self, _admission_id: str) -> None:
+            reserved.set()
+            assert continue_admission.wait(timeout=5)
+
+    supervisor = ReservationPausedSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        admitted = workers.submit(_admit, supervisor)
+        assert reserved.wait(timeout=5)
+        admission_id = supervisor.list_active_admissions()[0]["admission_id"]
+        assert supervisor.cancel(admission_id, actor=_DASHBOARD_ACTOR) is True
+        continue_admission.set()
+        result = admitted.result(timeout=5)
+
+    assert result.status == "rejected"
+    assert result.reason == "terminal_admission"
+    assert not (records["alpha"].canonical_root / ".swarm").exists()
+    assert _admit(supervisor, "beta").status == "created"
+
+
+def test_cancel_waits_for_admission_that_won_ledger_lock_and_terminalizes_its_child(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    child_create_started = threading.Event()
+    continue_child_create = threading.Event()
+
+    def blocking_store(root: Path):
+        store = ProjectSwarmStore(root)
+
+        class BlockingStore:
+            def create_run(self, *args, **kwargs):
+                child_create_started.set()
+                assert continue_child_create.wait(timeout=5)
+                return store.create_run(*args, **kwargs)
+
+            def __getattr__(self, name: str):
+                return getattr(store, name)
+        return BlockingStore()
+
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=blocking_store,
+    )
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        admitted = workers.submit(_admit, supervisor)
+        assert child_create_started.wait(timeout=5)
+        admission_id = supervisor.list_active_admissions()[0]["admission_id"]
+        cancelled = workers.submit(supervisor.cancel, admission_id, actor=_DASHBOARD_ACTOR)
+        continue_child_create.set()
+        created = admitted.result(timeout=5)
+        assert cancelled.result(timeout=5) is True
+
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(created.run_id)
+    assert created.status == "created"
+    assert run is not None and run.status == "cancelled"
+    assert _admit(supervisor, "beta").status == "created"
