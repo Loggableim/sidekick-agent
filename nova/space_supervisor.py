@@ -362,17 +362,42 @@ class ManagedSpaceSupervisor:
         if record is None or not _capability_matches_record(capability, record):
             self._pause(capability, "capability_invalid")
             return False
-        store = self._child_store_factory(Path(record["canonical_root"]))
-        run = store.get_run(record["run_id"])
-        if run is None or run.status != "completed":
+        return self._reconcile_completed_record(
+            record,
+            allowed_states=("active",),
+            event_type="completed",
+        )
+
+    def _reconcile_completed_record(
+        self,
+        record: Mapping[str, Any],
+        *,
+        allowed_states: tuple[str, ...],
+        event_type: str,
+    ) -> bool:
+        """Record a verified child completion without consulting live governance."""
+        try:
+            store = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
+            run = store.get_run(record["run_id"])
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
             return False
+        if (
+            run is None
+            or run.status != "completed"
+            or not _diagnostic_metadata_matches_record(run.metadata, record)
+        ):
+            return False
+        placeholders = ", ".join("?" for _ in allowed_states)
         with self._immediate_connection() as connection:
             cursor = connection.execute(
-                "UPDATE supervisor_admissions SET state = 'completed', updated_at = ? WHERE admission_id = ? AND state = 'active'",
-                (_timestamp(), record["admission_id"]),
+                f"UPDATE supervisor_admissions SET state = 'completed', updated_at = ? WHERE admission_id = ? AND state IN ({placeholders})",
+                (_timestamp(), record["admission_id"], *allowed_states),
             )
             if cursor.rowcount:
-                _audit(connection, record["admission_id"], "completed", None, None, _timestamp())
+                _audit(connection, record["admission_id"], event_type, None, None, _timestamp())
+        if cursor.rowcount:
+            with self._bindings_lock:
+                self._bindings.pop(record["run_id"], None)
         return cursor.rowcount == 1
 
     def completion_observer_for_run(self, run_id: str) -> Callable[[Path, SwarmRun], None]:
@@ -386,14 +411,19 @@ class ManagedSpaceSupervisor:
                 or run.status != "completed"
             ):
                 return
-            reason = self._revalidate(capability)
-            if reason is not None:
-                self._pause(capability, reason)
+            record = self._record(capability._admission_id)
+            if (
+                record is None
+                or not _capability_matches_record(capability, record)
+                or Path(project_root).resolve() != Path(record["canonical_root"])
+            ):
+                self._pause(capability, "capability_invalid")
                 return
-            if Path(project_root).resolve() != capability._canonical_root:
-                self._pause(capability, "root_mismatch")
-                return
-            self.record_completion(run_id)
+            self._reconcile_completed_record(
+                record,
+                allowed_states=("active",),
+                event_type="completed",
+            )
 
         return observe
 
@@ -416,6 +446,14 @@ class ManagedSpaceSupervisor:
         store = self._child_store_factory(Path(record["canonical_root"]))
         try:
             store.cancel_run_by_human(record["run_id"], actor)
+        except ValueError:
+            if self._reconcile_completed_record(
+                record,
+                allowed_states=("active", "paused"),
+                event_type="reconciled_completed_after_human_terminal",
+            ):
+                return False
+            raise
         except KeyError:
             # A child-store bootstrap can fail after the global ledger reserves
             # its slot.  A dashboard cancellation still records the durable
@@ -447,7 +485,16 @@ class ManagedSpaceSupervisor:
         with self._bindings_lock:
             self._bindings.pop(record["run_id"], None)
         store = self._child_store_factory(Path(record["canonical_root"]))
-        store.abandon_run_by_human(record["run_id"], actor)
+        try:
+            store.abandon_run_by_human(record["run_id"], actor)
+        except ValueError:
+            if self._reconcile_completed_record(
+                record,
+                allowed_states=("active", "paused"),
+                event_type="reconciled_completed_after_human_terminal",
+            ):
+                return False
+            raise
         with self._immediate_connection() as connection:
             cursor = connection.execute(
                 "UPDATE supervisor_admissions SET state = 'abandoned', terminal_actor = ?, updated_at = ? WHERE admission_id = ? AND state NOT IN ('cancelled', 'completed', 'abandoned')",
@@ -486,6 +533,13 @@ class ManagedSpaceSupervisor:
         # Object-level tampering must never turn a capability field into a
         # filesystem write target.  Only a matching ledger record supplies
         # the root/run to pause; a missing record is ledger-only fail-closed.
+        if record is not None and record["state"] == "active":
+            if self._reconcile_completed_record(
+                record,
+                allowed_states=("active",),
+                event_type="reconciled_completed_during_pause",
+            ):
+                return
         target_root: Path | None = None
         target_run_id: str | None = None
         target_admission_id: str | None = None

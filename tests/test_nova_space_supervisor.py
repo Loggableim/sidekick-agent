@@ -244,6 +244,60 @@ def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path
     assert _admit(supervisor, "beta").status == "created"
 
 
+@pytest.mark.parametrize("terminal", ("cancel", "abandon"))
+def test_human_terminal_race_reconciles_an_already_completed_child_without_overwriting_it(
+    tmp_path: Path,
+    terminal: str,
+) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.set_run_status(admission.run_id, "completed")
+
+    transition = getattr(supervisor, terminal)
+    assert transition(admission.admission_id, actor=_DASHBOARD_ACTOR) is False
+    assert store.get_run(admission.run_id).status == "completed"
+    assert _admit(supervisor, "beta").status == "created"
+
+
+def test_completion_observer_reconciles_durable_completion_after_post_hook_revocation(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    active = store.get_run(admission.run_id)
+    assert active is not None
+    options = supervisor.execution_options_for_run(records["alpha"].canonical_root, active)
+    assert options.on_completed is not None
+    completed = store.set_run_status(admission.run_id, "completed")
+    records["alpha"] = replace(records["alpha"], yolo=False)
+
+    options.on_completed(records["alpha"].canonical_root, completed)
+    assert _admit(supervisor, "beta").status == "created"
+
+
+def test_pause_race_reconciles_a_matching_completed_child_instead_of_stranding_slot(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(admission.run_id, "completed")
+    records["alpha"] = replace(records["alpha"], yolo=False)
+
+    assert supervisor.revalidate_action_boundary(admission.capability) is False
+    assert _admit(supervisor, "beta").status == "created"
+
+
 def test_fresh_supervisor_reconciles_a_matching_completed_child_before_admission(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
@@ -349,7 +403,7 @@ def test_host_execution_options_adapter_exposes_supervisor_hooks_and_pauses_revo
     assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
 
 
-def test_tampered_capability_cannot_complete_or_release_a_supervisor_slot(tmp_path: Path) -> None:
+def test_tampered_capability_cannot_directly_complete_but_verified_child_completion_reconciles(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
         "beta": _governance(tmp_path / "beta"),
@@ -363,7 +417,7 @@ def test_tampered_capability_cannot_complete_or_release_a_supervisor_slot(tmp_pa
     object.__setattr__(admission.capability, "_canonical_root", foreign_root)
 
     assert supervisor.record_completion(admission.run_id) is False
-    assert _admit(supervisor, "beta").reason == "active_limit"
+    assert _admit(supervisor, "beta").status == "created"
     assert not (foreign_root / ".swarm").exists()
 
 
