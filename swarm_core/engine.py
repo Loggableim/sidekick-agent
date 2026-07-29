@@ -134,6 +134,7 @@ class SwarmEngine:
         max_concurrent: int = 3,
         verifier: ReadOnlyVerifier | None = None,
         pre_completion_hook: PreCompletionHook | None = None,
+        required_pre_completion_hook_id: str | None = None,
     ) -> None:
         self.transport = transport
         self.registry = registry or ModelRegistry()
@@ -141,6 +142,7 @@ class SwarmEngine:
         self.max_concurrent = max_concurrent
         self.verifier = verifier
         self.pre_completion_hook = pre_completion_hook
+        self.required_pre_completion_hook_id = required_pre_completion_hook_id
 
     def run(
         self,
@@ -451,10 +453,12 @@ class SwarmEngine:
         checkpoint: Callable[[], None] | None,
     ) -> WorkflowPaused | None:
         """Run a host-neutral durable completion gate, when the run requires it."""
-        required_hook_key = "required_pre_completion_hook"
-        if required_hook_key not in run.metadata:
-            return None
-        required_hook_id = run.metadata[required_hook_key]
+        required_hook_id = self.required_pre_completion_hook_id
+        if required_hook_id is None:
+            required_hook_key = "required_pre_completion_hook"
+            if required_hook_key not in run.metadata:
+                return None
+            required_hook_id = run.metadata[required_hook_key]
         if type(required_hook_id) is not str or not required_hook_id.strip():
             return WorkflowPaused(
                 "required_pre_completion_hook_unavailable",

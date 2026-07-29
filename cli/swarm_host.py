@@ -53,6 +53,7 @@ class SwarmExecutionOptions:
     max_concurrent: int = 3
     verifier: ReadOnlyVerifier | None = None
     pre_completion_hook: PreCompletionHook | None = None
+    required_pre_completion_hook_id: str | None = None
     on_completed: RunCompletionObserver | None = None
     blocked_reason: str | None = None
 
@@ -280,6 +281,9 @@ class SidekickSwarmService:
                 verifier=options.verifier if options is not None else None,
                 pre_completion_hook=(
                     options.pre_completion_hook if options is not None else None
+                ),
+                required_pre_completion_hook_id=(
+                    options.required_pre_completion_hook_id if options is not None else None
                 ),
             ),
             snapshot,
@@ -663,6 +667,7 @@ def _valid_execution_options(run: SwarmRun, options: SwarmExecutionOptions) -> b
         and 1 <= options.max_concurrent <= 3
         and _is_read_only_verifier(options.verifier)
         and _is_pre_completion_hook(options.pre_completion_hook)
+        and _valid_required_pre_completion_hook_contract(options)
         and (options.on_completed is None or callable(options.on_completed))
     )
 
@@ -691,6 +696,22 @@ def _is_pre_completion_hook(hook: object) -> bool:
         return type(hook_id) is str and bool(hook_id.strip()) and callable(
             getattr(hook, "run")
         )
+    except Exception:
+        return False
+
+
+def _valid_required_pre_completion_hook_contract(options: SwarmExecutionOptions) -> bool:
+    """Accept a forced completion gate only when it matches the installed hook."""
+    required_hook_id = options.required_pre_completion_hook_id
+    if required_hook_id is None:
+        return True
+    if type(required_hook_id) is not str or not required_hook_id.strip():
+        return False
+    hook = options.pre_completion_hook
+    if hook is None:
+        return False
+    try:
+        return getattr(hook, "hook_id") == required_hook_id
     except Exception:
         return False
 
