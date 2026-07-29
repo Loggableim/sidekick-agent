@@ -26,7 +26,7 @@ from swarm_core.types import SwarmRun
 DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}\Z")
 _INTENT_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _CAPABILITY_TOKEN = object()
-_OCCUPIED_STATES = frozenset({"active", "paused", "abandoned"})
+_OCCUPIED_STATES = frozenset({"provisioning", "active", "paused", "abandoned"})
 _EXECUTABLE_STATES = frozenset({"active"})
 _ALLOWED_ACTION_FAMILIES = (
     "target_local_worktree",
@@ -471,10 +471,59 @@ class ManagedSpaceSupervisor:
 
     def revalidate_action_boundary(self, capability: ManagedSpaceCapability) -> bool:
         reason = self._revalidate(capability)
-        if reason is None:
+        if reason is not None:
+            self._pause(capability, reason)
+            return False
+        status = self._read_action_boundary_child_status(capability)
+        if status == "running":
             return True
-        self._pause(capability, reason)
+        # A paused child is already safe.  Preserve its active ledger record
+        # so the authenticated host can explicitly resume it later, but never
+        # grant an action at this boundary until the read-only status says it
+        # is running.
+        if status == "paused":
+            return False
+        self._pause_ledger_only(capability, "child_not_running")
         return False
+
+    def _read_action_boundary_child_status(self, capability: ManagedSpaceCapability) -> str | None:
+        """Return the ledger-rooted child status without creating or writing a store."""
+        record = self._record(capability._admission_id)
+        if (
+            record is None
+            or record["state"] not in _EXECUTABLE_STATES
+            or not _capability_matches_record(capability, record)
+        ):
+            return None
+        try:
+            reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
+            run = reader.get_run(record["run_id"])
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            return None
+        return run.status if run is not None else None
+
+    def _pause_ledger_only(self, capability: ManagedSpaceCapability, reason: str) -> None:
+        """Fail closed from an action gate without writing through capability data."""
+        record = self._record(capability._admission_id)
+        if (
+            record is None
+            or record["state"] not in _EXECUTABLE_STATES
+            or not _capability_matches_record(capability, record)
+        ):
+            return
+        if self._reconcile_completed_record(
+            record,
+            allowed_states=("active",),
+            event_type="reconciled_completed_during_action_gate",
+        ):
+            return
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ? AND state = 'active'",
+                (_timestamp(), record["admission_id"]),
+            )
+            if cursor.rowcount:
+                _audit(connection, record["admission_id"], "paused", None, reason, _timestamp())
 
     def _pause_record(
         self,

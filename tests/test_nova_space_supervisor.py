@@ -487,6 +487,32 @@ def test_dashboard_recovery_reattaches_only_a_verified_paused_child_after_restar
     assert store.resume_run(admission.run_id).status == "running"
 
 
+def test_action_boundary_requires_explicit_resume_for_admitted_and_reattached_children(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    original = _supervisor(tmp_path, records)
+    admission = _admit(original)
+    assert admission.capability is not None
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+
+    # Admission deliberately creates a paused child. Its capability may be
+    # bound for the host, but cannot authorize an action before resume.
+    assert original.revalidate_action_boundary(admission.capability) is False
+    assert (restarted_state := original.list_active_admissions())
+    assert restarted_state[0]["state"] == "active"
+    assert store.resume_run(admission.run_id).status == "running"
+    assert original.revalidate_action_boundary(admission.capability) is True
+
+    # The same rule holds after a fresh process explicitly re-attaches the
+    # paused child; re-attachment itself never starts an action.
+    assert store.set_run_status(admission.run_id, "paused").status == "paused"
+    restarted = _supervisor(tmp_path, records)
+    recovered = restarted.recover_and_reattach(admission.admission_id, actor=_DASHBOARD_ACTOR)
+    assert recovered is not None
+    assert restarted.revalidate_action_boundary(recovered) is False
+    assert store.resume_run(admission.run_id).status == "running"
+    assert restarted.revalidate_action_boundary(recovered) is True
+
+
 @pytest.mark.parametrize("defect", ("revoked", "root", "metadata", "lease"))
 def test_recovery_reattach_rejects_unverified_child_and_keeps_it_paused(tmp_path: Path, defect: str) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
