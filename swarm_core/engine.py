@@ -269,6 +269,12 @@ class SwarmEngine:
     ) -> RunSummary:
         """Execute a run after :meth:`execute_run` has claimed its lease."""
         goal, pack = self._durable_run_inputs(run, project_root)
+        boundary_checkpoint = self._boundary_checkpoint(
+            store,
+            run.run_id,
+            project_root,
+            checkpoint,
+        )
         pack_definition = PackRegistry(project_root).get(pack)
         prior_events = store.list_events(run.run_id)
         completed_responses = self._restore_completed_responses(
@@ -286,7 +292,7 @@ class SwarmEngine:
                 initial_used=prior_call_count,
             ),
             max_concurrent=self.max_concurrent,
-            before_model_call=lambda: self._guarded_checkpoint(store, run.run_id, project_root, checkpoint),
+            before_model_call=boundary_checkpoint,
             on_model_attempt_started=lambda attempt: self._record_model_attempt_started(
                 store,
                 run.run_id,
@@ -381,7 +387,7 @@ class SwarmEngine:
             call_count=executor.call_budget.used,
             decision=outcome.decision,
             evidence=outcome.evidence,
-            checkpoint=lambda: self._guarded_checkpoint(store, run.run_id, project_root, checkpoint),
+            checkpoint=boundary_checkpoint,
         )
         if pre_completion_pause is not None:
             return self._pause_summary(
@@ -391,7 +397,12 @@ class SwarmEngine:
                 pre_completion_pause,
             )
 
-        if not self._complete_after_checkpoint(store, run.run_id, lambda: self._guarded_checkpoint(store, run.run_id, project_root, checkpoint)):
+        if not self._complete_after_checkpoint(
+            store,
+            run.run_id,
+            boundary_checkpoint,
+            can_wait_for_resume=checkpoint is not None,
+        ):
             events = tuple(store.list_events(run.run_id))
             return RunSummary(
                 run_id=run.run_id,
@@ -562,6 +573,23 @@ class SwarmEngine:
             raise WorkflowPaused("execution_guard_failed", role="execution_guard") from None
         if reason is not None:
             raise WorkflowPaused(reason, role="execution_guard")
+
+    def _boundary_checkpoint(
+        self,
+        store: ProjectSwarmStore,
+        run_id: str,
+        project_root: Path,
+        checkpoint: Callable[[], None] | None,
+    ) -> Callable[[], None] | None:
+        """Compose boundary checks without inventing cooperative resume authority."""
+        if checkpoint is None and self.execution_guard is None:
+            return None
+        return lambda: self._guarded_checkpoint(
+            store,
+            run_id,
+            project_root,
+            checkpoint,
+        )
 
     @staticmethod
     def _record_local_verifier_reputation(
@@ -976,6 +1004,8 @@ class SwarmEngine:
         store: ProjectSwarmStore,
         run_id: str,
         checkpoint: Callable[[], None] | None,
+        *,
+        can_wait_for_resume: bool,
     ) -> bool:
         """Avoid a human pause racing the terminal completed transition.
 
@@ -993,7 +1023,7 @@ class SwarmEngine:
                 if (
                     current is not None
                     and current.status == "paused"
-                    and checkpoint is not None
+                    and can_wait_for_resume
                 ):
                     # A pause can land after the checkpoint but before SQLite's
                     # transition lock.  Wait for the explicit human resume.

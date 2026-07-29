@@ -1114,11 +1114,9 @@ def _durable_nova_contract_matches(
 
 def _default_runtime_dispatcher(project_root: Path, run_id: str) -> None:
     """Concrete named worker; Cloud calls remain guarded by the host service."""
-    from cli.swarm_host import SidekickSwarmService
+    from cli.swarm import get_swarm_service
 
-    SidekickSwarmService(
-        execution_options_resolver=nova_execution_options_for_run
-    ).execute_run(project_root, run_id)
+    get_swarm_service().execute_run(project_root, run_id)
 
 
 def _pause_dispatch_failure(store: ProjectSwarmStore, run_id: str) -> None:

@@ -7,6 +7,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import threading
+from uuid import uuid4
 
 import pytest
 
@@ -222,9 +223,130 @@ def _parse(argv: list[str]) -> argparse.Namespace:
 
 
 def test_cli_service_installs_the_durable_nova_options_resolver():
-    """Catches CLI resume bypassing the Nova required hook resolver."""
+    """Catches CLI resume bypassing the ledger-authoritative host router."""
     service = get_swarm_service()
-    assert service._execution_options_resolver.__name__ == "nova_execution_options_for_run"
+    assert (
+        type(service._execution_options_resolver).__name__
+        == "ManagedSpaceHostRouter"
+    )
+
+
+def test_default_nova_dispatcher_uses_the_shared_production_service_factory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches Nova's worker path constructing a legacy-only host service."""
+    calls: list[tuple[str, Path, str]] = []
+
+    class SharedService:
+        def execute_run(self, project_root: Path, run_id: str) -> None:
+            calls.append(("shared", project_root, run_id))
+
+    class LegacyOnlyService:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def execute_run(self, project_root: Path, run_id: str) -> None:
+            calls.append(("legacy", project_root, run_id))
+
+    import cli.swarm as swarm_cli
+    import cli.swarm_host as swarm_host
+
+    monkeypatch.setattr(swarm_cli, "get_swarm_service", lambda: SharedService())
+    monkeypatch.setattr(swarm_host, "SidekickSwarmService", LegacyOnlyService)
+
+    nova_bridge._default_runtime_dispatcher(tmp_path, "managed-run")
+
+    assert calls == [("shared", tmp_path, "managed-run")]
+
+
+def test_production_service_construction_does_not_create_the_supervisor_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Catches a read/status service factory initializing global authority."""
+    import nova.space_supervisor as space_supervisor
+
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "sidekick-home"))
+    monkeypatch.setattr(space_supervisor, "_PRODUCTION_SUPERVISORS", {})
+    ledger = (
+        tmp_path
+        / "sidekick-home"
+        / "state"
+        / "nova-space-supervisor.sqlite"
+    )
+
+    service = get_swarm_service()
+
+    assert type(service._execution_options_resolver).__name__ == "ManagedSpaceHostRouter"
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("remove_marker", "goal", "pack", "autonomy"),
+)
+def test_production_service_blocks_ledger_known_contract_tampering_before_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+):
+    """Catches the production router delegating managed runs by child metadata."""
+    import cli.swarm as swarm_cli
+    from nova.space_supervisor import ManagedSpaceGovernance, ManagedSpaceSupervisor
+
+    project = tmp_path / "managed"
+    governance = ManagedSpaceGovernance.from_values(
+        space_id=str(uuid4()),
+        canonical_root=project,
+        yolo=True,
+        enrolled=True,
+        revision=1,
+        policy_identity="policy:test",
+    )
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda _target: governance,
+    )
+    admission = supervisor.admit("alpha", {"goal": "managed maintenance"})
+    assert admission.run_id is not None
+    store = ProjectSwarmStore(project)
+    assert store.resume_run(admission.run_id).status == "running"
+    with store._connection() as connection:
+        raw = connection.execute(
+            "SELECT metadata_json FROM runs WHERE run_id = ?",
+            (admission.run_id,),
+        ).fetchone()[0]
+        metadata = json.loads(raw)
+        if mutation == "remove_marker":
+            metadata.pop("nova_supervisor")
+        else:
+            metadata[mutation] = {
+                "goal": "changed goal",
+                "pack": "review-team",
+                "autonomy": "reviewed_execution",
+            }[mutation]
+        connection.execute(
+            "UPDATE runs SET metadata_json = ? WHERE run_id = ?",
+            (json.dumps(metadata, sort_keys=True), admission.run_id),
+        )
+    calls: list[object] = []
+    monkeypatch.setattr(
+        swarm_cli,
+        "get_production_managed_space_supervisor",
+        lambda: supervisor,
+    )
+    service = swarm_cli.get_swarm_service()
+    service._call_llm = (
+        lambda **_kwargs: calls.append(object())
+        or pytest.fail("managed contract tampering must not reach transport")
+    )
+
+    summary = service.execute_run(project, admission.run_id)
+
+    assert calls == []
+    assert summary.status == "paused"
+    assert summary.pause_reason == "execution_options_blocked"
 
 
 def test_cli_resume_keeps_completed_nova_success_when_cleanup_observer_raises(
