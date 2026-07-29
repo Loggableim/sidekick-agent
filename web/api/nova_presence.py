@@ -11,12 +11,15 @@ in read-only mode and returns a deliberately small public allowlist.
 from __future__ import annotations
 
 import copy
+from datetime import datetime, timezone
 import json
+import math
 import os
 import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+from uuid import UUID
 
 import yaml
 
@@ -105,6 +108,40 @@ _BLOCKER_CODES = {
 }
 _SPACE_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _TIMESTAMP_RE = re.compile(r"[0-9T:+.\-Z]{1,40}")
+_MARKER_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+_MARKER_DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}\Z")
+_MARKER_STATE_COLUMNS = frozenset(
+    {
+        "target_key",
+        "target_space_id",
+        "root_fingerprint",
+        "pending_digest",
+        "governance_revision",
+        "current_reference_digest",
+        "last_evaluated_reference_digest",
+        "last_checked_at",
+        "last_check_code",
+    }
+)
+_MARKER_AUDIT_FIELDS = frozenset(
+    {
+        "actor",
+        "timestamp",
+        "space_id",
+        "root_fingerprint",
+        "policy_revision",
+        "governance_revision",
+        "previous",
+        "next",
+    }
+)
+_MARKER_STATE_SQL = """
+    SELECT target_key, target_space_id, root_fingerprint, pending_digest,
+           governance_revision, current_reference_digest,
+           last_evaluated_reference_digest, last_checked_at, last_check_code
+    FROM nova_supervision_space_state
+    WHERE target_key = ?
+"""
 
 # The status route deliberately keeps this metadata local to the read-only
 # projection.  Importing the lifecycle module would make the GET route depend
@@ -270,6 +307,16 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
     presence = _public_presence_state(entity_state)
     managed_spaces = _managed_space_summaries(spaces_root)
     ledger_path = resolved_home / "state" / "nova-space-supervisor.sqlite"
+    marker_bindings = _managed_space_marker_bindings(spaces_root)
+    managed_keys = set(_managed_space_keys(managed_spaces))
+    change_markers = _change_markers_for(
+        ledger_path,
+        {
+            space: binding
+            for space, binding in marker_bindings.items()
+            if space in managed_keys
+        },
+    )
     admissions = _read_supervisor_admissions(ledger_path, managed_spaces)
     admission_by_space = _latest_admission_by_space(admissions, managed_spaces)
     for summary in managed_spaces:
@@ -288,6 +335,7 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
         "state": presence,
         "focus": focus,
         "managed_spaces": managed_spaces,
+        "change_markers": change_markers,
         "audited_results": results,
         "blockers": blockers,
         "activity": activity,
@@ -497,6 +545,89 @@ def _managed_space_summaries(spaces_root: Path) -> list[dict[str, Any]]:
     return summaries
 
 
+def _managed_space_marker_bindings(spaces_root: Path) -> dict[str, dict[str, object]]:
+    """Read only audited scheduler bindings; unprovable Spaces are omitted."""
+    try:
+        children = sorted(spaces_root.iterdir(), key=lambda item: item.name.lower())
+    except OSError:
+        return {}
+    bindings: dict[str, dict[str, object]] = {}
+    for child in children:
+        slug = child.name.lower()
+        if not child.is_dir() or slug == _NOVA_SLUG or not _SPACE_SLUG_RE.fullmatch(slug):
+            continue
+        binding = _marker_binding_from_config(_read_space_config(child / "space.yaml"))
+        if binding is None:
+            continue
+        bindings[slug] = binding
+        if len(bindings) >= _MAX_SPACES:
+            break
+    return bindings
+
+
+def _marker_binding_from_config(config: Mapping[str, Any]) -> dict[str, object] | None:
+    management = config.get("nova_management")
+    if not _is_enrolled_yolo_management(management):
+        return None
+    space_id = _marker_space_id(config.get("space_id"))
+    audit = config.get("nova_management_audit")
+    if not space_id or not isinstance(audit, list) or not audit:
+        return None
+    event = audit[-1]
+    if not isinstance(event, Mapping) or set(event) != _MARKER_AUDIT_FIELDS:
+        return None
+    root_fingerprint = event.get("root_fingerprint")
+    revision = management["revision"]
+    if (
+        _marker_space_id(event.get("space_id")) != space_id
+        or not _valid_marker_digest(root_fingerprint)
+        or type(event.get("governance_revision")) is not int
+        or type(event.get("policy_revision")) is not int
+        or event.get("governance_revision") != revision
+        or event.get("policy_revision") != revision
+        or not _valid_marker_audit_event(event, management)
+    ):
+        return None
+    return {
+        "space_id": space_id,
+        "root_fingerprint": root_fingerprint,
+        "governance_revision": revision,
+    }
+
+
+def _valid_marker_audit_event(event: Mapping[str, Any], management: Mapping[str, Any]) -> bool:
+    timestamp = event.get("timestamp")
+    return (
+        isinstance(event.get("actor"), str)
+        and _MARKER_DASHBOARD_ACTOR_RE.fullmatch(event["actor"]) is not None
+        and _valid_marker_epoch(timestamp, allow_zero=True)
+        and _valid_management_record(event.get("previous"))
+        and _valid_management_record(event.get("next"))
+        and event.get("next") == dict(management)
+    )
+
+
+def _valid_management_record(value: object) -> bool:
+    if not isinstance(value, Mapping) or set(value) != {"yolo", "enrolled", "revision"}:
+        return False
+    return (
+        type(value.get("yolo")) is bool
+        and type(value.get("enrolled")) is bool
+        and type(value.get("revision")) is int
+        and int(value["revision"]) >= 0
+        and (value["enrolled"] is False or value["yolo"] is True)
+    )
+
+
+def _marker_space_id(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    try:
+        return UUID(value.strip()).hex
+    except (AttributeError, ValueError):
+        return ""
+
+
 def _read_space_config(path: Path) -> Mapping[str, Any]:
     try:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -533,7 +664,7 @@ def _managed_space_keys(managed_spaces: Iterable[Mapping[str, Any]]) -> tuple[st
 
 
 def _open_read_only_ledger(path: Path) -> sqlite3.Connection | None:
-    if not path.is_file():
+    if not path.is_file() or path.with_name(path.name + "-wal").exists():
         return None
     connection: sqlite3.Connection | None = None
     try:
@@ -570,6 +701,106 @@ def _has_required_ledger_indexes(connection: sqlite3.Connection) -> bool:
         for row in rows
     }
     return found == _REQUIRED_LEDGER_INDEX_SQL
+
+
+def _change_markers_for(
+    path: Path, bindings: Mapping[str, Mapping[str, object]]
+) -> list[dict[str, str | None]]:
+    """Project only proven scheduler state from an immutable ledger view."""
+    if not bindings or path.with_name(path.name + "-wal").exists():
+        # A live WAL can make the page's snapshot depend on a writer-owned
+        # checkpoint.  Scheduler state is therefore unknown until the normal
+        # writer has produced a stable ledger view.
+        return []
+    connection = _open_read_only_ledger(path)
+    if connection is None:
+        return []
+    try:
+        if not _has_marker_state_columns(connection):
+            return []
+        markers: list[dict[str, str | None]] = []
+        for space, binding in bindings.items():
+            try:
+                row = connection.execute(_MARKER_STATE_SQL, (space,)).fetchone()
+            except sqlite3.Error:
+                continue
+            marker = _marker_for_row(row, space, binding)
+            if marker is not None:
+                markers.append(marker)
+        return markers
+    except sqlite3.Error:
+        return []
+    finally:
+        connection.close()
+
+
+def _has_marker_state_columns(connection: sqlite3.Connection) -> bool:
+    try:
+        columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(nova_supervision_space_state)")
+        }
+    except sqlite3.Error:
+        return False
+    return _MARKER_STATE_COLUMNS <= columns
+
+
+def _marker_for_row(
+    row: sqlite3.Row | None,
+    space: str,
+    binding: Mapping[str, object],
+) -> dict[str, str | None] | None:
+    if row is None or not _marker_row_matches_binding(row, space, binding):
+        return None
+    if _valid_marker_digest(row["pending_digest"]):
+        return {"space": space, "state_code": "change_detected", "checked_at": None}
+    current = row["current_reference_digest"]
+    evaluated = row["last_evaluated_reference_digest"]
+    if _valid_marker_digest(current) and _valid_marker_digest(evaluated):
+        if current != evaluated:
+            return {"space": space, "state_code": "change_detected", "checked_at": None}
+        if row["last_check_code"] == "unchanged":
+            checked_at = _marker_checkpoint_iso(row["last_checked_at"])
+            if checked_at is not None:
+                return {
+                    "space": space,
+                    "state_code": "reference_unchanged",
+                    "checked_at": checked_at,
+                }
+    return None
+
+
+def _marker_row_matches_binding(
+    row: sqlite3.Row, space: str, binding: Mapping[str, object]
+) -> bool:
+    return (
+        row["target_key"] == space
+        and _marker_space_id(row["target_space_id"]) == binding.get("space_id")
+        and _valid_marker_digest(row["root_fingerprint"])
+        and row["root_fingerprint"] == binding.get("root_fingerprint")
+        and type(row["governance_revision"]) is int
+        and row["governance_revision"] == binding.get("governance_revision")
+    )
+
+
+def _valid_marker_digest(value: object) -> bool:
+    return isinstance(value, str) and _MARKER_DIGEST_RE.fullmatch(value) is not None
+
+
+def _valid_marker_epoch(value: object, *, allow_zero: bool = False) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    epoch = float(value)
+    return math.isfinite(epoch) and (epoch >= 0 if allow_zero else epoch > 0)
+
+
+def _marker_checkpoint_iso(value: object) -> str | None:
+    if not _valid_marker_epoch(value):
+        return None
+    try:
+        return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
 
 
 def _read_supervisor_admissions(
