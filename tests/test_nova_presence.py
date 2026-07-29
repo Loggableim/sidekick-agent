@@ -7,6 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,6 +34,89 @@ def _write_space(path: Path, *, slug: str, name: str, revision: int, enrolled: b
         ),
         encoding="utf-8",
     )
+
+
+def _write_marker_space(path: Path, *, slug: str, revision: int = 7) -> tuple[str, str]:
+    """Write the smallest audited binding a marker reader may trust."""
+    space_id = uuid4().hex
+    root_fingerprint = "a" * 64
+    management = {"yolo": True, "enrolled": True, "revision": revision}
+    _write_json(
+        path / "space.yaml",
+        {
+            "name": slug.title(),
+            "project_dir": "C:/private/project-root",
+            "space_id": space_id,
+            "nova_management": management,
+            "nova_management_audit": [
+                {
+                    "actor": "dashboard:" + "b" * 64,
+                    "timestamp": 1.0,
+                    "space_id": space_id,
+                    "root_fingerprint": root_fingerprint,
+                    "policy_revision": revision,
+                    "governance_revision": revision,
+                    "previous": {"yolo": False, "enrolled": False, "revision": revision - 1},
+                    "next": management,
+                }
+            ],
+        },
+    )
+    return space_id, root_fingerprint
+
+
+def _write_scheduler_marker_state(
+    path: Path,
+    *,
+    space: str,
+    space_id: str,
+    root_fingerprint: str,
+    revision: int,
+    pending_digest: str = "",
+    current_reference_digest: str = "c" * 64,
+    last_evaluated_reference_digest: str = "e" * 64,
+    last_checked_at: object = None,
+    last_check_code: object = "",
+) -> None:
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS nova_supervision_space_state (
+                target_key TEXT PRIMARY KEY,
+                target_space_id TEXT NOT NULL,
+                root_fingerprint TEXT NOT NULL,
+                pending_digest TEXT NOT NULL,
+                pending_reason_code TEXT NOT NULL,
+                pending_count INTEGER NOT NULL,
+                governance_revision INTEGER NOT NULL,
+                last_started_at REAL,
+                current_reference_digest TEXT NOT NULL,
+                last_evaluated_reference_digest TEXT NOT NULL,
+                last_checked_at REAL,
+                last_check_code TEXT NOT NULL,
+                last_outcome_code TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )"""
+        )
+        connection.execute(
+            """INSERT OR REPLACE INTO nova_supervision_space_state (
+                target_key, target_space_id, root_fingerprint,
+                pending_digest, pending_reason_code, pending_count,
+                governance_revision, last_started_at,
+                current_reference_digest, last_evaluated_reference_digest,
+                last_checked_at, last_check_code, last_outcome_code, updated_at
+            ) VALUES (?, ?, ?, ?, 'ci_change', 0, ?, NULL, ?, ?, ?, ?, '', 1.0)""",
+            (
+                space,
+                space_id,
+                root_fingerprint,
+                pending_digest,
+                revision,
+                current_reference_digest,
+                last_evaluated_reference_digest,
+                last_checked_at,
+                last_check_code,
+            ),
+        )
 
 
 def _write_ledger(path: Path) -> None:
@@ -194,6 +278,7 @@ def test_presence_card_is_a_pure_redacted_projection(tmp_path):
         "voice": "direct, curious, accountable",
     }
     assert payload["state"] == "thinking"
+    assert payload["change_markers"] == []
     assert payload["focus"] == {"kind": "supervision", "space": "alpha", "state": "paused"}
     assert payload["managed_spaces"] == [
         {
@@ -212,6 +297,153 @@ def test_presence_card_is_a_pure_redacted_projection(tmp_path):
     assert "super-secret-value" not in json.dumps(payload)
     assert "provider error" not in json.dumps(payload)
     assert "Untrusted name" not in json.dumps(payload)
+
+
+def test_presence_card_projects_only_redacted_scheduler_marker_codes(tmp_path):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(
+        home / "spaces" / "alpha", slug="alpha"
+    )
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        pending_digest="d" * 64,
+        current_reference_digest="commit-secret-".ljust(64, "c"),
+        last_evaluated_reference_digest="e" * 64,
+    )
+
+    payload = build_presence_card(home=home)
+
+    assert payload["change_markers"] == [
+        {"space": "alpha", "state_code": "change_detected", "checked_at": None}
+    ]
+    rendered = json.dumps(payload)
+    assert "digest" not in rendered
+    assert "commit-secret" not in rendered
+
+
+def test_presence_card_projects_valid_unchanged_marker_with_utc_checkpoint(tmp_path):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(
+        home / "spaces" / "alpha", slug="alpha"
+    )
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        current_reference_digest="d" * 64,
+        last_evaluated_reference_digest="d" * 64,
+        last_checked_at=1.0,
+        last_check_code="unchanged",
+    )
+
+    payload = build_presence_card(home=home)
+
+    assert payload["change_markers"] == [
+        {
+            "space": "alpha",
+            "state_code": "reference_unchanged",
+            "checked_at": "1970-01-01T00:00:01+00:00",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("root_fingerprint", "f" * 64),
+        ("revision", 8),
+        ("current_reference_digest", "invalid"),
+        ("last_check_code", "model_output"),
+        ("last_checked_at", float("nan")),
+        ("last_checked_at", 0.0),
+    ),
+)
+def test_presence_card_omits_invalid_or_mismatched_scheduler_marker_only(
+    tmp_path, field, value
+):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(
+        home / "spaces" / "alpha", slug="alpha"
+    )
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    values: dict[str, object] = {
+        "space": "alpha",
+        "space_id": space_id,
+        "root_fingerprint": root_fingerprint,
+        "revision": 7,
+        "current_reference_digest": "d" * 64,
+        "last_evaluated_reference_digest": "d" * 64,
+        "last_checked_at": 1.0,
+        "last_check_code": "unchanged",
+    }
+    values[field] = value
+    _write_scheduler_marker_state(ledger, **values)
+
+    payload = build_presence_card(home=home)
+
+    assert payload["managed_spaces"] == [
+        {"space": "alpha", "name": "Alpha", "governance_revision": 7, "state": "paused"}
+    ]
+    assert payload["change_markers"] == []
+
+
+def test_presence_card_omits_marker_from_partial_or_wal_backed_scheduler_state(tmp_path):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(
+        home / "spaces" / "alpha", slug="alpha"
+    )
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        current_reference_digest="d" * 64,
+        last_evaluated_reference_digest="d" * 64,
+        last_checked_at=1.0,
+        last_check_code="unchanged",
+    )
+    with sqlite3.connect(ledger) as connection:
+        connection.execute("DROP TABLE nova_supervision_space_state")
+        connection.execute(
+            """CREATE TABLE nova_supervision_space_state (
+                target_key TEXT PRIMARY KEY, current_reference_digest TEXT NOT NULL
+            )"""
+        )
+    before_partial = _tree_snapshot(home)
+
+    assert build_presence_card(home=home)["change_markers"] == []
+    assert _tree_snapshot(home) == before_partial
+
+    with sqlite3.connect(ledger) as connection:
+        connection.execute("DROP TABLE nova_supervision_space_state")
+    wal_path = ledger.with_name(ledger.name + "-wal")
+    wal_path.write_bytes(b"untrusted-wal-snapshot")
+    before_wal = _tree_snapshot(home)
+
+    assert build_presence_card(home=home)["change_markers"] == []
+    assert _tree_snapshot(home) == before_wal
 
 
 def test_presence_card_does_not_create_missing_runtime_state(tmp_path):
