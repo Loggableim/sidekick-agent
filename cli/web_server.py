@@ -3706,6 +3706,19 @@ async def nova_status_endpoint():
     return get_nova_status()
 
 
+@app.get("/api/nova/presence-card")
+async def nova_presence_card_endpoint():
+    """Return Nova's public card without invoking lifecycle/status helpers.
+
+    This native route deliberately precedes the generic compatibility bridge:
+    page loads must not initialise a Space, repair Nova state, or dispatch
+    background work merely to render the empty chat view.
+    """
+    from web.api.nova_presence import build_presence_card
+
+    return build_presence_card()
+
+
 class NovaYoloToggle(BaseModel):
     enabled: bool
 
