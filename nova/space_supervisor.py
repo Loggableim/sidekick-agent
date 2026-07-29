@@ -43,6 +43,46 @@ _ALLOWED_ACTION_FAMILIES = (
     "github_publication",
     "target_deployment_worker",
 )
+_SUPERVISOR_ADMISSION_COLUMNS = frozenset(
+    {
+        "admission_id",
+        "target_key",
+        "target_space_id",
+        "intent_digest",
+        "canonical_root",
+        "root_fingerprint",
+        "governance_revision",
+        "policy_identity",
+        "allowed_action_families_json",
+        "workflow_contract_digest",
+        "run_id",
+        "state",
+        "attachment_generation",
+        "record_version",
+        "created_at",
+        "updated_at",
+        "terminal_actor",
+    }
+)
+_SUPERVISOR_REQUIRED_INDEX_SQL = {
+    "idx_supervisor_target_intent": (
+        "createuniqueindexidx_supervisor_target_intent"
+        "onsupervisor_admissions(target_space_id,intent_digest)"
+    ),
+    "idx_supervisor_one_active": (
+        "createuniqueindexidx_supervisor_one_active"
+        "onsupervisor_admissions((1))wherestatein("
+        "'provisioning','active','paused','cancelling','abandoning','abandoned')"
+    ),
+    "idx_supervisor_admissions_target_updated": (
+        "createindexidx_supervisor_admissions_target_updated"
+        "onsupervisor_admissions(target_key,updated_atdesc)"
+    ),
+    "idx_supervisor_audit_admission_sequence": (
+        "createindexidx_supervisor_audit_admission_sequence"
+        "onsupervisor_audit(admission_id,sequencedesc)"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,71 +293,82 @@ class ManagedSpaceSupervisor:
         try:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS supervisor_admissions (
-                    admission_id TEXT PRIMARY KEY, target_key TEXT NOT NULL,
-                    target_space_id TEXT NOT NULL, intent_digest TEXT NOT NULL,
-                    canonical_root TEXT NOT NULL, root_fingerprint TEXT NOT NULL,
-                    governance_revision INTEGER NOT NULL, policy_identity TEXT NOT NULL,
-                    allowed_action_families_json TEXT NOT NULL DEFAULT '[]',
-                    workflow_contract_digest TEXT NOT NULL DEFAULT '',
-                    run_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
-                    attachment_generation INTEGER NOT NULL DEFAULT 0,
-                    record_version INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-                    terminal_actor TEXT
-                )"""
-            )
-            connection.execute(
-                """CREATE TABLE IF NOT EXISTS supervisor_audit (
-                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                    admission_id TEXT NOT NULL REFERENCES supervisor_admissions(admission_id),
-                    event_type TEXT NOT NULL, actor TEXT, reason TEXT, created_at TEXT NOT NULL
-                )"""
-            )
-            connection.execute(
-                """CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_target_intent
-                   ON supervisor_admissions(target_space_id, intent_digest)"""
-            )
-            columns = {
-                row[1]
-                for row in connection.execute(
-                    "PRAGMA table_info(supervisor_admissions)"
-                )
-            }
-            if "allowed_action_families_json" not in columns:
-                connection.execute(
-                    "ALTER TABLE supervisor_admissions ADD COLUMN allowed_action_families_json TEXT NOT NULL DEFAULT '[]'"
-                )
-            if "workflow_contract_digest" not in columns:
-                connection.execute(
-                    "ALTER TABLE supervisor_admissions ADD COLUMN workflow_contract_digest TEXT NOT NULL DEFAULT ''"
-                )
-            if "attachment_generation" not in columns:
-                connection.execute(
-                    """ALTER TABLE supervisor_admissions
-                       ADD COLUMN attachment_generation INTEGER NOT NULL DEFAULT 0"""
-                )
-            if "record_version" not in columns:
-                connection.execute(
-                    """ALTER TABLE supervisor_admissions
-                       ADD COLUMN record_version INTEGER NOT NULL DEFAULT 0"""
-                )
-            connection.execute("DROP INDEX IF EXISTS idx_supervisor_one_active")
-            connection.execute(
-                """CREATE UNIQUE INDEX idx_supervisor_one_active
-                   ON supervisor_admissions((1))
-                   WHERE state IN (
-                       'provisioning', 'active', 'paused',
-                       'cancelling', 'abandoning', 'abandoned'
-                   )"""
-            )
+            if not _supervisor_ledger_schema_ready(connection):
+                self._initialize_ledger_schema(connection)
             connection.commit()
         except BaseException:
             connection.rollback()
             raise
         finally:
             connection.close()
+
+    def _initialize_ledger_schema(self, connection: sqlite3.Connection) -> None:
+        """Create/migrate the ledger exactly once while its write lock is held."""
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS supervisor_admissions (
+                admission_id TEXT PRIMARY KEY, target_key TEXT NOT NULL,
+                target_space_id TEXT NOT NULL, intent_digest TEXT NOT NULL,
+                canonical_root TEXT NOT NULL, root_fingerprint TEXT NOT NULL,
+                governance_revision INTEGER NOT NULL, policy_identity TEXT NOT NULL,
+                allowed_action_families_json TEXT NOT NULL DEFAULT '[]',
+                workflow_contract_digest TEXT NOT NULL DEFAULT '',
+                run_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL,
+                attachment_generation INTEGER NOT NULL DEFAULT 0,
+                record_version INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                terminal_actor TEXT
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS supervisor_audit (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                admission_id TEXT NOT NULL REFERENCES supervisor_admissions(admission_id),
+                event_type TEXT NOT NULL, actor TEXT, reason TEXT, created_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_target_intent
+               ON supervisor_admissions(target_space_id, intent_digest)"""
+        )
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(supervisor_admissions)")
+        }
+        if "allowed_action_families_json" not in columns:
+            connection.execute(
+                "ALTER TABLE supervisor_admissions ADD COLUMN allowed_action_families_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "workflow_contract_digest" not in columns:
+            connection.execute(
+                "ALTER TABLE supervisor_admissions ADD COLUMN workflow_contract_digest TEXT NOT NULL DEFAULT ''"
+            )
+        if "attachment_generation" not in columns:
+            connection.execute(
+                """ALTER TABLE supervisor_admissions
+                   ADD COLUMN attachment_generation INTEGER NOT NULL DEFAULT 0"""
+            )
+        if "record_version" not in columns:
+            connection.execute(
+                """ALTER TABLE supervisor_admissions
+                   ADD COLUMN record_version INTEGER NOT NULL DEFAULT 0"""
+            )
+        connection.execute("DROP INDEX IF EXISTS idx_supervisor_one_active")
+        connection.execute(
+            """CREATE UNIQUE INDEX idx_supervisor_one_active
+               ON supervisor_admissions((1))
+               WHERE state IN (
+                   'provisioning', 'active', 'paused',
+                   'cancelling', 'abandoning', 'abandoned'
+               )"""
+        )
+        connection.execute(
+            """CREATE INDEX IF NOT EXISTS idx_supervisor_admissions_target_updated
+               ON supervisor_admissions(target_key, updated_at DESC)"""
+        )
+        connection.execute(
+            """CREATE INDEX IF NOT EXISTS idx_supervisor_audit_admission_sequence
+               ON supervisor_audit(admission_id, sequence DESC)"""
+        )
 
     def admit(self, target_key: str, intent: Mapping[str, Any]) -> SupervisorAdmission:
         target_key = _target_key(target_key)
@@ -729,11 +780,37 @@ class ManagedSpaceSupervisor:
         """Resolve target governance read-only for the host supervision pulse."""
         return _resolved_governance(self._governance_resolver, _target_key(target_key))
 
+    def _ledger_schema_ready_read_only(self) -> bool:
+        """Check core ledger readiness without opening a write-capable database."""
+        if not self._ledger_path.exists():
+            return False
+        try:
+            with self._read_connection() as connection:
+                return _supervisor_ledger_schema_ready(connection)
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            return False
+
     @contextmanager
-    def _supervision_state_transaction(self) -> Iterator[sqlite3.Connection]:
-        """Use the supervisor ledger lock for bounded host-runtime state only."""
-        self.start()
+    def _supervision_state_transaction(
+        self,
+        *,
+        schema_objects: tuple[str, ...],
+        schema_initializer: Callable[[sqlite3.Connection], None],
+    ) -> Iterator[sqlite3.Connection]:
+        """Lock runtime state, initializing missing schema only under that lock.
+
+        Steady-state callers do only read probes and DML.  This keeps duplicate
+        or capacity-rejected autonomous signals from executing SQLite DDL.
+        """
+        if not schema_objects or not callable(schema_initializer):
+            raise TypeError("supervision state schema contract is invalid")
+        if not self._ledger_schema_ready_read_only():
+            self.start()
         with self._immediate_connection() as connection:
+            if not _supervisor_ledger_schema_ready(connection):
+                self._initialize_ledger_schema(connection)
+            if not _sqlite_schema_objects_present(connection, schema_objects):
+                schema_initializer(connection)
             yield connection
 
     @contextmanager
@@ -1712,6 +1789,64 @@ class ManagedSpaceHostRouter:
                 blocked_reason="supervisor_binding_unavailable"
             )
         return self._fallback(project_root, run)
+
+
+def _supervisor_ledger_schema_ready(connection: sqlite3.Connection) -> bool:
+    """Return whether the ledger has the complete, current core schema.
+
+    This is intentionally a read-only predicate.  ``start`` and runtime
+    callers use it before deciding whether a migration is necessary, so a
+    ready database never drops and recreates indexes merely to be checked.
+    """
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        if {"supervisor_admissions", "supervisor_audit"} - tables:
+            return False
+        admission_columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(supervisor_admissions)")
+        }
+        if not _SUPERVISOR_ADMISSION_COLUMNS <= admission_columns:
+            return False
+        index_sql = {
+            row[0]: _normalized_sql(row[1])
+            for row in connection.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'index'"
+            )
+            if row[1] is not None
+        }
+    except sqlite3.Error:
+        return False
+    return all(
+        index_sql.get(name) == expected
+        for name, expected in _SUPERVISOR_REQUIRED_INDEX_SQL.items()
+    )
+
+
+def _sqlite_schema_objects_present(
+    connection: sqlite3.Connection,
+    schema_objects: tuple[str, ...],
+) -> bool:
+    """Check named tables/indexes without issuing schema-changing SQL."""
+    if any(not isinstance(name, str) or not name for name in schema_objects):
+        raise TypeError("supervision state schema object name is invalid")
+    placeholders = ", ".join("?" for _ in schema_objects)
+    rows = connection.execute(
+        f"SELECT name FROM sqlite_master WHERE name IN ({placeholders})",
+        schema_objects,
+    ).fetchall()
+    return {row[0] for row in rows} == set(schema_objects)
+
+
+def _normalized_sql(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"\s+", "", value).lower()
 
 
 _PRODUCTION_SUPERVISORS: dict[Path, ManagedSpaceSupervisor] = {}

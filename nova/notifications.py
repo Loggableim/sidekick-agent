@@ -35,6 +35,7 @@ _BLOCKER_CODES = frozenset(
 )
 _DIGEST_STATUSES = frozenset({"completed", "blocked", "paused", "active"})
 _MAX_MESSAGE_LENGTH = 280
+_NOTIFICATION_CLAIM_SCHEMA_OBJECTS = ("nova_notification_claims",)
 
 
 class PrivateTelegramSender(Protocol):
@@ -129,8 +130,10 @@ class NovaTelegramNotifications:
         return self._send_claimed(claim_digest, message)
 
     def _claim(self, kind: str, claim_digest: str) -> bool:
-        with self._supervisor._supervision_state_transaction() as connection:
-            _ensure_claim_schema(connection)
+        with self._supervisor._supervision_state_transaction(
+            schema_objects=_NOTIFICATION_CLAIM_SCHEMA_OBJECTS,
+            schema_initializer=_ensure_claim_schema,
+        ) as connection:
             existing = connection.execute(
                 "SELECT 1 FROM nova_notification_claims WHERE claim_digest = ?",
                 (claim_digest,),
@@ -156,8 +159,10 @@ class NovaTelegramNotifications:
         else:
             result = "sent"
         try:
-            with self._supervisor._supervision_state_transaction() as connection:
-                _ensure_claim_schema(connection)
+            with self._supervisor._supervision_state_transaction(
+                schema_objects=_NOTIFICATION_CLAIM_SCHEMA_OBJECTS,
+                schema_initializer=_ensure_claim_schema,
+            ) as connection:
                 connection.execute(
                     """UPDATE nova_notification_claims
                        SET result_code = ?, updated_at = ?

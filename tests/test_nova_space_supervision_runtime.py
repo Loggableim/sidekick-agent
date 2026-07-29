@@ -57,6 +57,19 @@ def _complete(supervisor: ManagedSpaceSupervisor, root: Path, run_id: str) -> No
     assert supervisor.record_completion(run_id) is True
 
 
+def _ledger_schema_snapshot(path: Path) -> tuple[int, tuple[tuple[object, ...], ...]]:
+    with sqlite3.connect(path) as connection:
+        schema_version = int(connection.execute("PRAGMA schema_version").fetchone()[0])
+        objects = tuple(
+            connection.execute(
+                """SELECT type, name, tbl_name, COALESCE(sql, '')
+                   FROM sqlite_master
+                   ORDER BY type, name"""
+            )
+        )
+    return schema_version, objects
+
+
 def test_host_start_of_admitted_run_uses_bound_root_without_human_resume_marker(
     tmp_path: Path,
 ) -> None:
@@ -381,6 +394,36 @@ def test_inert_pulse_without_signal_does_not_create_a_ledger_or_schedule_work(
     assert dispatched == []
 
 
+def test_concurrent_supervisor_start_is_schema_idempotent_after_initialization(
+    tmp_path: Path,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    supervisor.start()
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        index_names = {
+            row[0]
+            for row in connection.execute(
+                """SELECT name FROM sqlite_master
+                   WHERE type = 'index' AND name IN (?, ?)""",
+                (
+                    "idx_supervisor_admissions_target_updated",
+                    "idx_supervisor_audit_admission_sequence",
+                ),
+            )
+        }
+    assert index_names == {
+        "idx_supervisor_admissions_target_updated",
+        "idx_supervisor_audit_admission_sequence",
+    }
+    before = _ledger_schema_snapshot(tmp_path / "supervisor.sqlite")
+
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        list(workers.map(lambda _index: supervisor.start(), range(4)))
+
+    assert _ledger_schema_snapshot(tmp_path / "supervisor.sqlite") == before
+
+
 def test_signal_identity_capacity_rejects_new_events_without_evicting_replay_tombstones(
     tmp_path: Path,
 ) -> None:
@@ -397,6 +440,7 @@ def test_signal_identity_capacity_rejects_new_events_without_evicting_replay_tom
             reason_code="git_change",
         )
 
+    schema_before_rejections = _ledger_schema_snapshot(tmp_path / "supervisor.sqlite")
     assert not runtime.ingest_signal(
         "alpha",
         source="git",
@@ -409,10 +453,24 @@ def test_signal_identity_capacity_rejects_new_events_without_evicting_replay_tom
         event_id="capacity-0",
         reason_code="git_change",
     )
+    with ThreadPoolExecutor(max_workers=4) as workers:
+        rejected = list(
+            workers.map(
+                lambda index: runtime.ingest_signal(
+                    "alpha",
+                    source="git",
+                    event_id=("capacity-0" if index == 0 else f"capacity-race-{index}"),
+                    reason_code="git_change",
+                ),
+                range(4),
+            )
+        )
+    assert rejected == [False, False, False, False]
 
     with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
         stored_count = connection.execute(
             "SELECT COUNT(*) FROM nova_supervision_signals"
         ).fetchone()[0]
     assert stored_count == 2_048
+    assert _ledger_schema_snapshot(tmp_path / "supervisor.sqlite") == schema_before_rejections
     assert dispatched == []
