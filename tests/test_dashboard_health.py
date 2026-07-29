@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+import subprocess
 import sys
 import warnings
 import pytest
@@ -43,6 +44,112 @@ def test_nova_presence_empty_state_contract_keeps_the_composer_and_other_spaces_
     assert "syncNovaPresenceCard({visible:false})" in spaces_js
     assert ".nova-presence-card{" in style_css
     assert "#genericEmptyStateContent[hidden],.nova-presence-card[hidden]{display:none!important;}" in style_css
+
+
+def test_nova_presence_refetches_after_a_stale_read_when_returning_to_nova():
+    """Catches a stale in-flight card read permanently blanking Nova after a Space switch."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+
+    node_program = r"""
+const vm = require('node:vm');
+
+const elements = {};
+function element() {
+  return {
+    children: [],
+    hidden: false,
+    style: {display: ''},
+    textContent: '',
+    replaceChildren() { this.children = []; },
+    appendChild(child) { this.children.push(child); return child; },
+  };
+}
+for (const id of [
+  'emptyState', 'genericEmptyStateContent', 'novaPresenceCard',
+  'novaPresenceState', 'novaPresenceFocus', 'novaManagedSpaces',
+  'novaAuditedResults', 'novaBlockers', 'novaActivity',
+]) elements[id] = element();
+
+const pending = [];
+let reads = 0;
+const context = {
+  window: {_activeSpace: 'nova'},
+  document: {createElement: () => element()},
+  $: (id) => elements[id] || null,
+  api: (path, options) => {
+    if (path !== '/api/nova/presence-card' || !options || options.logError !== false) {
+      throw new Error('unexpected presence read');
+    }
+    reads += 1;
+    return new Promise((resolve) => pending.push(resolve));
+  },
+  Promise,
+  Set,
+  String,
+  Object,
+  Array,
+  Error,
+};
+
+vm.runInNewContext(__PRESENCE_CODE__, context, {filename: 'ui.js'});
+
+async function settle() {
+  await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  await Promise.resolve();
+}
+
+(async () => {
+  context.window.syncNovaPresenceCard({visible: true});
+  context.window._activeSpace = 'default';
+  context.window.syncNovaPresenceCard({visible: true});
+  context.window._activeSpace = 'nova';
+  context.window.syncNovaPresenceCard({visible: true});
+
+  pending.shift()({
+    state: 'thinking',
+    focus: {kind: 'supervision', space: 'stale', state: 'active'},
+  });
+  await settle();
+
+  if (reads !== 2 || pending.length !== 1) {
+    throw new Error(`expected one fresh presence read after stale completion, got ${reads} reads and ${pending.length} pending`);
+  }
+  context.window.syncNovaPresenceCard({visible: true});
+  if (reads !== 2 || pending.length !== 1) {
+    throw new Error('the stale completion cleared the active fresh presence read');
+  }
+  pending.shift()({
+    state: 'thinking',
+    focus: {kind: 'supervision', space: 'beta', state: 'active'},
+  });
+  await settle();
+
+  if (!elements.novaPresenceFocus.textContent.includes('Beta')) {
+    throw new Error(`fresh Nova focus was not rendered: ${elements.novaPresenceFocus.textContent}`);
+  }
+  if (elements.novaPresenceCard.hidden || !elements.genericEmptyStateContent.hidden) {
+    throw new Error('Nova card visibility was not restored after the fresh read');
+  }
+})().catch((error) => {
+  console.error(error && error.stack || error);
+  process.exit(1);
+});
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+
+    result = subprocess.run(
+        ["node", "-e", node_program],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_agent_health_exposes_sanitized_gateway_startup_reason():
