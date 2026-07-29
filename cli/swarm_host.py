@@ -54,6 +54,7 @@ class SwarmExecutionOptions:
     verifier: ReadOnlyVerifier | None = None
     pre_completion_hook: PreCompletionHook | None = None
     required_pre_completion_hook_id: str | None = None
+    execution_guard: Callable[[Path, SwarmRun], str | None] | None = None
     on_completed: RunCompletionObserver | None = None
     blocked_reason: str | None = None
 
@@ -285,6 +286,7 @@ class SidekickSwarmService:
                 required_pre_completion_hook_id=(
                     options.required_pre_completion_hook_id if options is not None else None
                 ),
+                execution_guard=(options.execution_guard if options is not None else None),
             ),
             snapshot,
             store,
@@ -672,6 +674,7 @@ def _valid_execution_options(run: SwarmRun, options: SwarmExecutionOptions) -> b
         and _is_read_only_verifier(options.verifier)
         and _is_pre_completion_hook(options.pre_completion_hook)
         and _valid_required_pre_completion_hook_contract(run, options)
+        and (options.execution_guard is None or callable(options.execution_guard))
         and (options.on_completed is None or callable(options.on_completed))
     )
 

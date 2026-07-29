@@ -135,6 +135,7 @@ class SwarmEngine:
         verifier: ReadOnlyVerifier | None = None,
         pre_completion_hook: PreCompletionHook | None = None,
         required_pre_completion_hook_id: str | None = None,
+        execution_guard: Callable[[Path, SwarmRun], str | None] | None = None,
     ) -> None:
         self.transport = transport
         self.registry = registry or ModelRegistry()
@@ -143,6 +144,7 @@ class SwarmEngine:
         self.verifier = verifier
         self.pre_completion_hook = pre_completion_hook
         self.required_pre_completion_hook_id = required_pre_completion_hook_id
+        self.execution_guard = execution_guard
 
     def run(
         self,
@@ -268,8 +270,6 @@ class SwarmEngine:
         """Execute a run after :meth:`execute_run` has claimed its lease."""
         goal, pack = self._durable_run_inputs(run, project_root)
         pack_definition = PackRegistry(project_root).get(pack)
-        if checkpoint is not None:
-            checkpoint()
         prior_events = store.list_events(run.run_id)
         completed_responses = self._restore_completed_responses(
             store,
@@ -286,7 +286,7 @@ class SwarmEngine:
                 initial_used=prior_call_count,
             ),
             max_concurrent=self.max_concurrent,
-            before_model_call=checkpoint,
+            before_model_call=lambda: self._guarded_checkpoint(store, run.run_id, project_root, checkpoint),
             on_model_attempt_started=lambda attempt: self._record_model_attempt_started(
                 store,
                 run.run_id,
@@ -294,6 +294,11 @@ class SwarmEngine:
             ),
             prior_failed_models=attempt_recovery.failed_models,
         )
+
+        try:
+            self._guarded_checkpoint(store, run.run_id, project_root, checkpoint)
+        except WorkflowPaused as paused:
+            return self._pause_summary(store, run.run_id, executor, paused)
 
         if attempt_recovery.invalid_replay_authorization:
             return self._pause_summary(
@@ -376,7 +381,7 @@ class SwarmEngine:
             call_count=executor.call_budget.used,
             decision=outcome.decision,
             evidence=outcome.evidence,
-            checkpoint=checkpoint,
+            checkpoint=lambda: self._guarded_checkpoint(store, run.run_id, project_root, checkpoint),
         )
         if pre_completion_pause is not None:
             return self._pause_summary(
@@ -386,7 +391,7 @@ class SwarmEngine:
                 pre_completion_pause,
             )
 
-        if not self._complete_after_checkpoint(store, run.run_id, checkpoint):
+        if not self._complete_after_checkpoint(store, run.run_id, lambda: self._guarded_checkpoint(store, run.run_id, project_root, checkpoint)):
             events = tuple(store.list_events(run.run_id))
             return RunSummary(
                 run_id=run.run_id,
@@ -484,6 +489,7 @@ class SwarmEngine:
             installed_hook_id = hook.hook_id
         except Exception:
             return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
+
         if type(installed_hook_id) is not str or not installed_hook_id.strip():
             return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
         if installed_hook_id != required_hook_id:
@@ -536,6 +542,26 @@ class SwarmEngine:
             return WorkflowPaused(result.pause_reason, role="pre_completion_hook")
         except Exception:
             return WorkflowPaused("pre_completion_hook_failed", role="pre_completion_hook")
+
+    def _guarded_checkpoint(
+        self,
+        store: ProjectSwarmStore,
+        run_id: str,
+        project_root: Path,
+        checkpoint: Callable[[], None] | None,
+    ) -> None:
+        if checkpoint is not None:
+            checkpoint()
+        guard = self.execution_guard
+        if guard is None:
+            return
+        try:
+            run = store.get_run(run_id)
+            reason = guard(project_root, run) if run is not None else "capability_invalid"
+        except Exception:
+            raise WorkflowPaused("execution_guard_failed", role="execution_guard") from None
+        if reason is not None:
+            raise WorkflowPaused(reason, role="execution_guard")
 
     @staticmethod
     def _record_local_verifier_reputation(
