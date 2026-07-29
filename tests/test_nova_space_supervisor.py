@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+import nova.space_supervisor as space_supervisor_module
 from nova.space_supervisor import (
     DASHBOARD_ACTOR_RE,
     ManagedSpaceGovernance,
@@ -713,6 +714,172 @@ def test_dashboard_recovery_reattaches_only_a_verified_paused_child_after_restar
     assert store.resume_run(admission.run_id).status == "running"
 
 
+def test_two_recoveries_advance_one_generation_and_only_the_winner_executes(
+    tmp_path: Path,
+) -> None:
+    """Catches concurrent recovery minting two independently valid capabilities."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    admission = _admit(_supervisor(tmp_path, records))
+    snapshots_ready = threading.Barrier(2)
+
+    class SynchronizedRecoverySupervisor(ManagedSpaceSupervisor):
+        def _before_recovery_transaction(
+            self,
+            _admission_id: str,
+            _snapshot: object,
+        ) -> None:
+            snapshots_ready.wait(timeout=5)
+
+    def restarted() -> SynchronizedRecoverySupervisor:
+        return SynchronizedRecoverySupervisor(
+            ledger_path=tmp_path / "supervisor.sqlite",
+            governance_resolver=lambda target: records[target],
+        )
+
+    first = restarted()
+    second = restarted()
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(
+            workers.map(
+                lambda supervisor: supervisor.recover_and_reattach(
+                    admission.admission_id,
+                    actor=_DASHBOARD_ACTOR,
+                ),
+                (first, second),
+            )
+        )
+
+    assert sum(result is not None for result in results) == 1
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None
+    options = [
+        supervisor.execution_options_for_run(records["alpha"].canonical_root, run)
+        for supervisor in (first, second)
+    ]
+    assert sum(option.blocked_reason is None for option in options) == 1
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        generation, version = connection.execute(
+            """SELECT attachment_generation, record_version
+               FROM supervisor_admissions WHERE admission_id = ?""",
+            (admission.admission_id,),
+        ).fetchone()
+    assert generation == 2
+    assert version >= 3
+
+
+@pytest.mark.parametrize("terminal_action", ("cancel", "abandon"))
+def test_recovery_loses_to_concurrent_human_terminal_transition(
+    tmp_path: Path,
+    terminal_action: str,
+) -> None:
+    """Catches recovery reactivating a run after terminal intent is durable."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    admission = _admit(_supervisor(tmp_path, records))
+    snapshot_ready = threading.Event()
+    continue_recovery = threading.Event()
+
+    class PausedRecoverySupervisor(ManagedSpaceSupervisor):
+        def _before_recovery_transaction(
+            self,
+            _admission_id: str,
+            _snapshot: object,
+        ) -> None:
+            snapshot_ready.set()
+            assert continue_recovery.wait(timeout=5)
+
+    recovering = PausedRecoverySupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+    terminal = _supervisor(tmp_path, records)
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        future = workers.submit(
+            recovering.recover_and_reattach,
+            admission.admission_id,
+            actor=_DASHBOARD_ACTOR,
+        )
+        assert snapshot_ready.wait(timeout=5)
+        assert getattr(terminal, terminal_action)(
+            admission.admission_id,
+            actor=_DASHBOARD_ACTOR,
+        ) is True
+        continue_recovery.set()
+        assert future.result(timeout=5) is None
+
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None and run.status == (
+        "cancelled" if terminal_action == "cancel" else "abandoned"
+    )
+    blocked = recovering.execution_options_for_run(
+        records["alpha"].canonical_root,
+        run,
+    )
+    assert blocked.blocked_reason is not None
+
+
+def test_failed_recovery_transaction_rolls_back_without_installing_a_binding(
+    tmp_path: Path,
+) -> None:
+    """Catches a transaction loser leaving process authority behind."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    admission = _admit(_supervisor(tmp_path, records))
+
+    class FailingRecoverySupervisor(ManagedSpaceSupervisor):
+        def _before_recovery_commit(
+            self,
+            _admission_id: str,
+            _generation: int,
+        ) -> None:
+            raise RuntimeError("forced recovery rollback")
+
+    restarted = FailingRecoverySupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+
+    with pytest.raises(RuntimeError, match="forced recovery rollback"):
+        restarted.recover_and_reattach(
+            admission.admission_id,
+            actor=_DASHBOARD_ACTOR,
+        )
+
+    assert restarted._bindings == {}
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        generation = connection.execute(
+            """SELECT attachment_generation FROM supervisor_admissions
+               WHERE admission_id = ?""",
+            (admission.admission_id,),
+        ).fetchone()[0]
+    assert generation == 1
+
+
+def test_newer_reattach_invalidates_the_old_capability_without_pausing_the_winner(
+    tmp_path: Path,
+) -> None:
+    """Catches stale generation authority mutating or disabling its replacement."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    original = _supervisor(tmp_path, records)
+    admission = _admit(original)
+    assert admission.capability is not None
+    old_capability = admission.capability
+    restarted = _supervisor(tmp_path, records)
+    current = restarted.recover_and_reattach(
+        admission.admission_id,
+        actor=_DASHBOARD_ACTOR,
+    )
+    assert current is not None
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    running = store.resume_run(admission.run_id)
+
+    assert original.revalidate_action_boundary(old_capability) is False
+    current_options = restarted.execution_options_for_run(
+        records["alpha"].canonical_root,
+        running,
+    )
+    assert current_options.blocked_reason is None
+    assert store.get_run(admission.run_id).status == "running"
+
+
 def test_action_boundary_requires_explicit_resume_for_admitted_and_reattached_children(tmp_path: Path) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
     original = _supervisor(tmp_path, records)
@@ -889,6 +1056,44 @@ def test_cancel_winning_before_child_creation_terminalizes_ledger_without_orphan
     assert _admit(supervisor, "beta").status == "created"
 
 
+def test_governance_change_at_reservation_seam_creates_no_child_and_holds_auditable_slot(
+    tmp_path: Path,
+) -> None:
+    """Catches child creation using the stale pre-reservation governance snapshot."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+
+    class RevokedAtReservationSupervisor(ManagedSpaceSupervisor):
+        def _after_provisioning_reservation(self, _admission_id: str) -> None:
+            records["alpha"] = replace(
+                records["alpha"],
+                enrolled=False,
+                revision=records["alpha"].revision + 1,
+            )
+
+    supervisor = RevokedAtReservationSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+
+    rejected = _admit(supervisor)
+
+    assert rejected.status == "rejected"
+    assert rejected.reason == "governance_changed"
+    assert rejected.capability is None
+    assert not (records["alpha"].canonical_root / ".swarm").exists()
+    active = supervisor.list_active_admissions()
+    assert len(active) == 1 and active[0]["state"] == "paused"
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        audit = connection.execute(
+            """SELECT event_type, reason FROM supervisor_audit
+               WHERE admission_id = ? ORDER BY sequence DESC LIMIT 1""",
+            (rejected.admission_id,),
+        ).fetchone()
+    assert audit == ("paused", "governance_changed")
+    assert supervisor.cancel(rejected.admission_id, actor=_DASHBOARD_ACTOR) is True
+    assert not (records["alpha"].canonical_root / ".swarm").exists()
+
+
 def test_cancel_waits_for_admission_that_won_ledger_lock_and_terminalizes_its_child(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
@@ -967,3 +1172,94 @@ def test_cancel_commits_nonexecutable_ledger_state_before_slow_child_terminaliza
         assert cancelled.result(timeout=5) is True
 
     assert store.get_run(admission.run_id).status == "cancelled"
+
+
+def test_ledger_read_connection_cannot_recreate_a_deleted_database(tmp_path: Path) -> None:
+    """Catches a read-only status race recreating an empty supervisor ledger."""
+    supervisor = _supervisor(tmp_path, {"alpha": _governance(tmp_path / "alpha")})
+    supervisor.start()
+    ledger = tmp_path / "supervisor.sqlite"
+    ledger.unlink()
+
+    with pytest.raises(sqlite3.OperationalError):
+        with supervisor._read_connection():
+            pass
+
+    assert not ledger.exists()
+
+
+def test_host_router_delegates_only_ledger_unknown_nonmanaged_runs(tmp_path: Path) -> None:
+    """Catches child metadata or a missing ledger selecting managed authority."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    router_type = getattr(space_supervisor_module, "ManagedSpaceHostRouter", None)
+    assert router_type is not None
+    fallbacks: list[str] = []
+
+    def fallback(_root: Path, run):
+        fallbacks.append(run.run_id)
+        return SwarmExecutionOptions(max_calls=48)
+
+    router = router_type(supervisor, fallback)
+    generic = ProjectSwarmStore(tmp_path / "generic").create_run(
+        metadata={"goal": "legacy", "pack": "coding-team"}
+    )
+    delegated = router(tmp_path / "generic", generic)
+    assert delegated is not None and delegated.max_calls == 48
+    assert fallbacks == [generic.run_id]
+
+    orphan = replace(
+        generic,
+        run_id=str(uuid4()),
+        metadata={
+            "integration_namespace": "nova-space-supervisor",
+            "goal": "orphan",
+            "pack": "coding-team",
+            "autonomy": "autonomous",
+        },
+    )
+    blocked = router(tmp_path / "generic", orphan)
+    assert blocked.blocked_reason == "supervisor_binding_unavailable"
+    assert fallbacks == [generic.run_id]
+
+    admission = _admit(supervisor)
+    managed = ProjectSwarmStore(records["alpha"].canonical_root).get_run(
+        admission.run_id
+    )
+    assert managed is not None
+    stripped = replace(
+        managed,
+        metadata={
+            key: value
+            for key, value in managed.metadata.items()
+            if key != "nova_supervisor"
+        },
+    )
+    blocked = router(records["alpha"].canonical_root, stripped)
+    assert blocked.blocked_reason == "capability_invalid"
+    assert fallbacks == [generic.run_id]
+
+
+def test_host_router_fails_closed_when_existing_ledger_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    """Catches an unreadable authority ledger falling through to generic execution."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    supervisor.start()
+    (tmp_path / "supervisor.sqlite").write_bytes(b"not a sqlite database")
+    router_type = getattr(space_supervisor_module, "ManagedSpaceHostRouter", None)
+    assert router_type is not None
+    fallbacks: list[str] = []
+    router = router_type(
+        supervisor,
+        lambda _root, run: fallbacks.append(run.run_id) or None,
+    )
+    run = ProjectSwarmStore(tmp_path / "generic").create_run(
+        metadata={"goal": "generic", "pack": "coding-team"}
+    )
+
+    blocked = router(tmp_path / "generic", run)
+
+    assert blocked.blocked_reason == "supervisor_binding_unavailable"
+    assert fallbacks == []

@@ -1453,6 +1453,47 @@ def test_run_without_pre_completion_hook_keeps_terminal_event_sequence(tmp_path:
     assert "run.paused" not in event_types
 
 
+@pytest.mark.parametrize("with_execution_guard", (False, True))
+def test_final_human_pause_without_host_checkpoint_returns_instead_of_waiting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    with_execution_guard: bool,
+):
+    """Catches a boundary guard being mistaken for a resumable host checkpoint."""
+    original_set_status = ProjectSwarmStore.set_run_status
+    completion_attempts = 0
+
+    def pause_at_terminal_transition(
+        store: ProjectSwarmStore,
+        run_id: str,
+        status: str,
+    ):
+        nonlocal completion_attempts
+        if status == "completed":
+            completion_attempts += 1
+            if completion_attempts > 1:
+                raise AssertionError(
+                    "a guard-only or absent checkpoint cannot wait for resume"
+                )
+            original_set_status(store, run_id, "paused")
+        return original_set_status(store, run_id, status)
+
+    monkeypatch.setattr(ProjectSwarmStore, "set_run_status", pause_at_terminal_transition)
+    engine = SwarmEngine(
+        WorkflowTransport(),
+        execution_guard=(
+            (lambda _root, _run: None) if with_execution_guard else None
+        ),
+    )
+    run = engine.start_run("respect a final human pause", tmp_path)
+
+    summary = engine.execute_run(run.run_id, tmp_path)
+
+    assert completion_attempts == 1
+    assert summary.status == "paused"
+    assert summary.pause_reason == "human_paused"
+
+
 def test_required_pre_completion_hook_fails_closed_when_unavailable(tmp_path: Path):
     """Catches a durable host requirement silently bypassing its completion gate."""
     transport = WorkflowTransport()
