@@ -7394,9 +7394,9 @@ function _renderNovaPresenceCard(payload){
   for(const item of rawMarkers.slice(0,12)){
     const space=_novaCardSpace(item&&item.space);
     if(!space||Object.prototype.hasOwnProperty.call(seenMarkerSpaces,space)) continue;
-    seenMarkerSpaces[space]=true;
     const stateCode=String(item&&item.state_code||'').trim();
     if(!Object.prototype.hasOwnProperty.call(_NOVA_CARD_CHANGE_MARKERS,stateCode)) continue;
+    seenMarkerSpaces[space]=true;
     const timestamp=stateCode==='reference_unchanged'
       ? _novaCardTimestamp(item&&item.checked_at)
       : '';

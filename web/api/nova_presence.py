@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import math
 import os
@@ -570,22 +571,20 @@ def _marker_binding_from_config(config: Mapping[str, Any]) -> dict[str, object] 
     if not _is_enrolled_yolo_management(management):
         return None
     space_id = _marker_space_id(config.get("space_id"))
-    audit = config.get("nova_management_audit")
-    if not space_id or not isinstance(audit, list) or not audit:
-        return None
-    event = audit[-1]
-    if not isinstance(event, Mapping) or set(event) != _MARKER_AUDIT_FIELDS:
+    event = _validated_marker_audit_event(
+        config.get("nova_management_audit"),
+        space_id=space_id,
+        management=management,
+    )
+    current_root_fingerprint = _trusted_marker_root_fingerprint(config.get("project_dir"))
+    if event is None or not current_root_fingerprint:
         return None
     root_fingerprint = event.get("root_fingerprint")
     revision = management["revision"]
     if (
-        _marker_space_id(event.get("space_id")) != space_id
-        or not _valid_marker_digest(root_fingerprint)
-        or type(event.get("governance_revision")) is not int
-        or type(event.get("policy_revision")) is not int
+        not _valid_marker_digest(root_fingerprint)
+        or root_fingerprint != current_root_fingerprint
         or event.get("governance_revision") != revision
-        or event.get("policy_revision") != revision
-        or not _valid_marker_audit_event(event, management)
     ):
         return None
     return {
@@ -595,16 +594,63 @@ def _marker_binding_from_config(config: Mapping[str, Any]) -> dict[str, object] 
     }
 
 
-def _valid_marker_audit_event(event: Mapping[str, Any], management: Mapping[str, Any]) -> bool:
-    timestamp = event.get("timestamp")
-    return (
-        isinstance(event.get("actor"), str)
-        and _MARKER_DASHBOARD_ACTOR_RE.fullmatch(event["actor"]) is not None
-        and _valid_marker_epoch(timestamp, allow_zero=True)
-        and _valid_management_record(event.get("previous"))
-        and _valid_management_record(event.get("next"))
-        and event.get("next") == dict(management)
-    )
+def _validated_marker_audit_event(
+    value: object,
+    *,
+    space_id: str,
+    management: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Validate the complete governance chain without repairing it on GET."""
+    if not space_id or not isinstance(value, list) or not value:
+        return None
+    events_by_revision: dict[int, Mapping[str, Any]] = {}
+    for event in value:
+        if not isinstance(event, Mapping) or set(event) != _MARKER_AUDIT_FIELDS:
+            return None
+        previous = event.get("previous")
+        following = event.get("next")
+        root_fingerprint = event.get("root_fingerprint")
+        revision = following.get("revision") if isinstance(following, Mapping) else None
+        if (
+            not isinstance(event.get("actor"), str)
+            or _MARKER_DASHBOARD_ACTOR_RE.fullmatch(event["actor"]) is None
+            or not _valid_marker_epoch(event.get("timestamp"), allow_zero=True)
+            or _marker_space_id(event.get("space_id")) != space_id
+            or not (root_fingerprint == "" or _valid_marker_digest(root_fingerprint))
+            or not _valid_management_record(previous)
+            or not _valid_management_record(following)
+            or type(event.get("policy_revision")) is not int
+            or type(event.get("governance_revision")) is not int
+            or type(revision) is not int
+            or event.get("policy_revision") != revision
+            or event.get("governance_revision") != revision
+            or previous["revision"] + 1 != revision
+            or revision in events_by_revision
+        ):
+            return None
+        events_by_revision[revision] = event
+    events = [events_by_revision[revision] for revision in sorted(events_by_revision)]
+    for index, event in enumerate(events):
+        previous = event["previous"]
+        if index == 0:
+            if previous["revision"] != 0:
+                return None
+        elif previous != events[index - 1]["next"]:
+            return None
+    return events[-1] if events[-1]["next"] == dict(management) else None
+
+
+def _trusted_marker_root_fingerprint(value: object) -> str:
+    """Resolve current project root only through the pure enrollment trust path."""
+    if not isinstance(value, str) or not value.strip():
+        return ""
+    try:
+        from web.api.workspace import resolve_enrollment_trusted_workspace_read_only
+
+        root = Path(resolve_enrollment_trusted_workspace_read_only(value)).expanduser().resolve()
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        return ""
+    return sha256(str(root).encode("utf-8")).hexdigest()
 
 
 def _valid_management_record(value: object) -> bool:
@@ -668,7 +714,9 @@ def _open_read_only_ledger(path: Path) -> sqlite3.Connection | None:
         return None
     connection: sqlite3.Connection | None = None
     try:
-        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        connection = sqlite3.connect(
+            path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True
+        )
         connection.row_factory = sqlite3.Row
         # An older ledger must be migrated on the normal supervisor write path.
         # Presence deliberately returns no ledger projection rather than issuing
@@ -752,7 +800,10 @@ def _marker_for_row(
 ) -> dict[str, str | None] | None:
     if row is None or not _marker_row_matches_binding(row, space, binding):
         return None
-    if _valid_marker_digest(row["pending_digest"]):
+    pending_digest = row["pending_digest"]
+    if pending_digest != "":
+        if not _valid_marker_digest(pending_digest):
+            return None
         return {"space": space, "state_code": "change_detected", "checked_at": None}
     current = row["current_reference_digest"]
     evaluated = row["last_evaluated_reference_digest"]

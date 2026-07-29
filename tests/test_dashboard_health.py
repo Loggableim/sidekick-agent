@@ -132,6 +132,7 @@ async function settle() {
     ],
     change_markers: [
       {space: 'beta', state_code: 'change_detected', checked_at: 'not-for-change'},
+      {space: 'alpha', state_code: '<raw-untrusted-status>', checked_at: '2026-07-29T20:30:00+00:00'},
       {space: 'alpha', state_code: 'reference_unchanged', checked_at: '2026-07-29T20:30:00+00:00'},
       {space: 'gamma', state_code: '__proto__', checked_at: '2026-07-29T20:30:00+00:00'},
       {space: 'alpha', state_code: 'change_detected', checked_at: null},
