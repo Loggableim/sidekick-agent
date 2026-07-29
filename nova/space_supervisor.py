@@ -592,6 +592,132 @@ class ManagedSpaceSupervisor:
             on_completed=self.completion_observer_for_run(run.run_id),
         )
 
+    def start_admitted_run(
+        self,
+        capability: ManagedSpaceCapability,
+        *,
+        dispatcher: Callable[[Path, str], object],
+    ) -> bool:
+        """Host-start one already admitted child without a human-resume marker.
+
+        Admission deliberately leaves the child paused so that a host can bind
+        its execution machinery before any model boundary is reachable.  This
+        is the only non-human transition for that paused child.  The caller
+        receives only the ledger-rooted ``Path`` and durable run id; the
+        capability never crosses the dispatch boundary.
+        """
+        if not isinstance(capability, ManagedSpaceCapability):
+            return False
+        try:
+            run_id = capability._run_id
+        except AttributeError:
+            # ``object.__new__`` can manufacture an uninitialized instance in
+            # Python.  It is not an authority and must not turn a host pulse
+            # into an exception path.
+            return False
+        if not callable(dispatcher):
+            self._pause(capability, "host_dispatch_failed")
+            return False
+        with self._bindings_lock:
+            if self._bindings.get(run_id) is not capability:
+                return False
+        reason = self._revalidate(capability)
+        if reason is not None:
+            self._pause(capability, reason)
+            return False
+        self._before_host_start(capability)
+        # A governance/root change can race a host wake-up.  Revalidate after
+        # the deterministic handoff point and again after the child transition
+        # before invoking the dispatcher.
+        reason = self._revalidate(capability)
+        if reason is not None:
+            self._pause(capability, reason)
+            return False
+        record = self._record(capability._admission_id)
+        if (
+            record is None
+            or record["state"] not in _EXECUTABLE_STATES
+            or not _capability_matches_record(capability, record)
+        ):
+            self._pause(capability, "capability_invalid")
+            return False
+        try:
+            root = Path(record["canonical_root"]).resolve()
+            reader = ProjectSwarmStore.open_read_only(root)
+            child = reader.get_run(record["run_id"])
+        except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+            child = None
+        if (
+            child is None
+            or child.status != "paused"
+            or not _diagnostic_metadata_matches_record(child.metadata, record)
+        ):
+            self._pause(capability, "host_start_invalid_child")
+            return False
+        try:
+            store = self._child_store_factory(root)
+            store.set_run_status(record["run_id"], "running")
+            store.append_event_once(
+                record["run_id"],
+                "nova.supervisor.host_started",
+                {"source": "space_supervision"},
+                idempotency_key="supervisor-host-start",
+            )
+        except BaseException:
+            self._pause(capability, "host_start_failed")
+            return False
+        reason = self._revalidate(capability)
+        if reason is not None:
+            self._pause(capability, reason)
+            return False
+        if self._read_action_boundary_child_status(capability) != "running":
+            # A human pause/cancellation may race the child transition.  A
+            # generic host dispatcher must never be invoked for a non-running
+            # child even though the ledger binding itself still looks active.
+            self._pause(capability, "host_start_interrupted")
+            return False
+        try:
+            dispatcher(root, record["run_id"])
+        except BaseException:
+            self._pause(capability, "host_dispatch_failed")
+            return False
+        return True
+
+    def _before_host_start(self, capability: ManagedSpaceCapability) -> None:
+        """Deterministic test seam between admission and host start revalidation."""
+        del capability
+
+    def current_governance(self, target_key: str) -> ManagedSpaceGovernance | None:
+        """Resolve target governance read-only for the host supervision pulse."""
+        return _resolved_governance(self._governance_resolver, _target_key(target_key))
+
+    @contextmanager
+    def _supervision_state_transaction(self) -> Iterator[sqlite3.Connection]:
+        """Use the supervisor ledger lock for bounded host-runtime state only."""
+        self.start()
+        with self._immediate_connection() as connection:
+            yield connection
+
+    @contextmanager
+    def _supervision_state_reader(self) -> Iterator[sqlite3.Connection | None]:
+        """Read supervision state without creating or migrating the ledger."""
+        if not self._ledger_path.exists():
+            yield None
+            return
+        try:
+            connection = sqlite3.connect(
+                self._ledger_path.resolve().as_uri() + "?mode=ro",
+                uri=True,
+            )
+        except (OSError, RuntimeError, ValueError, sqlite3.Error):
+            yield None
+            return
+        connection.row_factory = sqlite3.Row
+        try:
+            yield connection
+        finally:
+            connection.close()
+
     def _execution_guard_for(self, capability: ManagedSpaceCapability):
         def guard(_project_root: Path, current_run: SwarmRun | None) -> str | None:
             if current_run is None or not _diagnostic_metadata_matches_capability(
