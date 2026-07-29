@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
 from pathlib import Path
+from urllib.parse import urlparse
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -555,4 +558,135 @@ def test_presence_card_is_native_authenticated_fastapi_read(monkeypatch, tmp_pat
     assert unauthorized.status_code == 401
     assert authorized.status_code == 200
     assert authorized.json()["identity"]["name"] == "Nova"
+    assert _tree_snapshot(home) == before
+
+
+def _forbid_mutating_nova_read_dependencies(monkeypatch) -> None:
+    """Make a hidden lifecycle/store call fail loudly instead of writing test state."""
+    import nova.presence as runtime_presence
+    import web.api.nova_lifecycle as lifecycle
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Nova read endpoint invoked a mutating/runtime dependency")
+
+    monkeypatch.setattr(lifecycle, "migration_tick", forbidden)
+    monkeypatch.setattr(lifecycle, "repair_incomplete_events", forbidden)
+    monkeypatch.setattr(lifecycle, "ensure_background_cron_jobs", forbidden)
+    monkeypatch.setattr(lifecycle, "_run_local_script", forbidden)
+    monkeypatch.setattr(lifecycle, "EntityKernel", forbidden)
+    monkeypatch.setattr(lifecycle, "EntityStateStore", forbidden)
+    monkeypatch.setattr(runtime_presence, "PresenceCoordinator", forbidden)
+
+
+@pytest.mark.parametrize(
+    ("path", "seeded"),
+    [
+        ("/api/nova/status", False),
+        ("/api/nova/status", True),
+        ("/api/nova/presence", False),
+        ("/api/nova/presence", True),
+    ],
+)
+def test_native_nova_status_reads_are_authenticated_and_side_effect_free(
+    monkeypatch, tmp_path, path: str, seeded: bool,
+):
+    """Catches status/presence GETs bootstrapping Nova or probing models."""
+    home = tmp_path / "home"
+    if seeded:
+        _write_json(
+            home / "spaces" / "nova" / "nova_data" / "entity" / "entity_state.json",
+            {
+                "schema_version": 2,
+                "revision": 9,
+                "runtime": {"autonomy_level": 4, "last_event_id": "evt-public"},
+                "dynamic": {
+                    "presence": "thinking",
+                    "voice_cycle": {"cycle_id": "cycle-public", "status": "thinking"},
+                    "presence_updated_at": "2026-07-29T12:00:00+00:00",
+                },
+            },
+        )
+        _write_json(
+            home / "spaces" / "nova" / ".lifecycle" / "reflection_queue.json",
+            [{"status": "queued"}],
+        )
+    monkeypatch.setenv("SIDEKICK_HOME", str(home))
+
+    from cli import web_server
+
+    _forbid_mutating_nova_read_dependencies(monkeypatch)
+    before = _tree_snapshot(home)
+    client = TestClient(web_server.app, raise_server_exceptions=False)
+
+    unauthorized = client.get(path)
+    authorized = client.get(
+        path,
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+
+    assert unauthorized.status_code == 401
+    assert authorized.status_code == 200
+    payload = authorized.json()
+    if path == "/api/nova/status":
+        assert payload["ok"] is True
+        assert payload["autonomy_level"] == (4 if seeded else 2)
+        assert isinstance(payload["models"], dict)
+        assert payload["models"]["checked"] is False
+    else:
+        assert payload["presence"] == ("thinking" if seeded else "available")
+        assert payload["voice_cycle"] == (
+            {"cycle_id": "cycle-public", "status": "thinking"} if seeded else None
+        )
+    assert _tree_snapshot(home) == before
+
+
+class _LegacyNovaReadHandler:
+    headers = {"Host": "127.0.0.1"}
+    client_address = ("127.0.0.1", 12345)
+
+    def __init__(self) -> None:
+        self.status_code: int | None = None
+        self.response_headers: list[tuple[str, str]] = []
+        self.rfile = io.BytesIO()
+        self.wfile = io.BytesIO()
+
+    def send_response(self, status: int, *_args) -> None:
+        self.status_code = status
+
+    def send_header(self, name: str, value: str) -> None:
+        self.response_headers.append((name, value))
+
+    def end_headers(self) -> None:
+        return None
+
+
+@pytest.mark.parametrize("path", ["/api/nova/status", "/api/nova/presence"])
+def test_legacy_nova_status_reads_match_native_pure_projection(monkeypatch, tmp_path, path: str):
+    """Catches the compatibility router falling back to mutating Nova helpers."""
+    home = tmp_path / "home"
+    _write_json(
+        home / "spaces" / "nova" / "nova_data" / "entity" / "entity_state.json",
+        {
+            "runtime": {"autonomy_level": 3},
+            "dynamic": {"presence": "listening", "voice_cycle": None},
+        },
+    )
+    monkeypatch.setenv("SIDEKICK_HOME", str(home))
+
+    from cli import web_server
+    from web.api import routes
+
+    _forbid_mutating_nova_read_dependencies(monkeypatch)
+    before = _tree_snapshot(home)
+    native = TestClient(web_server.app, raise_server_exceptions=False).get(
+        path,
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+    handler = _LegacyNovaReadHandler()
+    handled = routes.handle_get(handler, urlparse(path))
+
+    assert native.status_code == 200
+    assert handled is None
+    assert handler.status_code == 200
+    assert json.loads(handler.wfile.getvalue().decode("utf-8")) == native.json()
     assert _tree_snapshot(home) == before

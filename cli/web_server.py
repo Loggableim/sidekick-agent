@@ -3701,9 +3701,9 @@ async def list_cron_jobs():
 
 @app.get("/api/nova/status")
 async def nova_status_endpoint():
-    from web.api.nova_lifecycle import get_nova_status
+    from web.api.nova_presence import build_status_projection
 
-    return get_nova_status()
+    return build_status_projection()
 
 
 @app.get("/api/nova/presence-card")
@@ -3749,9 +3749,9 @@ async def nova_yolo_toggle_endpoint(body: NovaYoloToggle):
 
 @app.get("/api/nova/presence")
 async def nova_presence_endpoint():
-    from nova.presence import PresenceCoordinator
+    from web.api.nova_presence import build_presence_status
 
-    return PresenceCoordinator().status()
+    return build_presence_status()
 
 
 @app.post("/api/nova/voice-event")
