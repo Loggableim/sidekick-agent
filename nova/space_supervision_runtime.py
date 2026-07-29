@@ -28,7 +28,6 @@ _MERGED_REASON = "multiple_changes"
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _TARGET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _MIN_CHECK_SECONDS = 15 * 60
-_MAX_STORED_SIGNALS = 2_048
 _MAX_PENDING_SIGNALS = 256
 
 # Task 5 can render this fixed, non-model identity data without making a
@@ -164,7 +163,6 @@ class NovaSpaceSupervisionRuntime:
                        WHERE target_key = ?""",
                     (pending_digest, pending_reason, pending_count, observed_at, target),
                 )
-            _prune_signals(connection)
         return True
 
     def pulse(self, *, now_epoch: float | None = None) -> tuple[SupervisionPulseOutcome, ...]:
@@ -342,6 +340,10 @@ class NovaSpaceSupervisionRuntime:
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
+    # These opaque identity tombstones are intentionally retained. Evicting a
+    # digest turns an old external event into a fresh autonomous trigger and
+    # violates exactly-once semantics. Pending state below is separately
+    # bounded, so event volume cannot inflate an individual intent.
     connection.execute(
         """CREATE TABLE IF NOT EXISTS nova_supervision_signals (
             signal_digest TEXT PRIMARY KEY,
@@ -365,21 +367,6 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         """CREATE INDEX IF NOT EXISTS idx_nova_supervision_signals_observed
            ON nova_supervision_signals(observed_at)"""
     )
-
-
-def _prune_signals(connection: sqlite3.Connection) -> None:
-    count = int(
-        connection.execute("SELECT COUNT(*) FROM nova_supervision_signals").fetchone()[0]
-    )
-    excess = count - _MAX_STORED_SIGNALS
-    if excess > 0:
-        connection.execute(
-            """DELETE FROM nova_supervision_signals WHERE signal_digest IN (
-                   SELECT signal_digest FROM nova_supervision_signals
-                   ORDER BY observed_at ASC, signal_digest ASC LIMIT ?
-               )""",
-            (excess,),
-        )
 
 
 def _target_key(value: object) -> str:

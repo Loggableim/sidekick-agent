@@ -160,6 +160,62 @@ def test_host_start_does_not_dispatch_if_the_bound_child_is_paused_during_handof
     assert dispatched == []
 
 
+def test_host_start_revalidates_again_after_status_probe_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = supervisor.admit("alpha", {"kind": "maintenance"})
+    dispatched: list[tuple[Path, str]] = []
+    original_status = supervisor._read_action_boundary_child_status
+
+    def status_then_revoke(capability):
+        status = original_status(capability)
+        records["alpha"] = replace(records["alpha"], yolo=False)
+        return status
+
+    monkeypatch.setattr(supervisor, "_read_action_boundary_child_status", status_then_revoke)
+    assert admission.capability is not None
+
+    assert not supervisor.start_admitted_run(
+        admission.capability,
+        dispatcher=lambda root, run_id: dispatched.append((root, run_id)),
+    )
+
+    child = ProjectSwarmStore(tmp_path / "alpha").get_run(admission.run_id)
+    assert child is not None and child.status == "paused"
+    assert dispatched == []
+
+
+def test_host_start_revalidates_at_final_dispatch_handoff(
+    tmp_path: Path,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+
+    class RevokingAtDispatchSupervisor(ManagedSpaceSupervisor):
+        def _before_host_dispatch(self, capability):
+            del capability
+            records["alpha"] = replace(records["alpha"], enrolled=False)
+
+    supervisor = RevokingAtDispatchSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+    )
+    admission = supervisor.admit("alpha", {"kind": "maintenance"})
+    dispatched: list[tuple[Path, str]] = []
+
+    assert admission.capability is not None
+    assert not supervisor.start_admitted_run(
+        admission.capability,
+        dispatcher=lambda root, run_id: dispatched.append((root, run_id)),
+    )
+
+    child = ProjectSwarmStore(tmp_path / "alpha").get_run(admission.run_id)
+    assert child is not None and child.status == "paused"
+    assert dispatched == []
+
+
 def test_duplicate_signals_coalesce_and_event_dispatches_once_without_model_runtime(
     tmp_path: Path,
 ) -> None:
@@ -321,4 +377,29 @@ def test_inert_pulse_without_signal_does_not_create_a_ledger_or_schedule_work(
     assert runtime.pulse(now_epoch=900.0) == ()
 
     assert not (tmp_path / "supervisor.sqlite").exists()
+    assert dispatched == []
+
+
+def test_deduped_signal_identity_cannot_be_reaccepted_after_more_than_2048_events(
+    tmp_path: Path,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    for index in range(2_050):
+        assert runtime.ingest_signal(
+            "alpha",
+            source="git",
+            event_id=f"commit-{index}",
+            reason_code="git_change",
+        )
+
+    assert not runtime.ingest_signal(
+        "alpha",
+        source="git",
+        event_id="commit-0",
+        reason_code="git_change",
+    )
     assert dispatched == []
