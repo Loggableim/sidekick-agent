@@ -671,43 +671,44 @@ class ManagedSpaceSupervisor:
                 if cursor.rowcount:
                     _audit(connection, admission_id, "cancelled", actor, "cancelled_before_child_create", _timestamp())
                 return cursor.rowcount == 1
-            # Invalidate execution before touching the child store while this
-            # write transaction prevents an in-flight admission from creating
-            # a child behind the terminal transition.
+            # Commit a visible non-executable state before the potentially
+            # slow child terminalization. Admission's creation lock means an
+            # in-flight admission either already activated this child or sees
+            # the terminal provisioning record and creates nothing.
             if record["state"] in {"active", "paused"}:
-                connection.execute(
+                cursor = connection.execute(
                     "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ? AND state IN ('active', 'paused')",
                     (_timestamp(), admission_id),
                 )
-            store = self._child_store_factory(Path(record["canonical_root"]))
-            try:
-                store.cancel_run_by_human(record["run_id"], actor)
-            except ValueError:
-                if self._reconcile_completed_record_in_connection(
-                    connection,
-                    record,
-                    allowed_states=("active", "paused"),
-                    event_type="reconciled_completed_after_human_terminal",
-                ):
-                    with self._bindings_lock:
-                        self._bindings.pop(record["run_id"], None)
-                    return False
-                raise
-            except KeyError:
-                # Legacy/crash-recovery paths can still have an active ledger
-                # record without a readable child. A human cancellation is a
-                # durable cleanup, never a reason to recreate one.
-                pass
+                if cursor.rowcount:
+                    _audit(connection, admission_id, "paused", actor, "cancel_requested", _timestamp())
+        with self._bindings_lock:
+            self._bindings.pop(record["run_id"], None)
+        store = self._child_store_factory(Path(record["canonical_root"]))
+        try:
+            store.cancel_run_by_human(record["run_id"], actor)
+        except ValueError:
+            if self._reconcile_completed_record(
+                record,
+                allowed_states=("active", "paused"),
+                event_type="reconciled_completed_after_human_terminal",
+            ):
+                return False
+            raise
+        except KeyError:
+            # Legacy/crash-recovery paths can still have an active ledger
+            # record without a readable child. A human cancellation is a
+            # durable cleanup, never a reason to recreate one.
+            pass
+        with self._immediate_connection() as connection:
             cursor = connection.execute(
                 """UPDATE supervisor_admissions
                    SET state = 'cancelled', terminal_actor = ?, updated_at = ?
-                   WHERE admission_id = ? AND state != 'cancelled'""",
+                   WHERE admission_id = ? AND state IN ('active', 'paused', 'abandoned')""",
                 (actor, _timestamp(), admission_id),
             )
             if cursor.rowcount:
                 _audit(connection, admission_id, "cancelled", actor, None, _timestamp())
-        with self._bindings_lock:
-            self._bindings.pop(record["run_id"], None)
         return cursor.rowcount == 1
 
     def abandon(self, admission_id: str, *, actor: str) -> bool:
@@ -733,28 +734,26 @@ class ManagedSpaceSupervisor:
             )
             if cursor.rowcount:
                 _audit(connection, admission_id, "paused", actor, "abandon_requested", _timestamp())
-            store = self._child_store_factory(Path(record["canonical_root"]))
-            try:
-                store.abandon_run_by_human(record["run_id"], actor)
-            except ValueError:
-                if self._reconcile_completed_record_in_connection(
-                    connection,
-                    record,
-                    allowed_states=("active", "paused"),
-                    event_type="reconciled_completed_after_human_terminal",
-                ):
-                    with self._bindings_lock:
-                        self._bindings.pop(record["run_id"], None)
-                    return False
-                raise
+        with self._bindings_lock:
+            self._bindings.pop(record["run_id"], None)
+        store = self._child_store_factory(Path(record["canonical_root"]))
+        try:
+            store.abandon_run_by_human(record["run_id"], actor)
+        except ValueError:
+            if self._reconcile_completed_record(
+                record,
+                allowed_states=("active", "paused"),
+                event_type="reconciled_completed_after_human_terminal",
+            ):
+                return False
+            raise
+        with self._immediate_connection() as connection:
             cursor = connection.execute(
-                "UPDATE supervisor_admissions SET state = 'abandoned', terminal_actor = ?, updated_at = ? WHERE admission_id = ? AND state NOT IN ('cancelled', 'completed', 'abandoned')",
+                "UPDATE supervisor_admissions SET state = 'abandoned', terminal_actor = ?, updated_at = ? WHERE admission_id = ? AND state IN ('active', 'paused')",
                 (actor, _timestamp(), admission_id),
             )
             if cursor.rowcount:
                 _audit(connection, admission_id, "abandoned", actor, None, _timestamp())
-        with self._bindings_lock:
-            self._bindings.pop(record["run_id"], None)
         return cursor.rowcount == 1
 
     def _binding_for_run(self, project_root: Path, run: SwarmRun) -> ManagedSpaceCapability | None:
