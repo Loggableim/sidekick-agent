@@ -312,7 +312,8 @@ def test_restart_and_concurrent_pulses_dispatch_one_pending_signal_once(
     assert dispatched == [(records["alpha"].canonical_root, run_id)]
 
 
-def test_periodic_check_waits_fifteen_minutes_but_pending_event_bypasses_floor(
+def test_equal_reference_at_fifteen_minutes_records_unchanged_without_model_work(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
@@ -327,16 +328,212 @@ def test_periodic_check_waits_fifteen_minutes_but_pending_event_bypasses_floor(
     _complete(supervisor, tmp_path / "alpha", first[0].run_id)
 
     assert runtime.pulse(now_epoch=899.0) == ()
-    at_floor = runtime.pulse(now_epoch=900.0)
-    assert at_floor[0].status == "started"
-    _complete(supervisor, tmp_path / "alpha", at_floor[0].run_id)
+    monkeypatch.setattr(
+        supervisor,
+        "admit",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a quiet equality check must not admit a model run")
+        ),
+    )
+    assert [(item.target_key, item.status) for item in runtime.pulse(now_epoch=900.0)] == [
+        ("alpha", "unchanged")
+    ]
+    assert dispatched == [(records["alpha"].canonical_root, first[0].run_id)]
+    assert runtime.pulse(now_epoch=901.0) == ()
+
+
+def test_fresh_signal_after_an_unchanged_check_bypasses_the_quiet_floor(
+    tmp_path: Path,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    assert runtime.ingest_signal(
+        "alpha", source="ci", event_id="build-1", reason_code="ci_change"
+    )
+    first = runtime.pulse(now_epoch=0.0)
+    _complete(supervisor, tmp_path / "alpha", first[0].run_id)
+    assert [outcome.status for outcome in runtime.pulse(now_epoch=900.0)] == ["unchanged"]
 
     assert runtime.ingest_signal(
         "alpha", source="kanban", event_id="card-2", reason_code="kanban_change"
     )
     immediate = runtime.pulse(now_epoch=901.0)
     assert immediate[0].status == "started"
-    assert len(dispatched) == 3
+    assert len(dispatched) == 2
+
+
+@pytest.mark.parametrize("legacy_reference", ("", "malformed-reference"))
+def test_legacy_reference_row_does_not_admit_periodic_model_work(
+    tmp_path: Path, legacy_reference: str
+) -> None:
+    """Blank or invalid markers are unknown, never a periodic model trigger."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    assert runtime.ingest_signal(
+        "alpha", source="ci", event_id="build-1", reason_code="ci_change"
+    )
+    first = runtime.pulse(now_epoch=0.0)
+    _complete(supervisor, tmp_path / "alpha", first[0].run_id)
+
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(nova_supervision_space_state)")
+        }
+        for definition in (
+            "current_reference_digest TEXT NOT NULL DEFAULT ''",
+            "last_evaluated_reference_digest TEXT NOT NULL DEFAULT ''",
+            "last_checked_at REAL",
+            "last_check_code TEXT NOT NULL DEFAULT ''",
+        ):
+            if definition.split()[0] not in columns:
+                connection.execute(
+                    f"ALTER TABLE nova_supervision_space_state ADD COLUMN {definition}"
+                )
+        connection.execute(
+            """UPDATE nova_supervision_space_state
+               SET current_reference_digest = ?,
+                   last_evaluated_reference_digest = ?,
+                   last_checked_at = NULL, last_check_code = ''
+               WHERE target_key = 'alpha'""",
+            (legacy_reference, legacy_reference),
+        )
+
+    assert runtime.pulse(now_epoch=900.0) == ()
+    assert dispatched == [(records["alpha"].canonical_root, first[0].run_id)]
+
+
+def test_object_complete_legacy_schema_migrates_marker_and_binding_columns_before_signal_write(
+    tmp_path: Path,
+) -> None:
+    """An existing table/index set cannot suppress a required column migration."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    supervisor.start()
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        connection.execute(
+            """CREATE TABLE nova_supervision_signals (
+                signal_digest TEXT PRIMARY KEY,
+                target_key TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                observed_at REAL NOT NULL
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE nova_supervision_space_state (
+                target_key TEXT PRIMARY KEY,
+                pending_digest TEXT NOT NULL,
+                pending_reason_code TEXT NOT NULL,
+                pending_count INTEGER NOT NULL,
+                last_started_at REAL,
+                last_outcome_code TEXT NOT NULL,
+                updated_at REAL NOT NULL
+            )"""
+        )
+        connection.execute(
+            """CREATE INDEX idx_nova_supervision_signals_observed
+               ON nova_supervision_signals(observed_at)"""
+        )
+
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    assert runtime.ingest_signal(
+        "alpha", source="ci", event_id="legacy-build-1", reason_code="ci_change"
+    )
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(nova_supervision_space_state)")
+        }
+
+    assert {
+        "target_space_id",
+        "root_fingerprint",
+        "governance_revision",
+        "current_reference_digest",
+        "last_evaluated_reference_digest",
+        "last_checked_at",
+        "last_check_code",
+    } <= columns
+    assert [outcome.status for outcome in runtime.pulse(now_epoch=0.0)] == ["started"]
+
+
+def test_rebind_clears_old_reference_markers_before_admitting_a_fresh_signal(
+    tmp_path: Path,
+) -> None:
+    """A recreated Space cannot inherit a quiet marker from its predecessor."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    assert runtime.ingest_signal(
+        "alpha", source="ci", event_id="build-1", reason_code="ci_change"
+    )
+    first = runtime.pulse(now_epoch=0.0)
+    _complete(supervisor, tmp_path / "alpha", first[0].run_id)
+    assert [outcome.status for outcome in runtime.pulse(now_epoch=900.0)] == ["unchanged"]
+
+    records["alpha"] = _governance(tmp_path / "alpha-rebound", revision=2)
+    assert runtime.ingest_signal(
+        "alpha", source="git", event_id="rebound-1", reason_code="git_change"
+    )
+
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        row = connection.execute(
+            """SELECT target_space_id, root_fingerprint, governance_revision,
+                      current_reference_digest, last_evaluated_reference_digest,
+                      last_checked_at, last_check_code
+               FROM nova_supervision_space_state WHERE target_key = 'alpha'"""
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == records["alpha"].space_id
+    assert row[1] == records["alpha"].root_fingerprint
+    assert row[2] == records["alpha"].revision
+    assert isinstance(row[3], str) and len(row[3]) == 64
+    assert row[4:] == ("", None, "")
+    assert [outcome.status for outcome in runtime.pulse(now_epoch=901.0)] == ["started"]
+
+
+def test_equality_race_preserves_a_fresh_signal_for_the_next_pulse(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A stale equality write loses to a newly accepted bounded signal."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    dispatched: list[tuple[Path, str]] = []
+    runtime = _runtime(supervisor, dispatched)
+
+    assert runtime.ingest_signal(
+        "alpha", source="ci", event_id="build-1", reason_code="ci_change"
+    )
+    first = runtime.pulse(now_epoch=0.0)
+    _complete(supervisor, tmp_path / "alpha", first[0].run_id)
+    original_mark_unchanged = runtime._mark_unchanged
+    injected = False
+
+    def mark_unchanged_after_fresh_signal(state: object, now: float) -> bool:
+        nonlocal injected
+        if not injected:
+            injected = True
+            assert runtime.ingest_signal(
+                "alpha", source="git", event_id="racing-commit", reason_code="git_change"
+            )
+        return original_mark_unchanged(state, now)
+
+    monkeypatch.setattr(runtime, "_mark_unchanged", mark_unchanged_after_fresh_signal)
+
+    assert runtime.pulse(now_epoch=900.0) == ()
+    assert [outcome.status for outcome in runtime.pulse(now_epoch=901.0)] == ["started"]
+    assert len(dispatched) == 2
 
 
 def test_ineligible_spaces_never_create_a_child_dispatch_or_consult_global_nova_yolo(
