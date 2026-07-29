@@ -273,24 +273,33 @@ class ManagedSpaceSupervisor:
                 ),
             )
             _audit(connection, admission_id, "provisioning", None, None, now)
-        store = self._child_store_factory(governance.canonical_root)
-        store.create_run(run_id, status="paused", metadata=_diagnostic_metadata(capability, intent))
-        if not self._activate_provisioning(admission_id):
-            # A concurrent admission may recover this still-provisioning
-            # record before we activate it.  That recovery intentionally
-            # leaves the child paused and the global slot occupied; return
-            # the durable admission without minting an executable binding.
-            record = self._record(admission_id)
-            if (
-                record is not None
-                and record["state"] == "paused"
-                and record["run_id"] == run_id
-            ):
-                return SupervisorAdmission("created", admission_id, run_id, None, "provisioning_interrupted")
-            raise RuntimeError("managed Space child provisioning could not be activated")
+        self._after_provisioning_reservation(admission_id)
+        # Serialize child creation and ledger activation against human
+        # terminal transitions.  A cancellation that wins before this lock
+        # is acquired terminalizes the reservation and prevents any child
+        # filesystem write; an admission that wins creates and activates
+        # while the terminal path is blocked on this ledger lock.
+        with self._immediate_connection() as connection:
+            record = connection.execute(
+                "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
+                (admission_id,),
+            ).fetchone()
+            if record is None or record["state"] != "provisioning":
+                return SupervisorAdmission("rejected", admission_id, run_id, None, "terminal_admission")
+            store = self._child_store_factory(governance.canonical_root)
+            store.create_run(run_id, status="paused", metadata=_diagnostic_metadata(capability, intent))
+            if not self._activate_provisioning(connection, record):
+                # Preserve the durable provisioning record for the existing
+                # write-path crash reconciliation rather than releasing a
+                # slot whose child may have been partially created.
+                raise RuntimeError("managed Space child provisioning could not be activated")
         with self._bindings_lock:
             self._bindings[run_id] = capability
         return SupervisorAdmission("created", admission_id, run_id, capability, None)
+
+    def _after_provisioning_reservation(self, admission_id: str) -> None:
+        """Test seam between durable reservation and serialized child create."""
+        del admission_id
 
     def list_active_admissions(self) -> list[dict[str, str]]:
         if not self._ledger_path.exists():
@@ -362,9 +371,9 @@ class ManagedSpaceSupervisor:
             )
             _audit(connection, record["admission_id"], "paused", None, reason, _timestamp())
 
-    def _activate_provisioning(self, admission_id: str) -> bool:
-        record = self._record(admission_id)
-        if record is None or record["state"] != "provisioning":
+    def _activate_provisioning(self, connection: sqlite3.Connection, record: Mapping[str, Any]) -> bool:
+        """Activate a verified child using the caller's held ledger lock."""
+        if record["state"] != "provisioning":
             return False
         try:
             reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
@@ -377,13 +386,12 @@ class ManagedSpaceSupervisor:
             or not _diagnostic_metadata_matches_record(run.metadata, record)
         ):
             return False
-        with self._immediate_connection() as connection:
-            cursor = connection.execute(
-                "UPDATE supervisor_admissions SET state = 'active', updated_at = ? WHERE admission_id = ? AND state = 'provisioning'",
-                (_timestamp(), admission_id),
-            )
-            if cursor.rowcount:
-                _audit(connection, admission_id, "admitted", None, None, _timestamp())
+        cursor = connection.execute(
+            "UPDATE supervisor_admissions SET state = 'active', updated_at = ? WHERE admission_id = ? AND state = 'provisioning'",
+            (_timestamp(), record["admission_id"]),
+        )
+        if cursor.rowcount:
+            _audit(connection, record["admission_id"], "admitted", None, None, _timestamp())
         return cursor.rowcount == 1
 
     def execution_options_for_run(self, project_root: Path, run: SwarmRun):
@@ -578,6 +586,27 @@ class ManagedSpaceSupervisor:
         event_type: str,
     ) -> bool:
         """Record a verified child completion without consulting live governance."""
+        with self._immediate_connection() as connection:
+            reconciled = self._reconcile_completed_record_in_connection(
+                connection,
+                record,
+                allowed_states=allowed_states,
+                event_type=event_type,
+            )
+        if reconciled:
+            with self._bindings_lock:
+                self._bindings.pop(record["run_id"], None)
+        return reconciled
+
+    def _reconcile_completed_record_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        record: Mapping[str, Any],
+        *,
+        allowed_states: tuple[str, ...],
+        event_type: str,
+    ) -> bool:
+        """Reconcile a completed child while the caller holds the ledger lock."""
         try:
             store = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
             run = store.get_run(record["run_id"])
@@ -590,16 +619,12 @@ class ManagedSpaceSupervisor:
         ):
             return False
         placeholders = ", ".join("?" for _ in allowed_states)
-        with self._immediate_connection() as connection:
-            cursor = connection.execute(
-                f"UPDATE supervisor_admissions SET state = 'completed', updated_at = ? WHERE admission_id = ? AND state IN ({placeholders})",
-                (_timestamp(), record["admission_id"], *allowed_states),
-            )
-            if cursor.rowcount:
-                _audit(connection, record["admission_id"], event_type, None, None, _timestamp())
+        cursor = connection.execute(
+            f"UPDATE supervisor_admissions SET state = 'completed', updated_at = ? WHERE admission_id = ? AND state IN ({placeholders})",
+            (_timestamp(), record["admission_id"], *allowed_states),
+        )
         if cursor.rowcount:
-            with self._bindings_lock:
-                self._bindings.pop(record["run_id"], None)
+            _audit(connection, record["admission_id"], event_type, None, None, _timestamp())
         return cursor.rowcount == 1
 
     def completion_observer_for_run(self, run_id: str) -> Callable[[Path, SwarmRun], None]:
@@ -631,37 +656,48 @@ class ManagedSpaceSupervisor:
 
     def cancel(self, admission_id: str, *, actor: str) -> bool:
         _dashboard_actor(actor)
-        record = self._record(admission_id)
-        if record is None or record["state"] in {"cancelled", "completed"}:
-            return False
-        # Invalidate execution before touching the child store.  If that
-        # operation fails, the ledger remains paused and unbound rather than
-        # leaving a window for another action boundary to proceed.
-        if record["state"] in {"active", "paused"}:
-            with self._immediate_connection() as connection:
+        with self._immediate_connection() as connection:
+            record = connection.execute(
+                "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
+                (admission_id,),
+            ).fetchone()
+            if record is None or record["state"] in {"cancelled", "completed"}:
+                return False
+            if record["state"] == "provisioning":
+                cursor = connection.execute(
+                    "UPDATE supervisor_admissions SET state = 'cancelled', terminal_actor = ?, updated_at = ? WHERE admission_id = ? AND state = 'provisioning'",
+                    (actor, _timestamp(), admission_id),
+                )
+                if cursor.rowcount:
+                    _audit(connection, admission_id, "cancelled", actor, "cancelled_before_child_create", _timestamp())
+                return cursor.rowcount == 1
+            # Invalidate execution before touching the child store while this
+            # write transaction prevents an in-flight admission from creating
+            # a child behind the terminal transition.
+            if record["state"] in {"active", "paused"}:
                 connection.execute(
                     "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ? AND state IN ('active', 'paused')",
                     (_timestamp(), admission_id),
                 )
-        with self._bindings_lock:
-            self._bindings.pop(record["run_id"], None)
-        store = self._child_store_factory(Path(record["canonical_root"]))
-        try:
-            store.cancel_run_by_human(record["run_id"], actor)
-        except ValueError:
-            if self._reconcile_completed_record(
-                record,
-                allowed_states=("active", "paused"),
-                event_type="reconciled_completed_after_human_terminal",
-            ):
-                return False
-            raise
-        except KeyError:
-            # A child-store bootstrap can fail after the global ledger reserves
-            # its slot.  A dashboard cancellation still records the durable
-            # human cleanup; no worker/model path can release that slot.
-            pass
-        with self._immediate_connection() as connection:
+            store = self._child_store_factory(Path(record["canonical_root"]))
+            try:
+                store.cancel_run_by_human(record["run_id"], actor)
+            except ValueError:
+                if self._reconcile_completed_record_in_connection(
+                    connection,
+                    record,
+                    allowed_states=("active", "paused"),
+                    event_type="reconciled_completed_after_human_terminal",
+                ):
+                    with self._bindings_lock:
+                        self._bindings.pop(record["run_id"], None)
+                    return False
+                raise
+            except KeyError:
+                # Legacy/crash-recovery paths can still have an active ledger
+                # record without a readable child. A human cancellation is a
+                # durable cleanup, never a reason to recreate one.
+                pass
             cursor = connection.execute(
                 """UPDATE supervisor_admissions
                    SET state = 'cancelled', terminal_actor = ?, updated_at = ?
@@ -670,40 +706,55 @@ class ManagedSpaceSupervisor:
             )
             if cursor.rowcount:
                 _audit(connection, admission_id, "cancelled", actor, None, _timestamp())
+        with self._bindings_lock:
+            self._bindings.pop(record["run_id"], None)
         return cursor.rowcount == 1
 
     def abandon(self, admission_id: str, *, actor: str) -> bool:
         _dashboard_actor(actor)
-        record = self._record(admission_id)
-        if record is None or record["state"] in {"cancelled", "completed", "abandoned"}:
-            return False
         with self._immediate_connection() as connection:
+            record = connection.execute(
+                "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
+                (admission_id,),
+            ).fetchone()
+            if record is None or record["state"] in {"cancelled", "completed", "abandoned"}:
+                return False
+            if record["state"] == "provisioning":
+                cursor = connection.execute(
+                    "UPDATE supervisor_admissions SET state = 'abandoned', terminal_actor = ?, updated_at = ? WHERE admission_id = ? AND state = 'provisioning'",
+                    (actor, _timestamp(), admission_id),
+                )
+                if cursor.rowcount:
+                    _audit(connection, admission_id, "abandoned", actor, "abandoned_before_child_create", _timestamp())
+                return cursor.rowcount == 1
             cursor = connection.execute(
                 "UPDATE supervisor_admissions SET state = 'paused', updated_at = ? WHERE admission_id = ? AND state IN ('active', 'paused')",
                 (_timestamp(), admission_id),
             )
             if cursor.rowcount:
                 _audit(connection, admission_id, "paused", actor, "abandon_requested", _timestamp())
-        with self._bindings_lock:
-            self._bindings.pop(record["run_id"], None)
-        store = self._child_store_factory(Path(record["canonical_root"]))
-        try:
-            store.abandon_run_by_human(record["run_id"], actor)
-        except ValueError:
-            if self._reconcile_completed_record(
-                record,
-                allowed_states=("active", "paused"),
-                event_type="reconciled_completed_after_human_terminal",
-            ):
-                return False
-            raise
-        with self._immediate_connection() as connection:
+            store = self._child_store_factory(Path(record["canonical_root"]))
+            try:
+                store.abandon_run_by_human(record["run_id"], actor)
+            except ValueError:
+                if self._reconcile_completed_record_in_connection(
+                    connection,
+                    record,
+                    allowed_states=("active", "paused"),
+                    event_type="reconciled_completed_after_human_terminal",
+                ):
+                    with self._bindings_lock:
+                        self._bindings.pop(record["run_id"], None)
+                    return False
+                raise
             cursor = connection.execute(
                 "UPDATE supervisor_admissions SET state = 'abandoned', terminal_actor = ?, updated_at = ? WHERE admission_id = ? AND state NOT IN ('cancelled', 'completed', 'abandoned')",
                 (actor, _timestamp(), admission_id),
             )
             if cursor.rowcount:
                 _audit(connection, admission_id, "abandoned", actor, None, _timestamp())
+        with self._bindings_lock:
+            self._bindings.pop(record["run_id"], None)
         return cursor.rowcount == 1
 
     def _binding_for_run(self, project_root: Path, run: SwarmRun) -> ManagedSpaceCapability | None:
