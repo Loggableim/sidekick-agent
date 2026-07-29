@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 
+from .tools import RoutedToolExecution
 from .types import (
     ActionCapabilities,
     ActionProposal,
@@ -79,16 +80,25 @@ class SidekickToolAdapter:
         }
 
     def execute(self, action: RequestedToolAction) -> Any:
-        from nova.managed_space_gateway import ManagedSpaceActionGateway
-
-        if ManagedSpaceActionGateway.handles(action.name):
-            raise RuntimeError("managed gateway handoff required for this operation")
         workspace = self._execution_workspace(action)
         return self._execute_action(
             action.name,
             workspace,
             thaw_json_value(action.arguments),
         )
+
+    def route_execution(
+        self,
+        proposal: ActionProposal,
+        run: SwarmRun,
+    ) -> RoutedToolExecution | None:
+        """Handle only runs currently bound to the injected managed gateway."""
+        if self._managed_gateway is None:
+            return None
+        result = self._managed_gateway.try_execute_for_run(proposal, run)
+        if result is None:
+            return None
+        return RoutedToolExecution(result)
 
     def execute_managed(
         self,

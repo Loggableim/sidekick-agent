@@ -454,8 +454,7 @@ def test_reviewed_nova_execution_requires_exact_digest_bound_checkpoints(
     )
 
     assert (
-        PolicyGate(store).evaluate(proposal, bound_run).status
-        is PolicyStatus.ALLOWED
+        PolicyGate(store).evaluate(proposal, bound_run).status is PolicyStatus.ALLOWED
     )
 
 
@@ -1043,6 +1042,29 @@ def test_approved_proposal_can_execute_only_once(tmp_path: Path):
         executor.execute(proposal, run)
 
     assert raised.value.decision.reason == "execution_already_claimed"
+    assert adapter.executed == [proposal.requested_action]
+
+
+def test_fix_round3_generic_managed_named_action_keeps_core_policy_path(
+    tmp_path: Path,
+) -> None:
+    """Catches Core treating an ordinary local.test name as Nova-managed."""
+    store = ProjectSwarmStore(tmp_path)
+    run = store.create_run(metadata={"autonomy": "autonomous"})
+    original = _proposal(tmp_path, proposal_id="ordinary-local-test")
+    proposal = replace(
+        original,
+        requested_action=replace(
+            original.requested_action,
+            name="local.test",
+            arguments={"selector": "tests/test_unit.py"},
+        ),
+    )
+    adapter = _RecordingAdapter()
+
+    result = GatedToolExecutor(PolicyGate(store), adapter).execute(proposal, run)
+
+    assert result == {"result": "local.test"}
     assert adapter.executed == [proposal.requested_action]
 
 
