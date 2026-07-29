@@ -508,6 +508,11 @@ class SwarmEngine:
             if active_run.status == "paused":
                 return WorkflowPaused("human_paused", role="pre_completion_hook")
             raise RuntimeError("Swarm run reached a terminal state before completion")
+        if active_run.metadata.get(required_hook_key) != required_hook_id:
+            return WorkflowPaused(
+                "required_pre_completion_hook_unavailable",
+                role="pre_completion_hook",
+            )
         autonomy = active_run.metadata.get("autonomy")
         if not isinstance(autonomy, str):
             raise ValueError("Swarm run is missing a durable autonomy setting")

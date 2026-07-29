@@ -918,6 +918,7 @@ def nova_execution_options_for_run(
         max_calls=max_calls,
         verifier=binding.verifier,
         pre_completion_hook=NovaPreCompletionHook(binding.adapter, binding.context),
+        required_pre_completion_hook_id=_RUNTIME_HOOK_ID,
         on_completed=_unregister_completed_nova_runtime_binding,
     )
 
