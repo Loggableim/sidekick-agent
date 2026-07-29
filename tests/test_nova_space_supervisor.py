@@ -706,3 +706,42 @@ def test_cancel_waits_for_admission_that_won_ledger_lock_and_terminalizes_its_ch
     assert created.status == "created"
     assert run is not None and run.status == "cancelled"
     assert _admit(supervisor, "beta").status == "created"
+
+
+def test_cancel_commits_nonexecutable_ledger_state_before_slow_child_terminalization(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    child_terminal_started = threading.Event()
+    continue_child_terminal = threading.Event()
+
+    def blocking_terminal_store(root: Path):
+        store = ProjectSwarmStore(root)
+
+        class BlockingTerminalStore:
+            def cancel_run_by_human(self, *args, **kwargs):
+                child_terminal_started.set()
+                assert continue_child_terminal.wait(timeout=5)
+                return store.cancel_run_by_human(*args, **kwargs)
+
+            def __getattr__(self, name: str):
+                return getattr(store, name)
+        return BlockingTerminalStore()
+
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=blocking_terminal_store,
+    )
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.resume_run(admission.run_id).status == "running"
+    assert supervisor.revalidate_action_boundary(admission.capability) is True
+
+    with ThreadPoolExecutor(max_workers=1) as workers:
+        cancelled = workers.submit(supervisor.cancel, admission.admission_id, actor=_DASHBOARD_ACTOR)
+        assert child_terminal_started.wait(timeout=5)
+        assert supervisor.revalidate_action_boundary(admission.capability) is False
+        continue_child_terminal.set()
+        assert cancelled.result(timeout=5) is True
+
+    assert store.get_run(admission.run_id).status == "cancelled"
