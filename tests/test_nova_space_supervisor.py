@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+import json
 from pathlib import Path
 import pickle
+import sqlite3
 import threading
 from uuid import uuid4
 
@@ -13,7 +15,9 @@ from nova.space_supervisor import (
     DASHBOARD_ACTOR_RE,
     ManagedSpaceGovernance,
     ManagedSpaceSupervisor,
+    managed_space_execution_options_for_run,
 )
+from cli.swarm_host import SidekickSwarmService, SwarmExecutionOptions
 from swarm_core.engine import PreCompletionContext
 from swarm_core.store import ProjectSwarmStore
 
@@ -185,6 +189,7 @@ def test_human_abandonment_holds_the_slot_until_explicit_dashboard_cancellation(
     }
     supervisor = _supervisor(tmp_path, records)
     admission = _admit(supervisor)
+    stale_hook = supervisor.pre_completion_hook_for_run(admission.run_id)
 
     assert supervisor.abandon(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
     store = ProjectSwarmStore(records["alpha"].canonical_root)
@@ -195,6 +200,26 @@ def test_human_abandonment_holds_the_slot_until_explicit_dashboard_cancellation(
         store.claim_run_execution_lease(admission.run_id, "worker")
     with pytest.raises(ValueError):
         store.recover_run_execution_lease(admission.run_id, actor_id="dashboard-operator")
+    assert admission.capability is not None
+    assert supervisor.revalidate_action_boundary(admission.capability) is False
+    with pytest.raises(ValueError):
+        supervisor.pre_completion_hook_for_run(admission.run_id)
+    abandoned_run = store.get_run(admission.run_id)
+    assert abandoned_run is not None
+    stale_outcome = stale_hook.run(
+        PreCompletionContext(
+            run=abandoned_run,
+            project_root=records["alpha"].canonical_root,
+            store=store,
+            goal="repair flaky test",
+            pack="coding-team",
+            autonomy="autonomous",
+            call_count=1,
+            decision="verified",
+            evidence={},
+        )
+    )
+    assert stale_outcome.continue_completion is False
     assert _admit(supervisor, "beta").reason == "active_limit"
     assert supervisor.record_completion(admission.run_id) is False
     assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is True
@@ -217,6 +242,111 @@ def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path
 
     options.on_completed(records["alpha"].canonical_root, run)
     assert _admit(supervisor, "beta").status == "created"
+
+
+def test_fresh_supervisor_reconciles_a_matching_completed_child_before_admission(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    original = _supervisor(tmp_path, records)
+    admission = _admit(original)
+    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(admission.run_id, "completed")
+
+    restarted = _supervisor(tmp_path, records)
+    assert _admit(restarted, "beta").status == "created"
+
+
+def test_restart_keeps_slot_when_completed_child_metadata_does_not_match_ledger(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    admission = _admit(_supervisor(tmp_path, records))
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.set_run_status(admission.run_id, "completed")
+    with store._connection() as connection:
+        raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (admission.run_id,)).fetchone()[0]
+        metadata = json.loads(raw)
+        metadata["nova_supervisor"]["allowed_action_families"] = ["hard_denied"]
+        connection.execute("UPDATE runs SET metadata_json = ? WHERE run_id = ?", (json.dumps(metadata), admission.run_id))
+
+    restarted = _supervisor(tmp_path, records)
+    blocked = _admit(restarted, "beta")
+    assert blocked.reason == "active_limit"
+
+
+def test_restart_keeps_slot_when_ledger_root_cannot_find_the_completed_child(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    ProjectSwarmStore(records["alpha"].canonical_root).set_run_status(admission.run_id, "completed")
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        connection.execute(
+            "UPDATE supervisor_admissions SET canonical_root = ? WHERE admission_id = ?",
+            (str(tmp_path / "wrong-root"), admission.admission_id),
+        )
+
+    restarted = _supervisor(tmp_path, records)
+    assert _admit(restarted, "beta").reason == "active_limit"
+
+
+def test_allowed_action_families_are_bound_in_capability_ledger_and_child_metadata(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None
+    allowed = run.metadata["nova_supervisor"]["allowed_action_families"]
+    assert allowed == ["target_local_worktree", "github_publication", "target_deployment_worker"]
+    assert "secret_access" not in allowed
+
+    tampered_metadata = dict(run.metadata)
+    tampered_supervisor = dict(tampered_metadata["nova_supervisor"])
+    tampered_supervisor["allowed_action_families"] = ["hard_denied"]
+    tampered_metadata["nova_supervisor"] = tampered_supervisor
+    blocked = supervisor.execution_options_for_run(
+        records["alpha"].canonical_root,
+        replace(run, metadata=tampered_metadata),
+    )
+    assert blocked.blocked_reason == "capability_invalid"
+    assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
+
+
+def test_tampered_capability_action_families_fail_closed_against_the_ledger(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    assert admission.capability is not None
+    object.__setattr__(admission.capability, "_allowed_action_families", ("hard_denied",))
+
+    assert supervisor.revalidate_action_boundary(admission.capability) is False
+    assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
+
+
+def test_host_execution_options_adapter_exposes_supervisor_hooks_and_pauses_revocation(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert run is not None
+    host = SidekickSwarmService(
+        execution_options_resolver=lambda root, candidate: managed_space_execution_options_for_run(supervisor, root, candidate),
+    )
+
+    options = host._resolve_execution_options(records["alpha"].canonical_root, run)
+    assert isinstance(options, SwarmExecutionOptions)
+    assert options.max_calls == 128
+    assert options.pre_completion_hook is not None and options.on_completed is not None
+
+    records["alpha"] = replace(records["alpha"], yolo=False)
+    blocked = host._resolve_execution_options(records["alpha"].canonical_root, run)
+    assert blocked.blocked_reason == "execution_options_blocked"
+    assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
 
 
 def test_tampered_capability_cannot_complete_or_release_a_supervisor_slot(tmp_path: Path) -> None:
