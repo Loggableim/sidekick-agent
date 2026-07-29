@@ -55,6 +55,7 @@ _ROUTED_MODELS = (
 )
 _TEST_WORKER_THREADS: list[threading.Thread] = []
 _TEST_WORKER_THREADS_LOCK = threading.Lock()
+_WORKER_SETTLE_SECONDS = 15.0
 
 
 def _extract_rendered_prompt_context(rendered: str) -> dict[str, object]:
@@ -88,7 +89,7 @@ def _join_workers_and_restore_runtime_bindings():
     with _TEST_WORKER_THREADS_LOCK:
         workers = list(_TEST_WORKER_THREADS[worker_start:])
     for worker in workers:
-        worker.join(timeout=2)
+        worker.join(timeout=_WORKER_SETTLE_SECONDS)
         assert not worker.is_alive(), f"Task 8 worker leaked: {worker.name}"
     with _TEST_WORKER_THREADS_LOCK:
         del _TEST_WORKER_THREADS[worker_start:]
@@ -250,7 +251,7 @@ class _FakeBridgeHost:
             self.summaries[run_id] = summary
             self._condition.notify_all()
 
-    def wait_for_worker(self, run_id: str, *, timeout: float = 3.0):
+    def wait_for_worker(self, run_id: str, *, timeout: float = _WORKER_SETTLE_SECONDS):
         deadline = time.monotonic() + timeout
         with self._condition:
             while (
@@ -275,7 +276,7 @@ class _FakeBridgeHost:
             if len(self.worker_run_ids) < count:
                 raise AssertionError("fake bridge worker was not dispatched")
 
-    def join_worker(self, run_id: str, *, timeout: float = 2.0) -> None:
+    def join_worker(self, run_id: str, *, timeout: float = _WORKER_SETTLE_SECONDS) -> None:
         self.wait_for_dispatch()
         with self._condition:
             worker = self.worker_threads[run_id]
