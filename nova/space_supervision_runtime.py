@@ -30,6 +30,11 @@ _TARGET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _MIN_CHECK_SECONDS = 15 * 60
 _MAX_PENDING_SIGNALS = 256
 _MAX_DEDUPLICATED_SIGNAL_IDENTITIES = 2_048
+_SUPERVISION_SCHEMA_OBJECTS = (
+    "nova_supervision_signals",
+    "nova_supervision_space_state",
+    "idx_nova_supervision_signals_observed",
+)
 
 # Task 5 can render this fixed, non-model identity data without making a
 # presence GET a write or a model invocation.
@@ -117,8 +122,10 @@ class NovaSpaceSupervisionRuntime:
             }
         )
         observed_at = time.time()
-        with self._supervisor._supervision_state_transaction() as connection:
-            _ensure_schema(connection)
+        with self._supervisor._supervision_state_transaction(
+            schema_objects=_SUPERVISION_SCHEMA_OBJECTS,
+            schema_initializer=_ensure_schema,
+        ) as connection:
             existing = connection.execute(
                 "SELECT 1 FROM nova_supervision_signals WHERE signal_digest = ?",
                 (signal_digest,),
@@ -318,8 +325,10 @@ class NovaSpaceSupervisionRuntime:
 
     def _mark_started(self, state: _TrackedState, now: float) -> None:
         """Clear only the exact dispatched signal; preserve a racing new one."""
-        with self._supervisor._supervision_state_transaction() as connection:
-            _ensure_schema(connection)
+        with self._supervisor._supervision_state_transaction(
+            schema_objects=_SUPERVISION_SCHEMA_OBJECTS,
+            schema_initializer=_ensure_schema,
+        ) as connection:
             if state.pending_digest:
                 cursor = connection.execute(
                     """UPDATE nova_supervision_space_state
