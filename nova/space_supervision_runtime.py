@@ -18,7 +18,7 @@ import sqlite3
 import time
 from typing import Callable, Mapping
 
-from nova.space_supervisor import ManagedSpaceSupervisor
+from nova.space_supervisor import ManagedSpaceGovernance, ManagedSpaceSupervisor
 
 
 _SOURCES = frozenset({"git", "kanban", "ci"})
@@ -30,6 +30,18 @@ _TARGET_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _MIN_CHECK_SECONDS = 15 * 60
 _MAX_PENDING_SIGNALS = 256
 _MAX_DEDUPLICATED_SIGNAL_IDENTITIES = 2_048
+_SPACE_ID_RE = re.compile(r"[0-9a-f]{32}\Z")
+_SUPERVISION_STATE_COLUMNS = frozenset(
+    {
+        "target_space_id",
+        "root_fingerprint",
+        "governance_revision",
+        "current_reference_digest",
+        "last_evaluated_reference_digest",
+        "last_checked_at",
+        "last_check_code",
+    }
+)
 _SUPERVISION_SCHEMA_OBJECTS = (
     "nova_supervision_signals",
     "nova_supervision_space_state",
@@ -67,9 +79,16 @@ class SupervisionStatus:
 @dataclass(frozen=True, slots=True)
 class _TrackedState:
     target_key: str
+    target_space_id: str
+    root_fingerprint: str
     pending_digest: str
     pending_reason_code: str
     last_started_at: float | None
+    governance_revision: int
+    current_reference_digest: str
+    last_evaluated_reference_digest: str
+    last_checked_at: float | None
+    last_check_code: str
 
 
 class NovaSpaceSupervisionRuntime:
@@ -137,6 +156,12 @@ class NovaSpaceSupervisionRuntime:
             schema_objects=_SUPERVISION_SCHEMA_OBJECTS,
             schema_initializer=_ensure_schema,
         ) as connection:
+            # Named tables and indexes alone cannot prove that an existing
+            # scheduler table has the marker and governance-binding columns.
+            # Upgrade under the same write lock before a new signal can become
+            # autonomous work.
+            if not _supervision_state_columns_present(connection):
+                _ensure_schema(connection)
             existing = connection.execute(
                 "SELECT 1 FROM nova_supervision_signals WHERE signal_digest = ?",
                 (signal_digest,),
@@ -160,7 +185,8 @@ class NovaSpaceSupervisionRuntime:
                 (signal_digest, target, normalized_reason, observed_at),
             )
             current = connection.execute(
-                """SELECT pending_digest, pending_reason_code, pending_count
+                """SELECT pending_digest, pending_reason_code, pending_count,
+                          target_space_id, root_fingerprint, governance_revision
                    FROM nova_supervision_space_state WHERE target_key = ?""",
                 (target,),
             ).fetchone()
@@ -170,10 +196,49 @@ class NovaSpaceSupervisionRuntime:
                 )
                 connection.execute(
                     """INSERT INTO nova_supervision_space_state
-                       (target_key, pending_digest, pending_reason_code,
-                        pending_count, last_started_at, last_outcome_code, updated_at)
-                       VALUES (?, ?, ?, 1, NULL, '', ?)""",
-                    (target, pending_digest, normalized_reason, observed_at),
+                       (target_key, target_space_id, root_fingerprint,
+                        pending_digest, pending_reason_code, pending_count,
+                        governance_revision, last_started_at,
+                        current_reference_digest, last_evaluated_reference_digest,
+                        last_checked_at, last_check_code, last_outcome_code, updated_at)
+                       VALUES (?, ?, ?, ?, ?, 1, ?, NULL, ?, '', NULL, '', '', ?)""",
+                    (
+                        target,
+                        governance.space_id,
+                        governance.root_fingerprint,
+                        pending_digest,
+                        normalized_reason,
+                        governance.revision,
+                        pending_digest,
+                        observed_at,
+                    ),
+                )
+            elif not _row_matches_governance(current, governance):
+                # A deleted/recreated Space, moved root, or changed governance
+                # cannot inherit a prior reference or quiet checkpoint.  Keep
+                # only the new event observed under the current authority.
+                pending_digest = _digest(
+                    {"signal_digest": signal_digest, "reason_code": normalized_reason}
+                )
+                connection.execute(
+                    """UPDATE nova_supervision_space_state
+                       SET target_space_id = ?, root_fingerprint = ?,
+                           pending_digest = ?, pending_reason_code = ?, pending_count = 1,
+                           governance_revision = ?, last_started_at = NULL,
+                           current_reference_digest = ?, last_evaluated_reference_digest = '',
+                           last_checked_at = NULL, last_check_code = '',
+                           last_outcome_code = '', updated_at = ?
+                       WHERE target_key = ?""",
+                    (
+                        governance.space_id,
+                        governance.root_fingerprint,
+                        pending_digest,
+                        normalized_reason,
+                        governance.revision,
+                        pending_digest,
+                        observed_at,
+                        target,
+                    ),
                 )
             else:
                 pending_digest = _digest(
@@ -190,9 +255,17 @@ class NovaSpaceSupervisionRuntime:
                 connection.execute(
                     """UPDATE nova_supervision_space_state
                        SET pending_digest = ?, pending_reason_code = ?, pending_count = ?,
-                           updated_at = ?
+                           current_reference_digest = ?, last_checked_at = NULL,
+                           last_check_code = '', updated_at = ?
                        WHERE target_key = ?""",
-                    (pending_digest, pending_reason, pending_count, observed_at, target),
+                    (
+                        pending_digest,
+                        pending_reason,
+                        pending_count,
+                        pending_digest,
+                        observed_at,
+                        target,
+                    ),
                 )
         return True
 
@@ -216,14 +289,18 @@ class NovaSpaceSupervisionRuntime:
                 if state.pending_digest:
                     outcomes.append(SupervisionPulseOutcome(state.target_key, "ineligible"))
                 continue
+            if not _state_matches_governance(state, governance):
+                # A stale durable scheduler row is not authority for a
+                # recreated Space, moved root, or revised governance.  It is
+                # retained only until a fresh, code-owned signal rebinding it
+                # arrives; it may not start work or claim quiet equality.
+                continue
             if state.pending_digest:
                 reason_code = state.pending_reason_code
-            elif (
-                state.last_started_at is not None
-                and now - state.last_started_at >= _MIN_CHECK_SECONDS
-            ):
-                reason_code = _PERIODIC_REASON
             else:
+                if _quiet_check_due(state, now) and _references_are_equal(state):
+                    if self._mark_unchanged(state, now):
+                        outcomes.append(SupervisionPulseOutcome(state.target_key, "unchanged"))
                 continue
             intent = {
                 "space_id": governance.space_id,
@@ -309,7 +386,11 @@ class NovaSpaceSupervisionRuntime:
                 return ()
             try:
                 rows = connection.execute(
-                    """SELECT target_key, pending_digest, pending_reason_code, last_started_at
+                    """SELECT target_key, target_space_id, root_fingerprint,
+                               pending_digest, pending_reason_code, last_started_at,
+                               governance_revision, current_reference_digest,
+                               last_evaluated_reference_digest, last_checked_at,
+                               last_check_code
                        FROM nova_supervision_space_state ORDER BY target_key ASC"""
                 ).fetchall()
             except sqlite3.Error:
@@ -320,6 +401,8 @@ class NovaSpaceSupervisionRuntime:
                 states.append(
                     _TrackedState(
                         target_key=_target_key(row["target_key"]),
+                        target_space_id=_state_space_id(row["target_space_id"]),
+                        root_fingerprint=_state_root_fingerprint(row["root_fingerprint"]),
                         pending_digest=_pending_digest(row["pending_digest"]),
                         pending_reason_code=_stored_reason(row["pending_reason_code"]),
                         last_started_at=(
@@ -327,6 +410,21 @@ class NovaSpaceSupervisionRuntime:
                             if row["last_started_at"] is not None
                             else None
                         ),
+                        governance_revision=_governance_revision(
+                            row["governance_revision"]
+                        ),
+                        current_reference_digest=_pending_digest(
+                            row["current_reference_digest"]
+                        ),
+                        last_evaluated_reference_digest=_pending_digest(
+                            row["last_evaluated_reference_digest"]
+                        ),
+                        last_checked_at=(
+                            _epoch(row["last_checked_at"])
+                            if row["last_checked_at"] is not None
+                            else None
+                        ),
+                        last_check_code=_check_code(row["last_check_code"]),
                     )
                 )
             except (TypeError, ValueError):
@@ -340,36 +438,70 @@ class NovaSpaceSupervisionRuntime:
             schema_objects=_SUPERVISION_SCHEMA_OBJECTS,
             schema_initializer=_ensure_schema,
         ) as connection:
-            if state.pending_digest:
-                cursor = connection.execute(
-                    """UPDATE nova_supervision_space_state
-                       SET pending_digest = CASE WHEN pending_digest = ? THEN ''
-                                                  ELSE pending_digest END,
-                           pending_reason_code = CASE WHEN pending_digest = ? THEN ?
-                                                      ELSE pending_reason_code END,
-                           pending_count = CASE WHEN pending_digest = ? THEN 0
-                                                ELSE pending_count END,
-                           last_started_at = ?, last_outcome_code = 'started', updated_at = ?
-                       WHERE target_key = ?""",
-                    (
-                        state.pending_digest,
-                        state.pending_digest,
-                        _PERIODIC_REASON,
-                        state.pending_digest,
-                        now,
-                        now,
-                        state.target_key,
-                    ),
-                )
-            else:
-                cursor = connection.execute(
-                    """UPDATE nova_supervision_space_state
-                       SET last_started_at = ?, last_outcome_code = 'started', updated_at = ?
-                       WHERE target_key = ?""",
-                    (now, now, state.target_key),
-                )
-            if cursor.rowcount != 1:
+            cursor = connection.execute(
+                """UPDATE nova_supervision_space_state
+                   SET pending_digest = '', pending_reason_code = ?, pending_count = 0,
+                       last_started_at = ?, last_evaluated_reference_digest = ?,
+                       last_checked_at = NULL, last_check_code = '',
+                       last_outcome_code = 'started', updated_at = ?
+                   WHERE target_key = ? AND target_space_id = ?
+                     AND root_fingerprint = ? AND governance_revision = ?
+                     AND pending_digest = ? AND current_reference_digest = ?
+                     AND last_evaluated_reference_digest = ? AND last_checked_at IS ?
+                     AND last_check_code = ?""",
+                (
+                    _PERIODIC_REASON,
+                    now,
+                    state.current_reference_digest,
+                    now,
+                    state.target_key,
+                    state.target_space_id,
+                    state.root_fingerprint,
+                    state.governance_revision,
+                    state.pending_digest,
+                    state.current_reference_digest,
+                    state.last_evaluated_reference_digest,
+                    state.last_checked_at,
+                    state.last_check_code,
+                ),
+            )
+            # The run has already received a capability.  A fresh signal that
+            # wins this CAS remains pending for the next pulse instead of
+            # being erased by old bookkeeping.
+            if cursor.rowcount not in (0, 1):
                 raise RuntimeError("supervision state changed during host start")
+
+    def _mark_unchanged(self, state: _TrackedState, now: float) -> bool:
+        """Record one proven quiet comparison without model admission."""
+        with self._supervisor._supervision_state_transaction(
+            schema_objects=_SUPERVISION_SCHEMA_OBJECTS,
+            schema_initializer=_ensure_schema,
+        ) as connection:
+            cursor = connection.execute(
+                """UPDATE nova_supervision_space_state
+                   SET last_checked_at = ?, last_check_code = 'unchanged',
+                       last_outcome_code = 'unchanged', updated_at = ?
+                   WHERE target_key = ? AND target_space_id = ?
+                     AND root_fingerprint = ? AND governance_revision = ?
+                     AND pending_digest = '' AND current_reference_digest = ?
+                     AND last_evaluated_reference_digest = ? AND last_checked_at IS ?
+                     AND last_check_code = ?""",
+                (
+                    now,
+                    now,
+                    state.target_key,
+                    state.target_space_id,
+                    state.root_fingerprint,
+                    state.governance_revision,
+                    state.current_reference_digest,
+                    state.last_evaluated_reference_digest,
+                    state.last_checked_at,
+                    state.last_check_code,
+                ),
+            )
+        if cursor.rowcount not in (0, 1):
+            raise RuntimeError("supervision equality state changed unexpectedly")
+        return cursor.rowcount == 1
 
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
@@ -389,14 +521,38 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         """CREATE TABLE IF NOT EXISTS nova_supervision_space_state (
             target_key TEXT PRIMARY KEY,
+            target_space_id TEXT NOT NULL DEFAULT '',
+            root_fingerprint TEXT NOT NULL DEFAULT '',
             pending_digest TEXT NOT NULL,
             pending_reason_code TEXT NOT NULL,
             pending_count INTEGER NOT NULL,
+            governance_revision INTEGER NOT NULL DEFAULT -1,
             last_started_at REAL,
+            current_reference_digest TEXT NOT NULL DEFAULT '',
+            last_evaluated_reference_digest TEXT NOT NULL DEFAULT '',
+            last_checked_at REAL,
+            last_check_code TEXT NOT NULL DEFAULT '',
             last_outcome_code TEXT NOT NULL,
             updated_at REAL NOT NULL
         )"""
     )
+    state_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(nova_supervision_space_state)")
+    }
+    for column, definition in (
+        ("target_space_id", "TEXT NOT NULL DEFAULT ''"),
+        ("root_fingerprint", "TEXT NOT NULL DEFAULT ''"),
+        ("governance_revision", "INTEGER NOT NULL DEFAULT -1"),
+        ("current_reference_digest", "TEXT NOT NULL DEFAULT ''"),
+        ("last_evaluated_reference_digest", "TEXT NOT NULL DEFAULT ''"),
+        ("last_checked_at", "REAL"),
+        ("last_check_code", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in state_columns:
+            connection.execute(
+                f"ALTER TABLE nova_supervision_space_state ADD COLUMN {column} {definition}"
+            )
     connection.execute(
         """CREATE INDEX IF NOT EXISTS idx_nova_supervision_signals_observed
            ON nova_supervision_signals(observed_at)"""
@@ -448,6 +604,80 @@ def _pending_digest(value: object) -> str:
     return value
 
 
+def _supervision_state_columns_present(connection: sqlite3.Connection) -> bool:
+    try:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(nova_supervision_space_state)")
+        }
+    except sqlite3.Error:
+        return False
+    return _SUPERVISION_STATE_COLUMNS <= columns
+
+
+def _state_space_id(value: object) -> str:
+    if not isinstance(value, str) or _SPACE_ID_RE.fullmatch(value) is None:
+        raise ValueError("Nova supervision Space binding is invalid")
+    return value
+
+
+def _state_root_fingerprint(value: object) -> str:
+    digest = _pending_digest(value)
+    if not digest:
+        raise ValueError("Nova supervision root binding is invalid")
+    return digest
+
+
+def _governance_revision(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("Nova supervision governance revision is invalid")
+    return value
+
+
+def _check_code(value: object) -> str:
+    if value not in ("", "unchanged"):
+        raise ValueError("Nova supervision checkpoint code is invalid")
+    return str(value)
+
+
+def _row_matches_governance(
+    row: Mapping[str, object], governance: ManagedSpaceGovernance
+) -> bool:
+    try:
+        return (
+            _state_space_id(row["target_space_id"]) == governance.space_id
+            and _state_root_fingerprint(row["root_fingerprint"])
+            == governance.root_fingerprint
+            and _governance_revision(row["governance_revision"]) == governance.revision
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _state_matches_governance(
+    state: _TrackedState, governance: ManagedSpaceGovernance
+) -> bool:
+    return (
+        state.target_space_id == governance.space_id
+        and state.root_fingerprint == governance.root_fingerprint
+        and state.governance_revision == governance.revision
+    )
+
+
+def _quiet_check_due(state: _TrackedState, now: float) -> bool:
+    anchors = [
+        value for value in (state.last_started_at, state.last_checked_at) if value is not None
+    ]
+    return bool(anchors) and now - max(anchors) >= _MIN_CHECK_SECONDS
+
+
+def _references_are_equal(state: _TrackedState) -> bool:
+    return (
+        bool(state.current_reference_digest)
+        and state.current_reference_digest == state.last_evaluated_reference_digest
+    )
+
+
 def _epoch(value: object) -> float:
     if value is None:
         return time.time()
@@ -477,5 +707,6 @@ def _bounded_outcome(value: object) -> str:
         "start_failed",
         "admission_failed",
         "admission_rejected",
+        "unchanged",
     }
     return str(value) if value in allowed else ""
