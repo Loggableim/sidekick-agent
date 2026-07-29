@@ -362,6 +362,12 @@ _SENSITIVE_VALUE_MARKERS = (
     "sk-",
     "token=",
 )
+_DESTRUCTIVE_PATCH_MARKER = re.compile(
+    r"(?im)^\s*(?:\*\*\*\s+delete\s+file:|deleted\s+file\s+mode\b)"
+)
+_UNIFIED_FILE_DELETION = re.compile(
+    r"(?m)^---\s+(?!/dev/null\b)[^\r\n]+\r?\n\+\+\+\s+/dev/null\s*$"
+)
 
 
 class ManagedSpaceActionGateway:
@@ -618,17 +624,17 @@ def _build_request(operation: str, value: object) -> ManagedRequest | None:
             return None
         path = _relative_path(value["path"])
         patch = _bounded_text(value["patch"], 1_000_000)
-        return LocalApplyPatchRequest(path, patch) if path and patch else None
+        return (
+            LocalApplyPatchRequest(path, patch)
+            if path and patch and not _patch_deletes_file(patch)
+            else None
+        )
     if operation == "local.write_file":
         if set(value) != {"artifact_digest", "path", "content"}:
             return None
         path = _relative_path(value["path"])
-        content = _bounded_text(value["content"], 1_000_000, allow_empty=True)
-        return (
-            LocalWriteFileRequest(path, content)
-            if path is not None and content is not None
-            else None
-        )
+        content = _bounded_text(value["content"], 1_000_000)
+        return LocalWriteFileRequest(path, content) if path and content else None
     if operation == "local.format":
         if set(value) != {"artifact_digest", "paths"}:
             return None
@@ -676,6 +682,15 @@ def _build_request(operation: str, value: object) -> ManagedRequest | None:
     if operation == "deployment.deploy":
         return TargetDeploymentRequest() if set(value) == {"artifact_digest"} else None
     return None
+
+
+def _patch_deletes_file(value: str) -> bool:
+    """Reject patch formats that remove a file before any worktree is opened."""
+    normalized = value.replace("\r\n", "\n")
+    return bool(
+        _DESTRUCTIVE_PATCH_MARKER.search(normalized)
+        or _UNIFIED_FILE_DELETION.search(normalized)
+    )
 
 
 def _relative_path(value: object) -> str | None:

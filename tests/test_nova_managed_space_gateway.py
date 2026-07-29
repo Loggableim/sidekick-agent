@@ -584,6 +584,30 @@ def test_capability_is_revalidated_after_worktree_creation(tmp_path: Path) -> No
                 "patch": "API_KEY=super-secret-value",
             },
         ),
+        (
+            "local.write_file",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "src/safe.py",
+                "content": "",
+            },
+        ),
+        (
+            "local.apply_patch",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "src/safe.py",
+                "patch": "*** Begin Patch\n*** Delete File: src/safe.py\n*** End Patch",
+            },
+        ),
+        (
+            "local.apply_patch",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "src/safe.py",
+                "patch": "--- src/safe.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-safe\n",
+            },
+        ),
         ("admin.iam_grant", {"artifact_digest": "a" * 64}),
         ("payments.purchase", {"artifact_digest": "a" * 64}),
         ("host.package_install", {"artifact_digest": "a" * 64}),

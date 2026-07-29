@@ -36,6 +36,10 @@ _BLOCKER_CODES = frozenset(
 _DIGEST_STATUSES = frozenset({"completed", "blocked", "paused", "active"})
 _MAX_MESSAGE_LENGTH = 280
 _NOTIFICATION_CLAIM_SCHEMA_OBJECTS = ("nova_notification_claims",)
+_DISPLAY_NAME_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b([a-z0-9_-]*(?:api[_-]?key|token|secret|password|credential|authorization)[a-z0-9_-]*\s*=\s*)[^\s,;]+"
+)
+_DISPLAY_NAME_URL = re.compile(r"(?i)\b(?:https?|wss?)://[^\s<>()]+")
 
 
 class PrivateTelegramSender(Protocol):
@@ -209,8 +213,13 @@ def _display_name(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("Nova notification display name is required")
     # The name is the only human-facing field. Redact before bounding and keep
-    # it one line so it cannot escape the fixed template shape.
-    redacted = redact_sensitive_text(value, force=True)
+    # it one line so it cannot escape the fixed template shape.  The shared
+    # redactor intentionally avoids broad lowercase ``key=value`` matching to
+    # reduce logging false positives; Telegram display labels are a narrower
+    # boundary, so mask those values and URLs before invoking it.
+    boundary_redacted = _DISPLAY_NAME_SECRET_ASSIGNMENT.sub(r"\1[redacted]", value)
+    boundary_redacted = _DISPLAY_NAME_URL.sub("[redacted-url]", boundary_redacted)
+    redacted = redact_sensitive_text(boundary_redacted, force=True)
     normalized = " ".join(redacted.split())[:80]
     if not normalized:
         raise ValueError("Nova notification display name is invalid")
