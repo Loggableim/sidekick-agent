@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import importlib
 import sqlite3
 
-from web.api import profiles as profiles_mod
 from web.api import models as models_mod
 from web.api import routes
 
 
+def _current_profiles_module():
+    """Return the live profiles module after tests reload it from sys.modules."""
+    return importlib.import_module("web.api.profiles")
+
+
 def test_lookup_cli_session_metadata_uses_direct_state_db_row(tmp_path, monkeypatch):
+    profiles_mod = _current_profiles_module()
     prev_default_home = profiles_mod._DEFAULT_SIDEKICK_HOME
     prev_active_profile = profiles_mod._active_profile
     prev_tls_profile = getattr(profiles_mod._tls, "profile", None)
@@ -79,6 +85,7 @@ def test_lookup_cli_session_metadata_uses_direct_state_db_row(tmp_path, monkeypa
 
 
 def test_get_cli_sessions_uses_index_title_without_loading_session_metadata(tmp_path, monkeypatch):
+    profiles_mod = _current_profiles_module()
     prev_default_home = profiles_mod._DEFAULT_SIDEKICK_HOME
     prev_active_profile = profiles_mod._active_profile
     prev_tls_profile = getattr(profiles_mod._tls, "profile", None)
@@ -133,6 +140,7 @@ def test_get_cli_sessions_uses_index_title_without_loading_session_metadata(tmp_
 
 
 def test_web_server_session_search_uses_compat_sessiondb(tmp_path, monkeypatch):
+    profiles_mod = _current_profiles_module()
     prev_default_home = profiles_mod._DEFAULT_SIDEKICK_HOME
     prev_active_profile = profiles_mod._active_profile
     prev_tls_profile = getattr(profiles_mod._tls, "profile", None)
