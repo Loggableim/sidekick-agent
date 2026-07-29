@@ -533,6 +533,44 @@ def test_presence_card_treats_a_live_sqlite_wal_as_unknown_without_side_effects(
         connection.close()
 
 
+def test_presence_card_treats_an_open_rollback_journal_as_unknown_without_side_effects(
+    tmp_path,
+):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(
+        home / "spaces" / "alpha", slug="alpha"
+    )
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        current_reference_digest="d" * 64,
+        last_evaluated_reference_digest="d" * 64,
+        last_checked_at=1.0,
+        last_check_code="unchanged",
+    )
+
+    writer = sqlite3.connect(ledger, isolation_level=None)
+    try:
+        assert writer.execute("PRAGMA journal_mode = DELETE").fetchone()[0].lower() == "delete"
+        writer.execute("BEGIN IMMEDIATE")
+        writer.execute("UPDATE nova_supervision_space_state SET updated_at = 2.0")
+        assert ledger.with_name(ledger.name + "-journal").is_file()
+        before = _tree_snapshot(home)
+
+        assert build_presence_card(home=home)["change_markers"] == []
+        assert _tree_snapshot(home) == before
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()
+
+
 def test_presence_card_does_not_create_missing_runtime_state(tmp_path):
     """Catches a GET path calling default EntityStateStore or a migration helper."""
     from web.api.nova_presence import build_presence_card

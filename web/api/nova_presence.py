@@ -710,13 +710,11 @@ def _managed_space_keys(managed_spaces: Iterable[Mapping[str, Any]]) -> tuple[st
 
 
 def _open_read_only_ledger(path: Path) -> sqlite3.Connection | None:
-    if not path.is_file() or path.with_name(path.name + "-wal").exists():
+    if not path.is_file() or _ledger_has_active_sidecar(path):
         return None
     connection: sqlite3.Connection | None = None
     try:
-        connection = sqlite3.connect(
-            path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True
-        )
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
         # An older ledger must be migrated on the normal supervisor write path.
         # Presence deliberately returns no ledger projection rather than issuing
@@ -754,8 +752,8 @@ def _has_required_ledger_indexes(connection: sqlite3.Connection) -> bool:
 def _change_markers_for(
     path: Path, bindings: Mapping[str, Mapping[str, object]]
 ) -> list[dict[str, str | None]]:
-    """Project only proven scheduler state from an immutable ledger view."""
-    if not bindings or path.with_name(path.name + "-wal").exists():
+    """Project only proven scheduler state from a read-only ledger snapshot."""
+    if not bindings or _ledger_has_active_sidecar(path):
         # A live WAL can make the page's snapshot depend on a writer-owned
         # checkpoint.  Scheduler state is therefore unknown until the normal
         # writer has produced a stable ledger view.
@@ -775,11 +773,18 @@ def _change_markers_for(
             marker = _marker_for_row(row, space, binding)
             if marker is not None:
                 markers.append(marker)
-        return markers
+        return [] if _ledger_has_active_sidecar(path) else markers
     except sqlite3.Error:
         return []
     finally:
         connection.close()
+
+
+def _ledger_has_active_sidecar(path: Path) -> bool:
+    return any(
+        path.with_name(path.name + suffix).exists()
+        for suffix in ("-wal", "-journal")
+    )
 
 
 def _has_marker_state_columns(connection: sqlite3.Connection) -> bool:
