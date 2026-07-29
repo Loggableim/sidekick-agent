@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from dataclasses import replace
 import importlib
+import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import pytest
 
+import nova.space_supervisor as space_supervisor_module
 from nova.space_supervisor import ManagedSpaceGovernance, ManagedSpaceSupervisor
 from swarm_core.policy import PolicyGate, proposal_digest
+from swarm_core.sidekick_adapter import SidekickToolAdapter
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.types import ActionProposal, RequestedToolAction
 
@@ -51,39 +54,64 @@ class _RecordingDiagnosis:
         return self.result
 
 
+class _RejectingAttestor:
+    def attest(self, source_root: Path, worktree_root: Path, run_id: str):
+        del source_root, worktree_root, run_id
+        return None
+
+
+class _WorktreeAttestor:
+    def __init__(
+        self,
+        *,
+        api: Any,
+        identity: str = "worktree:managed-1",
+        artifact_digest: str = "a" * 64,
+        target_root: Path | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        self._api = api
+        self._identity = identity
+        self._artifact_digest = artifact_digest
+        self._target_root = target_root
+        self._run_id = run_id
+        self.calls: list[tuple[Path, Path, str]] = []
+
+    def attest(self, source_root: Path, worktree_root: Path, run_id: str):
+        self.calls.append((source_root, worktree_root, run_id))
+        claimed_source = self._target_root or source_root
+        if claimed_source.is_absolute():
+            claimed_source.mkdir(parents=True, exist_ok=True)
+        return self._api.WorktreeAttestation(
+            source_root=claimed_source,
+            worktree_root=worktree_root,
+            run_id=self._run_id or run_id,
+            identity=self._identity,
+            artifact_digest=self._artifact_digest,
+        )
+
+
 class _WorktreeProvider:
     def __init__(
         self,
         *,
         api: Any,
         path: Path,
-        identity: str = "worktree:managed-1",
-        artifact_digest: str = "a" * 64,
-        target_root: Path | None = None,
-        run_id: str | None = None,
         after_create: Any | None = None,
     ) -> None:
         self._api = api
         self._path = path
-        self._identity = identity
-        self._artifact_digest = artifact_digest
-        self._target_root = target_root
-        self._run_id = run_id
         self._after_create = after_create
         self.calls: list[tuple[Path, str]] = []
 
     def create(self, canonical_root: Path, run_id: str):
         self.calls.append((canonical_root, run_id))
-        handle = self._api.ManagedWorktreeHandle(
-            canonical_root=self._target_root or canonical_root,
-            path=self._path,
-            run_id=self._run_id or run_id,
-            identity=self._identity,
-            artifact_digest=self._artifact_digest,
-        )
+        if self._path.is_absolute():
+            self._path.mkdir(parents=True, exist_ok=True)
+        created = self._api.CreatedWorktree(path=self._path)
         if self._after_create is not None:
             self._after_create()
-        return handle
+        return created
 
 
 def _managed_run(tmp_path: Path):
@@ -202,7 +230,12 @@ def _gateway(
 ):
     api = _gateway_api()
     root, records, supervisor, admission, store = _managed_run(tmp_path)
-    provider_values = dict(provider_kwargs or {})
+    supplied = dict(provider_kwargs or {})
+    provider_values = {
+        key: supplied.pop(key)
+        for key in ("path", "after_create")
+        if key in supplied
+    }
     provider_values.setdefault(
         "path",
         (worktree_path or (tmp_path / "worktrees" / "run-1")).resolve(),
@@ -211,6 +244,7 @@ def _gateway(
         api=api,
         **provider_values,
     )
+    attestor = _WorktreeAttestor(api=api, **supplied)
     local = _RecordingWorker(api.WorkerResult(True, "local_applied"))
     github = _RecordingWorker(api.WorkerResult(True, "published"))
     deployment = _RecordingWorker(
@@ -223,6 +257,7 @@ def _gateway(
         supervisor=supervisor,
         policy_gate=PolicyGate(store),
         worktree_provider=provider,
+        worktree_attestor=attestor,
         local_worker=local,
         github_worker=github,
         deployment_worker=deployment,
@@ -267,7 +302,11 @@ def test_local_action_requires_a_noncanonical_target_worktree(
     proposal = _proposal(
         root,
         operation="local.apply_patch",
-        arguments={"artifact_digest": "a" * 64, "patch": "safe patch"},
+        arguments={
+            "artifact_digest": "a" * 64,
+            "path": "src/safe.py",
+            "patch": "safe patch",
+        },
         use_worktree=use_worktree,
     )
     _record_bound_evidence(store, proposal, run_id=admission.run_id)
@@ -283,8 +322,8 @@ def test_local_action_requires_a_noncanonical_target_worktree(
     ("provider_kwargs", "expected_code"),
     [
         ({"path": Path("placeholder")}, "worktree_not_absolute"),
-        ({"target_root": Path("foreign")}, "worktree_target_mismatch"),
-        ({"run_id": "foreign-run"}, "worktree_run_mismatch"),
+        ({"target_root": Path("foreign")}, "worktree_attestation_failed"),
+        ({"run_id": "foreign-run"}, "worktree_attestation_failed"),
     ],
 )
 def test_invalid_or_foreign_worktree_handles_reach_no_worker(
@@ -330,6 +369,7 @@ def test_canonical_root_returned_as_worktree_reaches_no_worker(tmp_path: Path) -
         supervisor=supervisor,
         policy_gate=PolicyGate(store),
         worktree_provider=provider,
+        worktree_attestor=_WorktreeAttestor(api=api),
         local_worker=worker,
         github_worker=worker,
         deployment_worker=worker,
@@ -494,6 +534,7 @@ def test_capability_is_revalidated_after_worktree_creation(tmp_path: Path) -> No
         supervisor=supervisor,
         policy_gate=PolicyGate(store),
         worktree_provider=provider,
+        worktree_attestor=_WorktreeAttestor(api=api),
         local_worker=worker,
         github_worker=worker,
         deployment_worker=worker,
@@ -581,13 +622,24 @@ def test_hard_denials_and_nested_sensitive_arguments_never_reach_any_effect(
 
 
 @pytest.mark.parametrize(
-    ("operation", "arguments", "worker_name", "result_code"),
+    (
+        "operation",
+        "arguments",
+        "worker_name",
+        "result_code",
+        "request_type",
+    ),
     [
         (
             "local.apply_patch",
-            {"artifact_digest": "a" * 64, "patch": "safe patch"},
+            {
+                "artifact_digest": "a" * 64,
+                "path": "src/safe.py",
+                "patch": "safe patch",
+            },
             "local",
             "local_completed",
+            "LocalApplyPatchRequest",
         ),
         (
             "github.pull_request",
@@ -599,15 +651,14 @@ def test_hard_denials_and_nested_sensitive_arguments_never_reach_any_effect(
             },
             "github",
             "github_completed",
+            "GitHubPullRequestRequest",
         ),
         (
             "deployment.deploy",
-            {
-                "artifact_digest": "a" * 64,
-                "deployment_ref": "production",
-            },
+            {"artifact_digest": "a" * 64},
             "deployment",
             "deployment_completed",
+            "TargetDeploymentRequest",
         ),
     ],
 )
@@ -617,6 +668,7 @@ def test_allowed_operation_routes_only_to_named_worker_with_narrow_request(
     arguments: dict[str, object],
     worker_name: str,
     result_code: str,
+    request_type: str,
 ) -> None:
     """Catches cross-worker routing or leaking host authority into a worker."""
     (
@@ -644,7 +696,9 @@ def test_allowed_operation_routes_only_to_named_worker_with_narrow_request(
     assert len(calls[worker_name]) == 1
     assert all(calls[name] == [] for name in calls if name != worker_name)
     _handle, request = calls[worker_name][0]
+    assert isinstance(request, getattr(_api, request_type))
     assert request.operation == operation
+    assert not hasattr(request, "arguments")
     assert "secret" not in repr(request).lower()
     assert "admin" not in repr(request).lower()
     assert "remote" not in repr(request).lower()
@@ -746,10 +800,7 @@ def test_deployment_failure_uses_only_durable_budget_and_pauses_redacted_blocker
     proposal = _proposal(
         root,
         operation="deployment.deploy",
-        arguments={
-            "artifact_digest": "a" * 64,
-            "deployment_ref": "production",
-        },
+        arguments={"artifact_digest": "a" * 64},
     )
     _record_bound_evidence(store, proposal, run_id=admission.run_id)
     for index in range(127):
@@ -796,10 +847,7 @@ def test_exhausted_durable_budget_skips_diagnosis_and_pauses(tmp_path: Path) -> 
     proposal = _proposal(
         root,
         operation="deployment.deploy",
-        arguments={
-            "artifact_digest": "a" * 64,
-            "deployment_ref": "production",
-        },
+        arguments={"artifact_digest": "a" * 64},
     )
     _record_bound_evidence(store, proposal, run_id=admission.run_id)
     for index in range(128):
@@ -842,10 +890,7 @@ def test_verified_diagnosis_never_retries_the_claimed_deployment_proposal(
     proposal = _proposal(
         root,
         operation="deployment.deploy",
-        arguments={
-            "artifact_digest": "a" * 64,
-            "deployment_ref": "production",
-        },
+        arguments={"artifact_digest": "a" * 64},
     )
     _record_bound_evidence(store, proposal, run_id=admission.run_id)
 
@@ -856,3 +901,261 @@ def test_verified_diagnosis_never_retries_the_claimed_deployment_proposal(
     assert replay.code == "execution_already_claimed"
     assert len(deployment.calls) == 1
     assert len(diagnosis.calls) == 1
+
+
+def test_fix_round1_reconstructed_capability_is_not_current_authority(
+    tmp_path: Path,
+) -> None:
+    """Catches ledger-value reconstruction impersonating the installed binding."""
+    (
+        _api,
+        root,
+        _records,
+        supervisor,
+        admission,
+        store,
+        _provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(root)
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+    record = supervisor._record(admission.admission_id)
+    assert record is not None
+    reconstructed = space_supervisor_module._capability_from_record(record)
+    assert reconstructed is not None and reconstructed is not admission.capability
+
+    result = gateway.execute(reconstructed, proposal)
+
+    assert result.code == "capability_invalid"
+    assert github.calls == []
+    context = supervisor.resolve_action_context(admission.capability)
+    assert context is not None
+    assert context.run_id == admission.run_id
+
+
+def test_fix_round1_traversal_alias_to_canonical_root_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Catches lexical path comparison accepting an alias of the source checkout."""
+    root, records, supervisor, admission, store = _managed_run(tmp_path)
+    alias_parent = tmp_path / "alias-parent"
+    alias_parent.mkdir()
+    lexical_alias = alias_parent / ".." / root.name
+    api = _gateway_api()
+    provider = _WorktreeProvider(api=api, path=lexical_alias)
+    worker = _RecordingWorker(api.WorkerResult(True, "published"))
+    gateway = api.ManagedSpaceActionGateway(
+        supervisor=supervisor,
+        policy_gate=PolicyGate(store),
+        worktree_provider=provider,
+        worktree_attestor=_WorktreeAttestor(api=api),
+        local_worker=worker,
+        github_worker=worker,
+        deployment_worker=worker,
+        diagnosis_runner=_RecordingDiagnosis(),
+    )
+    proposal = _proposal(root)
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+
+    result = gateway.execute(admission.capability, proposal)
+
+    assert result.code == "canonical_worktree_forbidden"
+    assert worker.calls == []
+    assert records["target"].canonical_root == root
+
+
+def test_fix_round1_symlink_alias_to_canonical_root_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Catches a symlink/junction alias bypassing the canonical-root denial."""
+    root, _records, supervisor, admission, store = _managed_run(tmp_path)
+    alias = tmp_path / "root-alias"
+    try:
+        os.symlink(root, alias, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    api = _gateway_api()
+    provider = _WorktreeProvider(api=api, path=alias)
+    worker = _RecordingWorker(api.WorkerResult(True, "published"))
+    gateway = api.ManagedSpaceActionGateway(
+        supervisor=supervisor,
+        policy_gate=PolicyGate(store),
+        worktree_provider=provider,
+        worktree_attestor=_WorktreeAttestor(api=api),
+        local_worker=worker,
+        github_worker=worker,
+        deployment_worker=worker,
+        diagnosis_runner=_RecordingDiagnosis(),
+    )
+    proposal = _proposal(root)
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+
+    result = gateway.execute(admission.capability, proposal)
+
+    assert result.code == "canonical_worktree_forbidden"
+    assert worker.calls == []
+
+
+def test_fix_round1_unrelated_path_requires_independent_worktree_attestation(
+    tmp_path: Path,
+) -> None:
+    """Catches a provider self-asserting source/run metadata for any directory."""
+    root, _records, supervisor, admission, store = _managed_run(tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    api = _gateway_api()
+    provider = _WorktreeProvider(api=api, path=unrelated)
+    worker = _RecordingWorker(api.WorkerResult(True, "published"))
+    gateway = api.ManagedSpaceActionGateway(
+        supervisor=supervisor,
+        policy_gate=PolicyGate(store),
+        worktree_provider=provider,
+        worktree_attestor=_RejectingAttestor(),
+        local_worker=worker,
+        github_worker=worker,
+        deployment_worker=worker,
+        diagnosis_runner=_RecordingDiagnosis(),
+    )
+    proposal = _proposal(root)
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+
+    result = gateway.execute(admission.capability, proposal)
+
+    assert result.code == "worktree_attestation_failed"
+    assert worker.calls == []
+
+
+@pytest.mark.parametrize(
+    ("operation", "arguments"),
+    [
+        (
+            "local.write_file",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "../outside.txt",
+                "content": "safe",
+            },
+        ),
+        (
+            "local.write_file",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "C:\\outside.txt",
+                "content": "safe",
+            },
+        ),
+        (
+            "local.apply_patch",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "safe.txt",
+                "patch": {"accessToken": "abc123"},
+            },
+        ),
+        (
+            "local.apply_patch",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "safe.txt",
+                "patch": {"credentials": ["abc123"]},
+            },
+        ),
+        (
+            "local.apply_patch",
+            {
+                "artifact_digest": "a" * 64,
+                "path": "safe.txt",
+                "patch": {"safe": ["nested", "mutable"]},
+            },
+        ),
+        (
+            "local.test",
+            {
+                "artifact_digest": "a" * 64,
+                "selector": "tests/test_safe.py; remove everything",
+            },
+        ),
+        (
+            "github.push",
+            {
+                "artifact_digest": "a" * 64,
+                "branch": ["feat/one", "feat/two"],
+            },
+        ),
+        (
+            "deployment.deploy",
+            {
+                "artifact_digest": "a" * 64,
+                "deployment_ref": "attacker-selected-target",
+            },
+        ),
+    ],
+)
+def test_fix_round1_invalid_typed_operation_arguments_are_hard_denied(
+    tmp_path: Path,
+    operation: str,
+    arguments: dict[str, object],
+) -> None:
+    """Catches loose JSON reaching workers instead of immutable narrow requests."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        _store,
+        _provider,
+        local,
+        github,
+        deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+
+    result = gateway.execute(
+        admission.capability,
+        _proposal(root, operation=operation, arguments=arguments),
+    )
+
+    assert result.code == "operation_hard_denied"
+    assert local.calls == github.calls == deployment.calls == []
+
+
+def test_fix_round1_generic_sidekick_adapter_requires_managed_gateway_handoff(
+    tmp_path: Path,
+) -> None:
+    """Catches a managed operation reaching the generic Sidekick executor."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        _provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(root)
+    _record_bound_evidence(store, proposal, run_id=admission.run_id)
+    generic_calls: list[object] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *args: generic_calls.append(args),
+        managed_gateway=gateway,
+    )
+
+    with pytest.raises(RuntimeError, match="managed gateway"):
+        adapter.execute(proposal.requested_action)
+    result = adapter.execute_managed(admission.capability, proposal)
+
+    assert result.ok is True
+    assert generic_calls == []
+    assert len(github.calls) == 1

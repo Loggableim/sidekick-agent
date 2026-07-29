@@ -148,33 +148,33 @@ class PolicyGate:
     def authorize_managed_yolo_and_claim(
         self,
         proposal: ActionProposal,
-        capability: object,
+        context: object,
         *,
         worktree_identity: str,
         artifact_digest: str,
     ) -> PolicyDecision:
         """Claim one managed-Space action from durable, artifact-bound evidence.
 
-        This is deliberately not a generic autonomy override. Only the
-        supervisor's opaque capability can select this path, and all remaining
+        This is deliberately not a generic autonomy override. Only a
+        supervisor-owned action context can select this path, and all remaining
         authority is reconstructed under the store's atomic claim transaction.
         """
-        from nova.space_supervisor import ManagedSpaceCapability
+        from nova.space_supervisor import ManagedSpaceActionContext
 
-        if not isinstance(capability, ManagedSpaceCapability):
+        if not isinstance(context, ManagedSpaceActionContext):
             return self._decision(
                 proposal,
                 PolicyStatus.BLOCKED,
-                "managed_capability_required",
+                "managed_action_context_required",
             )
-        canonical_root = capability._canonical_root
-        run_id = capability._run_id
+        canonical_root = context.canonical_root
+        run_id = context.run_id
         family = self._MANAGED_OPERATION_FAMILIES.get(
             proposal.requested_action.name
         )
         if (
             family is None
-            or family not in capability._allowed_action_families
+            or family not in context.allowed_action_families
             or proposal.category != "managed"
             or proposal.requested_action.workspace != canonical_root
             or not proposal.requested_action.use_worktree
