@@ -68,6 +68,16 @@ def test_private_telegram_target_rejects_default_group_or_fallback_configuration
         PrivateTelegramTarget.from_config(config)
 
 
+@pytest.mark.parametrize("chat_id", (True, -100123456, 0, 1 << 63))
+def test_private_telegram_target_direct_constructor_enforces_private_chat_invariants(
+    chat_id: object,
+) -> None:
+    from nova.notifications import PrivateTelegramTarget
+
+    with pytest.raises((TypeError, ValueError)):
+        PrivateTelegramTarget(chat_id=chat_id)  # type: ignore[arg-type]
+
+
 def test_blocker_claim_is_durable_redacted_and_at_most_once(tmp_path: Path) -> None:
     sender = _Sender()
     notifier = _notifier(tmp_path, sender)

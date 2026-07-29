@@ -50,20 +50,16 @@ class PrivateTelegramTarget:
 
     chat_id: int
 
+    def __post_init__(self) -> None:
+        _private_chat_id(self.chat_id)
+
     @classmethod
     def from_config(cls, value: Mapping[str, object]) -> "PrivateTelegramTarget":
         if not isinstance(value, Mapping) or set(value) != {"chat_id", "chat_type"}:
             raise ValueError("Telegram target must be one explicit private chat")
-        chat_id = value.get("chat_id")
-        if isinstance(chat_id, bool) or not isinstance(chat_id, int):
-            raise TypeError("Telegram private chat id must be an integer")
-        # Negative IDs identify groups/channels in Telegram.  The host only
-        # accepts a positive user chat id and never derives one from a default.
-        if not 1 <= chat_id < (1 << 63):
-            raise ValueError("Telegram target must be a positive private chat id")
         if value.get("chat_type") != "private":
             raise ValueError("Telegram target must declare chat_type private")
-        return cls(chat_id=chat_id)
+        return cls(chat_id=_private_chat_id(value.get("chat_id")))
 
 
 class NovaTelegramNotifications:
@@ -191,6 +187,16 @@ def _ensure_claim_schema(connection: sqlite3.Connection) -> None:
 def _opaque_id(value: object, label: str) -> str:
     if not isinstance(value, str) or _OPAQUE_ID_RE.fullmatch(value) is None:
         raise ValueError(f"Nova notification {label} is invalid")
+    return value
+
+
+def _private_chat_id(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("Telegram private chat id must be an integer")
+    # Negative IDs identify groups/channels in Telegram. The host only accepts
+    # a positive user chat id and never derives one from a default or fallback.
+    if not 1 <= value < (1 << 63):
+        raise ValueError("Telegram target must be a positive private chat id")
     return value
 
 

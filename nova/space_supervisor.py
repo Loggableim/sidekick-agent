@@ -618,9 +618,8 @@ class ManagedSpaceSupervisor:
         if not callable(dispatcher):
             self._pause(capability, "host_dispatch_failed")
             return False
-        with self._bindings_lock:
-            if self._bindings.get(run_id) is not capability:
-                return False
+        if not self._has_current_binding(capability, run_id=run_id):
+            return False
         reason = self._revalidate(capability)
         if reason is not None:
             self._pause(capability, reason)
@@ -676,6 +675,27 @@ class ManagedSpaceSupervisor:
             # child even though the ledger binding itself still looks active.
             self._pause(capability, "host_start_interrupted")
             return False
+        # The status probe itself is a read boundary. Revalidate its exact
+        # in-process binding plus immutable ledger/root/governance facts before
+        # *and* at the final dispatch handoff, so a revocation cannot slip
+        # between a successful probe and an arbitrary host callback.
+        if not self._has_current_binding(capability, run_id=run_id):
+            return False
+        reason = self._revalidate(capability)
+        if reason is not None:
+            self._pause(capability, reason)
+            return False
+        try:
+            self._before_host_dispatch(capability)
+        except BaseException:
+            self._pause(capability, "host_dispatch_failed")
+            return False
+        if not self._has_current_binding(capability, run_id=run_id):
+            return False
+        reason = self._revalidate(capability)
+        if reason is not None:
+            self._pause(capability, reason)
+            return False
         try:
             dispatcher(root, record["run_id"])
         except BaseException:
@@ -686,6 +706,24 @@ class ManagedSpaceSupervisor:
     def _before_host_start(self, capability: ManagedSpaceCapability) -> None:
         """Deterministic test seam between admission and host start revalidation."""
         del capability
+
+    def _before_host_dispatch(self, capability: ManagedSpaceCapability) -> None:
+        """Deterministic seam immediately before final host dispatch validation."""
+        del capability
+
+    def _has_current_binding(
+        self,
+        capability: ManagedSpaceCapability,
+        *,
+        run_id: str | None = None,
+    ) -> bool:
+        """Require the exact process-local capability object, not its values."""
+        try:
+            bound_run_id = capability._run_id if run_id is None else run_id
+        except AttributeError:
+            return False
+        with self._bindings_lock:
+            return self._bindings.get(bound_run_id) is capability
 
     def current_governance(self, target_key: str) -> ManagedSpaceGovernance | None:
         """Resolve target governance read-only for the host supervision pulse."""
