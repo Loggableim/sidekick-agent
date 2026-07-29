@@ -35,6 +35,13 @@ class GatedToolExecutor:
         return self.adapter.preview(proposal.requested_action)
 
     def execute(self, proposal: ActionProposal, run: SwarmRun) -> Any:
+        from nova.managed_space_gateway import ManagedSpaceActionGateway
+
+        if ManagedSpaceActionGateway.handles(proposal.requested_action.name):
+            managed_execute = getattr(self.adapter, "execute_managed", None)
+            if not callable(managed_execute):
+                raise RuntimeError("managed gateway is not configured for this adapter")
+            return managed_execute(proposal, run)
         decision = self.policy_gate.authorize_and_claim(
             proposal,
             run,

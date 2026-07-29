@@ -115,9 +115,17 @@ class ManagedSpaceCapability:
         if _token is not _CAPABILITY_TOKEN:
             raise TypeError("ManagedSpaceCapability is host-owned")
         (
-            admission_id, target_key, target_space_id, canonical_root,
-            root_fingerprint, governance_revision, policy_identity, run_id,
-            intent_digest, allowed_action_families, allowed_action_families_digest,
+            admission_id,
+            target_key,
+            target_space_id,
+            canonical_root,
+            root_fingerprint,
+            governance_revision,
+            policy_identity,
+            run_id,
+            intent_digest,
+            allowed_action_families,
+            allowed_action_families_digest,
             attachment_generation,
         ) = args
         object.__setattr__(self, "_admission_id", admission_id)
@@ -130,7 +138,9 @@ class ManagedSpaceCapability:
         object.__setattr__(self, "_run_id", run_id)
         object.__setattr__(self, "_intent_digest", intent_digest)
         object.__setattr__(self, "_allowed_action_families", allowed_action_families)
-        object.__setattr__(self, "_allowed_action_families_digest", allowed_action_families_digest)
+        object.__setattr__(
+            self, "_allowed_action_families_digest", allowed_action_families_digest
+        )
         object.__setattr__(self, "_attachment_generation", attachment_generation)
 
     def __reduce__(self):
@@ -192,7 +202,9 @@ class SupervisorAdmission:
 class ManagedSpacePreCompletionHook:
     hook_id = "nova-managed-space-supervisor-v1"
 
-    def __init__(self, supervisor: "ManagedSpaceSupervisor", capability: ManagedSpaceCapability) -> None:
+    def __init__(
+        self, supervisor: "ManagedSpaceSupervisor", capability: ManagedSpaceCapability
+    ) -> None:
         self._supervisor = supervisor
         self._capability = capability
 
@@ -201,7 +213,9 @@ class ManagedSpacePreCompletionHook:
         if (
             context.run.run_id != capability._run_id
             or Path(context.project_root).resolve() != capability._canonical_root
-            or not _diagnostic_metadata_matches_capability(context.run.metadata, capability)
+            or not _diagnostic_metadata_matches_capability(
+                context.run.metadata, capability
+            )
         ):
             self._supervisor._pause(capability, "capability_invalid")
             return PreCompletionResult(False, "capability_invalid")
@@ -233,7 +247,9 @@ class ManagedSpaceSupervisor:
     def start(self) -> None:
         """Initialize the central ledger only on a write-capable start path."""
         self._ledger_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self._ledger_path, timeout=30, isolation_level=None)
+        connection = sqlite3.connect(
+            self._ledger_path, timeout=30, isolation_level=None
+        )
         try:
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")
@@ -265,7 +281,9 @@ class ManagedSpaceSupervisor:
             )
             columns = {
                 row[1]
-                for row in connection.execute("PRAGMA table_info(supervisor_admissions)")
+                for row in connection.execute(
+                    "PRAGMA table_info(supervisor_admissions)"
+                )
             }
             if "allowed_action_families_json" not in columns:
                 connection.execute(
@@ -304,8 +322,14 @@ class ManagedSpaceSupervisor:
     def admit(self, target_key: str, intent: Mapping[str, Any]) -> SupervisorAdmission:
         target_key = _target_key(target_key)
         governance = _resolved_governance(self._governance_resolver, target_key)
-        if governance is None or governance.yolo is not True or governance.enrolled is not True:
-            return SupervisorAdmission("rejected", None, None, None, "not_yolo_enrolled")
+        if (
+            governance is None
+            or governance.yolo is not True
+            or governance.enrolled is not True
+        ):
+            return SupervisorAdmission(
+                "rejected", None, None, None, "not_yolo_enrolled"
+            )
         intent_digest = _intent_digest(intent)
         self.start()
         admission_id = str(uuid4())
@@ -330,8 +354,20 @@ class ManagedSpaceSupervisor:
             ).fetchone()
             if existing is not None:
                 if existing["state"] in _OCCUPIED_STATES | {"completed"}:
-                    return SupervisorAdmission("coalesced", existing["admission_id"], existing["run_id"], None, None)
-                return SupervisorAdmission("rejected", existing["admission_id"], existing["run_id"], None, "terminal_admission")
+                    return SupervisorAdmission(
+                        "coalesced",
+                        existing["admission_id"],
+                        existing["run_id"],
+                        None,
+                        None,
+                    )
+                return SupervisorAdmission(
+                    "rejected",
+                    existing["admission_id"],
+                    existing["run_id"],
+                    None,
+                    "terminal_admission",
+                )
             active = connection.execute(
                 """SELECT 1 FROM supervisor_admissions
                    WHERE state IN (
@@ -348,10 +384,19 @@ class ManagedSpaceSupervisor:
                     attachment_generation, record_version, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'provisioning', 0, 1, ?, ?)""",
                 (
-                    admission_id, target_key, governance.space_id, intent_digest,
-                    str(governance.canonical_root), governance.root_fingerprint,
-                    governance.revision, governance.policy_identity,
-                    _allowed_action_families_json(), workflow_contract_digest, run_id, now, now,
+                    admission_id,
+                    target_key,
+                    governance.space_id,
+                    intent_digest,
+                    str(governance.canonical_root),
+                    governance.root_fingerprint,
+                    governance.revision,
+                    governance.policy_identity,
+                    _allowed_action_families_json(),
+                    workflow_contract_digest,
+                    run_id,
+                    now,
+                    now,
                 ),
             )
             _audit(connection, admission_id, "provisioning", None, None, now)
@@ -367,7 +412,9 @@ class ManagedSpaceSupervisor:
                 (admission_id,),
             ).fetchone()
             if record is None or record["state"] != "provisioning":
-                return SupervisorAdmission("rejected", admission_id, run_id, None, "terminal_admission")
+                return SupervisorAdmission(
+                    "rejected", admission_id, run_id, None, "terminal_admission"
+                )
             current_governance = _resolved_governance(
                 self._governance_resolver,
                 target_key,
@@ -408,7 +455,9 @@ class ManagedSpaceSupervisor:
             store = self._child_store_factory(current_governance.canonical_root)
             store.create_run(run_id, status="paused", metadata=metadata)
             if not self._activate_provisioning(connection, record):
-                raise RuntimeError("managed Space child provisioning could not be activated")
+                raise RuntimeError(
+                    "managed Space child provisioning could not be activated"
+                )
         self._install_binding(capability)
         return SupervisorAdmission("created", admission_id, run_id, capability, None)
 
@@ -447,7 +496,11 @@ class ManagedSpaceSupervisor:
                 run = store.get_run(record["run_id"])
             except (OSError, RuntimeError, ValueError, sqlite3.Error):
                 run = None
-            if run is not None and run.status == "completed" and _diagnostic_metadata_matches_record(run.metadata, record):
+            if (
+                run is not None
+                and run.status == "completed"
+                and _diagnostic_metadata_matches_record(run.metadata, record)
+            ):
                 cursor = connection.execute(
                     """UPDATE supervisor_admissions
                        SET state = 'completed',
@@ -465,11 +518,27 @@ class ManagedSpaceSupervisor:
                     ),
                 )
                 if cursor.rowcount:
-                    _audit(connection, record["admission_id"], "reconciled_completed", None, None, _timestamp())
+                    _audit(
+                        connection,
+                        record["admission_id"],
+                        "reconciled_completed",
+                        None,
+                        None,
+                        _timestamp(),
+                    )
             elif run is not None and run.status == "completed":
-                _audit(connection, record["admission_id"], "reconciliation_failed", None, "diagnostic_mismatch", _timestamp())
+                _audit(
+                    connection,
+                    record["admission_id"],
+                    "reconciliation_failed",
+                    None,
+                    "diagnostic_mismatch",
+                    _timestamp(),
+                )
 
-    def _activate_provisioning(self, connection: sqlite3.Connection, record: Mapping[str, Any]) -> bool:
+    def _activate_provisioning(
+        self, connection: sqlite3.Connection, record: Mapping[str, Any]
+    ) -> bool:
         """Activate a verified child using the caller's held ledger lock."""
         if record["state"] != "provisioning":
             return False
@@ -493,7 +562,9 @@ class ManagedSpaceSupervisor:
             (_timestamp(), record["admission_id"], record["record_version"]),
         )
         if cursor.rowcount:
-            _audit(connection, record["admission_id"], "admitted", None, None, _timestamp())
+            _audit(
+                connection, record["admission_id"], "admitted", None, None, _timestamp()
+            )
         return cursor.rowcount == 1
 
     def execution_options_for_run(self, project_root: Path, run: SwarmRun):
@@ -502,7 +573,9 @@ class ManagedSpaceSupervisor:
 
         capability = self._binding_for_run(project_root, run)
         if capability is None:
-            return SwarmExecutionOptions(blocked_reason="supervisor_binding_unavailable")
+            return SwarmExecutionOptions(
+                blocked_reason="supervisor_binding_unavailable"
+            )
         if not _diagnostic_metadata_matches_capability(run.metadata, capability):
             self._pause(capability, "capability_invalid")
             return SwarmExecutionOptions(blocked_reason="capability_invalid")
@@ -521,13 +594,16 @@ class ManagedSpaceSupervisor:
 
     def _execution_guard_for(self, capability: ManagedSpaceCapability):
         def guard(_project_root: Path, current_run: SwarmRun | None) -> str | None:
-            if current_run is None or not _diagnostic_metadata_matches_capability(current_run.metadata, capability):
+            if current_run is None or not _diagnostic_metadata_matches_capability(
+                current_run.metadata, capability
+            ):
                 self._pause(capability, "capability_invalid")
                 return "capability_invalid"
             reason = self._revalidate(capability)
             if reason is not None:
                 self._pause(capability, reason)
             return reason
+
         return guard
 
     def pre_completion_hook_for_run(self, run_id: str) -> ManagedSpacePreCompletionHook:
@@ -671,6 +747,26 @@ class ManagedSpaceSupervisor:
     def revalidate_action_boundary(self, capability: ManagedSpaceCapability) -> bool:
         return self.resolve_action_context(capability) is not None
 
+    def resolve_action_capability(
+        self,
+        project_root: Path,
+        run: SwarmRun,
+    ) -> ManagedSpaceCapability | None:
+        """Resolve the current capability from trusted host run identity."""
+        if not isinstance(run, SwarmRun):
+            return None
+        capability = self._binding_for_run(project_root, run)
+        if capability is None:
+            return None
+        context = self.resolve_action_context(capability)
+        if (
+            context is None
+            or context.run_id != run.run_id
+            or context.canonical_root != Path(project_root).resolve()
+        ):
+            return None
+        return capability
+
     def resolve_action_context(
         self,
         capability: ManagedSpaceCapability,
@@ -740,7 +836,9 @@ class ManagedSpaceSupervisor:
         self._pause(capability, reason)
         return True
 
-    def _read_action_boundary_child_status(self, capability: ManagedSpaceCapability) -> str | None:
+    def _read_action_boundary_child_status(
+        self, capability: ManagedSpaceCapability
+    ) -> str | None:
         """Return the ledger-rooted child status without creating or writing a store."""
         record = self._record(capability._admission_id)
         if (
@@ -760,7 +858,9 @@ class ManagedSpaceSupervisor:
             return "metadata_invalid"
         return run.status
 
-    def _pause_ledger_only(self, capability: ManagedSpaceCapability, reason: str) -> None:
+    def _pause_ledger_only(
+        self, capability: ManagedSpaceCapability, reason: str
+    ) -> None:
         """Fail closed from an action gate without writing through capability data."""
         record = self._record(capability._admission_id)
         if (
@@ -854,9 +954,7 @@ class ManagedSpaceSupervisor:
     ) -> None:
         """Write only after a read-only probe confirms the child already exists."""
         try:
-            reader = ProjectSwarmStore.open_read_only(
-                Path(record["canonical_root"])
-            )
+            reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
             run = reader.get_run(record["run_id"])
         except (OSError, RuntimeError, ValueError, sqlite3.Error):
             return
@@ -947,19 +1045,20 @@ class ManagedSpaceSupervisor:
             ),
         )
         if cursor.rowcount:
-            _audit(connection, record["admission_id"], event_type, None, None, _timestamp())
+            _audit(
+                connection, record["admission_id"], event_type, None, None, _timestamp()
+            )
         return cursor.rowcount == 1
 
-    def completion_observer_for_run(self, run_id: str) -> Callable[[Path, SwarmRun], None]:
+    def completion_observer_for_run(
+        self, run_id: str
+    ) -> Callable[[Path, SwarmRun], None]:
         """Return the host completion seam for this one in-process binding."""
+
         def observe(project_root: Path, run: SwarmRun) -> None:
             with self._bindings_lock:
                 capability = self._bindings.get(run_id)
-            if (
-                capability is None
-                or run.run_id != run_id
-                or run.status != "completed"
-            ):
+            if capability is None or run.run_id != run_id or run.status != "completed":
                 return
             record = self._record(capability._admission_id)
             if (
@@ -985,14 +1084,11 @@ class ManagedSpaceSupervisor:
                 "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
                 (admission_id,),
             ).fetchone()
-            if (
-                record is None
-                or record["state"] in {
-                    "cancelled",
-                    "completed",
-                    "abandoning",
-                }
-            ):
+            if record is None or record["state"] in {
+                "cancelled",
+                "completed",
+                "abandoning",
+            }:
                 return False
             if record["state"] == "provisioning":
                 cursor = connection.execute(
@@ -1011,7 +1107,14 @@ class ManagedSpaceSupervisor:
                     ),
                 )
                 if cursor.rowcount:
-                    _audit(connection, admission_id, "cancelled", actor, "cancelled_before_child_create", _timestamp())
+                    _audit(
+                        connection,
+                        admission_id,
+                        "cancelled",
+                        actor,
+                        "cancelled_before_child_create",
+                        _timestamp(),
+                    )
                 return cursor.rowcount == 1
             if record["state"] != "cancelling":
                 if record["state"] not in {"active", "paused", "abandoned"}:
@@ -1079,15 +1182,12 @@ class ManagedSpaceSupervisor:
                 "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
                 (admission_id,),
             ).fetchone()
-            if (
-                record is None
-                or record["state"] in {
-                    "cancelled",
-                    "completed",
-                    "abandoned",
-                    "cancelling",
-                }
-            ):
+            if record is None or record["state"] in {
+                "cancelled",
+                "completed",
+                "abandoned",
+                "cancelling",
+            }:
                 return False
             if record["state"] == "provisioning":
                 cursor = connection.execute(
@@ -1106,7 +1206,14 @@ class ManagedSpaceSupervisor:
                     ),
                 )
                 if cursor.rowcount:
-                    _audit(connection, admission_id, "abandoned", actor, "abandoned_before_child_create", _timestamp())
+                    _audit(
+                        connection,
+                        admission_id,
+                        "abandoned",
+                        actor,
+                        "abandoned_before_child_create",
+                        _timestamp(),
+                    )
                 return cursor.rowcount == 1
             if record["state"] != "abandoning":
                 if record["state"] not in {"active", "paused"}:
@@ -1273,8 +1380,7 @@ class ManagedSpaceSupervisor:
             if (
                 current is not None
                 and current._admission_id == capability._admission_id
-                and current._attachment_generation
-                == capability._attachment_generation
+                and current._attachment_generation == capability._attachment_generation
             ):
                 self._bindings.pop(capability._run_id, None)
 
@@ -1284,15 +1390,19 @@ class ManagedSpaceSupervisor:
             if (
                 current is not None
                 and current._admission_id == record["admission_id"]
-                and current._attachment_generation
-                == record["attachment_generation"]
+                and current._attachment_generation == record["attachment_generation"]
             ):
                 self._bindings.pop(record["run_id"], None)
 
-    def _binding_for_run(self, project_root: Path, run: SwarmRun) -> ManagedSpaceCapability | None:
+    def _binding_for_run(
+        self, project_root: Path, run: SwarmRun
+    ) -> ManagedSpaceCapability | None:
         with self._bindings_lock:
             capability = self._bindings.get(run.run_id)
-        if capability is None or Path(project_root).resolve() != capability._canonical_root:
+        if (
+            capability is None
+            or Path(project_root).resolve() != capability._canonical_root
+        ):
             return None
         return capability
 
@@ -1304,12 +1414,25 @@ class ManagedSpaceSupervisor:
             return "admission_inactive"
         if not _capability_matches_record(capability, record):
             return "capability_invalid"
-        governance = _resolved_governance(self._governance_resolver, capability._target_key)
-        if governance is None or governance.yolo is not True or governance.enrolled is not True:
+        governance = _resolved_governance(
+            self._governance_resolver, capability._target_key
+        )
+        if (
+            governance is None
+            or governance.yolo is not True
+            or governance.enrolled is not True
+        ):
             return "governance_revoked"
-        if governance.canonical_root != capability._canonical_root or governance.root_fingerprint != capability._root_fingerprint:
+        if (
+            governance.canonical_root != capability._canonical_root
+            or governance.root_fingerprint != capability._root_fingerprint
+        ):
             return "root_mismatch"
-        if governance.space_id != capability._target_space_id or governance.revision != capability._governance_revision or governance.policy_identity != capability._policy_identity:
+        if (
+            governance.space_id != capability._target_space_id
+            or governance.revision != capability._governance_revision
+            or governance.policy_identity != capability._policy_identity
+        ):
             return "governance_revoked"
         try:
             reader = ProjectSwarmStore.open_read_only(Path(record["canonical_root"]))
@@ -1362,7 +1485,10 @@ class ManagedSpaceSupervisor:
         if not self._ledger_path.exists():
             return None
         with self._read_connection() as connection:
-            return connection.execute("SELECT * FROM supervisor_admissions WHERE admission_id = ?", (admission_id,)).fetchone()
+            return connection.execute(
+                "SELECT * FROM supervisor_admissions WHERE admission_id = ?",
+                (admission_id,),
+            ).fetchone()
 
     def _routing_record(
         self,
@@ -1398,7 +1524,9 @@ class ManagedSpaceSupervisor:
 
     @contextmanager
     def _immediate_connection(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self._ledger_path, timeout=30, isolation_level=None)
+        connection = sqlite3.connect(
+            self._ledger_path, timeout=30, isolation_level=None
+        )
         connection.row_factory = sqlite3.Row
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -1473,14 +1601,19 @@ def get_production_managed_space_supervisor() -> ManagedSpaceSupervisor:
 
 def resolve_managed_space_governance(target_key: str) -> ManagedSpaceGovernance:
     """Production resolver: Space identity plus independently trusted root only."""
-    from web.api.space_engine import get_existing_space_read_only, list_nova_management_audit
+    from web.api.space_engine import (
+        get_existing_space_read_only,
+        list_nova_management_audit,
+    )
     from web.api.workspace import resolve_enrollment_trusted_workspace_read_only
 
     space = get_existing_space_read_only(_target_key(target_key))
     if space is None:
         raise ValueError("managed Space is unavailable")
     config = space.load_config()
-    if config.get("_space_config_malformed") or config.get("_nova_management_malformed"):
+    if config.get("_space_config_malformed") or config.get(
+        "_nova_management_malformed"
+    ):
         raise ValueError("managed Space governance is malformed")
     management = config.get("nova_management")
     if not isinstance(management, Mapping):
@@ -1523,9 +1656,17 @@ def _capability(
 ) -> ManagedSpaceCapability:
     families = _ALLOWED_ACTION_FAMILIES
     return ManagedSpaceCapability(
-        admission_id, target_key, governance.space_id, governance.canonical_root,
-        governance.root_fingerprint, governance.revision, governance.policy_identity,
-        run_id, digest, families, _allowed_action_families_digest(families),
+        admission_id,
+        target_key,
+        governance.space_id,
+        governance.canonical_root,
+        governance.root_fingerprint,
+        governance.revision,
+        governance.policy_identity,
+        run_id,
+        digest,
+        families,
+        _allowed_action_families_digest(families),
         attachment_generation,
         _token=_CAPABILITY_TOKEN,
     )
@@ -1541,10 +1682,17 @@ def _capability_from_record(
         if families != _ALLOWED_ACTION_FAMILIES:
             return None
         return ManagedSpaceCapability(
-            record["admission_id"], record["target_key"], record["target_space_id"],
-            Path(record["canonical_root"]).resolve(), record["root_fingerprint"],
-            record["governance_revision"], record["policy_identity"], record["run_id"],
-            record["intent_digest"], families, _allowed_action_families_digest(families),
+            record["admission_id"],
+            record["target_key"],
+            record["target_space_id"],
+            Path(record["canonical_root"]).resolve(),
+            record["root_fingerprint"],
+            record["governance_revision"],
+            record["policy_identity"],
+            record["run_id"],
+            record["intent_digest"],
+            families,
+            _allowed_action_families_digest(families),
             (
                 record["attachment_generation"]
                 if attachment_generation is None
@@ -1556,7 +1704,9 @@ def _capability_from_record(
         return None
 
 
-def _diagnostic_metadata(capability: ManagedSpaceCapability, intent: Mapping[str, Any]) -> dict[str, Any]:
+def _diagnostic_metadata(
+    capability: ManagedSpaceCapability, intent: Mapping[str, Any]
+) -> dict[str, Any]:
     return {
         "goal": str(intent.get("goal", "Nova managed Space supervision")),
         "pack": "coding-team",
@@ -1577,24 +1727,33 @@ def _diagnostic_metadata(capability: ManagedSpaceCapability, intent: Mapping[str
     }
 
 
-def _resolved_governance(resolver: Callable[[str], ManagedSpaceGovernance], target_key: str) -> ManagedSpaceGovernance | None:
+def _resolved_governance(
+    resolver: Callable[[str], ManagedSpaceGovernance], target_key: str
+) -> ManagedSpaceGovernance | None:
     try:
         result = resolver(target_key)
         if not isinstance(result, ManagedSpaceGovernance):
             return None
         return ManagedSpaceGovernance.from_values(
-            space_id=result.space_id, canonical_root=result.canonical_root,
-            root_fingerprint=result.root_fingerprint, yolo=result.yolo,
-            enrolled=result.enrolled, revision=result.revision,
+            space_id=result.space_id,
+            canonical_root=result.canonical_root,
+            root_fingerprint=result.root_fingerprint,
+            yolo=result.yolo,
+            enrolled=result.enrolled,
+            revision=result.revision,
             policy_identity=result.policy_identity,
         )
     except (OSError, TypeError, ValueError):
         return None
 
 
-def _capability_matches_record(capability: ManagedSpaceCapability, record: Mapping[str, object]) -> bool:
+def _capability_matches_record(
+    capability: ManagedSpaceCapability, record: Mapping[str, object]
+) -> bool:
     try:
-        action_families = _allowed_action_families_json(capability._allowed_action_families)
+        action_families = _allowed_action_families_json(
+            capability._allowed_action_families
+        )
     except (TypeError, ValueError):
         return False
     return (
@@ -1607,8 +1766,7 @@ def _capability_matches_record(capability: ManagedSpaceCapability, record: Mappi
         and record["policy_identity"] == capability._policy_identity
         and record["allowed_action_families_json"] == action_families
         and record["run_id"] == capability._run_id
-        and record["attachment_generation"]
-        == capability._attachment_generation
+        and record["attachment_generation"] == capability._attachment_generation
     )
 
 
@@ -1621,8 +1779,7 @@ def _capability_targets_record_generation(
         isinstance(capability, ManagedSpaceCapability)
         and record["admission_id"] == capability._admission_id
         and record["run_id"] == capability._run_id
-        and record["attachment_generation"]
-        == capability._attachment_generation
+        and record["attachment_generation"] == capability._attachment_generation
     )
 
 
@@ -1662,12 +1819,15 @@ def _same_recovery_snapshot(
     return all(current[field] == snapshot[field] for field in immutable_fields)
 
 
-def _diagnostic_metadata_matches_capability(metadata: Mapping[str, Any], capability: ManagedSpaceCapability) -> bool:
+def _diagnostic_metadata_matches_capability(
+    metadata: Mapping[str, Any], capability: ManagedSpaceCapability
+) -> bool:
     if (
         not isinstance(metadata, Mapping)
         or metadata.get("project_root") != str(capability._canonical_root)
         or metadata.get("integration_namespace") != "nova-space-supervisor"
-        or metadata.get("required_pre_completion_hook") != ManagedSpacePreCompletionHook.hook_id
+        or metadata.get("required_pre_completion_hook")
+        != ManagedSpacePreCompletionHook.hook_id
     ):
         return False
     diagnostic = metadata.get("nova_supervisor")
@@ -1683,22 +1843,28 @@ def _diagnostic_metadata_matches_capability(metadata: Mapping[str, Any], capabil
     }
 
 
-def _diagnostic_metadata_matches_record(metadata: Mapping[str, Any], record: Mapping[str, Any]) -> bool:
+def _diagnostic_metadata_matches_record(
+    metadata: Mapping[str, Any], record: Mapping[str, Any]
+) -> bool:
     try:
         families = tuple(json.loads(record["allowed_action_families_json"]))
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
     if families != _ALLOWED_ACTION_FAMILIES:
         return False
-    diagnostic = metadata.get("nova_supervisor") if isinstance(metadata, Mapping) else None
+    diagnostic = (
+        metadata.get("nova_supervisor") if isinstance(metadata, Mapping) else None
+    )
     return (
         record["workflow_contract_digest"] == _workflow_contract_digest(metadata)
         and record["workflow_contract_digest"] != ""
         and isinstance(diagnostic, Mapping)
         and metadata.get("project_root") == record["canonical_root"]
         and metadata.get("integration_namespace") == "nova-space-supervisor"
-        and metadata.get("required_pre_completion_hook") == ManagedSpacePreCompletionHook.hook_id
-        and diagnostic == {
+        and metadata.get("required_pre_completion_hook")
+        == ManagedSpacePreCompletionHook.hook_id
+        and diagnostic
+        == {
             "admission_id": record["admission_id"],
             "target_space_id": record["target_space_id"],
             "intent_digest": record["intent_digest"],
@@ -1729,23 +1895,40 @@ def _governance_matches_record(
 def _workflow_contract_digest(metadata: Mapping[str, Any]) -> str:
     """Bind every durable workflow input and supervisor diagnostic exactly."""
     try:
-        canonical = json.dumps(dict(metadata), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        canonical = json.dumps(
+            dict(metadata),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
     except (TypeError, ValueError):
         return ""
     return sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _allowed_action_families_json(families: tuple[str, ...] = _ALLOWED_ACTION_FAMILIES) -> str:
+def _allowed_action_families_json(
+    families: tuple[str, ...] = _ALLOWED_ACTION_FAMILIES,
+) -> str:
     if tuple(families) != _ALLOWED_ACTION_FAMILIES:
         raise ValueError("managed Space action families are not permitted")
     return json.dumps(list(families), separators=(",", ":"))
 
 
-def _allowed_action_families_digest(families: tuple[str, ...] = _ALLOWED_ACTION_FAMILIES) -> str:
+def _allowed_action_families_digest(
+    families: tuple[str, ...] = _ALLOWED_ACTION_FAMILIES,
+) -> str:
     return sha256(_allowed_action_families_json(families).encode("utf-8")).hexdigest()
 
 
-def _audit(connection: sqlite3.Connection, admission_id: str, event_type: str, actor: str | None, reason: str | None, now: str) -> None:
+def _audit(
+    connection: sqlite3.Connection,
+    admission_id: str,
+    event_type: str,
+    actor: str | None,
+    reason: str | None,
+    now: str,
+) -> None:
     connection.execute(
         "INSERT INTO supervisor_audit (admission_id, event_type, actor, reason, created_at) VALUES (?, ?, ?, ?, ?)",
         (admission_id, event_type, actor, reason, now),
@@ -1761,7 +1944,15 @@ def _target_key(value: object) -> str:
 def _intent_digest(intent: Mapping[str, Any]) -> str:
     if not isinstance(intent, Mapping):
         raise TypeError("managed Space intent must be a mapping")
-    return sha256(json.dumps(dict(intent), sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False).encode("utf-8")).hexdigest()
+    return sha256(
+        json.dumps(
+            dict(intent),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _root_fingerprint(root: Path) -> str:
@@ -1770,9 +1961,12 @@ def _root_fingerprint(root: Path) -> str:
 
 def _timestamp() -> str:
     from datetime import datetime, timezone
+
     return datetime.now(timezone.utc).isoformat()
 
 
 def _dashboard_actor(actor: str) -> None:
     if not isinstance(actor, str) or DASHBOARD_ACTOR_RE.fullmatch(actor) is None:
-        raise PermissionError("only a dashboard human actor may terminally transition a managed Space run")
+        raise PermissionError(
+            "only a dashboard human actor may terminally transition a managed Space run"
+        )

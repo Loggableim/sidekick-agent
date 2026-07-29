@@ -9,6 +9,7 @@ from .types import (
     ActionCapabilities,
     ActionProposal,
     RequestedToolAction,
+    SwarmRun,
     thaw_json_value,
 )
 
@@ -44,9 +45,7 @@ class SidekickToolAdapter:
             from nova.managed_space_gateway import ManagedSpaceActionGateway
 
             if not isinstance(managed_gateway, ManagedSpaceActionGateway):
-                raise TypeError(
-                    "managed_gateway must be ManagedSpaceActionGateway"
-                )
+                raise TypeError("managed_gateway must be ManagedSpaceActionGateway")
         self._resolve_trusted_workspace = trusted_workspace_resolver
         self._execute_action = action_executor
         self._preview_action = action_previewer
@@ -83,9 +82,7 @@ class SidekickToolAdapter:
         from nova.managed_space_gateway import ManagedSpaceActionGateway
 
         if ManagedSpaceActionGateway.handles(action.name):
-            raise RuntimeError(
-                "managed gateway handoff required for this operation"
-            )
+            raise RuntimeError("managed gateway handoff required for this operation")
         workspace = self._execution_workspace(action)
         return self._execute_action(
             action.name,
@@ -95,13 +92,13 @@ class SidekickToolAdapter:
 
     def execute_managed(
         self,
-        capability: object,
         proposal: ActionProposal,
+        run: SwarmRun,
     ) -> GatewayResult:
         """Route managed proposals only through the injected safety gateway."""
         if self._managed_gateway is None:
             raise RuntimeError("managed gateway is not configured")
-        return self._managed_gateway.execute(capability, proposal)
+        return self._managed_gateway.execute_for_run(proposal, run)
 
     def _resolve_action_workspace(self, action: RequestedToolAction) -> Path:
         trusted = Path(self._resolve_trusted_workspace(action.workspace)).expanduser()
