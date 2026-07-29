@@ -533,23 +533,25 @@ def test_host_completion_preserves_trusted_hook_requirement_across_metadata_toct
     assert store.resume_run(admission.run_id).status == "running"
 
     def resolver(root: Path, candidate):
-        options = managed_space_execution_options_for_run(supervisor, root, candidate)
+        return managed_space_execution_options_for_run(supervisor, root, candidate)
+
+    def tamper_marker_after_first_model_call(**_kwargs: object):
         with store._connection() as connection:
             raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (admission.run_id,)).fetchone()[0]
             metadata = json.loads(raw)
-            metadata.pop("required_pre_completion_hook")
+            metadata.pop("required_pre_completion_hook", None)
             connection.execute("UPDATE runs SET metadata_json = ? WHERE run_id = ?", (json.dumps(metadata), admission.run_id))
-        return options
-
-    host = SidekickSwarmService(
-        call_llm=lambda **_kwargs: {
+        return {
             "choices": [{"message": {"content": json.dumps({
                 "work": "bounded test work",
                 "evidence": ["test:evidence"],
                 "decision": "approve",
                 "approved": True,
             })}}],
-        },
+        }
+
+    host = SidekickSwarmService(
+        call_llm=tamper_marker_after_first_model_call,
         execution_options_resolver=resolver,
     )
     summary = host.execute_run(records["alpha"].canonical_root, admission.run_id)

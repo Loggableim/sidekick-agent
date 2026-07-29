@@ -116,10 +116,11 @@ def test_execution_options_resolver_uses_durable_run_without_weakening_cloud_dis
         assert project_root == tmp_path.resolve()
         resolver_runs.append(run)
         return swarm_host.SwarmExecutionOptions(
-            max_calls=128,
-            verifier=verifier,
-            pre_completion_hook=hook,
-            on_completed=on_completed,
+                max_calls=128,
+                verifier=verifier,
+                pre_completion_hook=hook,
+                required_pre_completion_hook_id="bridge-test-hook-v1",
+                on_completed=on_completed,
         )
 
     ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
@@ -262,8 +263,8 @@ def test_execution_options_required_hook_still_fails_closed_without_a_resolver(
     summary = service.execute_run(tmp_path, run.run_id)
 
     assert summary.status == "paused"
-    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
-    assert calls
+    assert summary.pause_reason == "invalid_execution_options"
+    assert calls == []
 
 
 def test_execution_options_cannot_replace_a_durable_required_hook_contract(
@@ -306,6 +307,54 @@ def test_execution_options_cannot_replace_a_durable_required_hook_contract(
     assert summary.status == "paused"
     assert summary.pause_reason == "invalid_execution_options"
     assert calls == []
+    assert not any(event.event_type == "run.completed" for event in ProjectSwarmStore(tmp_path).list_events(run.run_id))
+
+
+def test_required_hook_contract_rechecks_current_metadata_after_model_work(tmp_path: Path):
+    """A completion hook cannot rely on the pre-work run metadata snapshot."""
+    calls: list[dict] = []
+    ProjectSwarmStore(tmp_path).save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud", models=_ROUTED_MODELS, healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+
+    class RequiredHook:
+        hook_id = "durable-hook-v1"
+
+        def run(self, _context):
+            raise AssertionError("engine must reject the changed contract before invoking this hook")
+
+    def tamper_marker(**kwargs):
+        calls.append(kwargs)
+        store = ProjectSwarmStore(tmp_path)
+        with store._connection() as connection:
+            raw = connection.execute("SELECT metadata_json FROM runs WHERE run_id = ?", (run.run_id,)).fetchone()[0]
+            metadata = json.loads(raw)
+            metadata.pop("required_pre_completion_hook", None)
+            connection.execute("UPDATE runs SET metadata_json = ? WHERE run_id = ?", (json.dumps(metadata), run.run_id))
+        return _valid_response()
+
+    service = SidekickSwarmService(
+        call_llm=tamper_marker,
+        execution_options_resolver=lambda _root, _run: swarm_host.SwarmExecutionOptions(
+            max_calls=128,
+            pre_completion_hook=RequiredHook(),
+            required_pre_completion_hook_id="durable-hook-v1",
+        ),
+    )
+    run = service.start_run(
+        "recheck the active durable completion contract", tmp_path,
+        autonomy="autonomous",
+        host_metadata={"required_pre_completion_hook": "durable-hook-v1"},
+    )
+
+    summary = service.execute_run(tmp_path, run.run_id)
+
+    assert calls
+    assert summary.status == "paused"
+    assert summary.pause_reason == "required_pre_completion_hook_unavailable"
     assert not any(event.event_type == "run.completed" for event in ProjectSwarmStore(tmp_path).list_events(run.run_id))
 
 

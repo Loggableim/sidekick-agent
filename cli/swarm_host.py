@@ -298,12 +298,16 @@ class SidekickSwarmService:
         """Resolve once from durable state, failing closed without error detail."""
         resolver = self._execution_options_resolver
         if resolver is None:
+            if "required_pre_completion_hook" in run.metadata:
+                return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
             return SwarmExecutionOptions()
         try:
             resolved = resolver(project_root, run)
         except Exception:
             return SwarmExecutionOptions(blocked_reason="execution_options_unavailable")
         if resolved is None:
+            if "required_pre_completion_hook" in run.metadata:
+                return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
             return SwarmExecutionOptions()
         if not isinstance(resolved, SwarmExecutionOptions):
             return SwarmExecutionOptions(blocked_reason="invalid_execution_options")
@@ -706,6 +710,12 @@ def _valid_required_pre_completion_hook_contract(
 ) -> bool:
     """Require resolver hook contracts to confirm the durable run requirement."""
     required_hook_id = options.required_pre_completion_hook_id
+    durable_required_hook_id = run.metadata.get("required_pre_completion_hook")
+    if durable_required_hook_id is not None:
+        if type(durable_required_hook_id) is not str or not durable_required_hook_id.strip():
+            return False
+        if required_hook_id != durable_required_hook_id:
+            return False
     if required_hook_id is None:
         return True
     if type(required_hook_id) is not str or not required_hook_id.strip():
@@ -716,7 +726,7 @@ def _valid_required_pre_completion_hook_contract(
     try:
         return (
             getattr(hook, "hook_id") == required_hook_id
-            and run.metadata.get("required_pre_completion_hook") == required_hook_id
+            and durable_required_hook_id == required_hook_id
         )
     except Exception:
         return False
