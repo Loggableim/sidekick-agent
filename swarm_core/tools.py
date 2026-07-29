@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .policy import PolicyDecision, PolicyGate, PolicyStatus
@@ -14,6 +15,13 @@ class ToolAdapter(Protocol):
     def preview(self, action: RequestedToolAction) -> Any: ...
 
     def execute(self, action: RequestedToolAction) -> Any: ...
+
+
+@dataclass(frozen=True)
+class RoutedToolExecution:
+    """One adapter-owned execution that must bypass the generic policy path."""
+
+    result: Any
 
 
 class ActionNotAllowed(RuntimeError):
@@ -35,13 +43,16 @@ class GatedToolExecutor:
         return self.adapter.preview(proposal.requested_action)
 
     def execute(self, proposal: ActionProposal, run: SwarmRun) -> Any:
-        from nova.managed_space_gateway import ManagedSpaceActionGateway
-
-        if ManagedSpaceActionGateway.handles(proposal.requested_action.name):
-            managed_execute = getattr(self.adapter, "execute_managed", None)
-            if not callable(managed_execute):
-                raise RuntimeError("managed gateway is not configured for this adapter")
-            return managed_execute(proposal, run)
+        route_execution = getattr(self.adapter, "route_execution", None)
+        if callable(route_execution):
+            routed = route_execution(proposal, run)
+            if routed is not None:
+                if not isinstance(routed, RoutedToolExecution):
+                    raise TypeError(
+                        "Tool adapter route_execution must return "
+                        "RoutedToolExecution or None"
+                    )
+                return routed.result
         decision = self.policy_gate.authorize_and_claim(
             proposal,
             run,

@@ -15,8 +15,8 @@ from nova.space_supervisor import ManagedSpaceGovernance, ManagedSpaceSupervisor
 from swarm_core.policy import PolicyGate, proposal_digest
 from swarm_core.sidekick_adapter import SidekickToolAdapter
 from swarm_core.store import ProjectSwarmStore
-from swarm_core.tools import GatedToolExecutor
-from swarm_core.types import ActionProposal, RequestedToolAction
+from swarm_core.tools import ActionNotAllowed, GatedToolExecutor
+from swarm_core.types import ActionCapabilities, ActionProposal, RequestedToolAction
 
 
 def _gateway_api():
@@ -1129,10 +1129,10 @@ def test_fix_round1_invalid_typed_operation_arguments_are_hard_denied(
     assert local.calls == github.calls == deployment.calls == []
 
 
-def test_fix_round1_generic_sidekick_adapter_requires_managed_gateway_handoff(
+def test_fix_round1_sidekick_adapter_can_use_explicit_managed_gateway_handoff(
     tmp_path: Path,
 ) -> None:
-    """Catches a managed operation reaching the generic Sidekick executor."""
+    """Catches the explicit managed handoff bypassing the generic executor."""
     (
         _api,
         root,
@@ -1156,8 +1156,6 @@ def test_fix_round1_generic_sidekick_adapter_requires_managed_gateway_handoff(
         managed_gateway=gateway,
     )
 
-    with pytest.raises(RuntimeError, match="managed gateway"):
-        adapter.execute(proposal.requested_action)
     run = store.get_run(admission.run_id)
     assert run is not None
     result = adapter.execute_managed(proposal, run)
@@ -1321,7 +1319,7 @@ def test_fix_round2_gated_executor_never_generically_claims_managed_proposal(
         action_executor=lambda *args: generic_calls.append(args),
     )
 
-    with pytest.raises(RuntimeError, match="managed gateway is not configured"):
+    with pytest.raises(ActionNotAllowed):
         GatedToolExecutor(gate, unavailable).execute(proposal, run)
 
     configured = SidekickToolAdapter(
@@ -1448,3 +1446,213 @@ def test_fix_round2_gateway_factory_builds_repository_backed_attestor(
 
     assert isinstance(gateway, _api.ManagedSpaceActionGateway)
     assert isinstance(gateway._worktree_attestor, _api.GitWorktreeAttestor)
+
+
+def test_fix_round3_sidekick_without_matching_binding_executes_generically(
+    tmp_path: Path,
+) -> None:
+    """Catches a configured gateway capturing a normal run by operation name."""
+    (
+        _api,
+        _managed_root,
+        _records,
+        _supervisor,
+        _admission,
+        _managed_store,
+        _provider,
+        _local,
+        _github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path / "managed")
+    ordinary_root = (tmp_path / "ordinary").resolve()
+    ordinary_store = ProjectSwarmStore(ordinary_root)
+    ordinary_run = ordinary_store.create_run(metadata={"autonomy": "autonomous"})
+    proposal = ActionProposal(
+        proposal_id="ordinary-github-push",
+        category="project",
+        reversible=True,
+        external=False,
+        cost_increasing=False,
+        evidence_refs=("evidence:ordinary",),
+        requested_action=RequestedToolAction(
+            name="github.push",
+            workspace=ordinary_root,
+            arguments={"branch": "feat/ordinary"},
+            use_worktree=False,
+        ),
+    )
+    generic_calls: list[tuple[str, Path, dict[str, Any]]] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda name, workspace, arguments: (
+            generic_calls.append((name, workspace, arguments)) or {"result": "generic"}
+        ),
+        action_classifier=lambda _action: ActionCapabilities(
+            category="project",
+            reversible=True,
+            external=False,
+            cost_increasing=False,
+        ),
+        managed_gateway=gateway,
+    )
+
+    result = GatedToolExecutor(PolicyGate(ordinary_store), adapter).execute(
+        proposal,
+        ordinary_run,
+    )
+
+    assert result == {"result": "generic"}
+    assert generic_calls == [
+        ("github.push", ordinary_root, {"branch": "feat/ordinary"})
+    ]
+
+
+def test_fix_round3_active_managed_run_mismatch_fails_closed_before_generic_claim(
+    tmp_path: Path,
+) -> None:
+    """Catches an invalid managed target falling back to generic execution."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        store,
+        provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    wrong_root = (tmp_path / "wrong-target").resolve()
+    wrong_root.mkdir()
+    wrong = _proposal(wrong_root, proposal_id="managed-target-binding")
+    correct = _proposal(root, proposal_id=wrong.proposal_id)
+    _record_bound_evidence(store, correct, run_id=admission.run_id)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    generic_calls: list[object] = []
+    adapter = SidekickToolAdapter(
+        trusted_workspace_resolver=lambda workspace: Path(workspace),
+        action_executor=lambda *arguments: generic_calls.append(arguments),
+        action_classifier=lambda _action: ActionCapabilities(
+            category="managed",
+            reversible=True,
+            external=False,
+            cost_increasing=False,
+        ),
+        managed_gateway=gateway,
+    )
+
+    denied = GatedToolExecutor(PolicyGate(store), adapter).execute(wrong, run)
+    allowed = GatedToolExecutor(PolicyGate(store), adapter).execute(correct, run)
+
+    assert denied.code == "target_root_mismatch"
+    assert allowed.ok is True
+    assert generic_calls == []
+    assert len(provider.calls) == 1
+    assert len(github.calls) == 1
+
+
+def test_fix_round3_provider_symlink_alias_reaches_git_attestor_unresolved(
+    tmp_path: Path,
+) -> None:
+    """Catches the gateway laundering a provider alias into a canonical target."""
+    (
+        api,
+        root,
+        _records,
+        supervisor,
+        admission,
+        store,
+        _provider,
+        local,
+        github,
+        deployment,
+        diagnosis,
+        _gateway_instance,
+    ) = _gateway(tmp_path)
+    _git(root, "init")
+    _git(root, "config", "user.email", "test@example.invalid")
+    _git(root, "config", "user.name", "Managed Gateway Test")
+    (root / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    _git(root, "add", "tracked.txt")
+    _git(root, "commit", "-m", "initial")
+    worktree = (tmp_path / "real-worktree").resolve()
+    _git(root, "worktree", "add", "-b", "managed-alias-test", str(worktree))
+    alias = (tmp_path / "provider-alias").absolute()
+    try:
+        os.symlink(worktree, alias, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink unavailable: {exc}")
+    attestor = api.GitWorktreeAttestor(
+        run_target_resolver=lambda _source, run_id: (
+            worktree if run_id == admission.run_id else None
+        ),
+    )
+    valid = attestor.attest(root, worktree, admission.run_id)
+    assert valid is not None
+    provider = _WorktreeProvider(api=api, path=alias)
+    gateway = api.ManagedSpaceActionGateway(
+        supervisor=supervisor,
+        policy_gate=PolicyGate(store),
+        worktree_provider=provider,
+        worktree_attestor=attestor,
+        local_worker=local,
+        github_worker=github,
+        deployment_worker=deployment,
+        diagnosis_runner=diagnosis,
+    )
+    proposal = _proposal(root, artifact_digest=valid.artifact_digest)
+    _record_bound_evidence(
+        store,
+        proposal,
+        run_id=admission.run_id,
+        worktree_identity=valid.identity,
+        artifact_digest=valid.artifact_digest,
+    )
+
+    result = gateway.execute(admission.capability, proposal)
+
+    assert result.code == "worktree_attestation_failed"
+    assert github.calls == []
+
+
+@pytest.mark.parametrize("prefix", ["gho_", "ghu_", "ghs_", "ghr_"])
+def test_fix_round3_github_credential_prefixes_are_hard_denied(
+    tmp_path: Path,
+    prefix: str,
+) -> None:
+    """Catches modern GitHub credential forms reaching publication workers."""
+    (
+        _api,
+        root,
+        _records,
+        _supervisor,
+        admission,
+        _store,
+        provider,
+        _local,
+        github,
+        _deployment,
+        _diagnosis,
+        gateway,
+    ) = _gateway(tmp_path)
+    proposal = _proposal(
+        root,
+        operation="github.pull_request",
+        arguments={
+            "artifact_digest": "a" * 64,
+            "title": "Credential must not cross",
+            "body": f"leaked {prefix}1234567890abcdefghijklmnop",
+        },
+    )
+
+    result = gateway.execute(admission.capability, proposal)
+
+    assert result.code == "operation_hard_denied"
+    assert provider.calls == []
+    assert github.calls == []

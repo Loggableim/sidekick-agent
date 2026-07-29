@@ -23,7 +23,7 @@ _SHA256_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _SAFE_TEST_NODE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\[[A-Za-z0-9_.:-]{1,128}\])?\Z")
 _SAFE_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}\Z")
 _CURRENT_SECRET_TOKEN = re.compile(
-    r"(?:github_pat_|glpat-|xox[a-z]-)[A-Za-z0-9_-]{8,}",
+    r"(?:github_pat_|gh[pousr]_|glpat-|xox[a-z]-)[A-Za-z0-9_-]{8,}",
     re.IGNORECASE,
 )
 _MANAGED_MODEL_CALL_BUDGET = 128
@@ -448,13 +448,22 @@ class ManagedSpaceActionGateway:
         """Resolve managed authority from trusted supervisor run identity."""
         if not isinstance(proposal, ActionProposal) or not isinstance(run, SwarmRun):
             return GatewayResult(False, "proposal_invalid")
-        capability = self._supervisor.resolve_action_capability(
-            proposal.requested_action.workspace,
-            run,
-        )
+        capability = self._supervisor.resolve_action_capability_for_run(run)
         if capability is None:
             return GatewayResult(False, "capability_invalid")
         return self.execute(capability, proposal)
+
+    def try_execute_for_run(
+        self,
+        proposal: ActionProposal,
+        run: SwarmRun,
+    ) -> GatewayResult | None:
+        """Return None only when this process has no managed binding for run."""
+        if not isinstance(proposal, ActionProposal) or not isinstance(run, SwarmRun):
+            return GatewayResult(False, "proposal_invalid")
+        if not self._supervisor.has_action_binding(run):
+            return None
+        return self.execute_for_run(proposal, run)
 
     def _create_worktree(
         self,
@@ -481,7 +490,7 @@ class ManagedSpaceActionGateway:
             return GatewayResult(False, "target_root_mismatch")
         if resolved == source:
             return GatewayResult(False, "canonical_worktree_forbidden")
-        return CreatedWorktree(resolved)
+        return created
 
     def _attest_worktree(
         self,

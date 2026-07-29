@@ -753,17 +753,33 @@ class ManagedSpaceSupervisor:
         run: SwarmRun,
     ) -> ManagedSpaceCapability | None:
         """Resolve the current capability from trusted host run identity."""
+        capability = self.resolve_action_capability_for_run(run)
+        if capability is None:
+            return None
+        if capability._canonical_root != Path(project_root).resolve():
+            return None
+        return capability
+
+    def has_action_binding(self, run: SwarmRun) -> bool:
+        """Return whether this process currently owns a binding for the run."""
+        if not isinstance(run, SwarmRun):
+            return False
+        with self._bindings_lock:
+            return run.run_id in self._bindings
+
+    def resolve_action_capability_for_run(
+        self,
+        run: SwarmRun,
+    ) -> ManagedSpaceCapability | None:
+        """Resolve exact current authority without trusting proposal paths."""
         if not isinstance(run, SwarmRun):
             return None
-        capability = self._binding_for_run(project_root, run)
+        with self._bindings_lock:
+            capability = self._bindings.get(run.run_id)
         if capability is None:
             return None
         context = self.resolve_action_context(capability)
-        if (
-            context is None
-            or context.run_id != run.run_id
-            or context.canonical_root != Path(project_root).resolve()
-        ):
+        if context is None or context.run_id != run.run_id:
             return None
         return capability
 
