@@ -17,8 +17,13 @@ from nova.space_supervisor import (
     ManagedSpaceSupervisor,
     managed_space_execution_options_for_run,
 )
-from cli.swarm_host import SidekickSwarmService, SwarmExecutionOptions
+from cli.swarm_host import (
+    OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+    SidekickSwarmService,
+    SwarmExecutionOptions,
+)
 from swarm_core.engine import PreCompletionContext
+from swarm_core.models import ModelCatalogSnapshot
 from swarm_core.store import ProjectSwarmStore
 
 
@@ -418,6 +423,78 @@ def test_host_execution_options_adapter_exposes_supervisor_hooks_and_pauses_revo
     blocked = host._resolve_execution_options(records["alpha"].canonical_root, run)
     assert blocked.blocked_reason == "execution_options_blocked"
     assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
+
+
+def test_host_completion_executes_required_supervisor_hook_and_pauses_revocation(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    assert run.metadata["required_pre_completion_hook"] == "nova-managed-space-supervisor-v1"
+    store.save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=(
+                "deepseek-v4-flash", "deepseek-v4-pro", "kimi-k2.6",
+                "minimax-m3", "glm-5.2", "kimi-k2.7-code", "nemotron-3-super",
+            ),
+            healthy=True,
+            source=OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE,
+        )
+    )
+    assert store.resume_run(admission.run_id).status == "running"
+    calls: list[dict[str, object]] = []
+
+    def revoke_before_completion(**kwargs: object):
+        calls.append(dict(kwargs))
+        records["alpha"] = replace(records["alpha"], yolo=False)
+        return {
+            "choices": [{"message": {"content": json.dumps({
+                "work": "bounded test work",
+                "evidence": ["test:evidence"],
+                "decision": "approve",
+                "approved": True,
+            })}}],
+        }
+
+    host = SidekickSwarmService(
+        call_llm=revoke_before_completion,
+        execution_options_resolver=lambda root, candidate: managed_space_execution_options_for_run(
+            supervisor, root, candidate
+        ),
+    )
+    summary = host.execute_run(records["alpha"].canonical_root, admission.run_id)
+
+    assert calls
+    assert summary.status == "paused"
+    assert summary.pause_reason == "governance_revoked"
+    assert store.get_run(admission.run_id).status == "paused"
+    assert not any(event.event_type == "run.completed" for event in store.list_events(admission.run_id))
+
+
+@pytest.mark.parametrize("replacement", (None, "untrusted-hook-v1"))
+def test_untrusted_required_hook_marker_changes_fail_closed(tmp_path: Path, replacement: str | None) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    metadata = dict(run.metadata)
+    if replacement is None:
+        metadata.pop("required_pre_completion_hook")
+    else:
+        metadata["required_pre_completion_hook"] = replacement
+
+    options = supervisor.execution_options_for_run(
+        records["alpha"].canonical_root,
+        replace(run, metadata=metadata),
+    )
+
+    assert options.blocked_reason == "capability_invalid"
+    assert store.get_run(admission.run_id).status == "paused"
 
 
 def test_tampered_capability_cannot_directly_complete_but_verified_child_completion_reconciles(tmp_path: Path) -> None:
