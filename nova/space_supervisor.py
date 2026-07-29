@@ -26,6 +26,7 @@ from swarm_core.types import SwarmRun
 DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}\Z")
 _INTENT_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
 _CAPABILITY_TOKEN = object()
+_ACTION_CONTEXT_TOKEN = object()
 _OCCUPIED_STATES = frozenset(
     {
         "provisioning",
@@ -140,6 +141,43 @@ class ManagedSpaceCapability:
 
     def __repr__(self) -> str:
         return "<ManagedSpaceCapability>"
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class ManagedSpaceActionContext:
+    """Frozen authority reconstructed from the current binding and ledger."""
+
+    run_id: str
+    canonical_root: Path
+    attachment_generation: int
+    allowed_action_families: tuple[str, ...]
+    target_space_id: str
+
+    def __init__(self, *args: object, _token: object | None = None) -> None:
+        if _token is not _ACTION_CONTEXT_TOKEN:
+            raise TypeError("ManagedSpaceActionContext is supervisor-owned")
+        (
+            run_id,
+            canonical_root,
+            attachment_generation,
+            allowed_action_families,
+            target_space_id,
+        ) = args
+        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "canonical_root", canonical_root)
+        object.__setattr__(self, "attachment_generation", attachment_generation)
+        object.__setattr__(
+            self,
+            "allowed_action_families",
+            allowed_action_families,
+        )
+        object.__setattr__(self, "target_space_id", target_space_id)
+
+    def __reduce__(self):
+        raise TypeError("ManagedSpaceActionContext cannot be serialized")
+
+    def __reduce_ex__(self, protocol: int):
+        raise TypeError("ManagedSpaceActionContext cannot be serialized")
 
 
 @dataclass(frozen=True, slots=True)
@@ -631,24 +669,76 @@ class ManagedSpaceSupervisor:
         del admission_id, generation
 
     def revalidate_action_boundary(self, capability: ManagedSpaceCapability) -> bool:
+        return self.resolve_action_context(capability) is not None
+
+    def resolve_action_context(
+        self,
+        capability: ManagedSpaceCapability,
+    ) -> ManagedSpaceActionContext | None:
+        """Return authority only for this process's exact current attachment.
+
+        A capability reconstructed from ledger values is intentionally not
+        current authority. Reject it before any ledger/child mutation so a
+        forged or stale object cannot pause or remove the installed binding.
+        """
+        if not isinstance(capability, ManagedSpaceCapability):
+            return None
+        with self._bindings_lock:
+            if self._bindings.get(capability._run_id) is not capability:
+                return None
         reason = self._revalidate(capability)
         if reason is not None:
             self._pause(capability, reason)
-            return False
+            return None
         status = self._read_action_boundary_child_status(capability)
-        if status == "running":
-            return True
-        if status == "metadata_invalid":
-            self._pause(capability, "capability_invalid")
+        if status != "running":
+            if status == "metadata_invalid":
+                self._pause(capability, "capability_invalid")
+            # A paused child is already safe. Preserve its active ledger
+            # record so an authenticated host can explicitly resume it.
+            elif status != "paused":
+                self._pause_ledger_only(capability, "child_not_running")
+            return None
+        record = self._record(capability._admission_id)
+        if (
+            record is None
+            or record["state"] not in _EXECUTABLE_STATES
+            or not _capability_matches_record(capability, record)
+        ):
+            return None
+        try:
+            families = tuple(json.loads(record["allowed_action_families_json"]))
+            if families != _ALLOWED_ACTION_FAMILIES:
+                return None
+            context = ManagedSpaceActionContext(
+                record["run_id"],
+                Path(record["canonical_root"]).resolve(),
+                record["attachment_generation"],
+                families,
+                record["target_space_id"],
+                _token=_ACTION_CONTEXT_TOKEN,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        with self._bindings_lock:
+            if self._bindings.get(context.run_id) is not capability:
+                return None
+        return context
+
+    def pause_action_context(
+        self,
+        capability: ManagedSpaceCapability,
+        context: ManagedSpaceActionContext,
+        reason: str,
+    ) -> bool:
+        """Pause only the exact still-current, ledger-derived action context."""
+        if not isinstance(context, ManagedSpaceActionContext):
             return False
-        # A paused child is already safe.  Preserve its active ledger record
-        # so the authenticated host can explicitly resume it later, but never
-        # grant an action at this boundary until the read-only status says it
-        # is running.
-        if status == "paused":
+        current = self.resolve_action_context(capability)
+        if current != context:
             return False
-        self._pause_ledger_only(capability, "child_not_running")
-        return False
+        self._pause(capability, reason)
+        return True
 
     def _read_action_boundary_child_status(self, capability: ManagedSpaceCapability) -> str | None:
         """Return the ledger-rooted child status without creating or writing a store."""
