@@ -2337,46 +2337,24 @@ function workflowRefreshSubagentBadge(force){
   const value=$('subagentsStatusValue');
   if(!badge && !value) return;
   const secondary=_workflowTitlebarIsSecondaryChip(badge);
+  const sessionId=S&&S.session&&S.session.session_id ? String(S.session.session_id) : '';
   const state=_workflowSubagentSummaryState();
   const shouldFetch=!!force || (!state.available && !state.loading && !state.error);
-  if(shouldFetch && typeof api==='function' && !window._workflowSubagentSummaryPromise){
-    window._workflowSubagentSummaryPromise=api('/api/subagents').then(r=>{
-      const active=(r&&r.active)||[];
-      const paused=!!(r&&r.spawn_paused);
-      const first=active[0]||{};
-      window._workflowSubagentSummary={
-        count:active.length,
-        paused,
-        goal:String(first.goal||'').trim(),
-        subagent_id:String(first.subagent_id||first.session_id||'').trim(),
-        session_id:String(first.session_id||'').trim(),
-        preview:String(first.goal||first.session_id||first.subagent_id||'').trim(),
-      };
-    }).catch(()=>{
-      window._workflowSubagentSummary={error:true};
-    }).finally(()=>{
-      window._workflowSubagentSummaryPromise=null;
-      if(typeof syncWorkflowChip==='function') syncWorkflowChip();
-    });
+  if(shouldFetch && sessionId && typeof api==='function' && !window._workflowSubagentSummaryPromise){
+    const path='/api/subagents?session_id='+encodeURIComponent(sessionId)+'&status=all&limit=50';
+    window._workflowSubagentSummaryPromise=api(path).then(r=>{
+      const runs=Array.isArray(r&&r.runs)?r.runs:[];
+      const active=runs.filter(run=>['queued','running','waiting','paused'].includes(String(run&&run.status||'').toLowerCase()));
+      const first=active[0]||runs[0]||{};
+      window._workflowSubagentSummary={count:active.length,paused:!!(r&&r.spawn_paused),goal:String(first.goal_summary||first.goal||'').trim(),subagent_id:String(first.subagent_id||'').trim(),session_id:String(first.session_id||sessionId).trim(),preview:String(first.goal_summary||first.goal||'').trim()};
+    }).catch(()=>{window._workflowSubagentSummary={error:true};}).finally(()=>{window._workflowSubagentSummaryPromise=null;if(typeof syncWorkflowChip==='function')syncWorkflowChip();});
   }
   const renderState=_workflowSubagentSummaryState();
   const label=_workflowSubagentBadgeLabel(renderState);
   const stateClass=_workflowSubagentStateClass(renderState);
   const title=label.slice(0,1).toUpperCase()+label.slice(1)+(label.endsWith('.')?'':'.')+' Click to open subagents.';
-  if(badge){
-    badge.hidden=secondary;
-    badge.disabled=false;
-    badge.classList.remove('subagents-state-loading','subagents-state-active','subagents-state-paused','subagents-state-empty','subagents-state-offline');
-    badge.classList.add(stateClass);
-    badge.setAttribute('aria-busy',renderState.loading ? 'true' : 'false');
-    if(!secondary){
-      badge.setAttribute('aria-label',title);
-    }
-  }
-  if(value){
-    value.textContent=label;
-    value.hidden=secondary;
-  }
+  if(badge){badge.hidden=secondary;badge.disabled=false;badge.classList.remove('subagents-state-loading','subagents-state-active','subagents-state-paused','subagents-state-empty','subagents-state-offline');badge.classList.add(stateClass);badge.setAttribute('aria-busy',renderState.loading?'true':'false');if(!secondary)badge.setAttribute('aria-label',title);}
+  if(value){value.textContent=label;value.hidden=secondary;}
 }
 
 function workflowOpenSubagentsPanel(event){

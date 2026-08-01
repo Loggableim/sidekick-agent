@@ -9418,7 +9418,6 @@ function ensureSubagentsPanel(){
 }
 function loadSubagentsPanel(force){
   ensureSubagentsPanel();
-  loadSubagentStatus('subagentStatusCardPanel');
   const overview=$('subagentOverviewPanel');
   const sessionId=typeof _subagentCurrentSessionId==='function' ? _subagentCurrentSessionId() : null;
   if(!overview) return !!force;

@@ -3026,6 +3026,9 @@ function _subagentEnsurePanelState() {
   const title = document.createElement('span');
   title.className = 'subagent-panel-title';
   title.textContent = (typeof t === 'function' ? (t('subagent_children') || 'Subagent sessions') : 'Subagent sessions');
+  title.classList.add('clickable');
+  title.title = 'Open the full subagent overview';
+  title.addEventListener('click', () => { if(typeof openSubagentsPanel==='function') openSubagentsPanel(); });
   header.appendChild(title);
 
   const status = document.createElement('span');

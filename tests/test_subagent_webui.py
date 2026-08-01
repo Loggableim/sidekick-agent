@@ -37,3 +37,16 @@ def test_subagent_overview_observation_paths_remain_read_only():
     assert "api(_subagentOverviewPath(sid))" in messages
     assert "subagent-panel-offline" in messages
     assert "subagent-panel-empty" in messages
+
+def test_subagent_ui_never_uses_the_global_activity_list_for_chat_views():
+    messages = (ROOT / "web" / "static" / "messages.js").read_text(encoding="utf-8")
+    panels = (ROOT / "web" / "static" / "panels.js").read_text(encoding="utf-8")
+    ui = (ROOT / "web" / "static" / "ui.js").read_text(encoding="utf-8")
+
+    panel_start = panels.index("function loadSubagentsPanel(")
+    panel_end = panels.index("function openSubagentsPanel", panel_start)
+    panel_loader = panels[panel_start:panel_end]
+    assert "loadSubagentStatus('subagentStatusCardPanel')" not in panel_loader
+    assert "session_id=" in panel_loader
+    assert "api('/api/subagents')" not in ui[ui.index("function workflowRefreshSubagentBadge("):ui.index("function workflowOpenSubagentsPanel")]
+    assert "openSubagentsPanel" in messages[messages.index("function _subagentEnsurePanelState("):messages.index("function _subagentBuildRow(")]
