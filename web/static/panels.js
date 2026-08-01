@@ -9407,6 +9407,7 @@ function ensureSubagentsPanel(){
       <div class="subagents-panel-shell">
         <div class="subagents-panel-note">Active delegate_task workers and the spawn pause switch.</div>
         <div id="subagentStatusCardPanel"></div>
+        <div id="subagentOverviewPanel" class="subagent-overview-panel" aria-live="polite"></div>
       </div>
     `;
     const ref=$('panelProfiles')||$('panelLogs')||$('panelSettings')||$('panelAppstore')||null;
@@ -9418,6 +9419,29 @@ function ensureSubagentsPanel(){
 function loadSubagentsPanel(force){
   ensureSubagentsPanel();
   loadSubagentStatus('subagentStatusCardPanel');
+  const overview=$('subagentOverviewPanel');
+  const sessionId=typeof _subagentCurrentSessionId==='function' ? _subagentCurrentSessionId() : null;
+  if(!overview) return !!force;
+  if(!sessionId){
+    overview.innerHTML='<div class="subagent-panel-empty">Open a chat to view its subagent activity.</div>';
+    return !!force;
+  }
+  overview.innerHTML="<div class=\"subagent-panel-loading\">Loading this chat's subagent history…</div>";
+  api('/api/subagents?session_id='+encodeURIComponent(String(sessionId))+'&status=all&limit=50')
+    .then(payload=>{
+      const current=typeof _subagentCurrentSessionId==='function' ? _subagentCurrentSessionId() : null;
+      if(String(current)!==String(sessionId)) return;
+      if(typeof window.renderSubagentOverviewInto==='function'){
+        window.renderSubagentOverviewInto(overview,payload||{},sessionId,()=>loadSubagentsPanel(true));
+        return;
+      }
+      overview.innerHTML='<div class="subagent-panel-offline">Subagent overview is unavailable in this client.</div>';
+    })
+    .catch(()=>{
+      const current=typeof _subagentCurrentSessionId==='function' ? _subagentCurrentSessionId() : null;
+      if(String(current)!==String(sessionId)) return;
+      overview.innerHTML='<div class="subagent-panel-offline">Subagent history is offline. Refresh to retry.</div>';
+    });
   return !!force;
 }
 function openSubagentsPanel(){
