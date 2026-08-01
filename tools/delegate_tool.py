@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional
 
 from toolsets import TOOLSETS
 from tools import file_state
+from tools.subagent_store import get_subagent_store
 from tools.terminal_tool import set_approval_callback as _set_subagent_approval_cb
 from shared.utils import base_url_hostname, is_truthy_value
 
@@ -215,6 +216,44 @@ def list_active_subagents() -> List[Dict[str, Any]]:
             for r in _active_subagents.values()
         ]
 
+
+def _telemetry_start(record: Dict[str, Any]) -> None:
+    """Persist a delegate start without ever affecting the worker outcome."""
+    try:
+        sid = record["subagent_id"]
+        store = get_subagent_store()
+        store.record_run(
+            subagent_id=sid,
+            session_id=record.get("parent_session_id") or record.get("session_id"),
+            space_slug=record.get("space_slug"),
+            goal=record.get("goal", ""),
+            role=record.get("role"),
+            model=record.get("model"),
+            status="queued",
+            started_at=record.get("started_at"),
+        )
+        _telemetry_event(sid, "queued", "delegate queued")
+        store.update_run(sid, status="running", heartbeat_at=time.time())
+        _telemetry_event(sid, "running", "delegate started")
+    except Exception:
+        logger.debug("Subagent telemetry start failed", exc_info=True)
+
+
+def _telemetry_event(subagent_id: str, kind: str, detail: str = "", **updates: Any) -> None:
+    """Best-effort event append using a per-run monotone in-memory sequence."""
+    try:
+        with _active_subagents_lock:
+            record = _active_subagents.get(subagent_id)
+            if record is None:
+                return
+            sequence = int(record.get("telemetry_sequence", 0)) + 1
+            record["telemetry_sequence"] = sequence
+        store = get_subagent_store()
+        if updates:
+            store.update_run(subagent_id, **updates)
+        store.append_event(subagent_id, sequence, kind, detail)
+    except Exception:
+        logger.debug("Subagent telemetry event failed", exc_info=True)
 
 def _extract_output_tail(
     result: Dict[str, Any],
@@ -832,6 +871,10 @@ def _build_child_progress_callback(
                 if rec is not None:
                     rec["tool_count"] = _tool_count[0]
                     rec["last_tool"] = tool_name or ""
+        _telemetry_event(
+            subagent_id, "tool", tool_name or "tool",
+            heartbeat_at=time.time(), tool_count=_tool_count[0], last_step=tool_name or "tool",
+        )
         if spinner:
             short = (
                 (preview[:35] + "...")
@@ -1454,9 +1497,14 @@ def _run_single_child(
                 "status": "running",
                 "tool_count": 0,
                 "session_id": _child_session_id if isinstance(_child_session_id, str) else None,
+                "parent_session_id": getattr(parent_agent, "session_id", None),
+                "space_slug": getattr(parent_agent, "space_slug", None) or getattr(child, "space_slug", None),
+                "role": getattr(child, "_delegate_role", "leaf"),
+                "telemetry_sequence": 0,
                 "agent": child,
             }
         )
+        _telemetry_start(_active_subagents[_subagent_id])
 
     try:
         if child_progress_cb:
@@ -1805,6 +1853,14 @@ def _run_single_child(
             except Exception as e:
                 logger.debug("Progress callback completion failed: %s", e)
 
+        if _subagent_id:
+            _telemetry_event(
+                _subagent_id, status, summary if summary else str(entry.get("error", "")),
+                status=status, summary=summary if summary else None,
+                error_reason=entry.get("error"), finished_at=time.time(),
+                heartbeat_at=time.time(), tool_count=int(api_calls) if isinstance(api_calls, (int, float)) else 0,
+                last_step="completed",
+            )
         return entry
 
     except Exception as exc:
@@ -1821,6 +1877,11 @@ def _run_single_child(
                 )
             except Exception as e:
                 logger.debug("Progress callback failure relay failed: %s", e)
+        if _subagent_id:
+            _telemetry_event(
+                _subagent_id, "failed", str(exc), status="failed", error_reason=str(exc),
+                finished_at=time.time(), heartbeat_at=time.time(), last_step="failed",
+            )
         return {
             "task_index": task_index,
             "status": "error",
