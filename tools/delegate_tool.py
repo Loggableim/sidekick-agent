@@ -1414,7 +1414,13 @@ def _run_single_child(
                 child_tool = child_summary.get("current_tool")
                 child_iter = child_summary.get("api_call_count", 0)
                 child_max = child_summary.get("max_iterations", 0)
-
+                if _subagent_id:
+                    _telemetry_event(
+                        _subagent_id, "heartbeat", "child heartbeat",
+                        heartbeat_at=time.time(),
+                        tool_count=int(child_iter or 0),
+                        last_step=child_tool or "working",
+                    )
                 # Stale detection: count cycles where neither the iteration
                 # count nor the current_tool advances. A child running a
                 # legitimately long-running tool (terminal command, web
@@ -1636,7 +1642,7 @@ def _run_single_child(
             if _subagent_id:
                 _telemetry_event(
                     _subagent_id, "failed", "delegate timeout" if is_timeout else "delegate error",
-                    status="failed", error_reason=_err, finished_at=time.time(),
+                    status="failed", error_reason=("timeout" if is_timeout else "exception"), finished_at=time.time(),
                     heartbeat_at=time.time(), tool_count=child_api_calls,
                     last_step="timeout" if is_timeout else "error",
                 )
@@ -1865,7 +1871,7 @@ def _run_single_child(
             _telemetry_event(
                 _subagent_id, status, "delegate completed",
                 status=status,
-                error_reason=entry.get("error"), finished_at=time.time(),
+                error_reason=("tool_error" if status == "failed" else None), finished_at=time.time(),
                 heartbeat_at=time.time(), tool_count=int(api_calls) if isinstance(api_calls, (int, float)) else 0,
                 last_step="completed",
             )
@@ -1887,7 +1893,7 @@ def _run_single_child(
                 logger.debug("Progress callback failure relay failed: %s", e)
         if _subagent_id:
             _telemetry_event(
-                _subagent_id, "failed", str(exc), status="failed", error_reason=str(exc),
+                _subagent_id, "failed", "delegate exception", status="failed", error_reason="exception",
                 finished_at=time.time(), heartbeat_at=time.time(), last_step="failed",
             )
         return {
