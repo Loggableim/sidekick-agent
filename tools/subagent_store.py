@@ -47,17 +47,21 @@ def redact_text(value: Any, *, limit: int = 500) -> str:
 class SubagentStore:
     """Small SQLite run/event store, safe to use as best-effort telemetry."""
 
-    def __init__(self, home: Optional[Path | str] = None) -> None:
+    def __init__(self, home: Optional[Path | str] = None, *, read_only: bool = False) -> None:
         self.home = Path(home or os.environ.get("SIDEKICK_HOME") or (Path.home() / ".sidekick"))
-        self.home.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
         self.path = self.home / "subagents.db"
-        self._initialize()
-
+        if not self.read_only:
+            self.home.mkdir(parents=True, exist_ok=True)
+            self._initialize()
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path, timeout=5)
+        if self.read_only:
+            conn = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True, timeout=5)
+        else:
+            conn = sqlite3.connect(self.path, timeout=5)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _initialize(self) -> None:
@@ -67,6 +71,7 @@ class SubagentStore:
                 CREATE TABLE IF NOT EXISTS subagent_runs (
                     subagent_id TEXT PRIMARY KEY,
                     session_id TEXT,
+                    parent_id TEXT,
                     space_slug TEXT,
                     goal_summary TEXT NOT NULL,
                     role TEXT,
@@ -94,6 +99,10 @@ class SubagentStore:
                 CREATE INDEX IF NOT EXISTS idx_subagent_events_run ON subagent_events(subagent_id, sequence);
                 """
             )
+        with self._connect() as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(subagent_runs)")}
+            if "parent_id" not in columns:
+                conn.execute("ALTER TABLE subagent_runs ADD COLUMN parent_id TEXT")
         self.reconcile_stale_runs()
         self.prune()
 
@@ -106,6 +115,7 @@ class SubagentStore:
         goal: Any,
         role: Optional[str],
         model: Optional[str],
+        parent_id: Optional[str] = None,
         status: str = "queued",
         started_at: Optional[float] = None,
         heartbeat_at: Optional[float] = None,
@@ -119,16 +129,16 @@ class SubagentStore:
             conn.execute(
                 """
                 INSERT INTO subagent_runs (
-                    subagent_id, session_id, space_slug, goal_summary, role, model,
+                    subagent_id, session_id, parent_id, space_slug, goal_summary, role, model,
                     status, started_at, heartbeat_at, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(subagent_id) DO UPDATE SET
-                    session_id=excluded.session_id, space_slug=excluded.space_slug,
+                    session_id=excluded.session_id, parent_id=excluded.parent_id, space_slug=excluded.space_slug,
                     goal_summary=excluded.goal_summary, role=excluded.role, model=excluded.model,
                     status=excluded.status, heartbeat_at=excluded.heartbeat_at, updated_at=excluded.updated_at
                 """,
                 (
-                    subagent_id, session_id, space_slug, redact_text(goal), redact_text(role, limit=80),
+                    subagent_id, session_id, parent_id, space_slug, "Delegated task", redact_text(role, limit=80),
                     redact_text(model, limit=160), status, started, heartbeat, now, now,
                 ),
             )
@@ -175,6 +185,9 @@ class SubagentStore:
         occurred_at: Optional[float] = None,
     ) -> bool:
         with self._connect() as conn:
+            latest = conn.execute("SELECT MAX(sequence) FROM subagent_events WHERE subagent_id=?", (subagent_id,)).fetchone()[0]
+            if latest is not None and int(sequence) <= int(latest):
+                return False
             inserted = conn.execute(
                 "INSERT OR IGNORE INTO subagent_events (subagent_id, sequence, occurred_at, kind, detail) VALUES (?, ?, ?, ?, ?)",
                 (subagent_id, int(sequence), float(occurred_at or time.time()), redact_text(kind, limit=80), redact_text(detail)),
@@ -230,16 +243,22 @@ class SubagentStore:
             )
 
     def get_run(self, subagent_id: str) -> Optional[dict[str, Any]]:
+        if self.read_only and not self.path.exists():
+            return None
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM subagent_runs WHERE subagent_id=?", (subagent_id,)).fetchone()
         return dict(row) if row else None
 
     def list_events(self, subagent_id: str) -> list[dict[str, Any]]:
+        if self.read_only and not self.path.exists():
+            return []
         with self._connect() as conn:
             rows = conn.execute("SELECT * FROM subagent_events WHERE subagent_id=? ORDER BY sequence", (subagent_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def count_runs(self) -> int:
+        if self.read_only and not self.path.exists():
+            return 0
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM subagent_runs").fetchone()[0])
 

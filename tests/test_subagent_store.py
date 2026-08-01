@@ -110,5 +110,25 @@ def test_delegate_completion_is_persisted_without_changing_active_registry(monke
     assert delegate_tool.list_active_subagents() == []
     run = store.get_run("sa-persisted")
     assert run["status"] == "completed"
+    assert run["summary"] is None
+    assert "Finished" not in " ".join(event["detail"] for event in store.list_events("sa-persisted"))
     assert "C:\\private" not in run["goal_summary"]
     assert [event["kind"] for event in store.list_events("sa-persisted")] == ["queued", "running", "completed"]
+
+
+def test_event_sequence_rejects_out_of_order_event(tmp_path):
+    """A late event cannot rewrite the persisted event timeline."""
+    store = SubagentStore(tmp_path)
+    store.record_run(subagent_id="sa-seq", session_id="chat", space_slug="nova", goal="Task", role="leaf", model="m")
+    assert store.append_event("sa-seq", 2, "running", "later") is True
+    assert store.append_event("sa-seq", 1, "queued", "earlier") is False
+    assert [event["sequence"] for event in store.list_events("sa-seq")] == [2]
+
+
+def test_read_only_store_does_not_create_a_database(tmp_path):
+    """Read-only API consumers must not initialize state on a GET/SSE request."""
+    missing_home = tmp_path / "missing-profile"
+    store = SubagentStore(missing_home, read_only=True)
+    assert store.get_run("missing") is None
+    assert store.list_events("missing") == []
+    assert not missing_home.exists()

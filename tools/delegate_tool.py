@@ -225,6 +225,7 @@ def _telemetry_start(record: Dict[str, Any]) -> None:
         store.record_run(
             subagent_id=sid,
             session_id=record.get("parent_session_id") or record.get("session_id"),
+            parent_id=record.get("parent_id"),
             space_slug=record.get("space_slug"),
             goal=record.get("goal", ""),
             role=record.get("role"),
@@ -1632,6 +1633,13 @@ def _run_single_child(
             else:
                 _err = str(_timeout_exc)
 
+            if _subagent_id:
+                _telemetry_event(
+                    _subagent_id, "failed", "delegate timeout" if is_timeout else "delegate error",
+                    status="failed", error_reason=_err, finished_at=time.time(),
+                    heartbeat_at=time.time(), tool_count=child_api_calls,
+                    last_step="timeout" if is_timeout else "error",
+                )
             return {
                 "task_index": task_index,
                 "status": "timeout" if is_timeout else "error",
@@ -1855,8 +1863,8 @@ def _run_single_child(
 
         if _subagent_id:
             _telemetry_event(
-                _subagent_id, status, summary if summary else str(entry.get("error", "")),
-                status=status, summary=summary if summary else None,
+                _subagent_id, status, "delegate completed",
+                status=status,
                 error_reason=entry.get("error"), finished_at=time.time(),
                 heartbeat_at=time.time(), tool_count=int(api_calls) if isinstance(api_calls, (int, float)) else 0,
                 last_step="completed",
