@@ -8556,7 +8556,7 @@ def _subagent_read_store():
 def _subagent_session_for_read(handler, parsed):
     raw = parse_qs(parsed.query or "").get("session_id", [""])[0]
     session_id = str(raw or "").strip()
-    if not session_id or len(session_id) > 200:
+    if not session_id or len(session_id) > 200 or any(token in session_id for token in ("/", "\\", "..", "\x00")):
         raise ValueError("session_id required")
     # Do not use the legacy global get_session fallback here: a journal is
     # visible only from the request's current Space session directory.

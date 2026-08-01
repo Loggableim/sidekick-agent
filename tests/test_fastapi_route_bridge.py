@@ -965,3 +965,13 @@ def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
     assert management_post.status_code == 409
     assert generic_post.status_code == 409
     assert space.config_path.read_bytes() == before
+
+
+def test_subagent_reads_are_pure_fastapi_gets():
+    """Subagent history GET/SSE must bypass legacy runtime and workspace setup."""
+    from web.api.fastapi_bridge import _is_pure_swarm_get
+
+    assert _is_pure_swarm_get("GET", "/api/subagents")
+    assert _is_pure_swarm_get("GET", "/api/subagents/run-1")
+    assert _is_pure_swarm_get("GET", "/api/subagents/events/stream")
+    assert not _is_pure_swarm_get("POST", "/api/subagents")

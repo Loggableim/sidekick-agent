@@ -31,7 +31,7 @@ _RUNTIME_STATE_DIR: str | None = None
 
 def _is_pure_swarm_get(method: str, path: str) -> bool:
     """True for Swarm reads that must not initialize a WebUI Space."""
-    return method.upper() == "GET" and path.startswith("/api/swarm/")
+    return method.upper() == "GET" and (path.startswith("/api/swarm/") or path == "/api/subagents" or path.startswith("/api/subagents/"))
 
 
 def _is_swarm_human_actor_post(method: str, path: str) -> bool:
