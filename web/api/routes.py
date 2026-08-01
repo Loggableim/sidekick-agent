@@ -8553,16 +8553,19 @@ def _subagent_read_store():
     return SubagentStore(read_only=True)
 
 
-def _subagent_session_for_read(parsed):
+def _subagent_session_for_read(handler, parsed):
     raw = parse_qs(parsed.query or "").get("session_id", [""])[0]
     session_id = str(raw or "").strip()
     if not session_id or len(session_id) > 200:
         raise ValueError("session_id required")
-    try:
-        get_session(session_id, metadata_only=True)
-    except KeyError as exc:
-        raise KeyError("Session not found") from exc
-    return session_id
+    # Do not use the legacy global get_session fallback here: a journal is
+    # visible only from the request's current Space session directory.
+    from web.api.space_engine import DEFAULT_SPACE_SLUG
+    slug = _workspace_slug_from_request(handler, parsed) or DEFAULT_SPACE_SLUG
+    session_file = _routes_active_home() / "spaces" / slug / "sessions" / f"{session_id}.json"
+    if not session_file.is_file():
+        raise KeyError("Session not found")
+    return session_id, slug
 
 
 def _subagent_cursor(raw):
@@ -8585,9 +8588,9 @@ def _subagent_public_run(row):
     return {field: row.get(field) for field in fields}
 
 
-def _subagent_list_payload(store, session_id, status, limit, cursor):
+def _subagent_list_payload(store, session_id, space_slug, status, limit, cursor):
     statuses = set(_SUBAGENT_LIVE_STATUSES) if status == "active" else (set(_SUBAGENT_VALID_STATUSES - _SUBAGENT_LIVE_STATUSES) if status == "history" else None)
-    rows = store.list_runs(session_id, statuses=statuses, limit=limit + 1, cursor=cursor)
+    rows = store.list_runs(session_id, space_slug=space_slug, statuses=statuses, limit=limit + 1, cursor=cursor)
     page = rows[:limit]
     next_cursor = None
     if len(rows) > limit and page:
@@ -8598,7 +8601,7 @@ def _subagent_list_payload(store, session_id, status, limit, cursor):
 
 def _handle_subagent_list_get(handler, parsed):
     try:
-        session_id = _subagent_session_for_read(parsed)
+        session_id, space_slug = _subagent_session_for_read(handler, parsed)
         query = parse_qs(parsed.query or "")
         status = str(query.get("status", ["all"])[0] or "all").strip().lower()
         if status not in {"all", "active", "history"}:
@@ -8607,7 +8610,7 @@ def _handle_subagent_list_get(handler, parsed):
         if limit < 1 or limit > _SUBAGENT_LIST_LIMIT:
             raise ValueError("limit must be between 1 and 50")
         cursor = _subagent_cursor(query.get("cursor", [None])[0])
-        return j(handler, _subagent_list_payload(_subagent_read_store(), session_id, status, limit, cursor))
+        return j(handler, _subagent_list_payload(_subagent_read_store(), session_id, space_slug, status, limit, cursor))
     except (TypeError, ValueError) as exc:
         return bad(handler, str(exc), 400)
     except KeyError as exc:
@@ -8620,10 +8623,10 @@ def _handle_subagent_detail_get(handler, parsed, subagent_id):
     try:
         if len(subagent_id) > 96:
             raise ValueError("invalid subagent_id")
-        session_id = _subagent_session_for_read(parsed)
+        session_id, space_slug = _subagent_session_for_read(handler, parsed)
         store = _subagent_read_store()
         run = store.get_run(subagent_id)
-        if not run or run.get("session_id") != session_id:
+        if not run or run.get("session_id") != session_id or run.get("space_slug") != space_slug:
             return bad(handler, "Subagent run not found", 404)
         return j(handler, {"run": _subagent_public_run(run), "events": store.list_events(subagent_id)[:200]})
     except ValueError as exc:
@@ -8664,7 +8667,7 @@ def _subagent_sse_closed(handler):
 def _handle_subagent_events_sse_stream(handler, parsed):
     """Read-only, bounded session event stream with a snapshot for lost cursors."""
     try:
-        session_id = _subagent_session_for_read(parsed)
+        session_id, space_slug = _subagent_session_for_read(handler, parsed)
         store = _subagent_read_store()
     except ValueError as exc:
         return bad(handler, str(exc), 400)
@@ -8690,10 +8693,11 @@ def _handle_subagent_events_sse_stream(handler, parsed):
             if store is None:
                 events, lower, upper = [], 0, 0
             else:
-                lower, upper = store.session_event_bounds(session_id)
-                events = store.list_session_events_after(session_id, cursor, limit=_SUBAGENT_LIST_LIMIT)
-            if cursor and (cursor > upper or (lower and cursor < lower - 1)):
-                snapshot = _subagent_list_payload(store, session_id, "all", _SUBAGENT_LIST_LIMIT, None) if store else {"session_id": session_id, "status": "all", "runs": [], "next_cursor": None}
+                lower, upper = store.session_event_bounds(session_id, space_slug=space_slug)
+                events = store.list_session_events_after(session_id, cursor, space_slug=space_slug, limit=_SUBAGENT_LIST_LIMIT)
+            sequence_gap = any(event.get("prior_sequence") is not None and int(event["sequence"]) != int(event["prior_sequence"]) + 1 for event in events)
+            if sequence_gap or (cursor and (cursor > upper or (lower and cursor < lower - 1))):
+                snapshot = _subagent_list_payload(store, session_id, space_slug, "all", _SUBAGENT_LIST_LIMIT, None) if store else {"session_id": session_id, "status": "all", "runs": [], "next_cursor": None}
                 cursor = upper
                 if not _subagent_sse_write(handler, f"id: {cursor}\nevent: snapshot\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"):
                     return True

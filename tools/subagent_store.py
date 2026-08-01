@@ -268,10 +268,13 @@ class SubagentStore:
             rows = conn.execute("SELECT * FROM subagent_events WHERE subagent_id=? ORDER BY sequence", (subagent_id,)).fetchall()
         return [dict(row) for row in rows]
 
-    def list_runs(self, session_id: str, *, statuses: Optional[set[str]] = None, limit: int = 50, cursor: Optional[tuple[float, str]] = None) -> list[dict[str, Any]]:
+    def list_runs(self, session_id: str, *, space_slug: Optional[str] = None, statuses: Optional[set[str]] = None, limit: int = 50, cursor: Optional[tuple[float, str]] = None) -> list[dict[str, Any]]:
         if self.read_only and not self.path.exists():
             return []
         clauses, values = ["session_id=?"], [session_id]
+        if space_slug is not None:
+            clauses.append("space_slug=?")
+            values.append(space_slug)
         if statuses:
             allowed = sorted(status for status in statuses if status in VALID_STATUSES)
             if not allowed:
@@ -287,18 +290,18 @@ class SubagentStore:
             rows = conn.execute("SELECT * FROM subagent_runs WHERE " + " AND ".join(clauses) + " ORDER BY updated_at DESC, subagent_id DESC LIMIT ?", values).fetchall()
         return [dict(row) for row in rows]
 
-    def list_session_events_after(self, session_id: str, after_event_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
+    def list_session_events_after(self, session_id: str, after_event_id: int, *, space_slug: Optional[str] = None, limit: int = 50) -> list[dict[str, Any]]:
         if self.read_only and not self.path.exists():
             return []
         with self._connect() as conn:
-            rows = conn.execute("SELECT e.rowid AS event_id, e.subagent_id, e.sequence, e.occurred_at, e.kind, e.detail FROM subagent_events e JOIN subagent_runs r ON r.subagent_id=e.subagent_id WHERE r.session_id=? AND e.rowid > ? ORDER BY e.rowid ASC LIMIT ?", (session_id, max(0, int(after_event_id)), max(1, min(int(limit), 50)))).fetchall()
+            rows = conn.execute("SELECT e.rowid AS event_id, e.subagent_id, e.sequence, e.occurred_at, e.kind, e.detail, (SELECT MAX(previous.sequence) FROM subagent_events previous WHERE previous.subagent_id=e.subagent_id AND previous.sequence < e.sequence) AS prior_sequence FROM subagent_events e JOIN subagent_runs r ON r.subagent_id=e.subagent_id WHERE r.session_id=? AND (? IS NULL OR r.space_slug=?) AND e.rowid > ? ORDER BY e.rowid ASC LIMIT ?", (session_id, space_slug, space_slug, max(0, int(after_event_id)), max(1, min(int(limit), 50)))).fetchall()
         return [dict(row) for row in rows]
 
-    def session_event_bounds(self, session_id: str) -> tuple[int, int]:
+    def session_event_bounds(self, session_id: str, *, space_slug: Optional[str] = None) -> tuple[int, int]:
         if self.read_only and not self.path.exists():
             return (0, 0)
         with self._connect() as conn:
-            row = conn.execute("SELECT COALESCE(MIN(e.rowid), 0), COALESCE(MAX(e.rowid), 0) FROM subagent_events e JOIN subagent_runs r ON r.subagent_id=e.subagent_id WHERE r.session_id=?", (session_id,)).fetchone()
+            row = conn.execute("SELECT COALESCE(MIN(e.rowid), 0), COALESCE(MAX(e.rowid), 0) FROM subagent_events e JOIN subagent_runs r ON r.subagent_id=e.subagent_id WHERE r.session_id=? AND (? IS NULL OR r.space_slug=?)", (session_id, space_slug, space_slug)).fetchone()
         return (int(row[0]), int(row[1]))
     def count_runs(self) -> int:
         if self.read_only and not self.path.exists():

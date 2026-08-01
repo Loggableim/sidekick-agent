@@ -14,7 +14,7 @@ class _Handler:
     client_address = ("127.0.0.1", 12345)
 
     def __init__(self, *, headers=None, writer=None) -> None:
-        self.headers = {"Host": "127.0.0.1", **(headers or {})}
+        self.headers = {"Host": "127.0.0.1", "X-Sidekick-Workspace": "default", **(headers or {})}
         self.status_code = None
         self.response_headers = {}
         self.rfile = io.BytesIO()
@@ -48,14 +48,19 @@ def _payload(handler: _Handler) -> dict:
     return json.loads(handler.wfile.getvalue().decode("utf-8"))
 
 
+def _activate_session(home: Path, session_id: str, slug: str = "default") -> None:
+    sessions = home / "spaces" / slug / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    (sessions / f"{session_id}.json").write_text("{}", encoding="utf-8")
+
 def _seed(store: SubagentStore) -> None:
     store.record_run(
-        subagent_id="sa-one", session_id="chat-one", space_slug="one", parent_id="parent",
+        subagent_id="sa-one", session_id="chat-one", space_slug="default", parent_id="parent",
         goal="secret=should-not-leak", role="builder", model="model-a", status="running",
     )
     store.append_event("sa-one", 1, "started", "C:\\private\\token.txt")
     store.record_run(
-        subagent_id="sa-two", session_id="chat-two", space_slug="two", parent_id="parent",
+        subagent_id="sa-two", session_id="chat-two", space_slug="other", parent_id="parent",
         goal="other", role="reviewer", model="model-b", status="completed",
     )
     store.append_event("sa-two", 1, "completed", "other")
@@ -65,10 +70,10 @@ def test_subagent_list_and_detail_are_session_scoped_and_read_only(monkeypatch, 
     """A current-chat query cannot see another chat and never opens writable SQLite."""
     home = tmp_path / "home"
     _seed(SubagentStore(home))
+    _activate_session(home, "chat-one")
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
     from web.api import routes
 
-    monkeypatch.setattr(routes, "get_session", lambda sid, **_kwargs: object())
     before = sorted(path.name for path in home.iterdir())
     handler = _Handler()
     assert routes.handle_get(handler, urlparse("/api/subagents?session_id=chat-one&status=all&limit=50")) is None
@@ -86,9 +91,9 @@ def test_subagent_list_and_detail_are_session_scoped_and_read_only(monkeypatch, 
 def test_subagent_list_rejects_bad_session_status_and_cursor(monkeypatch, tmp_path: Path):
     home = tmp_path / "home"
     _seed(SubagentStore(home))
+    _activate_session(home, "chat-one")
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
     from web.api import routes
-    monkeypatch.setattr(routes, "get_session", lambda sid, **_kwargs: object())
 
     for path in (
         "/api/subagents?status=all",
@@ -105,9 +110,9 @@ def test_subagent_sse_sends_only_session_events_and_snapshot_on_gap(monkeypatch,
     home = tmp_path / "home"
     store = SubagentStore(home)
     _seed(store)
+    _activate_session(home, "chat-one")
     monkeypatch.setenv("SIDEKICK_HOME", str(home))
     from web.api import routes
-    monkeypatch.setattr(routes, "get_session", lambda sid, **_kwargs: object())
     monkeypatch.setattr(routes, "_SUBAGENT_SSE_POLL_SECONDS", 0)
 
     writer = _CloseAfterWrite(close_after=2)
@@ -120,5 +125,21 @@ def test_subagent_sse_sends_only_session_events_and_snapshot_on_gap(monkeypatch,
 
     writer = _CloseAfterWrite(close_after=2)
     handler = _Handler(headers={"Last-Event-ID": "999999"}, writer=writer)
+    assert routes.handle_get(handler, urlparse("/api/subagents/events/stream?session_id=chat-one")) is True
+    assert "event: snapshot" in writer.getvalue().decode("utf-8")
+
+
+def test_subagent_sse_uses_snapshot_for_a_per_run_sequence_gap(monkeypatch, tmp_path: Path):
+    home = tmp_path / "home"
+    store = SubagentStore(home)
+    _seed(store)
+    _activate_session(home, "chat-one")
+    store.append_event("sa-one", 3, "progress", "gap")
+    _activate_session(home, "chat-one")
+    monkeypatch.setenv("SIDEKICK_HOME", str(home))
+    from web.api import routes
+    monkeypatch.setattr(routes, "_SUBAGENT_SSE_POLL_SECONDS", 0)
+    writer = _CloseAfterWrite(close_after=2)
+    handler = _Handler(writer=writer)
     assert routes.handle_get(handler, urlparse("/api/subagents/events/stream?session_id=chat-one")) is True
     assert "event: snapshot" in writer.getvalue().decode("utf-8")
