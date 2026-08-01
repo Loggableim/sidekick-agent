@@ -2338,15 +2338,24 @@ function workflowRefreshSubagentBadge(force){
   if(!badge && !value) return;
   const secondary=_workflowTitlebarIsSecondaryChip(badge);
   const sessionId=S&&S.session&&S.session.session_id ? String(S.session.session_id) : '';
+  if(!sessionId){
+    window._workflowSubagentSummary=null;
+    if(badge) badge.hidden=true;
+    if(value) value.hidden=true;
+    return;
+  }
+  const summary=window._workflowSubagentSummary||null;
+  const sessionChanged=!!summary && summary.session_id!==sessionId;
+  if(sessionChanged) window._workflowSubagentSummary=null;
   const state=_workflowSubagentSummaryState();
-  const shouldFetch=!!force || (!state.available && !state.loading && !state.error);
+  const shouldFetch=!!force || sessionChanged || (!state.available && !state.loading && !state.error);
   if(shouldFetch && sessionId && typeof api==='function' && !window._workflowSubagentSummaryPromise){
     const path='/api/subagents?session_id='+encodeURIComponent(sessionId)+'&status=all&limit=50';
     window._workflowSubagentSummaryPromise=api(path).then(r=>{
       const runs=Array.isArray(r&&r.runs)?r.runs:[];
       const active=runs.filter(run=>['queued','running','waiting','paused'].includes(String(run&&run.status||'').toLowerCase()));
       const first=active[0]||runs[0]||{};
-      window._workflowSubagentSummary={count:active.length,paused:!!(r&&r.spawn_paused),goal:String(first.goal_summary||first.goal||'').trim(),subagent_id:String(first.subagent_id||'').trim(),session_id:String(first.session_id||sessionId).trim(),preview:String(first.goal_summary||first.goal||'').trim()};
+      window._workflowSubagentSummary={count:active.length,paused:!!(r&&r.spawn_paused),goal:String(first.goal_summary||first.goal||'').trim(),subagent_id:String(first.subagent_id||'').trim(),session_id:sessionId,preview:String(first.goal_summary||first.goal||'').trim()};
     }).catch(()=>{window._workflowSubagentSummary={error:true};}).finally(()=>{window._workflowSubagentSummaryPromise=null;if(typeof syncWorkflowChip==='function')syncWorkflowChip();});
   }
   const renderState=_workflowSubagentSummaryState();

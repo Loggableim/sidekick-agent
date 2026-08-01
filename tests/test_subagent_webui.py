@@ -50,3 +50,12 @@ def test_subagent_ui_never_uses_the_global_activity_list_for_chat_views():
     assert "session_id=" in panel_loader
     assert "api('/api/subagents')" not in ui[ui.index("function workflowRefreshSubagentBadge("):ui.index("function workflowOpenSubagentsPanel")]
     assert "openSubagentsPanel" in messages[messages.index("function _subagentEnsurePanelState("):messages.index("function _subagentBuildRow(")]
+def test_subagent_badge_cache_is_reset_when_the_chat_changes():
+    ui = (ROOT / "web" / "static" / "ui.js").read_text(encoding="utf-8")
+    start = ui.index("function workflowRefreshSubagentBadge(")
+    end = ui.index("function workflowOpenSubagentsPanel", start)
+    badge = ui[start:end]
+
+    assert "summary.session_id!==sessionId" in badge
+    assert "session_id:sessionId" in badge
+    assert "if(!sessionId)" in badge
