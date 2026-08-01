@@ -56,7 +56,7 @@ class SubagentStore:
             self._initialize()
     def _connect(self) -> sqlite3.Connection:
         if self.read_only:
-            conn = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro", uri=True, timeout=5)
+            conn = sqlite3.connect(f"file:{self.path.as_posix()}?mode=ro&immutable=1", uri=True, timeout=5)
         else:
             conn = sqlite3.connect(self.path, timeout=5)
             conn.execute("PRAGMA journal_mode=WAL")
@@ -64,6 +64,14 @@ class SubagentStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _checkpoint_wal(self) -> None:
+        if self.read_only:
+            return
+        try:
+            with self._connect() as conn:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except sqlite3.Error:
+            pass
     def _initialize(self) -> None:
         with self._connect() as conn:
             conn.executescript(
@@ -143,6 +151,7 @@ class SubagentStore:
                 ),
             )
         self.prune()
+        self._checkpoint_wal()
 
     def update_run(
         self,
@@ -174,6 +183,7 @@ class SubagentStore:
         values.append(subagent_id)
         with self._connect() as conn:
             conn.execute(f"UPDATE subagent_runs SET {', '.join(fields)} WHERE subagent_id=?", values)
+        self._checkpoint_wal()
 
     def append_event(
         self,
@@ -203,7 +213,9 @@ class SubagentStore:
                     """,
                     (subagent_id, subagent_id, MAX_EVENTS_PER_RUN),
                 )
-            return inserted
+        if inserted:
+            self._checkpoint_wal()
+        return inserted
 
     def reconcile_stale_runs(self, max_age_seconds: float = 300) -> int:
         cutoff = time.time() - max_age_seconds
@@ -256,6 +268,38 @@ class SubagentStore:
             rows = conn.execute("SELECT * FROM subagent_events WHERE subagent_id=? ORDER BY sequence", (subagent_id,)).fetchall()
         return [dict(row) for row in rows]
 
+    def list_runs(self, session_id: str, *, statuses: Optional[set[str]] = None, limit: int = 50, cursor: Optional[tuple[float, str]] = None) -> list[dict[str, Any]]:
+        if self.read_only and not self.path.exists():
+            return []
+        clauses, values = ["session_id=?"], [session_id]
+        if statuses:
+            allowed = sorted(status for status in statuses if status in VALID_STATUSES)
+            if not allowed:
+                return []
+            clauses.append("status IN (%s)" % ",".join("?" for _ in allowed))
+            values.extend(allowed)
+        if cursor is not None:
+            stamp, subagent_id = cursor
+            clauses.append("(updated_at < ? OR (updated_at = ? AND subagent_id < ?))")
+            values.extend([float(stamp), float(stamp), str(subagent_id)])
+        values.append(max(1, min(int(limit), 50)))
+        with self._connect() as conn:
+            rows = conn.execute("SELECT * FROM subagent_runs WHERE " + " AND ".join(clauses) + " ORDER BY updated_at DESC, subagent_id DESC LIMIT ?", values).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_session_events_after(self, session_id: str, after_event_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
+        if self.read_only and not self.path.exists():
+            return []
+        with self._connect() as conn:
+            rows = conn.execute("SELECT e.rowid AS event_id, e.subagent_id, e.sequence, e.occurred_at, e.kind, e.detail FROM subagent_events e JOIN subagent_runs r ON r.subagent_id=e.subagent_id WHERE r.session_id=? AND e.rowid > ? ORDER BY e.rowid ASC LIMIT ?", (session_id, max(0, int(after_event_id)), max(1, min(int(limit), 50)))).fetchall()
+        return [dict(row) for row in rows]
+
+    def session_event_bounds(self, session_id: str) -> tuple[int, int]:
+        if self.read_only and not self.path.exists():
+            return (0, 0)
+        with self._connect() as conn:
+            row = conn.execute("SELECT COALESCE(MIN(e.rowid), 0), COALESCE(MAX(e.rowid), 0) FROM subagent_events e JOIN subagent_runs r ON r.subagent_id=e.subagent_id WHERE r.session_id=?", (session_id,)).fetchone()
+        return (int(row[0]), int(row[1]))
     def count_runs(self) -> int:
         if self.read_only and not self.path.exists():
             return 0

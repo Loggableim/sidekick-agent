@@ -4594,14 +4594,25 @@ def handle_get(handler, parsed) -> bool:
             return bad(handler, "Missing session_id")
         return j(handler, {"yolo_enabled": is_session_yolo_enabled(sid)})
 
+    if parsed.path == "/api/subagents/events/stream":
+        return _handle_subagent_events_sse_stream(handler, parsed)
+
+    if parsed.path.startswith("/api/subagents/"):
+        subagent_id = parsed.path[len("/api/subagents/"):].strip()
+        if subagent_id and "/" not in subagent_id:
+            return _handle_subagent_detail_get(handler, parsed, subagent_id)
+
     if parsed.path == "/api/subagents":
-        return j(
-            handler,
-            {
-                "spawn_paused": is_spawn_paused(),
-                "active": list_active_subagents(),
-            },
-        )
+        # Keep the compact legacy endpoint intact for existing panels.
+        if not parsed.query:
+            return j(
+                handler,
+                {
+                    "spawn_paused": is_spawn_paused(),
+                    "active": list_active_subagents(),
+                },
+            )
+        return _handle_subagent_list_get(handler, parsed)
 
     if parsed.path == "/api/session/usage":
         sid = parse_qs(parsed.query).get("session_id", [""])[0]
@@ -8525,6 +8536,190 @@ def _handle_list_dir(handler, parsed):
     except ValueError as e:
         return bad(handler, _sanitize_error(e))
 
+
+_SUBAGENT_LIST_LIMIT = 50
+_SUBAGENT_CURSOR_LIMIT = 128
+_SUBAGENT_SSE_POLL_SECONDS = 0.5
+_SUBAGENT_SSE_HEARTBEAT_SECONDS = 15.0
+_SUBAGENT_LIVE_STATUSES = frozenset({"queued", "running", "waiting"})
+_SUBAGENT_VALID_STATUSES = frozenset({
+    "queued", "running", "waiting", "paused", "completed", "failed", "interrupted", "abandoned",
+})
+
+
+def _subagent_read_store():
+    """Open the durable journal strictly read-only; GET/SSE never initializes it."""
+    from tools.subagent_store import SubagentStore
+    return SubagentStore(read_only=True)
+
+
+def _subagent_session_for_read(parsed):
+    raw = parse_qs(parsed.query or "").get("session_id", [""])[0]
+    session_id = str(raw or "").strip()
+    if not session_id or len(session_id) > 200:
+        raise ValueError("session_id required")
+    try:
+        get_session(session_id, metadata_only=True)
+    except KeyError as exc:
+        raise KeyError("Session not found") from exc
+    return session_id
+
+
+def _subagent_cursor(raw):
+    if raw in (None, ""):
+        return None
+    value = str(raw)
+    if len(value) > _SUBAGENT_CURSOR_LIMIT or "|" not in value:
+        raise ValueError("invalid cursor")
+    stamp, subagent_id = value.rsplit("|", 1)
+    if not subagent_id or len(subagent_id) > 96:
+        raise ValueError("invalid cursor")
+    try:
+        return (float(stamp), subagent_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid cursor") from exc
+
+
+def _subagent_public_run(row):
+    fields = ("subagent_id", "session_id", "parent_id", "space_slug", "goal_summary", "role", "model", "status", "started_at", "finished_at", "heartbeat_at", "tool_count", "last_step", "summary", "error_reason", "updated_at")
+    return {field: row.get(field) for field in fields}
+
+
+def _subagent_list_payload(store, session_id, status, limit, cursor):
+    statuses = set(_SUBAGENT_LIVE_STATUSES) if status == "active" else (set(_SUBAGENT_VALID_STATUSES - _SUBAGENT_LIVE_STATUSES) if status == "history" else None)
+    rows = store.list_runs(session_id, statuses=statuses, limit=limit + 1, cursor=cursor)
+    page = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit and page:
+        tail = page[-1]
+        next_cursor = f"{float(tail['updated_at']):.6f}|{tail['subagent_id']}"
+    return {"session_id": session_id, "status": status, "runs": [_subagent_public_run(row) for row in page], "next_cursor": next_cursor}
+
+
+def _handle_subagent_list_get(handler, parsed):
+    try:
+        session_id = _subagent_session_for_read(parsed)
+        query = parse_qs(parsed.query or "")
+        status = str(query.get("status", ["all"])[0] or "all").strip().lower()
+        if status not in {"all", "active", "history"}:
+            raise ValueError("status must be all, active, or history")
+        limit = int(str(query.get("limit", ["50"])[0] or "50"))
+        if limit < 1 or limit > _SUBAGENT_LIST_LIMIT:
+            raise ValueError("limit must be between 1 and 50")
+        cursor = _subagent_cursor(query.get("cursor", [None])[0])
+        return j(handler, _subagent_list_payload(_subagent_read_store(), session_id, status, limit, cursor))
+    except (TypeError, ValueError) as exc:
+        return bad(handler, str(exc), 400)
+    except KeyError as exc:
+        return bad(handler, str(exc), 404)
+    except Exception:
+        return j(handler, {"session_id": str(parse_qs(parsed.query or "").get("session_id", [""])[0]), "status": "all", "runs": [], "next_cursor": None})
+
+
+def _handle_subagent_detail_get(handler, parsed, subagent_id):
+    try:
+        if len(subagent_id) > 96:
+            raise ValueError("invalid subagent_id")
+        session_id = _subagent_session_for_read(parsed)
+        store = _subagent_read_store()
+        run = store.get_run(subagent_id)
+        if not run or run.get("session_id") != session_id:
+            return bad(handler, "Subagent run not found", 404)
+        return j(handler, {"run": _subagent_public_run(run), "events": store.list_events(subagent_id)[:200]})
+    except ValueError as exc:
+        return bad(handler, str(exc), 400)
+    except KeyError as exc:
+        return bad(handler, str(exc), 404)
+    except Exception:
+        return bad(handler, "Subagent run not found", 404)
+
+
+def _subagent_sse_cursor(handler, parsed):
+    raw = parse_qs(parsed.query or "").get("since", [None])[0]
+    if raw is None:
+        raw = handler.headers.get("Last-Event-ID")
+    try:
+        return max(0, int(str(raw))) if raw not in (None, "") and len(str(raw)) <= 20 else 0
+    except ValueError:
+        return 0
+
+
+def _subagent_sse_write(handler, frame):
+    try:
+        handler.wfile.write(frame.encode("utf-8"))
+        handler.wfile.flush()
+        return True
+    except _CLIENT_DISCONNECT_ERRORS:
+        return False
+
+
+def _subagent_sse_closed(handler):
+    probe = getattr(handler.wfile, "is_closed", None)
+    try:
+        return bool(probe()) if callable(probe) else False
+    except Exception:
+        return True
+
+
+def _handle_subagent_events_sse_stream(handler, parsed):
+    """Read-only, bounded session event stream with a snapshot for lost cursors."""
+    try:
+        session_id = _subagent_session_for_read(parsed)
+        store = _subagent_read_store()
+    except ValueError as exc:
+        return bad(handler, str(exc), 400)
+    except KeyError as exc:
+        return bad(handler, str(exc), 404)
+    except Exception:
+        store = None
+        session_id = str(parse_qs(parsed.query or "").get("session_id", [""])[0])
+    cursor = _subagent_sse_cursor(handler, parsed)
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.send_header("Connection", "keep-alive")
+    handler.end_headers()
+    if not _subagent_sse_write(handler, f"event: hello\ndata: {json.dumps({'session_id': session_id, 'cursor': cursor})}\n\n"):
+        return True
+    emitted, last_heartbeat = set(), time.monotonic()
+    try:
+        while True:
+            if _subagent_sse_closed(handler):
+                return True
+            if store is None:
+                events, lower, upper = [], 0, 0
+            else:
+                lower, upper = store.session_event_bounds(session_id)
+                events = store.list_session_events_after(session_id, cursor, limit=_SUBAGENT_LIST_LIMIT)
+            if cursor and (cursor > upper or (lower and cursor < lower - 1)):
+                snapshot = _subagent_list_payload(store, session_id, "all", _SUBAGENT_LIST_LIMIT, None) if store else {"session_id": session_id, "status": "all", "runs": [], "next_cursor": None}
+                cursor = upper
+                if not _subagent_sse_write(handler, f"id: {cursor}\nevent: snapshot\ndata: {json.dumps(snapshot, ensure_ascii=False)}\n\n"):
+                    return True
+                last_heartbeat = time.monotonic()
+                continue
+            unique = []
+            for event in events:
+                key = (event["subagent_id"], event["sequence"])
+                if key not in emitted:
+                    emitted.add(key)
+                    unique.append(event)
+            if unique:
+                cursor = int(unique[-1]["event_id"])
+                if not _subagent_sse_write(handler, f"id: {cursor}\nevent: events\ndata: {json.dumps({'events': unique, 'cursor': cursor}, ensure_ascii=False)}\n\n"):
+                    return True
+                last_heartbeat = time.monotonic()
+                continue
+            if time.monotonic() - last_heartbeat >= _SUBAGENT_SSE_HEARTBEAT_SECONDS:
+                if not _subagent_sse_write(handler, ": keepalive\n\n"):
+                    return True
+                last_heartbeat = time.monotonic()
+            time.sleep(_SUBAGENT_SSE_POLL_SECONDS)
+    except _CLIENT_DISCONNECT_ERRORS:
+        return True
+    except Exception:
+        return True
 
 def _handle_sse_stream(handler, parsed):
     stream_id = parse_qs(parsed.query).get("stream_id", [""])[0]
