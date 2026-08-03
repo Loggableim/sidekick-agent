@@ -7582,6 +7582,8 @@ const pendingEl=$('novaPresencePending');
     if(operational.lease_liveness==='unverified'||(payload.supervision&&payload.supervision.lease&&payload.supervision.lease.liveness==='unverified')) text+=' ? Lease aktiv, Hostprozess nicht verifiziert';
     const presenceAge=Number(payload&&payload.presence_age_seconds);
     if(Number.isFinite(presenceAge)&&presenceAge>=60&&presenceAge<=86400) text+=' · Statusdaten '+Math.trunc(presenceAge)+'s alt';
+    const defaultModel=String(operational.default_model||operational.model||'').trim().toLowerCase();
+    if(/^[a-z0-9][a-z0-9._:-]{0,63}$/.test(defaultModel)) text+=' · Modell '+defaultModel;
     const runtimeStatus=String(operational.runtime_status||'').trim().toLowerCase();
     if(runtimeStatus==='degraded') text+=' · Dauerbetrieb eingeschränkt';
     const hostReadiness=String(operational.host_readiness||'').trim().toLowerCase();

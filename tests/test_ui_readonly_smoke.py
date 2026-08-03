@@ -119,3 +119,9 @@ def test_three_space_fake_transport_yolo_enrollment_global_lease_and_exactly_onc
     assert admit("nova", "sync") == "started"
     assert admit("aquarium-zentrum", "deploy") == "busy"
     assert admit("nova", "sync") == "duplicate"
+
+
+def test_deepseek_v4_flash_0731_is_valid_catalog_model():
+    model = "deepseek-v4-flash:0731"
+    assert len(model) <= 64
+    assert all(ch.isalnum() or ch in ".:_-" for ch in model)

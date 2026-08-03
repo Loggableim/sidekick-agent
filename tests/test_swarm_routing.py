@@ -792,3 +792,14 @@ def test_swarm_run_contract_keeps_reviewed_and_yolo_budgets_and_cloud_quorum():
     assert (first.model, second.model) == ("glm-5.2", "kimi-k2.7-code")
     assert first.provider == second.provider == "ollama-cloud"
     assert all("gpt-oss" not in name.lower() for name in (*first.models, *second.models))
+
+
+def test_dated_deepseek_cloud_catalog_tag_proves_stable_route_only():
+    registry = ModelRegistry(["deepseek-v4-flash:0731-cloud"])
+    assert registry.is_available("deepseek-v4-flash")
+    assert ModelRouter(registry).select("scout", {"structured-output"}).model == "deepseek-v4-flash"
+
+
+def test_unknown_dated_deepseek_tag_remains_fail_closed():
+    registry = ModelRegistry(["deepseek-v4-flash:other"])
+    assert not registry.is_available("deepseek-v4-flash")

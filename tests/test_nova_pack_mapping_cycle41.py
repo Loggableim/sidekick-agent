@@ -32,3 +32,15 @@ def test_role_model_mapping_rejects_unrouted_roles_without_provider_calls() -> N
 
 
 
+
+
+def test_unavailable_versioned_deepseek_flash_fails_closed_without_provider_fallback():
+    from swarm_core.models import ModelRegistry
+    from swarm_core.router import ModelRouter, NoEligibleModel
+    registry = ModelRegistry(["deepseek-v4-flash:0731"])
+    try:
+        ModelRouter(registry).select("scout", {"structured-output"})
+    except NoEligibleModel as exc:
+        assert "Ollama Cloud" in str(exc)
+    else:
+        raise AssertionError("missing exact DeepSeek V4 Flash 0731 must pause, not fallback")
