@@ -20,21 +20,21 @@ def _write_json(path: Path, payload: object) -> None:
 
 
 def _write_space(path: Path, *, slug: str, name: str, revision: int, enrolled: bool = True) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    path.joinpath("space.yaml").write_text(
-        "\n".join(
-            [
-                f"name: {name}",
-                "nova_management:",
-                "  yolo: true",
-                f"  enrolled: {'true' if enrolled else 'false'}",
-                f"  revision: {revision}",
-                "project_dir: C:/private/project-root",
-                "",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    # Presence now requires the same independently trusted root and chained
+    # governance evidence as production enrollment.  Keep this legacy helper
+    # aligned with that contract so tests cannot accidentally bless an
+    # unbound `nova_management`` flag.
+    _write_marker_space(path, slug=slug, revision=revision)
+    config_path = path / "space.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["name"] = name
+    if not enrolled:
+        config["nova_management"] = {
+            "yolo": True,
+            "enrolled": False,
+            "revision": revision,
+        }
+    config_path.write_text(json.dumps(config), encoding="utf-8")
 
 
 def _write_marker_space(path: Path, *, slug: str, revision: int = 7) -> tuple[str, str]:
@@ -257,6 +257,28 @@ def _tree_snapshot(root: Path) -> dict[str, bytes]:
     }
 
 
+def test_presence_three_space_smoke_keeps_nova_and_unenrolled_spaces_out(
+    tmp_path: Path,
+):
+    """Nova may expose only the independently enrolled Aquarium Space."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_json(
+        home / "spaces" / "nova" / "nova_data" / "entity" / "entity_state.json",
+        {"dynamic": {"presence": "available"}},
+    )
+    _write_space(home / "spaces" / "finanzjunkie", slug="finanzjunkie", name="Finanzjunkie", revision=2, enrolled=False)
+    _write_space(home / "spaces" / "aquarium-zentrum", slug="aquarium-zentrum", name="Aquarium Zentrum", revision=2, enrolled=True)
+    _write_ledger(home / "state" / "nova-space-supervisor.sqlite")
+
+    payload = build_presence_card(home=home)
+
+    assert [item["space"] for item in payload["managed_spaces"]] == ["aquarium-zentrum"]
+    rendered = json.dumps(payload)
+    assert "finanzjunkie" not in rendered
+    assert "nova_data" not in rendered
+
 def test_presence_card_is_a_pure_redacted_projection(tmp_path):
     """Catches accidental store initialization or raw supervisor data leakage."""
     from web.api.nova_presence import build_presence_card
@@ -310,6 +332,251 @@ def test_presence_card_is_a_pure_redacted_projection(tmp_path):
     assert "super-secret-value" not in json.dumps(payload)
     assert "provider error" not in json.dumps(payload)
     assert "Untrusted name" not in json.dumps(payload)
+
+
+def test_presence_card_projects_redacted_model_catalog_blocker_reason():
+    from web.api.nova_presence import _blockers_for
+
+    blockers = _blockers_for(
+        [{"space": "alpha", "state": "paused"}],
+        [{"space": "alpha", "reason": "no_eligible_model"}],
+    )
+    assert blockers == [{"space": "alpha", "code": "model_catalog_unavailable"}]
+
+
+@pytest.mark.parametrize("reason", ["provider_unavailable", "model_provider_unavailable"])
+def test_presence_card_projects_provider_pause_reason_without_private_data(reason):
+    from web.api.nova_presence import _blockers_for
+
+    blockers = _blockers_for([{ "space": "alpha", "state": "active" }], [{ "space": "alpha", "reason": reason, "private_reason": "C:/secret" }])
+
+    assert blockers == [{"space": "alpha", "code": "model_provider_unavailable"}]
+
+def test_presence_card_projects_active_limit_as_global_slot_blocker():
+    """A coalesced signal must explain slot contention, not hide behind paused."""
+    from web.api.nova_presence import _blockers_for
+
+    blockers = _blockers_for(
+        [{"space": "alpha", "state": "paused"}],
+        [{"space": "alpha", "reason": "active_limit"}],
+    )
+
+    assert blockers == [{"space": "alpha", "code": "global_run_slot_busy"}]
+
+
+
+def test_presence_card_projects_durable_global_slot_owner_and_skipped_tick(
+    tmp_path: Path,
+):
+    """Presence exposes only a durable managed owner and redacted no-TTL state."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+        pending_digest="d" * 64,
+        last_check_code="active_limit",
+        last_checked_at=123.0,
+    )
+
+    payload = build_presence_card(home=home)
+
+    assert payload["global_run_slot"] == {
+        "state": "occupied",
+        "occupied_by": "alpha",
+        "occupied_at": "2026-07-29T10:05:00+00:00",
+        "expires_at": None,
+    }
+    assert {item["code"] for item in payload["blockers"]} == {"global_run_slot_busy"}
+    assert payload["blockers"] == [{"space": "alpha", "code": "global_run_slot_busy"}]
+
+def test_presence_card_projects_pending_actions_without_writing(tmp_path):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+    )
+    with sqlite3.connect(ledger) as connection:
+        connection.execute(
+            "UPDATE nova_supervision_space_state SET pending_count = 3 WHERE target_key = 'alpha'"
+        )
+    before = _tree_snapshot(home)
+
+    payload = build_presence_card(home=home)
+
+    assert _tree_snapshot(home) == before
+    assert payload["pending_actions"] == 1
+    assert payload["pending_signals"] == 3
+    assert payload["managed_spaces"][0]["pending_actions"] == 1
+    assert payload["managed_spaces"][0]["pending_signals"] == 3
+
+
+def test_presence_card_projects_active_host_ticker_without_leaking_lease_owner(tmp_path):
+    """The Nova entity card must distinguish an active host ticker from idle."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    with sqlite3.connect(ledger) as connection:
+        connection.execute(
+            """INSERT INTO supervisor_ticker_leases (
+                lease_id, owner_id, state, started_at, expires_at, updated_at, terminal_reason
+            ) VALUES (?, ?, 'active', ?, ?, ?, NULL)""",
+            (
+                "lease-private-secret",
+                "host-private-secret",
+                1_800_000_000.0,
+                2_000_000_000.0,
+                1_800_000_060.0,
+            ),
+        )
+    before = _tree_snapshot(home)
+
+    payload = build_presence_card(home=home)
+
+    assert _tree_snapshot(home) == before
+    assert payload["supervision"] == {
+        "running": True,
+        "last_pulse_at": "2027-01-15T08:01:00+00:00",
+        "lease": {"state": "active", "liveness": "lease_unverified"},
+    }
+    assert "private-secret" not in json.dumps(payload)
+def test_presence_card_lifts_human_release_slot_to_payload_root(tmp_path, monkeypatch):
+    """The UI release control reads the opaque slot from the payload root."""
+    from web.api import nova_presence
+
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+
+    monkeypatch.setattr(
+        nova_presence,
+        "_managed_space_summaries",
+        lambda _root: [{"space": "alpha", "name": "Alpha", "governance_revision": 7, "state": "idle"}],
+    )
+    monkeypatch.setattr(
+        nova_presence,
+        "_read_supervisor_admissions",
+        lambda _path, _spaces: [{
+            "admission_id": "admission-alpha",
+            "space": "alpha",
+            "state": "paused",
+            "run_id": "123e4567-e89b-12d3-a456-426614174000",
+            "canonical_root": "C:/private/project",
+            "at": "2026-07-29T10:05:00+00:00",
+        }],
+    )
+
+    monkeypatch.setattr(
+        nova_presence,
+        "_release_slot_for",
+        lambda admission: (
+            {"run_id": "123e4567-e89b-12d3-a456-426614174000", "space": "alpha"}
+            if admission.get("state") == "paused"
+            else None
+        ),
+    )
+
+    payload = nova_presence.build_presence_card(home=home)
+
+    assert payload["release_slot"] == {
+        "run_id": "123e4567-e89b-12d3-a456-426614174000",
+        "space": "alpha",
+    }
+    assert payload["managed_spaces"][0]["release_slot"] == payload["release_slot"]
+
+
+def test_presence_ticker_projection_deduplicates_repeated_event_ids(tmp_path):
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space_id, root_fingerprint = _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    _write_scheduler_marker_state(
+        ledger,
+        space="alpha",
+        space_id=space_id,
+        root_fingerprint=root_fingerprint,
+        revision=7,
+    )
+    event_log = ledger.with_name("ticker_events.jsonl")
+    event_log.write_text(
+        "\n".join(
+            [
+                '{"event_id":"abcdef0123456789abcdef0123456789","space":"alpha","source":"bridge","stage":"handled","status":"failed","reason":"active_limit","at":"1"}',
+                '{"event_id":"abcdef0123456789abcdef0123456789","space":"alpha","source":"bridge","stage":"handled","status":"failed","reason":"active_limit","at":"2"}',
+                '{"event_id":"1234567890abcdef1234567890abcdef","space":"alpha","source":"heartbeat","stage":"observed","status":"pending","reason":"periodic_check","at":"3"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = build_presence_card(home=home)
+    assert len(payload["ticker_events"]) == 2
+    assert payload["ticker_events"][0]["at"] == "3"
+    assert len(payload["unread_events"]) == 2
+    assert [item["status"] for item in payload["unread_events"]] == ["pending", "failed"]
+
+
+def test_presence_card_projects_model_chain_and_deployment_blockers():
+    from web.api.nova_presence import _blockers_for
+
+    blockers = _blockers_for(
+        [{"space": "alpha", "state": "paused"}, {"space": "beta", "state": "paused"}],
+        [
+            {"space": "alpha", "reason": "model_chain_exhausted"},
+            {"space": "beta", "reason": "deployment_unverified"},
+        ],
+    )
+
+    assert blockers == [
+        {"space": "alpha", "code": "model_chain_exhausted"},
+        {"space": "beta", "code": "deployment_unverified"},
+    ]
+
+
+def test_presence_card_surfaces_space_binding_revocation_as_actionable_codes():
+    """Governance/root deletion pauses must remain visible in the entity card."""
+    from web.api.nova_presence import _blockers_for
+
+    blockers = _blockers_for(
+        [
+            {"space": "alpha", "state": "paused"},
+            {"space": "beta", "state": "paused"},
+            {"space": "gamma", "state": "paused"},
+        ],
+        [
+            {"space": "alpha", "reason": "governance_changed"},
+            {"space": "beta", "reason": "root_changed"},
+            {"space": "gamma", "reason": "space_deleted"},
+        ],
+    )
+
+    assert blockers == [
+        {"space": "alpha", "code": "governance_changed"},
+        {"space": "beta", "code": "root_changed"},
+        {"space": "gamma", "code": "space_deleted"},
+    ]
 
 
 def test_presence_card_projects_only_redacted_scheduler_marker_codes(tmp_path):
@@ -454,6 +721,33 @@ def test_presence_card_omits_marker_when_current_governance_binding_cannot_be_pr
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
     assert build_presence_card(home=home)["change_markers"] == []
+
+
+def test_presence_card_omits_yolo_space_without_independent_enrollment_binding(tmp_path):
+    """A copied YOLO flag must not make an unbound Space look supervised."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    space = home / "spaces" / "spoofed"
+    space.mkdir(parents=True)
+    (space / "space.yaml").write_text(
+        "\n".join(
+            [
+                "nova_management:",
+                "  yolo: true",
+                "  enrolled: true",
+                "  revision: 4",
+                "project_dir: C:/private/not-attested",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_presence_card(home=home)
+
+    assert payload["managed_spaces"] == []
+    assert payload["focus"]["kind"] == "presence"
 
 
 def test_presence_card_omits_marker_from_partial_or_wal_backed_scheduler_state(tmp_path):
@@ -915,6 +1209,7 @@ def test_presence_card_is_native_authenticated_fastapi_read(monkeypatch, tmp_pat
     assert unauthorized.status_code == 401
     assert authorized.status_code == 200
     assert authorized.json()["identity"]["name"] == "Nova"
+    assert authorized.json()["entity_feed"] == []
     assert _tree_snapshot(home) == before
 
 
@@ -1047,3 +1342,428 @@ def test_legacy_nova_status_reads_match_native_pure_projection(monkeypatch, tmp_
     assert handler.status_code == 200
     assert json.loads(handler.wfile.getvalue().decode("utf-8")) == native.json()
     assert _tree_snapshot(home) == before
+
+@pytest.fixture(autouse=True)
+def _allow_synthetic_test_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Register repository-local fixture roots with the read-only trust seam.
+
+    Production enrollment still requires the live trusted-workspace registry;
+    this test-only adapter lets synthetic spaces under ``.test-tmp`` exercise
+    the rest of the presence projection without weakening that production
+    gate. Missing or outside roots continue through the real resolver.
+    """
+    import web.api.workspace as workspace
+
+    original = workspace.resolve_enrollment_trusted_workspace_read_only
+    fixture_root = (Path(__file__).resolve().parent.parent / ".test-tmp").resolve()
+    def resolve(value: object) -> Path:
+        try:
+            return original(value)
+        except ValueError:
+            candidate = Path(str(value)).expanduser().resolve()
+            try:
+                candidate.relative_to(fixture_root)
+            except ValueError:
+                raise
+            if not candidate.is_dir():
+                raise
+            return candidate
+
+    monkeypatch.setattr(
+        workspace,
+        "resolve_enrollment_trusted_workspace_read_only",
+        resolve,
+    )
+
+def test_presence_unread_includes_durable_resonance_without_double_counting(tmp_path: Path, monkeypatch):
+    """Rotated ticker events still drive the entity attention badge once."""
+    from web.api.nova_presence import build_presence_card
+    monkeypatch.setattr("web.api.workspace.resolve_enrollment_trusted_workspace_read_only", lambda value: Path(value))
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    resonance = home / "state" / "resonance_memory.sqlite"
+    resonance.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(resonance) as connection:
+        connection.execute(
+            "CREATE TABLE resonance_events (event_id TEXT PRIMARY KEY, space TEXT, source TEXT, stage TEXT, status TEXT, reason TEXT, observed_at REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO resonance_events VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("a" * 64, "alpha", "ci", "handled", "failed", "ci_failed", 20.0),
+                ("b" * 64, "alpha", "git", "handled", "handled", "git_change", 10.0),
+                ("c" * 64, "alpha", "heartbeat", "observed", "pending", "periodic_check", 30.0),
+            ],
+        )
+    payload = build_presence_card(home=home)
+    assert [item["event_id"] for item in payload["unread_events"]] == ["c" * 64, "a" * 64]
+    assert payload["unread_event_count"] == 2
+    assert all(item["status"] in {"pending", "failed"} for item in payload["unread_events"])
+def test_presence_card_projects_resonance_entity_feed_read_only_and_redacted(tmp_path: Path, monkeypatch):
+    from web.api.nova_presence import build_presence_card
+    monkeypatch.setattr("web.api.workspace.resolve_enrollment_trusted_workspace_read_only", lambda value: Path(value))
+
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    _write_marker_space(home / "spaces" / "beta", slug="beta")
+    resonance = home / "state" / "resonance_memory.sqlite"
+    resonance.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(resonance) as connection:
+        connection.execute(
+            "CREATE TABLE resonance_events (event_id TEXT PRIMARY KEY, space TEXT, source TEXT, stage TEXT, status TEXT, reason TEXT, observed_at REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO resonance_events VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("a" * 64, "alpha", "bridge", "handled", "failed", "skipped_slot_occupied", 20.0),
+                ("b" * 64, "beta", "git", "handled", "handled", "git_change", 10.0),
+                ("c" * 64, "not-enrolled", "ci", "handled", "failed", "ci_failed", 30.0),
+            ],
+        )
+    before = _tree_snapshot(home)
+    payload = build_presence_card(home=home)
+    assert _tree_snapshot(home) == before
+    assert payload["entity_feed"] == [
+        {
+            "event_id": "a" * 64,
+            "space": "alpha",
+            "source": "bridge",
+            "stage": "handled",
+            "status": "failed",
+            "reason": "skipped_slot_occupied",
+            "at": "1970-01-01T00:00:20+00:00",
+        },
+        {
+            "event_id": "b" * 64,
+            "space": "beta",
+            "source": "git",
+            "stage": "handled",
+            "status": "handled",
+            "reason": "git_change",
+            "at": "1970-01-01T00:00:10+00:00",
+        },
+    ]
+    assert "not-enrolled" not in json.dumps(payload["entity_feed"])
+    assert str(home) not in json.dumps(payload["entity_feed"])
+
+
+def test_presence_card_omits_tombstoned_resonance_from_feed_and_unread(
+    tmp_path: Path, monkeypatch
+):
+    """Revoked resonance must not reappear through the rotated ticker path."""
+    from web.api.nova_presence import build_presence_card
+
+    monkeypatch.setattr(
+        "web.api.workspace.resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    resonance = home / "state" / "resonance_memory.sqlite"
+    resonance.parent.mkdir(parents=True, exist_ok=True)
+    revoked = "a" * 64
+    visible = "b" * 64
+    with sqlite3.connect(resonance) as connection:
+        connection.execute(
+            "CREATE TABLE resonance_events (event_id TEXT PRIMARY KEY, space TEXT, source TEXT, stage TEXT, status TEXT, reason TEXT, observed_at REAL)"
+        )
+        connection.execute(
+            "CREATE TABLE resonance_entity_tombstone (event_id TEXT PRIMARY KEY, tombstoned_at REAL NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO resonance_events VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (revoked, "alpha", "ci", "handled", "failed", "ci_failed", 20.0),
+                (visible, "alpha", "ci", "handled", "failed", "ci_failed", 10.0),
+            ],
+        )
+        connection.execute(
+            "INSERT INTO resonance_entity_tombstone VALUES (?, ?)",
+            (revoked, 21.0),
+        )
+    ticker = home / "state" / "ticker_events.jsonl"
+    ticker.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "event_id": event_id,
+                    "space": "alpha",
+                    "source": "ci",
+                    "stage": "handled",
+                    "status": "failed",
+                    "reason": "ci_failed",
+                    "at": str(at),
+                }
+            )
+            for event_id, at in ((revoked, 20), (visible, 10))
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    payload = build_presence_card(home=home)
+
+    assert [item["event_id"] for item in payload["entity_feed"]] == [visible]
+    assert [item["event_id"] for item in payload["unread_events"]] == [visible]
+
+
+def test_presence_card_fails_closed_for_duplicate_space_identity_and_root(tmp_path: Path, monkeypatch):
+    """A copied valid enrollment must not create a second managed Space."""
+    from web.api.nova_presence import build_presence_card
+    monkeypatch.setattr("web.api.workspace.resolve_enrollment_trusted_workspace_read_only", lambda value: Path(value))
+    home = tmp_path / "home"
+    aquarium = home / "spaces" / "aquarium-zentrum"
+    finanzjunkie = home / "spaces" / "finanzjunkie"
+    _write_marker_space(aquarium, slug="aquarium-zentrum")
+    finanzjunkie.mkdir(parents=True)
+    (finanzjunkie / "space.yaml").write_text((aquarium / "space.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    ticker_path = home / "state" / "ticker_events.jsonl"
+    ticker_path.parent.mkdir(parents=True, exist_ok=True)
+    ticker_path.write_text("\n".join(json.dumps(item) for item in (
+        {"event_id":"a"*64,"space":"aquarium-zentrum","source":"ci","stage":"handled","status":"failed","reason":"ci_failed","at":"2026-08-03T10:00:00+00:00"},
+        {"event_id":"b"*64,"space":"finanzjunkie","source":"ci","stage":"handled","status":"failed","reason":"ci_failed","at":"2026-08-03T10:01:00+00:00"},
+    )), encoding="utf-8")
+    payload = build_presence_card(home=home)
+    from web.api.nova_presence import _managed_space_marker_bindings
+    assert list(_managed_space_marker_bindings(home / "spaces")) == ["aquarium-zentrum"]
+    assert [item["space"] for item in payload["managed_spaces"]] == ["aquarium-zentrum"]
+    assert [item["space"] for item in payload["ticker_events"]] == ["aquarium-zentrum"]
+    assert "finanzjunkie" not in json.dumps(payload)
+
+def test_marker_bindings_reject_duplicate_identity_components(tmp_path: Path, monkeypatch):
+    from web.api.nova_presence import _managed_space_marker_bindings
+    spaces = tmp_path / "spaces"
+    for slug in ("aquarium-zentrum", "finanzjunkie"):
+        (spaces / slug).mkdir(parents=True)
+        (spaces / slug / "space.yaml").write_text("name: " + slug, encoding="utf-8")
+    monkeypatch.setattr(
+        "web.api.nova_presence._marker_binding_from_config",
+        lambda config: {
+            "space_id": "same-space-id",
+            "root_fingerprint": "root-" + str(config.get("name")),
+            "governance_revision": 1,
+        },
+    )
+    assert list(_managed_space_marker_bindings(spaces)) == ["aquarium-zentrum"]
+
+
+def test_marker_bindings_reject_duplicate_trusted_root_with_distinct_space_ids(
+    tmp_path: Path, monkeypatch
+):
+    """A copied trusted root cannot make two distinct Spaces look managed.
+
+    Space identity and root identity are independent admission components. A
+    forged second YAML may mint another UUID while still pointing at the same
+    trusted project root; the public projection must keep the first stable
+    binding only instead of exposing two autonomous owners for one checkout.
+    """
+    from web.api.nova_presence import _managed_space_marker_bindings
+
+    spaces = tmp_path / "spaces"
+    for slug in ("aquarium-zentrum", "finanzjunkie"):
+        (spaces / slug).mkdir(parents=True)
+        (spaces / slug / "space.yaml").write_text("name: " + slug, encoding="utf-8")
+
+    monkeypatch.setattr(
+        "web.api.nova_presence._marker_binding_from_config",
+        lambda config: {
+            "space_id": "id-" + str(config.get("name")),
+            "root_fingerprint": "same-trusted-root",
+            "governance_revision": 1,
+        },
+    )
+
+    assert list(_managed_space_marker_bindings(spaces)) == ["aquarium-zentrum"]
+
+
+def test_three_space_yolo_admission_isolation_and_entity_feed_are_deterministic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Only the enrolled Aquarium Space can occupy Nova's global run slot.
+
+    This joins the supervisor admission boundary with Nova's public, read-only
+    entity projection: Nova and Finanzjunkie stay out, repeated Aquarium
+    signals coalesce, and the feed exposes only the redacted Aquarium event.
+    """
+    from nova.space_supervisor import ManagedSpaceGovernance, ManagedSpaceSupervisor
+    from web.api.nova_presence import build_presence_card
+
+    monkeypatch.setattr(
+        "web.api.workspace.resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+    home = tmp_path / "home"
+    _write_json(
+        home / "spaces" / "nova" / "nova_data" / "entity" / "entity_state.json",
+        {"dynamic": {"presence": "available"}},
+    )
+    _write_space(
+        home / "spaces" / "finanzjunkie",
+        slug="finanzjunkie",
+        name="Finanzjunkie",
+        revision=2,
+        enrolled=False,
+    )
+    aquarium = home / "spaces" / "aquarium-zentrum"
+    aquarium_id, aquarium_fp = _write_marker_space(
+        aquarium, slug="aquarium-zentrum", revision=2
+    )
+    aquarium_root = aquarium / "trusted-project"
+    records = {
+        "aquarium-zentrum": ManagedSpaceGovernance.from_values(
+            space_id=aquarium_id,
+            canonical_root=aquarium_root,
+            root_fingerprint=aquarium_fp,
+            yolo=True,
+            enrolled=True,
+            revision=2,
+            policy_identity="policy:aquarium-v2",
+        ),
+        "finanzjunkie": ManagedSpaceGovernance.from_values(
+            space_id=uuid4(),
+            canonical_root=home / "spaces" / "finanzjunkie" / "trusted-project",
+            root_fingerprint="",
+            yolo=False,
+            enrolled=False,
+            revision=2,
+            policy_identity="policy:finanzjunkie-v2",
+        ),
+    }
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=ledger,
+        governance_resolver=lambda target: records.get(target),
+    )
+
+    rejected_finanz = supervisor.admit(
+        "finanzjunkie", {"goal": "inspect portfolio", "kind": "maintenance"}
+    )
+    first = supervisor.admit(
+        "aquarium-zentrum", {"goal": "check water quality", "kind": "maintenance"}
+    )
+    assert rejected_finanz.status == "rejected"
+    assert rejected_finanz.reason == "not_yolo_enrolled"
+    assert first.status == "created" and first.run_id and first.capability
+    assert supervisor.start_admitted_run(first.capability, dispatcher=lambda *_: None)
+    repeated = supervisor.admit(
+        "aquarium-zentrum", {"goal": "check water quality", "kind": "maintenance"}
+    )
+    assert repeated.status == "coalesced"
+    assert repeated.run_id == first.run_id
+    assert len(supervisor.list_active_admissions()) == 1
+
+    resonance = home / "state" / "resonance_memory.sqlite"
+    resonance.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(resonance) as connection:
+        connection.execute(
+            "CREATE TABLE resonance_events (event_id TEXT PRIMARY KEY, space TEXT, source TEXT, stage TEXT, status TEXT, reason TEXT, observed_at REAL)"
+        )
+        connection.executemany(
+            "INSERT INTO resonance_events VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "a" * 64,
+                    "aquarium-zentrum",
+                    "ci",
+                    "handled",
+                    "pending",
+                    "water_check",
+                    20.0,
+                ),
+                (
+                    "b" * 64,
+                    "finanzjunkie",
+                    "ci",
+                    "handled",
+                    "failed",
+                    "private",
+                    21.0,
+                ),
+                (
+                    "c" * 64,
+                    "nova",
+                    "bridge",
+                    "handled",
+                    "failed",
+                    "private",
+                    22.0,
+                ),
+            ],
+        )
+    before = _tree_snapshot(home)
+    payload = build_presence_card(home=home)
+    assert _tree_snapshot(home) == before
+    assert [item["space"] for item in payload["managed_spaces"]] == [
+        "aquarium-zentrum"
+    ]
+    assert payload["global_run_slot"]["state"] == "occupied"
+    assert payload["global_run_slot"]["occupied_by"] == "aquarium-zentrum"
+    assert [item["space"] for item in payload["entity_feed"]] == ["aquarium-zentrum"]
+    rendered = json.dumps(payload)
+    assert "finanzjunkie" not in rendered
+    assert "private" not in rendered
+    assert str(home) not in rendered
+
+
+def test_operational_projection_exposes_bounded_next_step_for_paused_model_chain():
+    from web.api.nova_presence import _operational_projection
+
+    projection = _operational_projection(
+        managed_spaces=[{"space": "aquarium-zentrum"}],
+        blockers=[{"space": "aquarium-zentrum", "code": "model_chain_exhausted"}],
+        supervision={"running": True},
+    )
+
+    assert projection["runtime_status"] == "degraded"
+    assert projection["next_step_code"] == "refresh_ollama_catalog"
+    assert "path" not in str(projection).lower()
+    assert "model" not in projection["next_step_code"]
+
+
+def test_presence_identity_and_paused_next_step_survive_host_restart_without_cross_space_leak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two independent read projections retain Nova identity and blocker state."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    nova_root = home / "spaces" / "nova"
+    _write_json(
+        nova_root / "nova_data" / "entity" / "entity_state.json",
+        {"dynamic": {"presence": "thinking"}},
+    )
+    _write_space(home / "spaces" / "finanzjunkie", slug="finanzjunkie", name="Finanzjunkie", revision=2, enrolled=False)
+    aquarium = home / "spaces" / "aquarium-zentrum"
+    aquarium_id, aquarium_fp = _write_marker_space(aquarium, slug="aquarium-zentrum", revision=2)
+    aquarium_root = aquarium / "trusted-project"
+    ledger = home / "state" / "nova-space-supervisor.sqlite"
+    _write_ledger(ledger)
+    with sqlite3.connect(ledger) as connection:
+        connection.execute(
+            "UPDATE supervisor_admissions SET target_key=?, target_space_id=?, canonical_root=?, root_fingerprint=? WHERE admission_id=?",
+            ("aquarium-zentrum", aquarium_id, str(aquarium_root.resolve()), aquarium_fp, "admission-secret-id"),
+        )
+        connection.execute(
+            "UPDATE supervisor_audit SET reason=? WHERE admission_id=?",
+            ("model_chain_exhausted", "admission-secret-id"),
+        )
+    monkeypatch.setattr(
+        "web.api.workspace.resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+
+    first = build_presence_card(home=home)
+    # Simulate a host restart: the second projection reconstructs all facts from
+    # the persisted ledger and Space config, without a ticker/model invocation.
+    second = build_presence_card(home=home)
+    for payload in (first, second):
+        assert payload["identity"] == {"name": "Nova", "voice": "direct, curious, accountable"}
+        assert [item["space"] for item in payload["managed_spaces"]] == ["aquarium-zentrum"]
+        assert payload["managed_spaces"][0]["state"] == "paused"
+        assert payload["focus"] == {"kind": "supervision", "space": "aquarium-zentrum", "state": "paused"}
+        assert payload["blockers"] == [{"space": "aquarium-zentrum", "code": "model_chain_exhausted"}]
+        assert payload["operational"]["next_step_code"] == "refresh_ollama_catalog"
+        rendered = json.dumps(payload)
+        assert "finanzjunkie" not in rendered
+        assert "space-alpha" not in rendered
+        assert "C:/private" not in rendered

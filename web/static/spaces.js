@@ -1,4 +1,4 @@
-﻿// â”€â”€ Spaces panel — workspace isolation for sessions, kanban, and config â”€â”€
+// â”€â”€ Spaces panel — workspace isolation for sessions, kanban, and config â”€â”€
 //
 // Provides:
 //   _activeSpace     — current space slug (string), stored in localStorage
@@ -161,6 +161,7 @@ function _publishSpaceGlobals() {
     toggleSidebarSpaceDropdown,
     openSidebarSpaceSelector,
     showCreateSpaceDialog,
+    getSpaceNovaManagementDiagnosis,
   });
 }
 
@@ -979,6 +980,20 @@ function renderSpaceDetail(space) {
   void fetchSpaceNovaManagement(space.slug);
 }
 
+// Translate the redacted management projection into an actionable operator hint.
+function getSpaceNovaManagementDiagnosis(data, slug, projectDir) {
+  const snapshot = data && typeof data === 'object' ? data : {};
+  const management = snapshot.nova_management && typeof snapshot.nova_management === 'object' ? snapshot.nova_management : {};
+  const spaceId = String(snapshot.space_id || '').trim();
+  const fingerprint = String(snapshot.root_fingerprint || '').trim();
+  if (!spaceId) return {state:'identity_required', action:'initialize_identity', message:'Persisted Space ID fehlt. Speichere die Betreuung einmal, um die Space-Identität zu initialisieren.'};
+  if (!String(projectDir || '').trim()) return {state:'project_dir_required', action:'configure_project_dir', message:'Trusted project directory fehlt. Hinterlege zuerst einen bestätigten Projektpfad.'};
+  if (!fingerprint) return {state:'trusted_root_required', action:'confirm_trusted_root', message:'Projektpfad ist noch nicht als Trusted Workspace bestätigt. Bestätige den Root vor dem Enrollment.'};
+  if (management.enrolled === true && management.yolo !== true) return {state:'invalid_governance', action:'enable_yolo', message:'Ungültige Governance: Nova-Betreuung ist nur mit aktiviertem YOLO erlaubt.'};
+  if (management.yolo === true && management.enrolled !== true) return {state:'enrollment_required', action:'enroll', message:'YOLO ist erlaubt, aber Nova-Betreuung noch deaktiviert. Aktiviere Enrollment ausdrücklich.'};
+  if (management.yolo !== true && management.enrolled !== true) return {state:'supervision_disabled', action:'enable_yolo_and_enroll', message:'Nova-Betreuung ist deaktiviert. Aktiviere YOLO und Enrollment getrennt, wenn Nova diesen Space betreuen soll.'};
+  return {state:'enrolled', action:'none', message:'Nova-Betreuung ist für diesen Space eingeschrieben und an den bestätigten Root gebunden.'};
+}
 async function fetchSpaceNovaManagement(slug) {
   const card = document.getElementById('spaceNovaManagementCard');
   if (!card || String(card.dataset.slug || '') !== String(slug || '')) return null;
@@ -993,15 +1008,17 @@ async function fetchSpaceNovaManagement(slug) {
     const yolo = document.getElementById('spaceNovaManagementYolo');
     const enrolled = document.getElementById('spaceNovaManagementEnrolled');
     const save = document.getElementById('spaceNovaManagementSave');
+    const diagnosis = getSpaceNovaManagementDiagnosis(data, slug, card.dataset.projectDir);
+    card.dataset.diagnosticState = diagnosis.state;
     if (yolo) { yolo.checked = management.yolo === true; yolo.disabled = false; }
     if (enrolled) { enrolled.checked = management.enrolled === true; enrolled.disabled = false; }
     if (save) { save.disabled = false; save.textContent = card.dataset.spaceId ? 'Save supervision' : 'Initialize Space identity'; }
-    if (meta) meta.textContent = card.dataset.spaceId
-      ? 'Space ID: ' + card.dataset.spaceId + ' · Root fingerprint: ' + (card.dataset.rootFingerprint || 'no independently trusted project directory')
-      : 'This legacy Space needs an explicit management save to create its durable identity; no unrelated configuration change is required.';
+    if (meta) meta.textContent = diagnosis.message + (card.dataset.spaceId ? ' Space ID: ' + card.dataset.spaceId + ' · Root fingerprint: ' + (card.dataset.rootFingerprint || '-') : '');
     return data;
   } catch (e) {
-    if (meta) meta.textContent = 'Supervision status unavailable: ' + (e.message || e);
+    const detail = String(e && e.message || e || '').trim();
+    const slugHint = String(slug || '').toLowerCase() === 'finanzjunkie' ? ' Did you mean the Space slug "finanz-junkie"?' : '';
+    if (meta) meta.textContent = (e && e.status === 404 ? 'Space "' + String(slug || '') + '" not found. Check the exact Space slug.' : 'Supervision status unavailable: ' + detail) + slugHint;
     return null;
   }
 }
@@ -1096,13 +1113,13 @@ async function deleteActiveSpaceFromDetail() {
   if (typeof updateTitlebarSpace === 'function') updateTitlebarSpace();
 }
 
-function renderSpacesPanel() {
+function renderSpacesPanel(options = {}) {
   const container = document.getElementById('workspacesPanel');
   if (!container) return;
   const renderRev = ++_spacesPanelRenderRev;
   container.classList.add('spaces-sidebar-list');
   container.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px">Loading spaces...</div>';
-  loadSpaces().then(spaces => {
+  loadSpaces(options).then(spaces => {
     if (renderRev !== _spacesPanelRenderRev) return;
     spaces = Array.isArray(spaces) ? spaces.slice() : [];
     const query = (document.getElementById('workspaceSearch') || {}).value || '';

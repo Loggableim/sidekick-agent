@@ -55,8 +55,8 @@ class PolicyGate:
     # A reviewed-execution quorum is intentionally locked to the two routed
     # independent review roles and their expected distinct model families.
     _REQUIRED_REVIEW_MODELS = {
-        "review_a": ("glm-5.2", "glm-5"),
-        "review_b": ("kimi-k2.7-code", "kimi-k2"),
+        "review_a": (("glm-5.2",), "glm-5"),
+        "review_b": (("kimi-k2.7-code",), "kimi-k2"),
     }
     _APPROVING_REVIEW_DECISIONS = frozenset({"approve", "approved"})
     _NOVA_PROPOSAL_ID = re.compile(r"^nova-([0-9a-f]{64})$")
@@ -240,13 +240,13 @@ class PolicyGate:
         ):
             return False
         for role, (
-            expected_model,
+            expected_models,
             expected_family,
         ) in cls._REQUIRED_REVIEW_MODELS.items():
             checkpoint = checkpoints.get(role)
             if (
                 checkpoint is None
-                or checkpoint.model != expected_model
+                or checkpoint.model not in expected_models
                 or not cls._valid_checkpoint_evidence(checkpoint)
                 or not cls._has_positive_review_vote(checkpoint)
                 or (

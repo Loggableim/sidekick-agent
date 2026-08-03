@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterable, Mapping
 from .models import ModelRequest, ModelResponse
 from .router import ModelRouter, NoEligibleModel
 from .transport import ModelTransport, RetryableModelTransportError
-from .types import thaw_json_value
+from .types import ActionProposal, RequestedToolAction, thaw_json_value
 from .verifier import (
     DefaultReadOnlyVerifier,
     InvalidVerifierResult,
@@ -560,6 +560,99 @@ def _has_explicit_planner_conflict(*responses: ModelResponse) -> bool:
 class WorkflowOutcome:
     evidence: Mapping[str, list[Any]]
     decision: str
+    action_proposals: tuple[ActionProposal, ...] = ()
+
+
+_ACTION_PROPOSAL_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+_ACTION_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
+_ACTION_DECISIONS = frozenset({"approve", "approved"})
+_MAX_ACTION_PROPOSALS = 8
+_MAX_ACTION_EVIDENCE_REFS = 32
+
+
+def _extract_action_proposals(
+    response: ModelResponse,
+    *,
+    project_root: Path,
+    evidence_refs: set[str],
+) -> tuple[ActionProposal, ...]:
+    """Parse only an explicitly approved, bounded action list from the referee.
+
+    The model never supplies a workspace path: every proposal is bound to the
+    host-resolved project root. Invalid approved action data fails closed so a
+    run cannot report completion while silently dropping requested work.
+    """
+    if not isinstance(response, ModelResponse):
+        raise TypeError("action proposal response is invalid")
+    data = response.data
+    if not isinstance(data, Mapping):
+        return ()
+    decision = data.get("decision")
+    raw_actions = data.get("actions")
+    if not isinstance(raw_actions, list):
+        return ()
+    if not (isinstance(decision, str) and decision.strip().lower() in _ACTION_DECISIONS):
+        return ()
+    if len(raw_actions) > _MAX_ACTION_PROPOSALS:
+        raise ValueError("too many action proposals")
+    proposals: list[ActionProposal] = []
+    seen_ids: set[str] = set()
+    canonical_root = Path(project_root).expanduser().resolve()
+    for raw in raw_actions:
+        if not isinstance(raw, Mapping):
+            raise ValueError("action proposal is malformed")
+        required = {
+            "proposal_id", "name", "arguments", "category", "reversible",
+            "external", "cost_increasing", "evidence_refs", "use_worktree",
+        }
+        if set(raw) != required:
+            raise ValueError("action proposal fields are invalid")
+        proposal_id = raw["proposal_id"]
+        name = raw["name"]
+        if (
+            not isinstance(proposal_id, str)
+            or _ACTION_PROPOSAL_ID_RE.fullmatch(proposal_id) is None
+            or proposal_id in seen_ids
+            or not isinstance(name, str)
+            or _ACTION_NAME_RE.fullmatch(name) is None
+        ):
+            raise ValueError("action proposal identity is invalid")
+        arguments = raw["arguments"]
+        refs = raw["evidence_refs"]
+        if (
+            not isinstance(arguments, Mapping)
+            or not isinstance(refs, list)
+            or not 1 <= len(refs) <= _MAX_ACTION_EVIDENCE_REFS
+            or any(not isinstance(ref, str) or not ref.strip() for ref in refs)
+            or not set(refs) <= evidence_refs
+            or type(raw["reversible"]) is not bool
+            or type(raw["external"]) is not bool
+            or type(raw["cost_increasing"]) is not bool
+            or raw["use_worktree"] is not True
+        ):
+            raise ValueError("action proposal evidence or capabilities are invalid")
+        try:
+            requested = RequestedToolAction(
+                name=name,
+                workspace=canonical_root,
+                arguments=arguments,
+                use_worktree=True,
+            )
+            proposals.append(
+                ActionProposal(
+                    proposal_id=proposal_id,
+                    category=raw["category"],
+                    reversible=raw["reversible"],
+                    external=raw["external"],
+                    cost_increasing=raw["cost_increasing"],
+                    evidence_refs=tuple(refs),
+                    requested_action=requested,
+                )
+            )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("action proposal payload is invalid") from exc
+        seen_ids.add(proposal_id)
+    return tuple(proposals)
 
 
 EventEmitter = Callable[[str, Mapping[str, Any]], None]
@@ -858,7 +951,25 @@ class CodingTeamWorkflow:
             record_response,
         )
         self._record("referee", referee, "referee", board, evidence)
-        return WorkflowOutcome(evidence=evidence, decision=referee.data["decision"])
+        known_evidence = {
+            str(reference)
+            for references in evidence.values()
+            for reference in references
+            if isinstance(reference, str)
+        }
+        try:
+            action_proposals = _extract_action_proposals(
+                referee,
+                project_root=project_root,
+                evidence_refs=known_evidence,
+            )
+        except (TypeError, ValueError) as exc:
+            raise WorkflowPaused("invalid_action_proposal", role="referee") from exc
+        return WorkflowOutcome(
+            evidence=evidence,
+            decision=referee.data["decision"],
+            action_proposals=action_proposals,
+        )
 
     def _prompt(self, role: str, base: str) -> str:
         if self.pack_id == "coding-team":

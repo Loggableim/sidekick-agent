@@ -1868,6 +1868,7 @@ async function _syncGameModeStateFromServer() {
 (async()=>{
   // Load send key preference
   let _bootSettings={};
+  const _bootSettingsReady = (async()=>{
   try{
     // Settings can be slow during startup on cold/backlogged instances.
     const s=await _bootTimeout(api('/api/settings'),20000,'settings');
@@ -1946,6 +1947,8 @@ async function _syncGameModeStateFromServer() {
     if(typeof syncGameModeButton==='function')syncGameModeButton();
     if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('sidekick-tts-enabled')==='true');
   }
+  })();
+  void _bootSettingsReady;
   // Non-blocking update check (fire-and-forget, once per tab session)
   // ?test_updates=1 in URL forces banner display for testing (bypasses sessionStorage guards)
   const _testUpdates=new URLSearchParams(location.search).get('test_updates')==='1';
@@ -1956,18 +1959,33 @@ async function _syncGameModeStateFromServer() {
   if (typeof renderSessionListLoadingState === 'function') {
     try { renderSessionListLoadingState('Loading conversations...'); } catch (_) {}
   }
-  // Fetch active profile. This endpoint is useful metadata, but must never
-  // block first paint/session rendering if the backend is busy.
-  try{
-    const p=await _bootTimeout(api('/api/profile/active'),20000,'active profile');
+  // Start independent boot metadata requests together. The profile result is
+  // still awaited before session-list rendering, while workspace and space
+  // config warm in parallel without changing their admission semantics.
+  try {
+    const _bootEarlySessionId = (typeof _sessionIdFromLocation === 'function') ? _sessionIdFromLocation() : null;
+    if (_bootEarlySessionId) _setConversationRestorePlaceholder('Restoring conversation...');
+  } catch (_) {}
+  const _profileReady = _bootTimeout(api('/api/profile/active'),20000,'active profile');
+  const _workspaceReady = _bootTimeout(loadWorkspaceList(),10000,'workspace list').catch((e)=>{
+    console.warn('[boot] workspace list unavailable, continuing', e);
+  });
+  const _spaceConfigReady = _bootTimeout(_loadActiveSpaceConfig(),8000,'space config').catch((e)=>{
+    window._activeSpaceConfig=null;
+    console.warn('[boot] active space config unavailable, continuing', e);
+  });
+  // Fetch active profile as a background decoration.  Session-list and
+  // conversation restore must never wait for this metadata endpoint.
+  void _profileReady.then((p)=>{
     S.activeProfile=p.name||'default';
-  }catch(e){
+    const profileLabel=$('profileChipLabel');
+    if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
+  }).catch((e)=>{
     S.activeProfile='default';
+    const profileLabel=$('profileChipLabel');
+    if(profileLabel) profileLabel.textContent='default';
     console.warn('[boot] active profile unavailable, using default', e);
-  }
-  // Update profile chip label immediately
-  const profileLabel=$('profileChipLabel');
-  if(profileLabel) profileLabel.textContent=S.activeProfile||'default';
+  });
   // Fetch available models without blocking session restore. The static HTML
   // options are enough for first paint; the dynamic provider list can settle
   // after the saved session is visible.
@@ -1991,23 +2009,13 @@ async function _syncGameModeStateFromServer() {
     if(S.session) syncTopbar();
   }).catch(()=>{});
   window._modelDropdownReady=_modelDropdownReady;
-  // Pre-load workspace list so sidebar name is correct from first render.
-  // Render the session list before restoring the saved conversation so a stale
-  // saved-session/client-side boot error cannot leave the sidebar empty forever.
-  try {
-    const _bootEarlySessionId = (typeof _sessionIdFromLocation === 'function') ? _sessionIdFromLocation() : null;
-    if (_bootEarlySessionId) _setConversationRestorePlaceholder('Restoring conversation...');
-  } catch (_) {}
-  await _bootTimeout(loadWorkspaceList(),10000,'workspace list').catch((e)=>{
-    console.warn('[boot] workspace list unavailable, continuing', e);
-  });
-  // Load the active space's config (project_dir, default model, etc.) so
-  // newSession() sees the correct spaceDefaultPath right from the first
-  // new chat, not just after an explicit space switch (#spaces-default-dir).
-  await _bootTimeout(_loadActiveSpaceConfig(),8000,'space config').catch((e)=>{
-    window._activeSpaceConfig=null;
-    console.warn('[boot] active space config unavailable, continuing', e);
-  });
+  // Workspace and space config were started alongside the profile request above.
+  // Do not gate the first conversation paint on either metadata request. The
+  // sidebar and saved session can restore from their own APIs immediately;
+  // these promises continue warming the selectors/config in the background.
+  // Any path that creates a new session still awaits _spaceConfigReady below.
+  void _workspaceReady;
+  void _spaceConfigReady;
   void _bootTimeout(loadOnboardingWizard(),8000,'onboarding').catch((e)=>{
     if(window && window.localStorage && window.localStorage.getItem('sidekick-debug-boot')==='1'){
       console.debug('[boot] onboarding unavailable, continuing', e);
@@ -2033,17 +2041,35 @@ async function _syncGameModeStateFromServer() {
   }
   let _bootSavedSessionLoadPromise = null;
   let _bootMissingSession = false;
+  // A URL session is authoritative and already identifies the conversation.
+  // Start its metadata restore immediately; the sidebar list is secondary
+  // decoration and can hydrate in parallel. This removes the cold-start gap
+  // where "Restoring conversation..." waited for /api/sessions first.
   if (urlSession && saved && !_bootRestoreCanceled()) {
+    _bootSavedSessionLoadPromise = loadSession(saved, {
+      expectedSpace: urlWorkspace || '',
+      suppressMissingSessionMessage: true,
+      deferTranscript: true,
+    }).catch((e) => {
+      if (!_bootRestoreCanceled()) throw e;
+    });
   }
-  await renderSessionList();
+  // Keep the first paint independent from the optional CLI/agent sidebar.
+  // That database can be multi-gigabyte and is hydrated after the active
+  // conversation is visible.
+  await renderSessionList({deferProjects:true,deferCli:true});
   _initResizePanels();
   const _bootSavedSessionExists = !!(saved && Array.isArray(_allSessions) && _allSessions.some((s) => s && s.session_id === saved));
   if (urlSession && saved && !_bootRestoreCanceled()) {
-    if (_bootSavedSessionExists) {
-      _bootSavedSessionLoadPromise = loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch((e) => {
+    if (!_bootSavedSessionLoadPromise && _bootSavedSessionExists) {
+      _bootSavedSessionLoadPromise = loadSession(saved, {
+        expectedSpace: urlWorkspace || '',
+        suppressMissingSessionMessage: true,
+        deferTranscript: true,
+      }).catch((e) => {
         if (!_bootRestoreCanceled()) throw e;
       });
-    } else {
+    } else if (!_bootSavedSessionLoadPromise && !_bootSavedSessionExists) {
       _bootMissingSession = true;
     }
   }
@@ -2069,20 +2095,23 @@ async function _syncGameModeStateFromServer() {
         return;
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
+      let _bootDeferredTranscript = false;
       if (_bootSavedSessionLoadPromise) {
         const _bootLoadResult = await _bootSavedSessionLoadPromise;
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
+        _bootDeferredTranscript = true;
       }
       else if(!_bootRestoreCanceled() && !_bootMissingSession) {
         const _bootLoadResult = await loadSession(saved);
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
-      if (saved && !_bootMissingSession && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
+      if (saved && !_bootMissingSession && !_bootDeferredTranscript && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
         const _bootRetryResult = await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
         _bootMissingSession = _bootMissingSession || !!(_bootRetryResult && _bootRetryResult.missingSession);
       }
       if (_bootMissingSession && urlSession && saved) {
+        await _spaceConfigReady;
         if (typeof newSession === 'function') {
           S._bootReady=true;
           await newSession();
@@ -2129,7 +2158,15 @@ async function _syncGameModeStateFromServer() {
       // Sync file tree panel state in chat layout
       _applyFileTreePanelPref();
       S._bootReady=true;
-      syncTopbar();syncWorkspacePanelState();await renderSessionList();if(typeof startGatewaySSE==='function')startGatewaySSE();await checkInflightOnBoot(saved);return;}
+       syncTopbar();syncWorkspacePanelState();
+       // The boot list was already fetched with deferProjects:true above. A
+       // second synchronous renderSessionList() here made conversation restore
+       // wait for another /api/sessions round-trip (and, on a cold cache, a
+       // second session-index scan). Repaint the current cache and let the
+       // deferred project hydration update it when ready.
+       if(typeof renderSessionListFromCache==='function') renderSessionListFromCache();
+       if(typeof startGatewaySSE==='function')startGatewaySSE();
+       await checkInflightOnBoot(saved);return;}
     catch(e){if(!_bootRestoreCanceled()) localStorage.removeItem('sidekick-webui-session');}
   }
   // no saved session - show empty state, wait for user to hit +

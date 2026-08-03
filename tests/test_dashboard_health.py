@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import subprocess
+import tempfile
 import sys
 import warnings
 import pytest
@@ -11,6 +12,30 @@ from starlette.requests import Request
 
 TestClient = pytest.importorskip("fastapi.testclient").TestClient
 
+def _run_node_script(script):
+    """Run an inline-browser harness from a file to avoid Windows argv limits."""
+    temp_dir = Path(".test-tmp")
+    temp_dir.mkdir(exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".cjs", dir=temp_dir, delete=False
+    )
+    script_path = Path(handle.name)
+    try:
+        handle.write(script)
+        handle.close()
+        return subprocess.run(
+            ["node", str(script_path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+    finally:
+        try:
+            script_path.unlink()
+        except OSError:
+            pass
 
 def test_dashboard_health_endpoint_returns_readiness(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
@@ -36,14 +61,72 @@ def test_nova_presence_empty_state_contract_keeps_the_composer_and_other_spaces_
 
     assert 'id="genericEmptyStateContent"' in index_html
     assert 'id="novaPresenceCard"' in index_html
+    assert 'id="novaPresenceReleaseSlot"' in index_html
     assert 'id="composerWrap"' in index_html
     assert "function syncNovaPresenceCard" in ui_js
+    assert "novaPresenceSupervision" in index_html
+    assert "payload&&payload.supervision" in ui_js
+    assert "supervision.mind_watchdog" in ui_js
+    assert "Mind ${watchdogStatus}" in ui_js
+    # Every public blocker emitted by the read-only presence projection must
+    # remain visible in the entity card; silently filtering a known blocker
+    # makes a paused YOLO Space look healthy.
+    for blocker_code in (
+        "model_chain_exhausted",
+        "model_schema_invalid",
+        "deployment_unverified",
+        "deployment_budget_exhausted",
+        "verification_not_verified",
+        "governance_changed",
+        "root_changed",
+        "space_deleted",
+    ):
+        assert f"{blocker_code}:" in ui_js
     assert "api('/api/nova/presence-card',{logError:false})" in ui_js
+    assert "/api/swarm/supervisor/release-slot" in ui_js
     assert "activeSpace === 'nova'" in ui_js
+    assert "_NOVA_CARD_STATE_LABELS" in ui_js
+    assert "_novaCardStateLabel(focusState)" in ui_js
+    assert "item.dataset.state=row.state" in ui_js
+    assert "payload&&payload.unread_events" in ui_js
+    assert "novaPresenceUnread" in index_html
+    assert "novaPresenceOffline" in index_html
+    assert "_renderNovaPresenceCard({offline:true})" in ui_js
     assert "window.syncNovaPresenceCard = syncNovaPresenceCard" in ui_js
     assert "syncNovaPresenceCard({visible:false})" in spaces_js
     assert ".nova-presence-card{" in style_css
     assert "#genericEmptyStateContent[hidden],.nova-presence-card[hidden]{display:none!important;}" in style_css
+
+
+def test_nova_presence_uses_a_small_live_status_instead_of_announcing_the_whole_card():
+    """Presence refreshes must not make screen readers reread every feed row."""
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    card_start = index_html.index('<section class="nova-presence-card"')
+    card_end = index_html.index("</section>", card_start)
+    card_markup = index_html[card_start:card_end]
+
+    assert 'id="novaPresenceState" role="status" aria-live="polite" aria-atomic="true"' in card_markup
+    assert 'class="nova-presence-card" id="novaPresenceCard" aria-labelledby="novaPresenceName" aria-live=' not in card_markup
+
+
+def test_nova_presence_surfaces_ticker_watchdog_degradation():
+    """The entity card must expose a stale/recovery-exhausted host ticker."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm=require('node:vm'); const elements={};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePending','novaPresenceUnread','novaPresenceOffline','novaPresenceSlot','novaPresenceReleaseSlot','novaManagedSpaces','novaAuditedResults','novaBlockers','novaActivity','novaTickerEvents','novaUnreadEvents']) elements[id]=element();
+const context={window:{_activeSpace:'nova'},document:{createElement:()=>element()},$:id=>elements[id]||null,Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+context._renderNovaPresenceCard({state:'available',managed_spaces:[],supervision:{running:false,ticker_watchdog:{status:'restart_escalated'}}});
+if(!elements.novaPresenceSupervision.textContent.includes('Ticker recovery exhausted')) throw new Error('ticker recovery status was hidden: '+elements.novaPresenceSupervision.textContent);
+if(elements.novaPresenceSupervision.dataset.state!=='degraded') throw new Error('ticker degradation did not set degraded state');
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_nova_presence_refetches_after_a_stale_read_when_returning_to_nova():
@@ -69,8 +152,8 @@ function element() {
 }
 for (const id of [
   'emptyState', 'genericEmptyStateContent', 'novaPresenceCard',
-  'novaPresenceState', 'novaPresenceFocus', 'novaManagedSpaces',
-  'novaAuditedResults', 'novaBlockers', 'novaActivity',
+  'novaPresenceState', 'novaPresenceFocus', 'novaPresenceSupervision', 'novaPresencePending', 'novaManagedSpaces',
+  'novaAuditedResults', 'novaBlockers', 'novaActivity', 'novaTickerEvents',
 ]) elements[id] = element();
 
 const pending = [];
@@ -80,6 +163,7 @@ const context = {
   document: {createElement: () => element()},
   $: (id) => elements[id] || null,
   api: (path, options) => {
+    if (path === '/api/nova/space-inventory') return Promise.resolve({spaces:[]});
     if (path !== '/api/nova/presence-card' || !options || options.logError !== false) {
       throw new Error('unexpected presence read');
     }
@@ -111,7 +195,7 @@ async function settle() {
 
   pending.shift()({
     state: 'thinking',
-    focus: {kind: 'supervision', space: 'stale', state: 'active'},
+        focus: {kind: 'supervision', space: 'stale', state: 'active'},
   });
   await settle();
 
@@ -122,11 +206,13 @@ async function settle() {
   if (reads !== 2 || pending.length !== 1) {
     throw new Error('the stale completion cleared the active fresh presence read');
   }
-  pending.shift()({
-    state: 'thinking',
-    focus: {kind: 'supervision', space: 'beta', state: 'active'},
+      pending.shift()({
+        state: 'thinking',
+  pending_actions: 2,
+  pending_signals: 2,
+        focus: {kind: 'supervision', space: 'beta', state: 'active'},
     managed_spaces: [
-      {space: 'beta', state: 'active'},
+      {space: 'beta', state: 'active', pending_actions: 1, pending_signals: 4},
       {space: 'alpha', state: 'idle'},
       {space: 'gamma', state: 'paused'},
     ],
@@ -146,19 +232,25 @@ async function settle() {
   if (elements.novaPresenceCard.hidden || !elements.genericEmptyStateContent.hidden) {
     throw new Error('Nova card visibility was not restored after the fresh read');
   }
+  if (elements.novaPresencePending.textContent !== '2 offene Folgeaktionen aus dem Ticker.') {
+    throw new Error(`pending action count was not rendered: ${elements.novaPresencePending.textContent}`);
+  }
   const managedRows = elements.novaManagedSpaces.children.map((item) =>
-    item.children.map((child) => child.textContent).join(' · ')
+    item.children.map((child) => child.textContent).join(' Â· ')
   );
   const beta = managedRows.find((row) => row.startsWith('Beta')) || '';
   const alpha = managedRows.find((row) => row.startsWith('Alpha')) || '';
   const gamma = managedRows.find((row) => row.startsWith('Gamma')) || '';
-  if (!beta.includes('Änderung erkannt.') || beta.includes('not-for-change')) {
+  if (!beta.includes('1 Folgeaktion') || !beta.includes('4 Signale')) {
+    throw new Error(`pending work was not attributed to beta: ${beta}`);
+  }
+  if (!beta.includes('\u00c4nderung erkannt.') || beta.includes('not-for-change')) {
     throw new Error(`changed marker was not safely rendered for beta: ${beta}`);
   }
-  if (!alpha.includes('Stand geprüft. Nix Neues.') || !alpha.includes('2026-07-29 20:30:00 UTC')) {
+  if (!alpha.includes('Stand gepr\u00fcft. Nix Neues.') || !alpha.includes('2026-07-29 20:30:00 UTC')) {
     throw new Error(`unchanged marker/timestamp was not rendered for alpha: ${alpha}`);
   }
-  if (gamma.includes('__proto__') || gamma.includes('Änderung erkannt.') || gamma.includes('Stand geprüft. Nix Neues.')) {
+  if (gamma.includes('__proto__') || gamma.includes('\u00c4nderung erkannt.') || gamma.includes('Stand gepr\u00fcft. Nix Neues.')) {
     throw new Error(`unknown marker code leaked into gamma: ${gamma}`);
   }
 })().catch((error) => {
@@ -167,15 +259,131 @@ async function settle() {
 });
 """.replace("__PRESENCE_CODE__", json.dumps(presence_code))
 
-    result = subprocess.run(
-        ["node", "-e", node_program],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=15,
-    )
+    result = _run_node_script(node_program)
 
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_nova_presence_entity_feed_is_rendered_redacted_and_bounded():
+    """Durable resonance events appear in Nova's entity feed without raw data."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm = require('node:vm');
+const elements = {};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePending','novaPresenceUnread','novaPresenceOffline','novaPresenceSlot','novaPresenceReleaseSlot','novaUnreadEvents','novaManagedSpaces','novaAuditedResults','novaBlockers','novaActivity','novaTickerEvents']) elements[id]=element();
+const context={window:{_activeSpace:'nova'},document:{createElement:()=>element()},$:id=>elements[id]||null,Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+context._renderNovaPresenceCard({state:'available', managed_spaces:[{space:'aquarium-zentrum',state:'active'}], entity_feed:[
+  {event_id:'a'.repeat(64),space:'aquarium-zentrum',source:'ci',stage:'handled',status:'failed',reason:'ci_failed',at:'2026-08-02T17:00:00+00:00',secret:'TOKEN'},
+  {event_id:'b'.repeat(64),space:'../private',source:'bridge',stage:'handled',status:'failed',reason:'leak',at:'2026-08-02T17:01:00+00:00',path:'C:/secret'},
+  {event_id:'c'.repeat(64),space:'aquarium-zentrum',source:'ci',stage:'handled',status:'failed',reason:'bad reason',at:'2026-08-02T17:02:00+00:00'}
+]});
+const rows=elements.novaActivity.children.map(item=>item.children.map(child=>child.textContent).join(' | '));
+if(rows.length!==1 || !rows[0].includes('Aquarium Zentrum') || !rows[0].includes('ci_failed') || !rows[0].includes('Resonanz')) throw new Error('validated resonance event was not rendered: '+rows.join(' || '));
+if(rows.join(' ').includes('TOKEN')||rows.join(' ').includes('secret')||rows.join(' ').includes('private')||rows.join(' ').includes('bad reason')||rows.join(' ').includes('a'.repeat(64))) throw new Error('raw resonance data leaked into entity feed');
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+def test_nova_entity_browser_smoke_identity_managed_space_degraded_next_step_and_offline():
+    """Render the public Nova card contract entirely in a Node browser harness."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm=require('node:vm'); const elements={};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePolicy','novaPresenceOffline','novaManagedSpaces','novaBlockers','novaDecisionFeed','novaActivity','novaTickerEvents','novaUnreadEvents','novaAuditedResults','novaPresencePending','novaPresenceUnread','novaPresenceSlot','novaPresenceReleaseSlot']) elements[id]=element();
+const context={window:{_activeSpace:'nova'},document:{createElement:()=>element()},$:id=>elements[id]||null,Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+context._renderNovaPresenceCard({state:'available', managed_spaces:[{space:'aquarium-zentrum',state:'paused'}], focus:{kind:'supervision',space:'aquarium-zentrum',state:'paused'}, supervision:{running:true,consumer_interval_seconds:60,interval_seconds:60,lease:{state:'active',liveness:'unverified'},ticker_watchdog:{status:'healthy'}}, operational:{management_mode:'space_yolo_only',managed_space_count:1,ticker:'active',runtime_status:'degraded',paused_model_chain_spaces:['aquarium-zentrum'],next_step_code:'refresh_ollama_catalog'}, blockers:[{space:'aquarium-zentrum',code:'model_chain_exhausted'}], decision_feed:[{space:'aquarium-zentrum',event:'paused',reason:'model_chain_exhausted',at:'2026-08-03T10:00:00+00:00'},{space:'finanzjunkie',event:'blocked',reason:'leak'}]});
+const rows=id=>elements[id].children.map(item=>item.children.map(child=>child.textContent).join(' | ')).join(' || ');
+if(elements.novaPresenceState.textContent!=='available') throw new Error('Nova identity state missing');
+if(!rows('novaManagedSpaces').includes('Aquarium Zentrum')||rows('novaManagedSpaces').includes('Finanzjunkie')) throw new Error('managed Space boundary broken: '+rows('novaManagedSpaces'));
+if(elements.novaPresencePolicy.dataset.state!=='degraded'||!elements.novaPresencePolicy.textContent.includes('Naechster Schritt')) throw new Error('degraded next-step guidance missing: '+elements.novaPresencePolicy.textContent);
+if(!rows('novaDecisionFeed').includes('Aquarium Zentrum')||rows('novaDecisionFeed').includes('Finanzjunkie')) throw new Error('decision feed boundary broken: '+rows('novaDecisionFeed'));
+context._renderNovaPresenceCard({state:'available',managed_spaces:[{space:'aquarium-zentrum',state:'idle'}],operational:{runtime_status:'offline'}});
+if(elements.novaPresenceOffline.hidden!==false) throw new Error('successful offline projection was not shown');
+context._renderNovaPresenceCard({offline:true});
+if(elements.novaPresenceOffline.hidden!==false) throw new Error('offline state was not shown');
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_nova_presence_refreshes_while_nova_space_stays_open():
+    """A stale payload must not make Nova appear to manage another Space."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm=require('node:vm'); const elements={};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePending','novaPresenceUnread','novaPresenceOffline','novaPresenceSlot','novaPresenceReleaseSlot','novaUnreadEvents','novaManagedSpaces','novaAuditedResults','novaBlockers','novaActivity','novaTickerEvents']) elements[id]=element();
+const context={window:{_activeSpace:'nova'},document:{createElement:()=>element()},$:id=>elements[id]||null,Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+context._renderNovaPresenceCard({state:'available',focus:{kind:'supervision',space:'finanzjunkie',state:'active'},managed_spaces:[{space:'aquarium-zentrum',state:'active'}],release_slot:{run_id:'123e4567-e89b-12d3-a456-426614174000',space:'finanzjunkie'},audited_results:[{space:'finanzjunkie',result:'completed',at:'2026-08-02T17:00:00+00:00'},{space:'aquarium-zentrum',result:'completed',at:'2026-08-02T17:00:00+00:00'}],blockers:[{space:'finanzjunkie',code:'model_chain_exhausted'},{space:'aquarium-zentrum',code:'model_chain_exhausted'}],entity_feed:[{event_id:'a'.repeat(64),space:'finanzjunkie',source:'ci',stage:'handled',status:'failed',reason:'ci_failed',at:'2026-08-02T17:00:00+00:00'},{event_id:'b'.repeat(64),space:'aquarium-zentrum',source:'ci',stage:'handled',status:'failed',reason:'ci_failed',at:'2026-08-02T17:00:00+00:00'}],unread_events:[{event_id:'c'.repeat(64),space:'finanzjunkie',source:'ci',stage:'handled',status:'failed',reason:'ci_failed'},{event_id:'d'.repeat(64),space:'aquarium-zentrum',source:'ci',stage:'handled',status:'failed',reason:'ci_failed'}],ticker_events:[{event_id:'e'.repeat(64),space:'finanzjunkie',source:'ci',stage:'handled',status:'failed',reason:'ci_failed',at:'2026-08-02T17:00:00+00:00'},{event_id:'f'.repeat(64),space:'aquarium-zentrum',source:'ci',stage:'handled',status:'failed',reason:'ci_failed',at:'2026-08-02T17:00:00+00:00'}]});
+const rendered=Object.values(elements).flatMap((element)=>[element.textContent,...element.children.flatMap((item)=>item.children.map((child)=>child.textContent))]).join(' | ');
+if(rendered.includes('Finanzjunkie')) throw new Error('unattested Space leaked into the Nova entity card: '+rendered);
+if(!rendered.includes('Aquarium Zentrum')) throw new Error('attested managed Space was omitted: '+rendered);
+if(!elements.novaPresenceFocus.textContent.includes('halte den Kontext zusammen')) throw new Error('unattested focus was rendered: '+elements.novaPresenceFocus.textContent);
+if(!elements.novaPresenceReleaseSlot.hidden) throw new Error('unattested Space exposed a release action');
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+    """The read-only entity card must not freeze while the host ticker advances."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm = require('node:vm');
+const elements = {};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['emptyState','genericEmptyStateContent','novaPresenceCard','novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePending','novaPresenceReleaseSlot','novaManagedSpaces','novaAuditedResults','novaBlockers','novaActivity','novaTickerEvents']) elements[id]=element();
+let presenceReads=0, inventoryReads=0, nextTimer=1, timers=[];
+const context={window:{_activeSpace:'nova'},document:{createElement:()=>element()},$:id=>elements[id]||null,
+  api:(path)=>{if(path==='/api/nova/presence-card') presenceReads+=1; else if(path==='/api/nova/space-inventory') inventoryReads+=1; return Promise.resolve({state:'available',managed_spaces:[],ticker_events:[]});},
+  setTimeout:(fn)=>{timers.push(fn); return nextTimer++;}, clearTimeout:()=>{}, Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+(async()=>{
+  context.window.syncNovaPresenceCard({visible:true});
+  await Promise.resolve(); await new Promise((resolve)=>setImmediate(resolve)); await Promise.resolve();
+  if(presenceReads!==1||inventoryReads!==1||timers.length!==1) throw new Error(`initial card did not schedule one refresh: ${presenceReads}/${inventoryReads}/${timers.length}`);
+  const refresh=timers.shift(); refresh();
+  await Promise.resolve(); await new Promise((resolve)=>setImmediate(resolve)); await Promise.resolve();
+  if(presenceReads!==2) throw new Error(`ticker refresh did not refetch presence: ${presenceReads}`);
+})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_nova_presence_release_slot_requires_confirmation_and_posts_opaque_run_id():
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm = require('node:vm');
+const elements = {};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['emptyState','genericEmptyStateContent','novaPresenceCard','novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePending','novaPresenceReleaseSlot','novaManagedSpaces','novaAuditedResults','novaBlockers','novaActivity','novaTickerEvents']) elements[id]=element();
+let confirms=0, posts=[];
+const context={window:{_activeSpace:'nova',confirm:()=>{confirms++;return true}},document:{createElement:()=>element()},$:id=>elements[id]||null,api:(path,opts)=>{if(opts&&opts.method==='POST'){posts.push({path,body:opts.body});return Promise.resolve({ok:true})} return Promise.resolve({})},Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+(async()=>{context.window.syncNovaPresenceCard({visible:true}); await Promise.resolve(); const payload={state:'available',managed_spaces:[{space:'aquarium-zentrum',state:'paused'}],release_slot:{run_id:'123e4567-e89b-12d3-a456-426614174000',space:'aquarium-zentrum'}}; context._novaPresenceLoaded=false; context._renderNovaPresenceCard(payload); if(elements.novaPresenceReleaseSlot.hidden) throw new Error('release button stayed hidden'); await elements.novaPresenceReleaseSlot.onclick(); if(confirms!==1||posts.length!==1||posts[0].path!=='/api/swarm/supervisor/release-slot') throw new Error('release action did not confirm and post'); const parsed=JSON.parse(posts[0].body); if(Object.keys(parsed).join()!=='run_id') throw new Error('release posted more than opaque run_id');})().catch(e=>{console.error(e);process.exit(1)});
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
     assert result.returncode == 0, result.stderr or result.stdout
 
 
@@ -444,14 +652,14 @@ def test_agent_profile_creation_uses_utf8_subprocess_capture(monkeypatch):
     monkeypatch.setattr("web.api.helpers.bad", lambda _handler, msg, status=400: {"status": status, "payload": {"error": str(msg)}})
     monkeypatch.setattr(agents, "get_agent", lambda _slug: object())
     monkeypatch.setattr(agents, "update_agent", lambda _slug, _updates: None)
-    monkeypatch.setattr(routes, "read_body", lambda _handler: {"profile_name": "über-profile"})
+    monkeypatch.setattr(routes, "read_body", lambda _handler: {"profile_name": "Ã¼ber-profile"})
 
     captured = {}
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        return SimpleNamespace(returncode=0, stdout="Profil angelegt ✓", stderr="")
+        return SimpleNamespace(returncode=0, stdout="Profil angelegt âœ“", stderr="")
 
     monkeypatch.setattr(routes.subprocess, "run", fake_run)
 
@@ -462,8 +670,8 @@ def test_agent_profile_creation_uses_utf8_subprocess_capture(monkeypatch):
 
     assert response["status"] == 200
     assert response["payload"]["ok"] is True
-    assert response["payload"]["profile"] == "über-profile"
-    assert response["payload"]["output"] == "Profil angelegt ✓"
+    assert response["payload"]["profile"] == "Ã¼ber-profile"
+    assert response["payload"]["output"] == "Profil angelegt âœ“"
     assert captured["kwargs"]["capture_output"] is True
     assert captured["kwargs"]["text"] is True
     assert captured["kwargs"]["encoding"] == "utf-8"
@@ -492,7 +700,7 @@ def test_apply_patch_fallback_uses_utf8_subprocess_capture(monkeypatch):
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        return SimpleNamespace(returncode=0, stdout="Patch appliziert ✓", stderr="")
+        return SimpleNamespace(returncode=0, stdout="Patch appliziert âœ“", stderr="")
 
     monkeypatch.setattr(routes.subprocess, "run", fake_run)
 
@@ -504,7 +712,7 @@ def test_apply_patch_fallback_uses_utf8_subprocess_capture(monkeypatch):
     assert response["status"] == 200
     assert response["payload"]["ok"] is True
     assert response["payload"]["action"] == "accepted"
-    assert response["payload"]["result"] == "Patch appliziert ✓"
+    assert response["payload"]["result"] == "Patch appliziert âœ“"
     assert captured["kwargs"]["capture_output"] is True
     assert captured["kwargs"]["text"] is True
     assert captured["kwargs"]["encoding"] == "utf-8"
@@ -622,6 +830,86 @@ def test_sessions_endpoint_default_limit_surfaces_legacy_history(monkeypatch, tm
     assert payload["limit"] == 200
     assert len(payload["sessions"]) == 96
     assert payload["total"] == 96
+
+
+def test_sessions_endpoint_defer_cli_skips_state_db_scan_for_first_paint(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    monkeypatch.setattr(
+        "web.api.routes.load_settings",
+        lambda: {"show_cli_sessions": True, "api_redact_enabled": True},
+    )
+    monkeypatch.setattr(
+        "web.api.routes.get_cli_sessions",
+        lambda: (_ for _ in ()).throw(AssertionError("deferred sidebar must not scan state.db")),
+    )
+
+    client = TestClient(web_server.app)
+    response = client.get(
+        "/api/sessions?fields=sidebar&defer_cli=1",
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["cli_pending"] is True
+
+
+def test_sessions_endpoint_startup_fallback_is_capped_and_projected(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    class _FakeSessionDB:
+        requested_limits = []
+
+        def __init__(self, *args, **kwargs):
+            self._conn = self
+
+        def list_sessions(self, limit=0, offset=0, **kwargs):
+            self.requested_limits.append(limit)
+            return [
+                {
+                    "session_id": f"s-{i}",
+                    "title": f"Chat {i}",
+                    "workspace": "default",
+                    "updated_at": i,
+                    "large_payload": "x" * 10000,
+                }
+                for i in range(96)
+            ]
+
+        def execute(self, query):
+            class _Cursor:
+                def fetchone(self_inner):
+                    return (96,)
+
+            return _Cursor()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("runtime._compat.shim_state.SessionDB", _FakeSessionDB)
+    client = TestClient(web_server.app)
+    response = client.get(
+        "/api/sessions?fields=sidebar&defer_cli=1&startup=1",
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["sessions"]) == 10
+    assert all("large_payload" not in row for row in payload["sessions"])
+    assert _FakeSessionDB.requested_limits == [10]
+
+
+def test_session_list_boot_resolves_space_before_unscoped_fallback():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+
+    assert "new URLSearchParams(window.location.search || '').get('workspace')" in sessions_js
+    assert "localStorage.getItem('sidekick-active-workspace')" in sessions_js
+    assert "sessionParams.set('startup', '1')" in sessions_js
 
 
 def test_sessions_endpoint_uses_space_index_when_workspace_is_active(monkeypatch, tmp_path):
@@ -1623,7 +1911,7 @@ def test_goal_command_sends_workspace_slug_for_space_sessions():
 def test_switch_kanban_board_does_not_restart_polling_twice():
     panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
     start = panels_js.index("async function switchKanbanBoard(slug){")
-    end = panels_js.index("// ── Create / rename / archive board modals ─", start)
+    end = panels_js.index("// \u2500\u2500 Create / rename / archive board modals", start)
     body = panels_js[start:end]
 
     assert body.count("_kanbanStartPolling();") == 0
@@ -2010,13 +2298,13 @@ def test_settings_navigation_and_locale_labels_are_i18n_driven():
     assert 'data-i18n="settings_subagents_label"' in index_html
 
     assert "settings_section_switcher_label: 'Settings section'" in i18n_js
-    assert "settings_section_switcher_label: 'Bereich auswählen'" in i18n_js
+    assert "settings_section_switcher_label: 'Bereich auswÃ¤hlen'" in i18n_js
     assert "settings_section_switcher_providers: 'Providers'" in i18n_js
     assert "settings_section_switcher_providers: 'Anbieter'" in i18n_js
     assert "plugins_section_meta: 'Installed apps and plugin settings. Gmail can be connected per space here.'" in i18n_js
     assert "plugins_section_meta: 'Installierte Apps und Plugin-Einstellungen. Gmail kann hier pro Space verbunden werden.'" in i18n_js
     assert "settings_dashboard_mode_desc: 'Show a nav-rail link when the official sidekick dashboard is reachable. Overrides are restricted to loopback URLs.'" in i18n_js
-    assert "settings_dashboard_mode_desc: 'Zeige einen Link in der Navigationsleiste an, wenn das offizielle Sidekick-Dashboard erreichbar ist. Überschreibungen sind auf Loopback-URLs beschränkt.'" in i18n_js
+    assert "settings_dashboard_mode_desc: 'Zeige einen Link in der Navigationsleiste an, wenn das offizielle Sidekick-Dashboard erreichbar ist. Ãœberschreibungen sind auf Loopback-URLs beschrÃ¤nkt.'" in i18n_js
     assert "settings_tab_appearance: 'Darstellung'" in i18n_js
     assert "settings_tab_conversation: 'Konversation'" in i18n_js
     assert "settings_tab_preferences: 'Einstellungen'" in i18n_js
@@ -2254,11 +2542,11 @@ def test_websearch_toggles_expose_pressed_state():
     browser_js = Path("web/static/browser.js").read_text(encoding="utf-8")
 
     assert 'class="websearch-mode-btn is-active" data-mode="quick"' in index_html
-    assert 'aria-pressed="true">⚡ Quick Search</button>' in index_html
+    assert 'aria-pressed="true">\u26a1 Quick Search</button>' in index_html
     assert 'class="websearch-mode-btn" data-mode="deep"' in index_html
-    assert 'aria-pressed="false">🧠 Deep Research</button>' in index_html
+    assert 'aria-pressed="false">\U0001f9e0 Deep Research</button>' in index_html
     assert 'id="websearchSplitBtn"' in index_html
-    assert 'aria-pressed="false">□ Split</button>' in index_html
+    assert 'aria-pressed="false">\u25a1 Split</button>' in index_html
 
     mode_start = browser_js.index("function websearchToggleMode(mode)")
     history_start = browser_js.index("// ── History Sidebar Toggle", mode_start)
@@ -5108,6 +5396,18 @@ def test_space_dropdown_renders_cached_spaces_before_refresh():
     assert "requestAnimationFrame(runSelect)" in spaces_js
 
 
+def test_active_spaces_panel_propagates_force_options_to_loader():
+    spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
+    matches = list(re.finditer(r"function renderSpacesPanel(?:\(\)|\(options = \{\}\))", spaces_js))
+    assert len(matches) >= 2
+    active_start = matches[1].start()
+    active_end = spaces_js.find("\nfunction ", active_start + 1)
+    active_body = spaces_js[active_start:active_end if active_end != -1 else None]
+
+    assert "function renderSpacesPanel(options = {})" in active_body
+    assert "loadSpaces(options).then(spaces => {" in active_body
+
+
 def test_space_switch_does_not_block_on_space_config_load():
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
 
@@ -5279,3 +5579,215 @@ def test_browser_frame_image_uses_authenticated_fetch_blob():
     assert "if (!img.getAttribute('src')) img.style.visibility = 'hidden';" in browser_js
     assert "URL.createObjectURL(blob)" in browser_js
     assert "URL.revokeObjectURL(_browserFrameObjectUrl)" in browser_js
+
+
+def test_nova_supervision_ticker_schedules_one_redacted_daily_digest_per_space():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert "send_daily_digest" in server_py
+    assert "status_counts" in server_py
+    assert "get_all_spaces" in server_py
+    assert "datetime.now(timezone.utc).date().isoformat()" in server_py
+
+def test_nova_supervision_digest_includes_enrolled_spaces_without_runtime_rows():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert "status_by_target: dict[str, Any | None] = {}" in server_py
+    assert "status_by_target.setdefault(target_key, None)" in server_py
+    assert "if item is None:" in server_py
+
+def test_nova_supervision_consumer_runs_at_bounded_interval_and_fails_closed():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert "_NOVA_SUPERVISION_CONSUMER_INTERVAL_SECONDS = 60.0" in server_py
+    assert "consumer_now - last_consumer_at >= _NOVA_SUPERVISION_CONSUMER_INTERVAL_SECONDS" in server_py
+    assert "from nova.ticker_handler import consume_pending_events" in server_py
+    # Consumption is guarded by the existing exception boundary and cannot
+    # create an unbounded model/dispatch loop on every 60s host heartbeat.
+    assert "the next bounded interval can retry safely" in server_py
+
+def test_nova_supervision_ticker_emits_bounded_heartbeat_signals():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert "periodic_check" in server_py
+    assert "heartbeat:" in server_py
+    assert "15 * 60" in server_py
+
+def test_nova_supervision_ticker_detects_redacted_uncommitted_worktree_changes():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert '["git", "status", "--porcelain=v1", "--untracked-files=all"]' in server_py
+    assert 'event_id=f"git-worktree:{status_digest}"' in server_py
+    assert 'source="git"' in server_py
+    # The raw status must be reduced to a digest before entering the signal
+    # bridge; filenames and other worktree details must not be persisted.
+    assert 'status_digest = _bounded_nova_status_digest(status_text)' in server_py
+
+def test_nova_supervision_ticker_detects_space_kanban_changes_without_task_data():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert 'source="kanban"' in server_py
+    assert 'reason_code="kanban_change"' in server_py
+    assert 'kanban_stat.st_mtime_ns' in server_py
+    assert 'kanban_stat.st_size' in server_py
+
+def test_nova_supervision_ticker_closure_shares_host_bindings():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    assert "supervisor: Any | None = None" in server_py
+    assert "nonlocal supervisor, notification_sink" in server_py
+
+
+def test_nova_supervision_ticker_marks_watchdog_failure_for_reacquisition():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    # A dead heartbeat must not leave its expired generation looping forever.
+    # The loss signal only releases the current owner lease; it cannot preempt
+    # another live host generation.
+    marker = 'if not ticker_watchdog.healthy:'
+    assert marker in server_py
+    watchdog_block = server_py.split(marker, 1)[1].split('except Exception:', 1)[0]
+    assert 'lease_lost.set()' in watchdog_block
+
+def test_nova_supervision_ticker_retires_stale_runtime_after_lease_loss():
+    server_py = Path("cli/web_server.py").read_text(encoding="utf-8")
+    # A lost durable lease must also revoke the in-process bridge. Otherwise
+    # Git/Kanban/CI producers could keep feeding a runtime bound to an expired
+    # host while another dashboard has already acquired the lease.
+    assert "from nova.space_supervision_runtime import clear_active_runtime" in server_py
+    assert server_py.count("clear_active_runtime(runtime)") >= 2
+    assert '"last_error"] = "ticker_lease_lost"' in server_py
+
+def test_nova_global_toggle_is_presented_as_legacy_source_mode():
+    messages_js = Path("web/static/messages.js").read_text(encoding="utf-8")
+    index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    assert "Nova legacy source mode active" in messages_js
+    assert "Space YOLO enrollment and policy gates remain required" in messages_js
+    assert "Nova legacy source mode" in index_html
+    assert "policy and boundaries are bypassed" not in messages_js
+
+def test_swarm_panel_exposes_human_only_supervisor_slot_release():
+    swarm_js = Path("web/static/swarm.js").read_text(encoding="utf-8")
+    assert "data-swarm-action=\"abandon\"" in swarm_js
+    assert "/abandon" in swarm_js
+    assert "nova-space-supervisor" in swarm_js
+    assert "human" in swarm_js.lower()
+
+def test_boot_starts_session_restore_before_nonessential_metadata_finishes():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    restore_start = boot_js.index("  await renderSessionList();", boot_js.index("const _bootRestoreEpoch"))
+    # Cold-start conversation restore must not wait for workspace/space metadata.
+    assert "await _workspaceReady" not in boot_js[:restore_start]
+    assert "await _spaceConfigReady" not in boot_js[:restore_start]
+    assert "void _workspaceReady;" in boot_js
+    assert "void _spaceConfigReady;" in boot_js
+
+
+def test_boot_does_not_gate_session_restore_on_settings_or_game_mode():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    restore_start = boot_js.index("  await renderSessionList();", boot_js.index("const _bootRestoreEpoch"))
+    # Settings and game-mode decoration must be launched without gating restore.
+    assert "const _bootSettingsReady = (async()=>{" in boot_js
+    assert "void _bootSettingsReady;" in boot_js[:restore_start]
+
+def test_boot_defers_project_hydration_until_after_session_restore():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    restore_start = boot_js.index("  await renderSessionList({deferProjects:true,deferCli:true});", boot_js.index("const _bootRestoreEpoch"))
+    assert restore_start > 0
+
+
+def test_boot_defers_expensive_cli_sidebar_hydration_until_after_restore():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+    restore_start = boot_js.index("const _bootRestoreEpoch")
+    restore_end = boot_js.index("// Workspace panel restore happens AFTER loadSession", restore_start)
+    restore_block = boot_js[restore_start:restore_end]
+    assert "renderSessionList({deferProjects:true,deferCli:true})" in restore_block
+    assert "sessionParams.set('defer_cli', '1')" in sessions_js
+    assert "cli_pending" in sessions_js
+    assert "S._bootReady" in sessions_js
+
+
+def test_sessions_endpoint_can_skip_cli_aggregation_for_first_sidebar_paint():
+    routes_py = Path("web/api/routes.py").read_text(encoding="utf-8")
+    assert "defer_cli_raw" in routes_py
+    assert "cli_pending" in routes_py
+    assert "not show_cli_sessions or defer_cli" in routes_py
+
+def test_session_restore_renders_metadata_shell_before_slow_message_hydration():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+    assert "const messageLoad = _ensureMessagesLoaded(sid, loadAbortController.signal);" in sessions_js
+    assert "renderMessages({preserveScroll:true});" in sessions_js
+    assert "await messageLoad;" in sessions_js
+    assert "const deferTranscript = options.deferTranscript === true;" in sessions_js
+    assert "if (deferTranscript) deferredTranscriptLoad = messageLoad;" in sessions_js
+
+
+def test_session_restore_does_not_wait_for_space_hydration():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+    switch_start = sessions_js.index(
+        "if (loadedSessionSpace && typeof _activeSpace !== 'undefined'"
+    )
+    switch_end = sessions_js.index(
+        "// Stale response? A newer loadSession() call has already started",
+        switch_start,
+    )
+    switch_body = sessions_js[switch_start:switch_end]
+
+    assert "const spaceHydration = [];" in switch_body
+    assert "void Promise.all(spaceHydration).then" in switch_body
+    assert "await _loadActiveSpaceConfig()" not in switch_body
+    assert "await loadSpaces()" not in switch_body
+
+
+def test_boot_starts_url_session_restore_before_session_list_finishes():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    restore_block = boot_js[
+        boot_js.index("let _bootSavedSessionLoadPromise = null;"):
+        boot_js.index("// Workspace panel restore happens AFTER loadSession", boot_js.index("let _bootSavedSessionLoadPromise = null;"))
+    ]
+    assert "Start its metadata restore immediately" in restore_block
+    assert restore_block.index("_bootSavedSessionLoadPromise = loadSession(saved") < restore_block.index("await renderSessionList({deferProjects:true,deferCli:true})")
+    assert "suppressMissingSessionMessage: true" in restore_block
+    assert "deferTranscript: true" in restore_block
+
+
+def test_startup_never_rehydrates_unscoped_cli_sidebar_after_bounded_fallback():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+    assert "if (!activeSpace) return;" in sessions_js
+    assert "unscoped global scan" in sessions_js
+
+
+def test_boot_does_not_repeat_sidebar_fetch_after_saved_session_restore():
+    boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    restore_start = boot_js.index("let _bootSavedSessionLoadPromise = null;")
+    restore_end = boot_js.index("// no saved session - show empty state", restore_start)
+    restore_block = boot_js[restore_start:restore_end]
+    assert "deferProjects:true" in restore_block
+    assert "renderSessionListFromCache();" in restore_block
+    # The saved-session completion path must not issue a second blocking
+    # /api/sessions request after the deferred boot list has already started.
+    assert "syncTopbar();syncWorkspacePanelState();await renderSessionList();" not in restore_block
+
+
+def test_session_restore_uses_bounded_recent_tail_for_fast_render():
+    sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
+    assert "const _INITIAL_MSG_LIMIT = 12;" in sessions_js
+    assert "msg_before=${_oldestIdx}&msg_limit=${_INITIAL_MSG_LIMIT}" in sessions_js
+
+
+def test_message_window_tail_scanner_handles_nested_json_and_escaped_braces():
+    from web.api.models import (
+        _json_array_object_spans,
+        _json_array_object_spans_tail,
+        _json_top_level_array_bounds,
+    )
+
+    payload = {
+        "messages": [
+            {"role": "user", "content": "old { brace"},
+            {"role": "assistant", "content": "middle [array]"},
+            {"role": "user", "content": "new \\\"brace\\\""},
+        ]
+    }
+    text = json.dumps(payload)
+    start, end = _json_top_level_array_bounds(text, "messages")
+    full = _json_array_object_spans(text, start, end)
+    tail = _json_array_object_spans_tail(text, start, end, 2)
+    assert [json.loads(text[a:b])["content"] for a, b in tail] == [
+        "middle [array]",
+        'new \\"brace\\"',
+    ]
+    assert len(full) == 3

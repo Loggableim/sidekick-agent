@@ -1153,6 +1153,17 @@ def test_fix_round1_invalid_typed_operation_arguments_are_hard_denied(
     assert local.calls == github.calls == deployment.calls == []
 
 
+@pytest.mark.parametrize("path", [".swarm/deploy.json", ".swarm\\deploy.json", ".swarm/swarm.yaml"])
+def test_control_plane_files_cannot_be_rewritten_by_managed_run(path: str) -> None:
+    """Deployment policy must stay Space-owned, not become model-authored."""
+    api = _gateway_api()
+    request = api._build_request(
+        "local.write_file",
+        {"artifact_digest": "a" * 64, "path": path, "content": "{}"},
+    )
+    assert request is None
+
+
 def test_fix_round1_host_route_can_use_explicit_managed_gateway_handoff(
     tmp_path: Path,
 ) -> None:

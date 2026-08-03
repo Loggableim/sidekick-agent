@@ -28,8 +28,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import logging
+import math
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -239,6 +241,122 @@ def space_root_fingerprint(root: str | Path) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def nova_enrollment_readiness(
+    space: "Space",
+    *,
+    trusted_project_root: str | Path | None = None,
+) -> dict[str, object]:
+    """Describe whether a Space can be explicitly enrolled for Nova.
+
+    This is a pure, fail-closed diagnostic. It never mints an identity,
+    rewrites ``space.yaml`` or registers a workspace.
+    """
+    config = space.load_config()
+    reasons: list[str] = []
+    malformed_config = bool(config.get("_space_config_malformed"))
+    malformed_management = bool(config.get("_nova_management_malformed"))
+    malformed_audit = bool(config.get("_nova_management_audit_malformed"))
+    if malformed_config:
+        reasons.append("space_config_malformed")
+
+    space_id_persisted = bool(_normalized_space_id(config.get("space_id")))
+    if not space_id_persisted:
+        reasons.append("space_id_missing")
+
+    configured_project = str(config.get("project_dir") or "").strip()
+    project_dir_configured = bool(configured_project)
+    project_dir_available = False
+    configured_root: Path | None = None
+    if configured_project:
+        try:
+            configured_root = Path(configured_project).expanduser().resolve()
+            project_dir_available = configured_root.is_dir()
+        except (TypeError, OSError, RuntimeError):
+            project_dir_available = False
+    if not project_dir_configured:
+        reasons.append("project_dir_missing")
+    elif not project_dir_available:
+        reasons.append("project_dir_unavailable")
+
+    trusted_root_verified = False
+    if trusted_project_root is not None:
+        try:
+            candidate_root = Path(trusted_project_root).expanduser().resolve()
+            trusted_root_available = candidate_root.is_dir()
+        except (TypeError, OSError, RuntimeError):
+            candidate_root = None
+            trusted_root_available = False
+        if not trusted_root_available:
+            reasons.append("trusted_workspace_unavailable")
+        elif configured_root is None or candidate_root != configured_root:
+            reasons.append("trusted_root_mismatch")
+        else:
+            trusted_root_verified = True
+    else:
+        reasons.append("trusted_workspace_unavailable")
+
+    if malformed_management:
+        reasons.append("nova_management_malformed")
+    if malformed_audit:
+        reasons.append("management_audit_malformed")
+    elif not malformed_config and not malformed_management:
+        try:
+            _effective_audit_events(space, config)
+        except SpaceGovernanceError:
+            reasons.append("management_audit_invalid")
+            malformed_audit = True
+    management = _strict_nova_management_record(config.get("nova_management"))
+    if management is None and not malformed_management:
+        management = _normalized_nova_management(config.get("nova_management"))
+    yolo = bool(management and management["yolo"] is True)
+    enrolled = bool(management and management["enrolled"] is True)
+    if not yolo:
+        reasons.append("yolo_not_enabled")
+
+    core_ready = (
+        not malformed_config and not malformed_management and not malformed_audit
+        and space_id_persisted and project_dir_available and trusted_root_verified
+    )
+    can_enroll = core_ready and yolo
+    if can_enroll and not enrolled:
+        reasons.append("nova_enrollment_not_enabled")
+    reasons = list(dict.fromkeys(reasons))
+    next_steps = (
+        ("space_config_malformed", "repair_space_config"),
+        ("space_id_missing", "persist_space_id"),
+        ("project_dir_missing", "configure_project_dir"),
+        ("project_dir_unavailable", "restore_project_dir"),
+        ("trusted_workspace_unavailable", "register_trusted_workspace"),
+        ("trusted_root_mismatch", "repair_trusted_workspace_binding"),
+        ("nova_management_malformed", "repair_nova_management"),
+        ("management_audit_malformed", "repair_management_audit"),
+        ("management_audit_invalid", "repair_management_audit"),
+        ("yolo_not_enabled", "enable_space_yolo"),
+        ("nova_enrollment_not_enabled", "enroll_nova_management"),
+    )
+    next_step_code = next((step for reason, step in next_steps if reason in reasons), "none")
+    if enrolled and core_ready and yolo and not malformed_audit:
+        state = "enrolled"
+    elif can_enroll:
+        state = "ready"
+    else:
+        state = "blocked"
+    return {
+        "state": state,
+        "ready": can_enroll,
+        "space_id_persisted": space_id_persisted,
+        "project_dir_configured": project_dir_configured,
+        "project_dir_available": project_dir_available,
+        "trusted_root_verified": trusted_root_verified,
+        "yolo": yolo,
+        "enrolled": enrolled,
+        "governance_revision": int(management["revision"]) if management else 0,
+        "reason_codes": reasons,
+        "next_step_code": next_step_code,
+        "requires_explicit_write": bool(reasons),
+    }
+
+
 class AgentNotFound(SpaceError):
     """Agent does not exist in this space."""
 
@@ -355,7 +473,13 @@ class Space:
                 result["space_id"] = _normalized_space_id(raw.get("space_id"))
                 continue
             if key == "nova_management":
-                result["nova_management"] = _normalized_nova_management(raw.get("nova_management"))
+                raw_management = raw.get("nova_management")
+                result["nova_management"] = _normalized_nova_management(raw_management)
+                # Preserve evidence that a governance record was present but
+                # invalid. Reads remain side-effect free, while governance
+                # gates can fail closed instead of silently accepting defaults.
+                if raw_management is not None and _strict_nova_management_record(raw_management) is None:
+                    result["_nova_management_malformed"] = True
                 continue
             if key == "nova_management_audit":
                 audit = raw.get("nova_management_audit")
@@ -370,6 +494,11 @@ class Space:
             result["gmail"] = raw["gmail"]
         if "discord" in raw:
             result["discord"] = raw["discord"]
+        # A legacy JSONL audit beside a config without a YAML audit must stay
+        # visibly un-migrated on pure reads; the evidence is merged only by
+        # the audit reader/gate.
+        if "nova_management_audit" not in raw and _legacy_audit_path(self).exists():
+            result.pop("nova_management_audit", None)
         return result
 
     def save_config(self, config: dict, *, mint_space_id: bool = False) -> None:
@@ -404,7 +533,10 @@ class Space:
                 )
                 continue
             if key == "nova_management_audit":
-                out["nova_management_audit"] = config.get("nova_management_audit") if isinstance(config.get("nova_management_audit"), list) else []
+                # Do not materialize an empty audit list on ordinary writes;
+                # this keeps legacy read/migration paths side-effect free.
+                if key in config:
+                    out[key] = config.get(key) if isinstance(config.get(key), list) else []
                 continue
             if key in config:
                 out[key] = config[key]
@@ -727,7 +859,7 @@ def _prepare_audit_for_write(
 
 
 @contextmanager
-def _nova_management_lock(space: Space):
+def space_config_lock(space: Space):
     """Lock one Space's governance transaction across threads and processes.
 
     The lock file is deliberately opened only by the management write path.
@@ -735,9 +867,9 @@ def _nova_management_lock(space: Space):
     free.  A process-local re-entrant lock also protects platforms whose file
     locks do not reliably serialize two handles in the same process.
     """
-    with _NOVA_MANAGEMENT_THREAD_LOCK:
+    with _SPACE_CONFIG_THREAD_LOCK:
         space.root.mkdir(parents=True, exist_ok=True)
-        lock_path = space.root / ".nova-management.lock"
+        lock_path = space.root / ".space-config.lock"
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         locked = False
         try:
@@ -775,7 +907,7 @@ def update_nova_management(
     **kwargs,
 ) -> dict[str, bool | int]:
     """Apply one fully serialized governance and audit transaction."""
-    with _nova_management_lock(space):
+    with space_config_lock(space):
         return _update_nova_management(space, **kwargs)
 
 
@@ -942,8 +1074,9 @@ def _pause_managed_space_before_change(
 
 def list_nova_management_audit(space: Space) -> list[dict]:
     """Read append-only governance evidence without creating missing files."""
-    events = space.load_config().get("nova_management_audit", [])
-    return [dict(event) for event in events if isinstance(event, dict)]
+    config = space.load_config()
+    events = _effective_audit_events(space, config)
+    return [dict(event) for event in events]
 
 
 _SPACE_CACHE: list[Space] | None = None
@@ -1279,6 +1412,13 @@ def get_or_create_space(slug: str, name: str = "") -> Space:
     existing = get_space(slug)
     if existing:
         existing.memory_dir.mkdir(parents=True, exist_ok=True)
+        # Selecting an existing Space is an explicit lifecycle path. Repair
+        # only this legacy identity here; registry reads remain side-effect
+        # free and do not silently mutate every Space on the server.
+        with space_config_lock(existing):
+            config = existing.load_config()
+            if not _normalized_space_id(config.get("space_id")):
+                existing.save_config(config, mint_space_id=True)
         if existing.slug == DEFAULT_SPACE_SLUG:
             _seed_default_space_from_consciousness()
         return existing

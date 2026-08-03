@@ -81,6 +81,19 @@ function _clearConversationLoadingState(){
   if (inner) inner.removeAttribute('aria-busy');
 }
 
+// Metadata is enough to make the conversation shell usable while the first
+// transcript page is still being hydrated.  Do not leave the whole pane on a
+// blocking "Loading conversation..." card: the composer and session chrome
+// remain available while markdown/tool post-processing catches up.
+function _showConversationHydrationShell(sid){
+  const inner = $('msgInner');
+  if (!inner || !_conversationPaneShowsLoading()) return;
+  inner.removeAttribute('aria-busy');
+  inner.innerHTML = '<div class="conversation-hydration-shell" role="status" aria-live="polite">Loading transcript…</div>';
+  const emptyState = $('emptyState');
+  if (emptyState) emptyState.style.display = 'none';
+}
+
 function _scheduleConversationPaneRecovery(sid){
   if(!sid) return;
   for(const delay of [50, 300, 1200]){
@@ -703,6 +716,11 @@ if (document.readyState === 'loading') {
 
 async function loadSession(sid, options){
   options = options || {};
+  // The boot path can render the metadata shell immediately and hydrate the
+  // transcript in the background. Interactive session switches retain the
+  // historical await semantics so their callers still receive a fully loaded
+  // conversation when the promise resolves.
+  const deferTranscript = options.deferTranscript === true;
   const navigationEpoch = _markExplicitSessionNavigation(!!options.explicitNavigation);
   const isCurrentNavigationEpoch = () => Number(window.__sidekickSessionNavigationEpoch || 0) === navigationEpoch;
   const suppressMissingSessionMessage = !!options.suppressMissingSessionMessage;
@@ -787,7 +805,7 @@ async function loadSession(sid, options){
   let data;
   try {
     data = await _sessionApi(
-      `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0&msg_limit=${_INITIAL_MSG_LIMIT}`,
+      `/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`,
       _SESSION_LOAD_TIMEOUT_MS,
       loadAbortController.signal,
       suppressMissingSessionMessage ? {logError:false} : undefined
@@ -853,8 +871,26 @@ async function loadSession(sid, options){
   if (loadedSessionSpace && typeof _activeSpace !== 'undefined' && loadedSessionSpace !== _activeSpace) {
     _activeSpace = loadedSessionSpace;
     try { localStorage.setItem('sidekick-active-workspace', loadedSessionSpace); } catch (_) {}
-    try { if (typeof _loadActiveSpaceConfig === 'function') await _loadActiveSpaceConfig(); } catch (_) {}
-    try { if (typeof loadSpaces === 'function') await loadSpaces(); } catch (_) {}
+    // The session transcript is the primary boot surface. Do not hold it
+    // behind secondary Space metadata requests: a cold /api/spaces call can
+    // take several seconds (and its timeout is 20s), which otherwise leaves
+    // the conversation on "Restoring conversation..." despite the session
+    // metadata already being available.
+    const spaceHydration = [];
+    try {
+      if (typeof _loadActiveSpaceConfig === 'function') {
+        spaceHydration.push(Promise.resolve(_loadActiveSpaceConfig()).catch(() => {}));
+      }
+    } catch (_) {}
+    try {
+      if (typeof loadSpaces === 'function') {
+        spaceHydration.push(Promise.resolve(loadSpaces()).catch(() => {}));
+      }
+    } catch (_) {}
+    void Promise.all(spaceHydration).then(() => {
+      try { if (typeof updateTitlebarSpace === 'function') updateTitlebarSpace(); } catch (_) {}
+      try { if (typeof _refreshSidebarSelector === 'function') _refreshSidebarSelector(); } catch (_) {}
+    });
     try { if (typeof updateTitlebarSpace === 'function') updateTitlebarSpace(); } catch (_) {}
     try { if (typeof _refreshSidebarSelector === 'function') _refreshSidebarSelector(); } catch (_) {}
     // The load that triggered the space change is still the current load.
@@ -965,10 +1001,23 @@ async function loadSession(sid, options){
   }else{
     // Phase 2b: Idle session — load full messages lazily for rendering.
     // _ensureMessagesLoaded is idempotent; it skips if S.messages already populated.
+    let deferredTranscriptLoad = null;
     try {
       const reportedMessageCount = Number(S.session && S.session.message_count || initialMessageCount || 0);
       if (reportedMessageCount > 0) {
-        await _ensureMessagesLoaded(sid, loadAbortController.signal);
+        // Render the metadata-backed shell immediately. Full transcript
+        // hydration can be slow for tool-heavy chats; keeping the global
+        // restore placeholder until it completes makes the whole UI feel
+        // blocked even though the active Space and composer are ready.
+        const messageLoad = _ensureMessagesLoaded(sid, loadAbortController.signal);
+        try {
+          _showConversationHydrationShell(sid);
+          syncTopbar();
+          renderMessages({preserveScroll:true});
+          _clearConversationLoadingState();
+        } catch (_) {}
+        if (deferTranscript) deferredTranscriptLoad = messageLoad;
+        else await messageLoad;
       }
     } catch (e) {
       if (loadAbortController.signal.aborted || (e && e.name === 'AbortError')) {
@@ -990,6 +1039,23 @@ async function loadSession(sid, options){
       if (typeof showToast === 'function') showToast('Failed to load conversation messages', 3000, 'error');
       if (_loadingSessionId === sid) _loadingSessionId = null;
       return;
+    }
+    if (deferredTranscriptLoad) {
+      void deferredTranscriptLoad.then(() => {
+        if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
+        if (!S.session || S.session.session_id !== sid) return;
+        try {
+          updateQueueBadge(sid);
+          syncTopbar();
+          renderMessages({preserveScroll:true});
+          highlightCode();
+          _clearConversationLoadingState();
+        } catch (_) {}
+      }).catch(() => {
+        if (_loadingSessionId !== sid || !S.session || S.session.session_id !== sid) return;
+        const inner = $('msgInner');
+        if (inner) inner.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Failed to load messages. Try switching sessions or refreshing.</div>';
+      });
     }
     if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) {
       _abortStaleSessionLoad(sid, previousState);
@@ -1078,8 +1144,8 @@ async function loadSession(sid, options){
       // hydration fetch lands before the persisted transcript is ready, the
       // pane can stay visually empty until another interaction forces a reload.
       // Retry once shortly after the initial render to catch the completed save.
-      _forceConversationMessageRecovery(sid, initialMessageCount, loadAbortController.signal);
-      if (!S.messages.length && initialMessageCount > 0) {
+      if (!deferTranscript) _forceConversationMessageRecovery(sid, initialMessageCount, loadAbortController.signal);
+      if (!deferTranscript && !S.messages.length && initialMessageCount > 0) {
         setTimeout(() => {
           try {
             if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
@@ -1571,7 +1637,7 @@ let _messagesTruncated = false;
 // Keep this above a single exchange because tool-heavy agent sessions often
 // have many hidden `tool` rows at the tail; too small a raw window renders as
 // an almost-empty chat and can pin the viewport to the load-older sentinel.
-const _INITIAL_MSG_LIMIT = 24;
+const _INITIAL_MSG_LIMIT = 12;
 const _SESSION_MESSAGES_TIMEOUT_MS = 45000;
 
 async function _ensureMessagesLoaded(sid, signal) {
@@ -2324,6 +2390,7 @@ let _sessionListInFlight = false;  // prevent request pileup
 let _sessionListInFlightKey = '';
 let _sessionListInFlightPromise = null;
 let _sessionListAbortController = null;
+let _deferredCliHydrationTimer = null;
 
 function _apiWithTimeout(path, options, ms, label){
   const opts = options || {};
@@ -2355,6 +2422,9 @@ function _apiWithTimeout(path, options, ms, label){
 }
 
 async function renderSessionList(){
+  const options = arguments[0] || {};
+  const deferProjects = options.deferProjects === true;
+  const deferCli = options.deferCli === true;
   const spaceLoadKey = (typeof _activeSpaceLoadKey === 'function') ? _activeSpaceLoadKey() : '';
   const activeWorkspace = (typeof getActiveSpaceQuery === 'function')
     ? (new URLSearchParams(getActiveSpaceQuery().slice(1)).get('workspace') || '')
@@ -2381,10 +2451,16 @@ async function renderSessionList(){
     if (_showAllProfiles) sessionParams.set('all_profiles', '1');
     if (_showAllProfiles) projectParams.set('all_profiles', '1');
     if (_showArchived) sessionParams.set('include_archived', '1');
-    if (typeof getActiveSpaceQuery === 'function') {
-      const activeSpace = new URLSearchParams(getActiveSpaceQuery().slice(1)).get('workspace');
-      if (activeSpace) sessionParams.set('workspace', activeSpace);
-      if (activeSpace) projectParams.set('workspace', activeSpace);
+    if (deferCli) sessionParams.set('defer_cli', '1');
+    const scopeProbe = _spaceScopedApiPath('/api/sessions');
+    let activeSpace = '';
+    try { activeSpace = new URL(scopeProbe, document.baseURI || location.href).searchParams.get('workspace') || ''; } catch (_) {}
+    if (activeSpace) {
+      sessionParams.set('workspace', activeSpace);
+      projectParams.set('workspace', activeSpace);
+    } else if (deferCli) {
+      // Mark the first-paint fallback so the server can cap it safely.
+      sessionParams.set('startup', '1');
     }
     const sessionsUrl = '/api/sessions' + (sessionParams.toString() ? '?' + sessionParams.toString() : '');
     const projectsUrl = '/api/projects' + (projectParams.toString() ? '?' + projectParams.toString() : '');
@@ -2436,11 +2512,36 @@ async function renderSessionList(){
     }
     ensureSessionTimeRefreshPoll();
     renderSessionListFromCache();  // no-ops if rename is in progress
-    const projData = await projectsPromise;
-    if (_gen !== _renderSessionListGen) return;
-    if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
-    _allProjects = projData.projects || [];
-    renderSessionListFromCache();
+    if (deferCli && sessData && sessData.cli_pending) {
+      // A boot without an established Space must never turn into a second
+      // unscoped global scan. The bounded first-paint result is sufficient;
+      // explicit navigation/search can still request the full history later.
+      if (!activeSpace) return;
+      // Let the active conversation finish restoring before touching the
+      // optional, potentially very large agent state database.
+      clearTimeout(_deferredCliHydrationTimer);
+      const hydrateCliSidebar = () => {
+        if (typeof S !== 'undefined' && !S._bootReady) {
+          _deferredCliHydrationTimer = setTimeout(hydrateCliSidebar, 500);
+          return;
+        }
+        _deferredCliHydrationTimer = null;
+        void renderSessionList({deferProjects: false, deferCli: false});
+      };
+      _deferredCliHydrationTimer = setTimeout(hydrateCliSidebar, 1200);
+    }
+    const hydrateProjects = async () => {
+      const projData = await projectsPromise;
+      if (_gen !== _renderSessionListGen) return;
+      if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
+      _allProjects = projData.projects || [];
+      renderSessionListFromCache();
+    };
+    if (deferProjects) {
+      void hydrateProjects().catch(() => {});
+      return;
+    }
+    await hydrateProjects();
   }catch(e){
     if (listAbortController.signal.aborted || (e && e.name === 'AbortError')) return;
     if (_gen !== _renderSessionListGen) return;
@@ -2606,8 +2707,17 @@ let _serverTimeDelta = 0;       // ms offset: client clock - server clock (for c
 let _serverTz = '';              // server timezone offset string (e.g. "+0800", "+0000", "-0500")
 
 function _spaceScopedApiPath(path) {
-  if (typeof getActiveSpaceQuery !== 'function') return path;
-  const activeSpace = new URLSearchParams(getActiveSpaceQuery().slice(1)).get('workspace');
+  // Resolve URL/localStorage during boot as a fallback while spaces.js is
+  // still loading; otherwise the first sidebar request becomes unscoped.
+  let activeSpace = '';
+  try { activeSpace = new URLSearchParams(window.location.search || '').get('workspace') || ''; } catch (_) {}
+  if (!activeSpace && typeof getActiveSpaceQuery === 'function') {
+    try { activeSpace = new URLSearchParams(getActiveSpaceQuery().slice(1)).get('workspace') || ''; } catch (_) {}
+  }
+  if (!activeSpace) {
+    try { activeSpace = localStorage.getItem('sidekick-active-workspace') || ''; } catch (_) {}
+  }
+  activeSpace = String(activeSpace || '').trim().toLowerCase();
   if (!activeSpace) return path;
   const [base, query = ''] = String(path).split('?');
   const params = new URLSearchParams(query);

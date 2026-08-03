@@ -738,6 +738,7 @@ class SessionDB:
         limit: int = 50,
         offset: int = 0,
         source: str | None = None,
+        derive_titles: bool = True,
     ) -> list[dict[str, Any]]:
         columns = self._table_columns("sessions")
         if "updated_at" in columns:
@@ -768,6 +769,9 @@ class SessionDB:
                 continue
             session_id = row.get("session_id") or row.get("id")
             if not session_id:
+                continue
+            if not derive_titles:
+                row["title"] = self._fallback_title(row)
                 continue
             derived_title = self._derive_title_from_messages(str(session_id))
             if derived_title:

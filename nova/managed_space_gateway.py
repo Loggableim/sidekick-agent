@@ -50,8 +50,8 @@ _CURRENT_SECRET_TOKEN = re.compile(
 _MANAGED_MODEL_CALL_BUDGET = 128
 _FORBIDDEN_REF_PARTS = ("..", "@{", "//", ".lock")
 _REQUIRED_MANAGED_REVIEW_MODELS = {
-    "review_a": "glm-5.2",
-    "review_b": "kimi-k2.7-code",
+    "review_a": ("glm-5.2",),
+    "review_b": ("kimi-k2.7-code",),
 }
 _APPROVING_REVIEW_DECISIONS = frozenset({"approve", "approved"})
 
@@ -362,12 +362,48 @@ _SENSITIVE_VALUE_MARKERS = (
     "sk-",
     "token=",
 )
+_PROTECTED_PATH_NAMES = frozenset(
+    {".env", ".env.local", ".env.production", ".env.development", "credentials", "credentials.json", "secrets.json"}
+)
+_PROTECTED_CONTROL_PATHS = frozenset(
+    {
+        # These files are host/policy inputs, not project source.  In
+        # particular deploy.json is read by the bound deployment worker; if
+        # the managed run could rewrite it first, the allowlisted deployment
+        # command would become Nova-controlled rather than Space-controlled.
+        ".swarm/deploy.json",
+        ".swarm/swarm.yaml",
+    }
+)
+_PROTECTED_PATH_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 _DESTRUCTIVE_PATCH_MARKER = re.compile(
     r"(?im)^\s*(?:\*\*\*\s+delete\s+file:|deleted\s+file\s+mode\b)"
 )
 _UNIFIED_FILE_DELETION = re.compile(
     r"(?m)^---\s+(?!/dev/null\b)[^\r\n]+\r?\n\+\+\+\s+/dev/null\s*$"
 )
+
+
+def _emit_action_supervision_signal(
+    capability: ManagedSpaceCapability,
+    *,
+    source: str,
+    event_id: str,
+    reason_code: str,
+) -> None:
+    """Publish a redacted post-action signal without affecting the worker."""
+    try:
+        from nova.space_supervision_runtime import emit_code_owned_signal
+
+        emit_code_owned_signal(
+            capability._target_key,
+            source=source,
+            event_id=event_id,
+            reason_code=reason_code,
+        )
+    except Exception:
+        # Supervision telemetry is deliberately non-blocking and fail-closed.
+        return
 
 
 class ManagedSpaceActionGateway:
@@ -468,9 +504,29 @@ class ManagedSpaceActionGateway:
         if not isinstance(outcome, WorkerResult):
             outcome = WorkerResult(False, "worker_invalid_result")
         if outcome.ok is True:
+            if spec.worker == "github":
+                _emit_action_supervision_signal(
+                    capability,
+                    source="git",
+                    event_id=f"{capability._run_id}:{operation}:success",
+                    reason_code="git_change",
+                )
+            elif spec.worker == "deployment":
+                _emit_action_supervision_signal(
+                    capability,
+                    source="ci",
+                    event_id=f"{capability._run_id}:{operation}:success",
+                    reason_code="ci_change",
+                )
             return GatewayResult(True, _SUCCESS_CODES[spec.worker])
         if spec.worker != "deployment":
             return GatewayResult(False, "worker_failed")
+        _emit_action_supervision_signal(
+            capability,
+            source="ci",
+            event_id=f"{capability._run_id}:{operation}:failure",
+            reason_code="ci_failed",
+        )
         return self._recover_deployment_failure(capability, context)
 
     def host_bound_execution_route(
@@ -626,7 +682,7 @@ def _build_request(operation: str, value: object) -> ManagedRequest | None:
         patch = _bounded_text(value["patch"], 1_000_000)
         return (
             LocalApplyPatchRequest(path, patch)
-            if path and patch and not _patch_deletes_file(patch)
+            if path and not _protected_relative_path(path) and patch and not _patch_deletes_file(patch)
             else None
         )
     if operation == "local.write_file":
@@ -634,7 +690,7 @@ def _build_request(operation: str, value: object) -> ManagedRequest | None:
             return None
         path = _relative_path(value["path"])
         content = _bounded_text(value["content"], 1_000_000)
-        return LocalWriteFileRequest(path, content) if path and content else None
+        return LocalWriteFileRequest(path, content) if path and not _protected_relative_path(path) and content else None
     if operation == "local.format":
         if set(value) != {"artifact_digest", "paths"}:
             return None
@@ -642,12 +698,12 @@ def _build_request(operation: str, value: object) -> ManagedRequest | None:
         if not isinstance(raw_paths, list) or not 1 <= len(raw_paths) <= 64:
             return None
         paths = tuple(_relative_path(item) or "" for item in raw_paths)
-        return LocalFormatRequest(paths) if all(paths) else None
+        return LocalFormatRequest(paths) if all(paths) and not any(_protected_relative_path(path) for path in paths) else None
     if operation == "local.test":
         if set(value) != {"artifact_digest", "selector"}:
             return None
         selector = _test_selector(value["selector"])
-        return LocalTestRequest(*selector) if selector is not None else None
+        return LocalTestRequest(*selector) if selector is not None and not _protected_relative_path(selector[0]) else None
     if operation == "github.commit":
         if set(value) != {"artifact_digest", "message"}:
             return None
@@ -690,6 +746,22 @@ def _patch_deletes_file(value: str) -> bool:
     return bool(
         _DESTRUCTIVE_PATCH_MARKER.search(normalized)
         or _UNIFIED_FILE_DELETION.search(normalized)
+    )
+
+
+def _protected_relative_path(value: str) -> bool:
+    """Reject credential-like paths before a worktree or worker is touched."""
+    normalized = value.replace("\\", "/").strip().lower()
+    if normalized in _PROTECTED_CONTROL_PATHS:
+        return True
+    parts = tuple(part.lower() for part in PurePosixPath(value).parts)
+    return any(
+        part in _PROTECTED_PATH_NAMES
+        or part.startswith(".env.")
+        or part.endswith(_PROTECTED_PATH_SUFFIXES)
+        or "credential" in part
+        or "secret" in part
+        for part in parts
     )
 
 
@@ -944,12 +1016,12 @@ def _evaluate_managed_yolo(
         "artifact_digest": artifact_digest,
         "proposal_digest": proposal_digest_value,
     }
-    for role, expected_model in _REQUIRED_MANAGED_REVIEW_MODELS.items():
+    for role, expected_models in _REQUIRED_MANAGED_REVIEW_MODELS.items():
         checkpoint = checkpoints.get(role)
         evidence = _valid_checkpoint_evidence(checkpoint)
         if (
             checkpoint is None
-            or checkpoint.model != expected_model
+            or checkpoint.model not in expected_models
             or not evidence
             or not _has_positive_review_vote(checkpoint)
             or test_evidence.report_ref not in evidence

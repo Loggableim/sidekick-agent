@@ -60,3 +60,4 @@ nova/nova_data/
 Thumbs.db
 .idea/
 .vscode/
+.test-tmp/

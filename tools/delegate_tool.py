@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Delegate Tool -- Subagent Architecture
 
@@ -148,6 +148,17 @@ _active_subagents_lock = threading.Lock()
 # subagent_id -> mutable record tracking the live child agent.  Stays only
 # for the lifetime of the run; _run_single_child is the owner.
 _active_subagents: Dict[str, Dict[str, Any]] = {}
+
+def _record_history(subagent_id, session_id, space_slug, status, summary=""):
+    if not subagent_id:
+        return
+    try:
+        from pathlib import Path
+        from web.api.subagent_history import record
+        record(Path(os.environ.get("SIDEKICK_HOME", ".sidekick-home")), subagent_id=subagent_id, session_id=session_id or "", space_slug=space_slug or "", status=status, summary=summary)
+    except Exception:
+        logger.debug("subagent history telemetry failed", exc_info=True)
+
 
 
 def set_spawn_paused(paused: bool) -> bool:
@@ -1458,6 +1469,13 @@ def _run_single_child(
             }
         )
 
+        _record_history(
+            _subagent_id,
+            _child_session_id if isinstance(_child_session_id, str) else getattr(parent_agent, "session_id", None),
+            getattr(child, "workspace_slug", None),
+            "running",
+            goal,
+        )
     try:
         if child_progress_cb:
             try:
@@ -1839,6 +1857,13 @@ def _run_single_child(
 
         # Drop the TUI-facing registry entry.  Safe to call even if the
         # child was never registered (e.g. ID missing on test doubles).
+        _record_history(
+            _subagent_id,
+            getattr(child, "session_id", None),
+            getattr(child, "workspace_slug", None),
+            "interrupted" if getattr(child, "_interrupted", False) else "completed",
+            "lifecycle complete",
+            )
         if _subagent_id:
             _unregister_subagent(_subagent_id)
 

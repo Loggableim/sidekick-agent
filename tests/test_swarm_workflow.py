@@ -16,8 +16,15 @@ from swarm_core.models import ModelRegistry, ModelRequest, ModelResponse
 from swarm_core.router import ModelRouter
 from swarm_core.store import ProjectSwarmStore
 from swarm_core.transport import ModelProviderError, ModelTransport
+from swarm_core.types import ActionProposal, RequestedToolAction
 from swarm_core.verifier import VerificationResult, VerifierAssessment
-from swarm_core.workflow import CallBudget, ModelExecutor, RoleCall, WorkflowPaused
+from swarm_core.workflow import (
+    CallBudget,
+    ModelExecutor,
+    RoleCall,
+    WorkflowPaused,
+    _extract_action_proposals,
+)
 
 
 class WorkflowTransport(ModelTransport):
@@ -48,6 +55,85 @@ class WorkflowTransport(ModelTransport):
 
 def _request_by_role(requests: list[ModelRequest], role: str) -> ModelRequest:
     return next(request for request in requests if request.role == role)
+
+
+def test_action_proposal_parser_binds_workspace_and_rejects_unapproved_referee(
+    tmp_path: Path,
+) -> None:
+    response = ModelResponse(
+        model="nemotron-3-super",
+        content="approved",
+        data={
+            "decision": "approved",
+            "actions": [
+                {
+                    "proposal_id": "push-1",
+                    "name": "github.push",
+                    "arguments": {"branch": "main", "artifact_digest": "a" * 64},
+                    "category": "external",
+                    "reversible": False,
+                    "external": True,
+                    "cost_increasing": False,
+                    "evidence_refs": ["verifier:1"],
+                    "use_worktree": True,
+                }
+            ],
+        },
+    )
+    proposals = _extract_action_proposals(
+        response,
+        project_root=tmp_path,
+        evidence_refs={"verifier:1"},
+    )
+    assert len(proposals) == 1
+    assert proposals[0].requested_action.workspace == tmp_path.resolve()
+    assert proposals[0].requested_action.use_worktree is True
+
+    blocked = ModelResponse(
+        model="nemotron-3-super",
+        content="blocked",
+        data={"decision": "blocked", "actions": response.data["actions"]},
+    )
+    assert _extract_action_proposals(
+        blocked,
+        project_root=tmp_path,
+        evidence_refs={"verifier:1"},
+    ) == ()
+
+
+def test_action_executor_is_idempotent_across_repeated_engine_attempts(
+    tmp_path: Path,
+) -> None:
+    class FakeExecutor:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def execute(self, _proposal, _run):
+            self.calls += 1
+            return type("Result", (), {"ok": True, "code": "github_completed"})()
+
+    action_executor = FakeExecutor()
+    engine = SwarmEngine(WorkflowTransport(), action_executor=action_executor)
+    run = engine.start_run("execute approved action", tmp_path)
+    store = ProjectSwarmStore(tmp_path)
+    proposal = ActionProposal(
+        proposal_id="push-1",
+        category="external",
+        reversible=False,
+        external=True,
+        cost_increasing=False,
+        evidence_refs=("verifier:1",),
+        requested_action=RequestedToolAction(
+            name="github.push",
+            workspace=tmp_path,
+            arguments={"branch": "main", "artifact_digest": "a" * 64},
+            use_worktree=True,
+        ),
+    )
+    assert engine._execute_action_proposals(store, run.run_id, (proposal,), checkpoint=None) is None
+    assert engine._execute_action_proposals(store, run.run_id, (proposal,), checkpoint=None) is None
+    assert action_executor.calls == 1
+    assert len([event for event in store.list_events(run.run_id) if event.event_type == "action.completed"]) == 1
 
 
 def test_scout_schema_invalid_flash_response_uses_only_pro_cloud_fallback_and_budgets_it():
@@ -1749,6 +1835,22 @@ def test_pre_completion_hook_base_exception_propagates_and_releases_lease(
     assert store.claim_run_execution_lease(run.run_id, "post-interrupt-owner")
     store.release_run_execution_lease(run.run_id, "post-interrupt-owner")
 
+
+def test_start_run_rejects_malformed_autonomous_admission_inputs(tmp_path: Path):
+    """Autonomous workers never receive an empty goal or unknown mode."""
+    engine = SwarmEngine(WorkflowTransport())
+
+    with pytest.raises(ValueError, match="non-empty string"):
+        engine.start_run("   ", tmp_path, autonomy="autonomous")
+    with pytest.raises(ValueError, match="Unsupported Swarm autonomy level"):
+        engine.start_run("valid goal", tmp_path, autonomy="yolo")
+    with pytest.raises(ValueError, match="20000 character limit"):
+        engine.start_run("x" * 20_001, tmp_path, autonomy="autonomous")
+
+    run = engine.start_run("  durable autonomous goal  ", tmp_path, autonomy="autonomous")
+    persisted = ProjectSwarmStore(tmp_path).get_run(run.run_id)
+    assert persisted is not None
+    assert persisted.metadata["goal"] == "durable autonomous goal"
 
 def test_start_run_rejects_unsafe_or_reserved_host_metadata(tmp_path: Path):
     """Catches host metadata overwriting durable Core inputs or losing JSON shape."""

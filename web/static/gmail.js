@@ -277,6 +277,9 @@ async function gmailRefresh() {
 }
 
 // ── Render inbox list (Main + Sidebar) ──
+//  Render inbox list
+// ── Render inbox list
+// â”€â”€ Render inbox list
 function renderInbox(data) {
   const emails = data.emails || [];
 

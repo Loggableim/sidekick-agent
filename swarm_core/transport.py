@@ -89,6 +89,10 @@ class OllamaCloudTransport:
         self._call_guard = call_guard
 
     def complete(self, request: ModelRequest) -> ModelResponse:
+        if request.provider != OLLAMA_CLOUD_PROVIDER:
+            raise ModelProviderError("Swarm requires the Ollama Cloud provider")
+        if "gpt-oss" in request.model.casefold():
+            raise ModelProviderError("GPT-OSS is forbidden for Swarm")
         guard = (
             self._call_guard(request) if self._call_guard is not None else nullcontext()
         )

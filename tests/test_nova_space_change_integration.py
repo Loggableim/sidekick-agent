@@ -370,6 +370,7 @@ def test_fake_injected_dispatcher_composes_a_redacted_blocker_without_live_wirin
             {"chat_id": 123456, "chat_type": "private"}
         ),
         sender=FakePrivateSender(),
+        allowed_space_ids={records["alpha"].space_id},
     )
     raw_secret = "token=must-not-leave-fake-host"
 

@@ -4857,14 +4857,17 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, {"yolo_enabled": is_session_yolo_enabled(sid)})
 
     if parsed.path == "/api/subagents":
-        return j(
-            handler,
-            {
-                "spawn_paused": is_spawn_paused(),
-                "active": list_active_subagents(),
-            },
-        )
-
+        query = parse_qs(parsed.query)
+        session_id = str(query.get("session_id", [""])[0] or "").strip()
+        history = []
+        if session_id:
+            from web.api.subagent_history import list_history
+            try:
+                limit = int(query.get("limit", ["50"])[0] or "50")
+            except (TypeError, ValueError):
+                limit = 50
+            history = list_history(_routes_active_home(), session_id=session_id, limit=limit)
+        return j(handler, {"spawn_paused": is_spawn_paused(), "active": list_active_subagents(), "history": history})
     if parsed.path == "/api/session/usage":
         sid = parse_qs(parsed.query).get("session_id", [""])[0]
         if not sid:
@@ -4912,6 +4915,8 @@ def handle_get(handler, parsed) -> bool:
                 str(query.get("fields", [""])[0] or "").strip().lower() == "sidebar"
                 or "fields=sidebar" in str(parsed.query or "").lower()
             )
+            defer_cli_raw = str(query.get("defer_cli", [""])[0] or "").strip().lower()
+            defer_cli = defer_cli_raw in {"1", "true", "yes", "on"}
 
             diag.stage("all_sessions")
             # Phase 1: Read from the global session dir when no specific
@@ -5002,7 +5007,7 @@ def handle_get(handler, parsed) -> bool:
             migrated_webui_sessions = []
             if isolated_workspace:
                 diag.stage("skip_state_sessions")
-            elif not show_cli_sessions:
+            elif not show_cli_sessions or defer_cli:
                 diag.stage("skip_state_sessions_disabled")
             else:
                 diag.stage("get_state_sessions")
@@ -5113,6 +5118,7 @@ def handle_get(handler, parsed) -> bool:
                 "active_profile": active_profile,
                 "other_profile_count": other_profile_count,
                 "archived_count": archived_count,
+                "cli_pending": bool(show_cli_sessions and defer_cli and not isolated_workspace),
                 "server_time": time.time(),
                 "server_tz": time.strftime("%z"),
             })
@@ -6365,6 +6371,33 @@ def handle_post(handler, parsed) -> bool:
             result = handle_kanban_post(handler, parsed, body)
             if result is False:
                 return _kanban_unknown_endpoint(handler, parsed, "POST")
+            try:
+                # In-process, code-owned signal; no prompt, path or tool payload is stored.
+                from hashlib import sha256
+                from nova.space_supervision_runtime import emit_code_owned_signal
+                from web.api.space_engine import get_active_workspace_slug
+
+                target_key = str(get_active_workspace_slug() or "").strip().lower()
+                if target_key and target_key != "default":
+                    identity = {
+                        "path": parsed.path,
+                        "board": body.get("board"),
+                        "task_id": body.get("task_id"),
+                        "idempotency_key": body.get("idempotency_key"),
+                        "status": body.get("status"),
+                        "action": body.get("action"),
+                    }
+                    event_id = sha256(
+                        json.dumps(identity, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+                    ).hexdigest()
+                    emit_code_owned_signal(
+                        target_key,
+                        source="kanban",
+                        event_id=event_id,
+                        reason_code="kanban_change",
+                    )
+            except Exception:
+                logger.debug("Nova Kanban supervision signal skipped", exc_info=True)
             return True
         finally:
             _teardown_workspace_context()
@@ -6437,7 +6470,11 @@ def handle_post(handler, parsed) -> bool:
                 "Nova management must be changed through /api/space/nova-management",
                 status=400,
             )
-        from web.api.space_engine import get_workspace
+        from web.api.space_engine import (
+            SpaceGovernanceError,
+            get_workspace,
+            update_space_config,
+        )
         ws = get_workspace(slug)
         if not ws:
             return bad(handler, "Space not found", status=404)
@@ -14514,3 +14551,5 @@ def _handle_hybrid_search(handler, body):
     sorted_results = sorted(seen.values(), key=lambda x: x["score"], reverse=True)[:limit]
 
     return j(handler, {"hits": sorted_results})
+
+

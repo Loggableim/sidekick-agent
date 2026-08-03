@@ -100,9 +100,9 @@
     <button class="titlebar-action-btn cast-status-btn cast-unavailable" id="btnCastToggle" type="button" aria-label="Hub Cast" onclick="toggleHubCast()">
       <span id="castStatusIcon">📺</span>
     </button>
-    <button class="titlebar-action-btn nova-yolo-toggle-btn" id="btnNovaYoloToggle" type="button" aria-label="Nova YOLO autonomy" aria-pressed="false" onclick="toggleNovaYoloMode()">
+    <button class="titlebar-action-btn nova-yolo-toggle-btn" id="btnNovaYoloToggle" type="button" aria-label="Nova legacy source mode" aria-pressed="false" onclick="toggleNovaYoloMode()">
       <span aria-hidden="true">⚡</span>
-      <span class="sr-only">Nova YOLO</span>
+      <span class="sr-only">Nova legacy source mode</span>
     </button>
   </div>
   <div class="app-titlebar-center" id="appTitlebarCenter">
@@ -1021,7 +1021,7 @@
           <button class="suggestion" data-msg="Help me plan a small project."><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg> <span data-i18n="suggest_plan">Help me plan a small project.</span></button>
         </div>
         </div>
-        <section class="nova-presence-card" id="novaPresenceCard" aria-labelledby="novaPresenceName" aria-live="polite" hidden>
+        <section class="nova-presence-card" id="novaPresenceCard" aria-labelledby="novaPresenceName" hidden>
           <header class="nova-presence-header">
             <div class="nova-presence-avatar" aria-hidden="true">N</div>
             <div class="nova-presence-identity">
@@ -1029,9 +1029,24 @@
               <h2 id="novaPresenceName">Nova</h2>
               <p id="novaPresenceVoice">Direkt, neugierig, verantwortungsvoll.</p>
             </div>
-            <span class="nova-presence-state" id="novaPresenceState">available</span>
+            <span class="nova-presence-state" id="novaPresenceState" role="status" aria-live="polite" aria-atomic="true">available</span>
           </header>
           <p class="nova-presence-focus" id="novaPresenceFocus">Ich ordne meinen nächsten Fokus ein.</p>
+          <p class="nova-presence-policy" id="novaPresencePolicy">Ticker inaktiv - keine autonome Arbeit · globale YOLO bleibt Quellmodus</p>
+          <p class="nova-presence-supervision" id="novaPresenceSupervision">Keine aktive Betreuung</p>
+          <ul id="novaPresenceUnread" class="nova-presence-list" hidden></ul>
+          <p id="novaPresenceOffline" class="nova-presence-offline" hidden>Presence offline</p>
+          <p id="novaPresencePending" hidden></p>
+          <section class="nova-presence-section nova-presence-slot" id="novaPresenceSlot" aria-labelledby="novaPresenceSlotTitle" role="status" aria-live="polite" aria-atomic="true">
+            <h3 id="novaPresenceSlotTitle">Supervisor-Slot</h3>
+            <span id="novaPresenceSlotStatus">Kein manueller Slot-Handoff erforderlich.</span>
+            <button id="novaPresenceReleaseSlot" type="button" hidden>Slot auditieren und freigeben</button>
+          </section>
+          <section class="nova-presence-section" aria-labelledby="novaSpaceInventoryTitle">
+            <h3 id="novaSpaceInventoryTitle">Space-Inventur</h3>
+            <ul id="novaSpaceInventory" class="nova-presence-list"></ul>
+            <p id="novaSpaceInventoryNote" class="nova-presence-inventory-note">Nur redigierte Statusdaten; YOLO und Betreuung werden hier nicht aktiviert.</p>
+          </section>
           <div class="nova-presence-grid">
             <section class="nova-presence-section" aria-labelledby="novaManagedSpacesTitle">
               <h3 id="novaManagedSpacesTitle">Betreute YOLO-Spaces</h3>
@@ -1046,11 +1061,15 @@
             <h3 id="novaBlockersTitle">Offene Blocker</h3>
             <ul id="novaBlockers" class="nova-presence-list"></ul>
           </section>
+          <section class="nova-presence-section nova-presence-decisions" aria-labelledby="novaDecisionFeedTitle">
+            <h3 id="novaDecisionFeedTitle">Entscheidungsfeed</h3>
+            <ul id="novaDecisionFeed" class="nova-presence-list"></ul>
+          </section>
           <section class="nova-presence-section nova-presence-activity" aria-labelledby="novaActivityTitle">
             <h3 id="novaActivityTitle">Entitätsfeed</h3>
             <ul id="novaActivity" class="nova-presence-list"></ul>
           </section>
-          <p class="nova-presence-governance">Nova betreut nur Spaces, in denen YOLO und Nova-Betreuung getrennt aktiviert wurden. <button type="button" class="nova-presence-settings-link" onclick="switchPanel('workspaces')">Space-Einstellungen öffnen</button></p>
+          <p class="nova-presence-governance">Nova betreut nur Spaces, in denen YOLO und Nova-Betreuung getrennt aktiviert wurden. Der globale Nova-Schalter bleibt Legacy-Quellmodus und enrollt keinen Space. <button type="button" class="nova-presence-settings-link" onclick="switchPanel('workspaces')">Space-Einstellungen öffnen</button></p>
         </section>
       </div>
       <div class="messages-inner" id="msgInner"></div>

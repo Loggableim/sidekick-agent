@@ -20,7 +20,15 @@ _ROLE_CHAINS = {
     "planner_arbitrator": ("deepseek-v4-pro", "kimi-k2.6"),
     "builder": ("minimax-m3",),
     "critic": ("minimax-m3",),
-    "coding": ("glm-5.2",),
+    # Keep the coding specialist primary, but use the explicitly catalogued
+    # sibling before pausing a YOLO run after a provider/schema failure.
+    # Both models stay in the same GLM family; this is a provider retry, not
+    # an unapproved cross-provider or local-model fallback.
+    "coding": ("glm-5.2", "glm-5.1"),
+    # Ollama Cloud currently exposes glm-5.1 as the compatible family fallback
+    # in some catalog snapshots. Keep glm-5.2 primary, but do not pause an
+    # otherwise valid YOLO run after a schema/provider failure when the
+    # explicitly catalogued sibling is available.
     "review_a": ("glm-5.2",),
     "review_b": ("kimi-k2.7-code",),
     "integrator": ("nemotron-3-super",),

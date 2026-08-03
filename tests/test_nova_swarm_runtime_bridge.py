@@ -1166,6 +1166,60 @@ def test_submit_nova_intent_derives_host_context_and_delegates_through_bridge(
     assert json.loads(json.dumps(result)) == result
 
 
+def test_managed_space_root_resolves_space_governance_before_legacy_yolo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "managed"
+    (root / ".swarm").mkdir(parents=True)
+
+    class Space:
+        slug = "managed-space"
+
+        def get_project_dir(self):
+            return str(root)
+
+    governance = type("Governance", (), {"yolo": True, "enrolled": True})()
+    import web.api.space_engine as space_engine
+    import nova.space_supervisor as supervisor_module
+
+    monkeypatch.setattr(space_engine, "get_all_spaces", lambda: [Space()])
+    monkeypatch.setattr(
+        supervisor_module,
+        "resolve_managed_space_governance",
+        lambda slug: governance if slug == "managed-space" else None,
+    )
+
+    assert bridge._resolve_space_governance_for_root(root.resolve()) is governance
+
+
+def test_known_space_without_valid_governance_never_returns_legacy_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "managed"
+    (root / ".swarm").mkdir(parents=True)
+
+    class Space:
+        slug = "not-enrolled"
+
+        def get_project_dir(self):
+            return str(root)
+
+    import web.api.space_engine as space_engine
+    import nova.space_supervisor as supervisor_module
+
+    monkeypatch.setattr(space_engine, "get_all_spaces", lambda: [Space()])
+    monkeypatch.setattr(
+        supervisor_module,
+        "resolve_managed_space_governance",
+        lambda _slug: (_ for _ in ()).throw(ValueError("not enrolled")),
+    )
+
+    assert (
+        bridge._resolve_space_governance_for_root(root.resolve())
+        is bridge._KNOWN_SPACE_NOT_MANAGED
+    )
+
+
 @pytest.mark.parametrize(
     ("status", "bridge_run_id", "public_run_id", "accepted", "reason"),
     [
@@ -2293,6 +2347,27 @@ def test_worker_system_exit_pauses_the_durable_admission(tmp_path: Path):
     assert store.get_run(run.run_id).status == "paused"
     assert store.list_events(run.run_id)[-1].payload == {"reason": "nova_dispatch_failed"}
 
+
+def test_worker_store_cleanup_race_is_fail_closed_without_thread_exception(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A removed project store must not leak from the daemon worker boundary."""
+    from nova.swarm_runtime_bridge import _run_worker
+
+    class MissingStore:
+        def __init__(self, _root):
+            raise FileNotFoundError("project removed during cleanup")
+
+        @classmethod
+        def open_read_only(cls, _root):
+            raise FileNotFoundError("project removed during cleanup")
+
+    monkeypatch.setattr(bridge, "ProjectSwarmStore", MissingStore)
+
+    def crash(*_args):
+        raise RuntimeError("dispatcher failed")
+
+    _run_worker(crash, tmp_path, "missing-run")
 
 def test_resolver_blocks_an_enabled_nova_run_without_a_process_binding(tmp_path: Path):
     """Catches a cross-process resume constructing an engine without Nova trust."""

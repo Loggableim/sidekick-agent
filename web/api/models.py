@@ -289,6 +289,49 @@ def _write_session_index(updates=None):
         _write_session_index(updates=None)
 
 
+_MESSAGE_TAIL_INDEX_LIMIT = 32
+_MESSAGE_TAIL_INDEX_MAX_BYTES = 512 * 1024
+
+
+def _message_tail_index_path(session_path: Path) -> Path:
+    return session_path.with_name(f"{session_path.stem}.tail.json")
+
+
+def _write_message_tail_index(session_path: Path, payload: str, messages) -> None:
+    """Persist a bounded restore tail tied to the exact JSON snapshot."""
+    sidecar = _message_tail_index_path(session_path)
+    tmp = None
+    try:
+        tail = list(messages or [])[-_MESSAGE_TAIL_INDEX_LIMIT:]
+        encoded = payload.encode("utf-8")
+        if len(json.dumps(tail, ensure_ascii=False).encode("utf-8")) > _MESSAGE_TAIL_INDEX_MAX_BYTES:
+            sidecar.unlink(missing_ok=True)
+            return
+        fingerprint = hashlib.sha256(encoded[:4096] + encoded[-4096:]).hexdigest()
+        stat = session_path.stat()
+        data = {
+            "version": 1,
+            "file_size": len(encoded),
+            "file_mtime_ns": stat.st_mtime_ns,
+            "fingerprint": fingerprint,
+            "message_count": len(messages or []),
+            "messages": tail,
+        }
+        tmp = sidecar.with_suffix(f".tmp.{os.getpid()}.{threading.current_thread().ident}")
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, sidecar)
+    except Exception:
+        try:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        logger.debug("Failed to persist message tail index for %s", session_path, exc_info=True)
+
+
 def _active_stream_ids():
     with STREAMS_LOCK:
         return set(STREAMS.keys())
@@ -479,6 +522,47 @@ def _json_array_object_spans(text, array_start, array_end):
     return spans
 
 
+def _json_array_object_spans_tail(text, array_start, array_end, limit):
+    """Find only the last ``limit`` object spans once the JSON text is loaded."""
+    try:
+        wanted = max(1, int(limit))
+    except (TypeError, ValueError):
+        return []
+    spans = []
+    depth = 0
+    object_end = None
+    in_string = False
+    i = array_end - 1
+    while i > array_start:
+        ch = text[i]
+        if ch == '"':
+            # Walking backwards, a quote is escaped when preceded by an odd
+            # run of backslashes. This keeps braces inside message strings
+            # from being interpreted as JSON structure.
+            slash_count = 0
+            j = i - 1
+            while j > array_start and text[j] == '\\':
+                slash_count += 1
+                j -= 1
+            if slash_count % 2 == 0:
+                in_string = not in_string
+        elif not in_string:
+            if ch == '}':
+                if depth == 0:
+                    object_end = i + 1
+                depth += 1
+            elif ch == '{' and depth:
+                depth -= 1
+                if depth == 0 and object_end is not None:
+                    spans.append((i, object_end))
+                    object_end = None
+                    if len(spans) >= wanted:
+                        break
+        i -= 1
+    spans.reverse()
+    return spans
+
+
 def load_session_message_window(sid, limit=None, before=None):
     """Load only a message window from a persisted WebUI JSON session.
 
@@ -495,19 +579,34 @@ def load_session_message_window(sid, limit=None, before=None):
         bounds = _json_top_level_array_bounds(text, 'messages')
         if not bounds:
             return None
-        spans = _json_array_object_spans(text, bounds[0], bounds[1])
-        total = len(spans)
-        if before is not None:
-            before_idx = max(0, min(int(before), total))
+        total_hint = _lookup_index_message_count(sid)
+        try:
+            limit_value = max(1, int(limit)) if limit is not None else None
+        except (TypeError, ValueError):
+            limit_value = None
+        try:
+            before_idx = max(0, int(before)) if before is not None else None
+        except (TypeError, ValueError):
+            before_idx = None
+
+        if total_hint is not None and limit_value is not None:
+            total = max(0, int(total_hint))
+            effective_before = min(before_idx, total) if before_idx is not None else total
+            needed = max(0, total - effective_before) + limit_value
+            spans = _json_array_object_spans_tail(text, bounds[0], bounds[1], needed)
+            if len(spans) < min(needed, total):
+                # Stale/corrupt index metadata must never hide messages.
+                spans = _json_array_object_spans(text, bounds[0], bounds[1])
+                total = len(spans)
+        else:
+            spans = _json_array_object_spans(text, bounds[0], bounds[1])
+            total = len(spans)
+        if before_idx is not None:
+            before_idx = max(0, min(before_idx, total))
             candidates = spans[:before_idx]
         else:
             candidates = spans
-        if limit is not None:
-            try:
-                limit = max(1, int(limit))
-            except (TypeError, ValueError):
-                limit = None
-        selected = candidates[-limit:] if limit else candidates
+        selected = candidates[-limit_value:] if limit_value else candidates
         offset = (before_idx - len(selected)) if before is not None else (total - len(selected))
         messages = [json.loads(text[start:end]) for start, end in selected]
         return messages, total, max(0, offset)
@@ -855,6 +954,7 @@ class Session:
             except Exception:
                 pass
             raise
+        _write_message_tail_index(self.path, payload, self.messages)
         self._sync_legacy_session_copy(payload)
         if not skip_index:
             _write_session_index(updates=[self])

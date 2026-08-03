@@ -266,6 +266,16 @@ _MODEL_SPECS = (
         role_quality={"coding": 1.0, "review_a": 1.0},
     ),
     ModelSpec(
+        "glm-5.1",
+        "glm-5",
+        frozenset({"coding", "review", "reasoning", "structured-output"}),
+        tools=True,
+        thinking=True,
+        json_capable=True,
+        context_budget=976_000,
+        role_quality={"review_a": 0.85},
+    ),
+    ModelSpec(
         "kimi-k2.7-code",
         "kimi-k2",
         frozenset({"coding", "review", "reasoning", "structured-output", "vision"}),

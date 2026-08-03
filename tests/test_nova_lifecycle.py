@@ -88,6 +88,8 @@ def test_post_turn_creates_versioned_event_and_queues_reflection(monkeypatch, tm
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 
     from web.api.nova_lifecycle import get_nova_state_paths, load_events, post_turn
+    import web.api.nova_lifecycle as lifecycle
+    monkeypatch.setattr(lifecycle, "_run_local_script", lambda *args, **kwargs: {"ok": True, "stdout": ""})
 
     result = post_turn(
         session_id="s1",
@@ -133,6 +135,36 @@ def test_post_turn_filters_goal_loop_from_vector_memory_and_personality_queue(mo
     assert "personality_filtered" in events[0]["steps"]
     assert not any(args and args[0] == "vector_memory.py" for args in calls)
     assert queue == []
+
+
+def test_post_turn_isolates_effect_failures_and_writes_pipeline_summary(monkeypatch, tmp_path):
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    import web.api.nova_lifecycle as lifecycle
+
+    def fake_run(script, *args, **kwargs):
+        if script == "emotion.py":
+            return {"ok": False, "reason": "timeout"}
+        return {"ok": True, "stdout": ""}
+
+    monkeypatch.setattr(lifecycle, "_run_local_script", fake_run)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+    result = lifecycle.post_turn(
+        session_id="pipeline-failure",
+        user_text="A concrete memory-worthy question",
+        assistant_text="A grounded answer",
+        workspace_slug="nova",
+        blocking=True,
+    )
+    event = lifecycle.load_events(limit=1, include_private=True)[0]
+    assert result["ok"] is True
+    assert event["status"] == "completed"
+    assert event["pipeline_degraded"] is True
+    assert event["pipeline_failures"] == ["emotion"]
+    assert "emotion_failed" in event["steps"]
+    assert "continuity_done" in event["steps"]
+    summary = (lifecycle.get_nova_space_root() / "nova_pipeline.log").read_text(encoding="utf-8")
+    assert '"emotion": "failed"' in summary
+    assert "A concrete memory-worthy question" not in summary
 
 
 def test_entity_prompt_context_doses_internal_state_without_raw_metrics(monkeypatch, tmp_path):

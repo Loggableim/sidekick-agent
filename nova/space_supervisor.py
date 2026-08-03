@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import sqlite3
 import threading
+import time
 from typing import Any, Callable, Iterator, Mapping
 from uuid import UUID, uuid4
 
@@ -25,6 +26,8 @@ from swarm_core.types import SwarmRun
 
 DASHBOARD_ACTOR_RE = re.compile(r"dashboard:[0-9a-f]{64}\Z")
 _INTENT_DIGEST_RE = re.compile(r"[0-9a-f]{64}\Z")
+_RUN_ID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z")
+_CHILD_PAUSE_REASON_RE = re.compile(r"[A-Za-z0-9_.:-]{1,96}\Z")
 SYSTEM_SPACE_LIFECYCLE_ACTOR = "system:space-lifecycle"
 _CAPABILITY_TOKEN = object()
 _ACTION_CONTEXT_TOKEN = object()
@@ -45,6 +48,21 @@ _ALLOWED_ACTION_FAMILIES = (
 )
 _SPACE_CHANGE_PAUSE_REASONS = frozenset(
     {"governance_changed", "root_changed", "space_deleted"}
+)
+_RECOVERABLE_PROVIDER_PAUSE_REASONS = frozenset(
+    {
+        "no_eligible_model",
+        "model_chain_exhausted",
+        "model_provider_unavailable",
+        "model_catalog_unavailable",
+        "provider_unavailable",
+    }
+)
+_OLLAMA_CLOUD_PROVIDER = "ollama-cloud"
+_OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE = "ollama-cloud-api-live-verified"
+_AUTO_RESUME_WAIT_AUDIT_EVENT = "auto_resume_waiting"
+_AUTO_RESUME_WAIT_REASONS = frozenset(
+    {"model_chain_exhausted", "pause_not_recoverable", "catalog_refresh_required"}
 )
 _SUPERVISOR_ADMISSION_COLUMNS = frozenset(
     {
@@ -70,7 +88,7 @@ _SUPERVISOR_ADMISSION_COLUMNS = frozenset(
 _SUPERVISOR_REQUIRED_INDEX_SQL = {
     "idx_supervisor_target_intent": (
         "createuniqueindexidx_supervisor_target_intent"
-        "onsupervisor_admissions(target_space_id,intent_digest)"
+        "onsupervisor_admissions(target_key,target_space_id,intent_digest,canonical_root,root_fingerprint,governance_revision)"
     ),
     "idx_supervisor_one_active": (
         "createuniqueindexidx_supervisor_one_active"
@@ -244,6 +262,7 @@ class SupervisorAdmission:
 
 class ManagedSpacePreCompletionHook:
     hook_id = "nova-managed-space-supervisor-v1"
+    verifier_contract = "production-read-only-v1"
 
     def __init__(
         self, supervisor: "ManagedSpaceSupervisor", capability: ManagedSpaceCapability
@@ -263,10 +282,54 @@ class ManagedSpacePreCompletionHook:
             self._supervisor._pause(capability, "capability_invalid")
             return PreCompletionResult(False, "capability_invalid")
         reason = self._supervisor._revalidate(capability)
-        if reason is None:
-            return PreCompletionResult(continue_completion=True)
-        self._supervisor._pause(capability, reason)
-        return PreCompletionResult(continue_completion=False, pause_reason=reason)
+        if reason is not None:
+            self._supervisor._pause(capability, reason)
+            return PreCompletionResult(False, reason)
+        try:
+            verifier_checkpoint = context.store.get_workflow_role_checkpoints(
+                context.run.run_id
+            ).get("verifier")
+            verifier_decision = (
+                verifier_checkpoint.data.get("decision")
+                if verifier_checkpoint is not None
+                and isinstance(verifier_checkpoint.data, Mapping)
+                else None
+            )
+        except (AttributeError, KeyError, TypeError, ValueError, sqlite3.Error):
+            verifier_decision = None
+        if verifier_decision != "verified":
+            self._supervisor._pause(capability, "verification_not_verified")
+            return PreCompletionResult(False, "verification_not_verified")
+        # Re-attest the current worktree at the final gate. A positive
+        # checkpoint from before a builder change to .swarm/verify.json is
+        # stale evidence and must not unlock completion.
+        if context.run.metadata.get("production_verifier") == self.verifier_contract:
+            try:
+                from nova.production_verifier import ProductionReadOnlyVerifier
+                from swarm_core.verifier import VerificationRequest
+
+                checkpoints = context.store.get_workflow_role_checkpoints(
+                    context.run.run_id
+                )
+                builder = checkpoints.get("builder")
+                critic = checkpoints.get("critic")
+                if builder is None or critic is None:
+                    raise ValueError("missing builder or critic checkpoint")
+                final_result = ProductionReadOnlyVerifier().verify(
+                    VerificationRequest(
+                        run_id=context.run.run_id,
+                        goal=context.goal,
+                        project_root=context.project_root,
+                        builder=builder.data,
+                        critic=critic.data,
+                    )
+                )
+            except Exception:
+                final_result = None
+            if final_result is None or final_result.decision != "verified":
+                self._supervisor._pause(capability, "verification_not_verified")
+                return PreCompletionResult(False, "verification_not_verified")
+        return PreCompletionResult(continue_completion=True)
 
 
 class ManagedSpaceSupervisor:
@@ -278,12 +341,16 @@ class ManagedSpaceSupervisor:
         ledger_path: Path,
         governance_resolver: Callable[[str], ManagedSpaceGovernance],
         child_store_factory: Callable[[Path], ProjectSwarmStore] = ProjectSwarmStore,
+        action_executor: Any | None = None,
     ) -> None:
         if not callable(governance_resolver) or not callable(child_store_factory):
             raise TypeError("managed Space supervisor requires callable dependencies")
+        if action_executor is not None and not callable(getattr(action_executor, "execute", None)):
+            raise TypeError("managed Space action executor requires an execute method")
         self._ledger_path = Path(ledger_path)
         self._governance_resolver = governance_resolver
         self._child_store_factory = child_store_factory
+        self._action_executor = action_executor
         self._bindings: dict[str, ManagedSpaceCapability] = {}
         self._bindings_lock = threading.RLock()
 
@@ -298,6 +365,8 @@ class ManagedSpaceSupervisor:
             connection.execute("BEGIN IMMEDIATE")
             if not _supervisor_ledger_schema_ready(connection):
                 self._initialize_ledger_schema(connection)
+            else:
+                _ensure_ticker_lease_schema(connection)
             connection.commit()
         except BaseException:
             connection.rollback()
@@ -329,9 +398,17 @@ class ManagedSpaceSupervisor:
                 event_type TEXT NOT NULL, actor TEXT, reason TEXT, created_at TEXT NOT NULL
             )"""
         )
+        # The intent identity is bound to the complete Space capability. A
+        # root move or governance revision must not collide with a historical
+        # run carrying the same intent digest; migrate the old two-column
+        # index before creating the capability-bound index.
+        connection.execute("DROP INDEX IF EXISTS idx_supervisor_target_intent")
         connection.execute(
-            """CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_target_intent
-               ON supervisor_admissions(target_space_id, intent_digest)"""
+            """CREATE UNIQUE INDEX idx_supervisor_target_intent
+               ON supervisor_admissions(
+                   target_key, target_space_id, intent_digest, canonical_root,
+                   root_fingerprint, governance_revision
+               )"""
         )
         columns = {
             row[1]
@@ -372,9 +449,181 @@ class ManagedSpaceSupervisor:
             """CREATE INDEX IF NOT EXISTS idx_supervisor_audit_admission_sequence
                ON supervisor_audit(admission_id, sequence DESC)"""
         )
+        _ensure_ticker_lease_schema(connection)
+
+    def acquire_ticker_lease(
+        self,
+        owner_id: str,
+        *,
+        now: float | None = None,
+        ttl_seconds: float = 120.0,
+    ) -> str | None:
+        """Acquire the one durable host-ticker lease, or return ``None``.
+
+        An expired lease is retained as ``orphaned`` for auditability.  This
+        lease guards only the host ticker; it never resumes a child run and
+        therefore cannot bypass the run ledger's Exactly-once admission.
+        """
+        owner_id = str(owner_id or "").strip()
+        if not owner_id or ttl_seconds <= 0:
+            raise ValueError("ticker lease owner and positive TTL are required")
+        now = float(time.time() if now is None else now)
+        self.start()
+        lease_id = str(uuid4())
+        try:
+            with self._immediate_connection() as connection:
+                active = connection.execute(
+                    """SELECT lease_id, owner_id, expires_at
+                       FROM supervisor_ticker_leases
+                       WHERE state = 'active'
+                       ORDER BY started_at DESC LIMIT 1"""
+                ).fetchone()
+                if active is not None:
+                    if float(active["expires_at"]) > now:
+                        return None
+                    connection.execute(
+                        """UPDATE supervisor_ticker_leases
+                           SET state = 'orphaned', terminal_reason = ?, updated_at = ?
+                           WHERE lease_id = ? AND state = 'active'""",
+                        ("lease_expired", now, active["lease_id"]),
+                    )
+                connection.execute(
+                    """INSERT INTO supervisor_ticker_leases
+                       (lease_id, owner_id, state, started_at, expires_at, updated_at, terminal_reason)
+                       VALUES (?, ?, 'active', ?, ?, ?, NULL)""",
+                    (lease_id, owner_id, now, now + float(ttl_seconds), now),
+                )
+        except sqlite3.IntegrityError:
+            # Another process won the unique active-lease race.
+            return None
+        return lease_id
+
+    def reconcile_stale_ticker_leases(
+        self, owner_alive: Callable[[str], bool], *, now: float | None = None
+    ) -> tuple[str, ...]:
+        """Audit-orphan ticker leases whose host is definitively gone.
+
+        A live owner is never pre-empted.  The callback must therefore fail
+        closed for unknown/malformed owners; only an explicit ``False`` may
+        reclaim a lease before its TTL.  This keeps dashboard restarts quick
+        without weakening the single-ticker invariant.
+        """
+        if not callable(owner_alive):
+            raise TypeError("ticker owner liveness requires a callable")
+        now_value = float(time.time() if now is None else now)
+        self.start()
+        orphaned: list[str] = []
+        with self._immediate_connection() as connection:
+            rows = connection.execute(
+                """SELECT lease_id, owner_id, expires_at
+                   FROM supervisor_ticker_leases WHERE state = 'active'"""
+            ).fetchall()
+            for row in rows:
+                lease_id = str(row["lease_id"])
+                expired = float(row["expires_at"]) <= now_value
+                dead = False
+                if not expired:
+                    try:
+                        dead = owner_alive(str(row["owner_id"])) is False
+                    except Exception:
+                        dead = False
+                if not expired and not dead:
+                    continue
+                reason = "lease_expired" if expired else "host_restart_recovered"
+                cursor = connection.execute(
+                    """UPDATE supervisor_ticker_leases
+                       SET state = 'orphaned', terminal_reason = ?, updated_at = ?
+                       WHERE lease_id = ? AND state = 'active'""",
+                    (reason, now_value, lease_id),
+                )
+                if cursor.rowcount:
+                    orphaned.append(lease_id)
+        return tuple(orphaned)
+
+    def heartbeat_ticker_lease(
+        self,
+        lease_id: str,
+        owner_id: str,
+        *,
+        now: float | None = None,
+        ttl_seconds: float = 120.0,
+    ) -> bool:
+        if not lease_id or not owner_id or ttl_seconds <= 0:
+            return False
+        now = float(time.time() if now is None else now)
+        self.start()
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                """UPDATE supervisor_ticker_leases
+                   SET expires_at = ?, updated_at = ?
+                   WHERE lease_id = ? AND owner_id = ? AND state = 'active'
+                     AND expires_at > ?""",
+                (now + float(ttl_seconds), now, lease_id, owner_id, now),
+            )
+        return cursor.rowcount == 1
+
+    def release_ticker_lease(
+        self,
+        lease_id: str,
+        owner_id: str,
+        *,
+        reason: str = "released",
+        now: float | None = None,
+    ) -> bool:
+        if not lease_id or not owner_id:
+            return False
+        now = float(time.time() if now is None else now)
+        self.start()
+        with self._immediate_connection() as connection:
+            cursor = connection.execute(
+                """UPDATE supervisor_ticker_leases
+                   SET state = 'released', terminal_reason = ?, updated_at = ?
+                   WHERE lease_id = ? AND owner_id = ? AND state = 'active'""",
+                (str(reason or "released")[:96], now, lease_id, owner_id),
+            )
+        return cursor.rowcount == 1
+
+    def list_ticker_leases(self) -> list[dict[str, Any]]:
+        if not self._ledger_path.exists():
+            return []
+        with self._read_connection() as connection:
+            rows = connection.execute(
+                """SELECT lease_id, owner_id, state, started_at, expires_at,
+                          updated_at, terminal_reason
+                   FROM supervisor_ticker_leases ORDER BY started_at DESC"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def has_other_active_admissions(self, target_key: str) -> bool:
+        """Return whether another Space currently occupies the global slot."""
+        target = _target_key(target_key)
+        if not self._ledger_path.exists():
+            return False
+        with self._read_connection() as connection:
+            rows = connection.execute(
+                """SELECT target_key FROM supervisor_admissions
+                   WHERE state IN (
+                       'provisioning', 'active', 'paused',
+                       'cancelling', 'abandoning'
+                   )"""
+            ).fetchall()
+        # One same-target row is the expected self-owned admission. Any other
+        # row (including a duplicate same-target row in a legacy/corrupt
+        # ledger) is treated as contention so recovery remains fail-closed.
+        return len(rows) > 1 or any(row["target_key"] != target for row in rows)
 
     def admit(self, target_key: str, intent: Mapping[str, Any]) -> SupervisorAdmission:
         target_key = _target_key(target_key)
+        # An explicitly supplied empty goal is never actionable. Reject it
+        # before governance resolution or any ledger write so malformed
+        # ticker/bridge payloads cannot consume the global YOLO slot. Legacy
+        # kind-only callers remain valid while they migrate to a goal.
+        if "goal" in intent:
+            goal = intent.get("goal")
+            if not isinstance(goal, str) or not goal.strip():
+                return SupervisorAdmission(
+                    "rejected", None, None, None, "invalid_intent"
+                )
         governance = _resolved_governance(self._governance_resolver, target_key)
         if (
             governance is None
@@ -401,10 +650,49 @@ class ManagedSpaceSupervisor:
         now = _timestamp()
         with self._immediate_connection() as connection:
             self._reconcile_completed_admissions(connection)
+            # A live ledger row is also an identity claim. Never let a second
+            # target key (or moved root) reuse the same Space ID while the
+            # original run still occupies the global slot. Comparing against
+            # the immutable ledger snapshot keeps duplicate slug/root claims
+            # fail-closed even if resolver entries race.
+            identity_rows = connection.execute(
+                """SELECT admission_id, run_id, target_key, target_space_id,
+                          canonical_root, root_fingerprint, state
+                   FROM supervisor_admissions
+                   WHERE state IN (
+                       'provisioning', 'active', 'paused',
+                       'cancelling', 'abandoning'
+                   ) AND (target_space_id = ? OR target_key = ?)
+                   ORDER BY updated_at DESC""",
+                (governance.space_id, target_key),
+            ).fetchall()
+            for identity in identity_rows:
+                if (
+                    identity["target_space_id"] != governance.space_id
+                    or identity["target_key"] != target_key
+                    or identity["canonical_root"] != str(governance.canonical_root)
+                    or identity["root_fingerprint"] != governance.root_fingerprint
+                ):
+                    return SupervisorAdmission(
+                        "rejected",
+                        identity["admission_id"],
+                        identity["run_id"],
+                        None,
+                        "space_identity_conflict",
+                    )
             existing = connection.execute(
                 """SELECT admission_id, run_id, state FROM supervisor_admissions
-                   WHERE target_space_id = ? AND intent_digest = ?""",
-                (governance.space_id, intent_digest),
+                   WHERE target_key = ? AND target_space_id = ?
+                     AND intent_digest = ? AND canonical_root = ?
+                     AND root_fingerprint = ? AND governance_revision = ?""",
+                (
+                    target_key,
+                    governance.space_id,
+                    intent_digest,
+                    str(governance.canonical_root),
+                    governance.root_fingerprint,
+                    governance.revision,
+                ),
             ).fetchone()
             if existing is not None:
                 if existing["state"] in _OCCUPIED_STATES | {"completed"}:
@@ -506,12 +794,46 @@ class ManagedSpaceSupervisor:
                     "governance_changed",
                 )
             assert current_governance is not None
-            store = self._child_store_factory(current_governance.canonical_root)
-            store.create_run(run_id, status="paused", metadata=metadata)
-            if not self._activate_provisioning(connection, record):
-                raise RuntimeError(
-                    "managed Space child provisioning could not be activated"
+            try:
+                store = self._child_store_factory(current_governance.canonical_root)
+                store.create_run(run_id, status="paused", metadata=metadata)
+                if not self._activate_provisioning(connection, record):
+                    raise RuntimeError(
+                        "managed Space child provisioning could not be activated"
+                    )
+            except BaseException:
+                # Child-store creation is outside the ledger transaction. Never
+                # strand the global admission slot in ``provisioning`` when it
+                # fails; preserve an audit-able terminal lifecycle instead.
+                cursor = connection.execute(
+                    """UPDATE supervisor_admissions
+                       SET state = 'abandoned', terminal_actor = ?,
+                           attachment_generation = attachment_generation + 1,
+                           record_version = record_version + 1, updated_at = ?
+                       WHERE admission_id = ? AND state = 'provisioning'
+                         AND attachment_generation = ? AND record_version = ?""",
+                    (
+                        SYSTEM_SPACE_LIFECYCLE_ACTOR,
+                        _timestamp(),
+                        admission_id,
+                        record["attachment_generation"],
+                        record["record_version"],
+                    ),
                 )
+                if cursor.rowcount:
+                    _audit(
+                        connection,
+                        admission_id,
+                        "abandoned",
+                        SYSTEM_SPACE_LIFECYCLE_ACTOR,
+                        "child_provisioning_failed",
+                        _timestamp(),
+                    )
+                    # The surrounding ledger context would otherwise roll this
+                    # terminal transition back when the original failure is
+                    # re-raised to the caller.
+                    connection.commit()
+                raise
         self._install_binding(capability)
         return SupervisorAdmission("created", admission_id, run_id, capability, None)
 
@@ -532,6 +854,80 @@ class ManagedSpaceSupervisor:
                    )"""
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def reconcile_stale_host_runs(
+        self, host_alive: Callable[[str], bool]
+    ) -> tuple[str, ...]:
+        """Pause runs whose dashboard execution owner is definitively dead."""
+        if not callable(host_alive):
+            raise TypeError("stale host reconciliation requires a callable")
+        self.start()
+        recovered: list[str] = []
+        for admission in self.list_active_admissions():
+            try:
+                record = self._record(admission["admission_id"])
+                if record is None or record["state"] != "active":
+                    continue
+                child_store = self._child_store_factory(Path(record["canonical_root"]))
+                child = child_store.get_run(record["run_id"])
+                owner = child_store.get_run_execution_lease_owner(record["run_id"])
+                if child is None:
+                    continue
+                # A host can die after admission activation but before the
+                # worker claims its execution lease. Without an owner token,
+                # retaining an active slot is unsafe and can deadlock the
+                # global exactly-once boundary. Pause this ambiguous handoff
+                # so a later host must explicitly recover it.
+                owner_missing = not owner
+                if owner_missing and child.status not in {"running", "paused"}:
+                    continue
+                try:
+                    owner_alive = host_alive(owner) if owner else False
+                except Exception:
+                    # An uncertain owner must never be preempted.
+                    owner_alive = True
+                # A provider/policy pause can race the host crash after the
+                # lease is claimed. Recover that dead lease too; otherwise the
+                # active admission permanently occupies the global slot while
+                # the child is already paused and cannot execute.
+                recover_paused = child.status == "paused" and owner_alive is False
+                recover_running = child.status == "running" and owner_alive is False
+                if not (recover_paused or recover_running):
+                    continue
+                if owner:
+                    child_store.recover_run_execution_lease_after_host_restart(record["run_id"])
+                if owner_missing:
+                    self._pause_record(
+                        record,
+                        "host_restart_recovered",
+                        actor=SYSTEM_SPACE_LIFECYCLE_ACTOR,
+                    )
+                    current = self._record(record["admission_id"])
+                    if current is None or current["state"] != "paused":
+                        continue
+                    recovered.append(record["run_id"])
+                    continue
+                with self._immediate_connection() as connection:
+                    cursor = connection.execute(
+                        """UPDATE supervisor_admissions
+                           SET state = 'paused', updated_at = ?, record_version = record_version + 1
+                           WHERE admission_id = ? AND state = 'active'""",
+                        (_timestamp(), record["admission_id"]),
+                    )
+                    if cursor.rowcount:
+                        _audit(
+                            connection,
+                            record["admission_id"],
+                            "paused",
+                            SYSTEM_SPACE_LIFECYCLE_ACTOR,
+                            "host_restart_recovered",
+                            _timestamp(),
+                        )
+                        recovered.append(record["run_id"])
+                self._remove_binding_for_record(record)
+            except (OSError, RuntimeError, ValueError, sqlite3.Error):
+                continue
+        return tuple(recovered)
 
     def _reconcile_completed_admissions(self, connection: sqlite3.Connection) -> None:
         """Release only active slots whose trusted child run is durably complete.
@@ -625,8 +1021,9 @@ class ManagedSpaceSupervisor:
         """Return host-compatible options only for a live, active binding."""
         from cli.swarm_host import SwarmExecutionOptions
 
-        capability = self._binding_for_run(project_root, run)
-        if capability is None:
+        with self._bindings_lock:
+            capability = self._bindings.get(run.run_id)
+        if capability is None or Path(project_root).resolve() != capability._canonical_root:
             return SwarmExecutionOptions(
                 blocked_reason="supervisor_binding_unavailable"
             )
@@ -637,12 +1034,15 @@ class ManagedSpaceSupervisor:
         if reason is not None:
             self._pause(capability, reason)
             return SwarmExecutionOptions(blocked_reason=reason)
+        from nova.production_verifier import ProductionReadOnlyVerifier
         return SwarmExecutionOptions(
             max_calls=128,
             max_concurrent=3,
+            verifier=ProductionReadOnlyVerifier(),
             pre_completion_hook=ManagedSpacePreCompletionHook(self, capability),
             required_pre_completion_hook_id=ManagedSpacePreCompletionHook.hook_id,
             execution_guard=self._execution_guard_for(capability),
+            action_executor=self._action_executor,
             on_completed=self.completion_observer_for_run(run.run_id),
         )
 
@@ -751,8 +1151,16 @@ class ManagedSpaceSupervisor:
             self._pause(capability, reason)
             return False
         try:
-            dispatcher(root, record["run_id"])
+            dispatch_result = dispatcher(root, record["run_id"])
         except BaseException:
+            self._pause(capability, "host_dispatch_failed")
+            return False
+        # Dispatchers may be asynchronous, but an explicit ``False`` is a
+        # host-level refusal (for example, a saturated worker pool). Treat
+        # that signal as a failed handoff instead of leaving the child in
+        # ``running`` forever with no worker behind it. ``None`` remains the
+        # success value used by existing fire-and-forget dispatchers.
+        if dispatch_result is False:
             self._pause(capability, "host_dispatch_failed")
             return False
         return True
@@ -1327,6 +1735,277 @@ class ManagedSpaceSupervisor:
             event_type="completed",
         )
 
+    def reconcile_host_dispatch(
+        self,
+        project_root: Path,
+        run_id: str,
+        *,
+        failure_reason: str = "host_dispatch_failed",
+    ) -> str:
+        """Release or pause a host-started run after its worker returns.
+
+        ``on_completed`` covers the normal completed path, but a cloud
+        catalog outage, a schema pause, or an unexpected worker exception can
+        return from ``SwarmHost.execute_run`` without invoking that observer.
+        Leaving the supervisor admission active in those cases would consume
+        the global one-run slot forever. This method is capability- and
+        ledger-bound; it never trusts a caller-provided root to create a store
+        or to transition a different run.
+        """
+        if not isinstance(project_root, Path) or not isinstance(run_id, str):
+            return "invalid"
+        with self._bindings_lock:
+            capability = self._bindings.get(run_id)
+        if capability is None:
+            return "unbound"
+        record = self._record(capability._admission_id)
+        if (
+            record is None
+            or not _capability_matches_record(capability, record)
+            or Path(project_root).resolve() != Path(record["canonical_root"])
+        ):
+            self._pause(capability, "capability_invalid")
+            return "paused"
+        try:
+            child = ProjectSwarmStore.open_read_only(
+                Path(record["canonical_root"])
+            ).get_run(record["run_id"])
+        except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+            child = None
+        if child is not None and child.status == "completed":
+            if self._reconcile_completed_record(
+                record,
+                allowed_states=("active", "paused"),
+                event_type="completed_after_host_dispatch",
+            ):
+                return "completed"
+        if child is not None and child.status == "paused" and failure_reason == "host_execution_returned":
+            # Swarm may have paused fail-closed at a model/policy boundary
+            # before the host callback returns. Preserve that bounded reason
+            # in the supervisor audit instead of replacing it with a generic
+            # transport outcome such as ``host_execution_returned``.
+            try:
+                for event in reversed(
+                    ProjectSwarmStore.open_read_only(
+                        Path(record["canonical_root"])
+                    ).list_events(record["run_id"])
+                ):
+                    if event.event_type != "run.paused":
+                        continue
+                    candidate = event.payload.get("reason") if isinstance(event.payload, Mapping) else None
+                    if isinstance(candidate, str) and _CHILD_PAUSE_REASON_RE.fullmatch(candidate):
+                        failure_reason = candidate
+                    break
+            except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+                pass
+        # A returned worker with a paused/missing/unknown child is fail-closed:
+        # stop the ledger binding and let the existing human resume path decide
+        # whether another attempt is appropriate.
+        self._pause(capability, failure_reason)
+        return "paused"
+
+    def auto_resume_recoverable_run(
+        self,
+        target_key: str,
+        *,
+        dispatcher: Callable[[Path, str], object],
+    ) -> tuple[str, str | None]:
+        """Resume one provider-blocked child after an explicit catalog proof.
+
+        This is intentionally narrower than the dashboard recovery path.  It
+        only wakes a still-valid enrolled YOLO Space whose child recorded one
+        of the bounded provider/model pause reasons and whose project-local
+        catalog now contains an explicitly live-verified Ollama Cloud
+        snapshot.  Human, governance, root, policy, and schema pauses never
+        enter this path.
+        """
+        target_key = _target_key(target_key)
+        if not callable(dispatcher):
+            return "none", None
+        governance = _resolved_governance(self._governance_resolver, target_key)
+        if (
+            governance is None
+            or governance.yolo is not True
+            or governance.enrolled is not True
+        ):
+            return "none", None
+        # A legacy/crashed ledger can contain more than one occupied record
+        # while its partial unique index is missing. Rebuilding that index is
+        # fail-closed: SQLite raises IntegrityError rather than allowing
+        # recovery to activate a second run. Keep the run paused and let the
+        # next signal/heartbeat retry after reconciliation.
+        try:
+            self.start()
+        except sqlite3.IntegrityError:
+            return "none", None
+        capability: ManagedSpaceCapability | None = None
+        pause_reason: str | None = None
+        pause_at = None
+        record: sqlite3.Row | None = None
+        with self._immediate_connection() as connection:
+            record = connection.execute(
+                """SELECT * FROM supervisor_admissions
+                   WHERE target_key = ? AND state = 'paused'
+                   ORDER BY updated_at DESC LIMIT 1""",
+                (target_key,),
+            ).fetchone()
+            if (
+                record is None
+                or not _governance_matches_record(governance, record)
+            ):
+                return "none", None
+            # Do not open the child store or inspect its catalog while another
+            # occupied admission owns the global slot. This preflight keeps
+            # recovery strictly behind the slot boundary; the later guard
+            # remains as a race-safe check immediately before activation.
+            occupied = connection.execute(
+                """SELECT 1 FROM supervisor_admissions
+                   WHERE admission_id != ? AND state IN (
+                       'provisioning', 'active', 'paused',
+                       'cancelling', 'abandoning'
+                   ) LIMIT 1""",
+                (record["admission_id"],),
+            ).fetchone()
+            if occupied is not None:
+                return "none", None
+            try:
+                reader = ProjectSwarmStore.open_read_only(
+                    Path(record["canonical_root"])
+                )
+                run = reader.get_run(record["run_id"])
+                lease_held = reader.has_run_execution_lease(record["run_id"])
+                events = reader.list_events(record["run_id"])
+                catalog = reader.get_model_catalog_snapshot(_OLLAMA_CLOUD_PROVIDER)
+            except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+                return "none", None
+            if (
+                run is None
+                or run.status != "paused"
+                or lease_held
+                or not _diagnostic_metadata_matches_record(run.metadata, record)
+            ):
+                return "none", None
+            for event in reversed(events):
+                if event.event_type != "run.paused":
+                    continue
+                candidate = event.payload.get("reason") if isinstance(event.payload, Mapping) else None
+                if isinstance(candidate, str) and _CHILD_PAUSE_REASON_RE.fullmatch(candidate):
+                    pause_reason = candidate
+                    pause_at = event.timestamp
+                break
+            if pause_reason not in _RECOVERABLE_PROVIDER_PAUSE_REASONS:
+                _audit_auto_resume_wait_once(
+                    connection,
+                    record["admission_id"],
+                    (
+                        "model_chain_exhausted"
+                        if pause_reason == "model_chain_exhausted"
+                        else "pause_not_recoverable"
+                    ),
+                )
+                return "none", None
+            if not (
+                catalog is not None
+                and catalog.provider == _OLLAMA_CLOUD_PROVIDER
+                and catalog.healthy is True
+                and catalog.source == _OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE
+                and catalog.models
+            ):
+                if pause_reason == "model_chain_exhausted":
+                    _audit_auto_resume_wait_once(
+                        connection,
+                        record["admission_id"],
+                        "catalog_refresh_required",
+                    )
+                    return "waiting_for_catalog", record["run_id"]
+                _audit_auto_resume_wait_once(
+                    connection,
+                    record["admission_id"],
+                    "catalog_refresh_required",
+                )
+                return "none", None
+            # A catalog that predates the pause cannot prove that the provider
+            # recovered. Require a strictly newer verified snapshot so the
+            # heartbeat cannot repeatedly wake a run on stale model metadata.
+            if pause_at is None or catalog.refreshed_at <= pause_at:
+                if pause_reason == "model_chain_exhausted":
+                    _audit_auto_resume_wait_once(
+                        connection,
+                        record["admission_id"],
+                        "catalog_refresh_required",
+                    )
+                    return "waiting_for_catalog", record["run_id"]
+                _audit_auto_resume_wait_once(
+                    connection,
+                    record["admission_id"],
+                    "catalog_refresh_required",
+                )
+                return "none", None
+
+            next_generation = int(record["attachment_generation"]) + 1
+            capability = _capability_from_record(
+                record,
+                attachment_generation=next_generation,
+            )
+            if capability is None:
+                return "none", None
+            # Recovery must obey the same global one-run admission boundary
+            # as a fresh signal. A paused record is itself part of the
+            # occupied-slot index, but another occupied admission can still
+            # be visible in a legacy ledger before this paused -> active
+            # update. Keep recovery pending so normal admission backoff can
+            # report ``active_limit`` instead of leaking IntegrityError.
+            occupied = connection.execute(
+                """SELECT 1 FROM supervisor_admissions
+                   WHERE admission_id != ? AND state IN (
+                       'provisioning', 'active', 'paused',
+                       'cancelling', 'abandoning'
+                   ) LIMIT 1""",
+                (record["admission_id"],),
+            ).fetchone()
+            if occupied is not None:
+                return "none", None
+            cursor = connection.execute(
+                """UPDATE supervisor_admissions
+                   SET state = 'active', attachment_generation = ?,
+                       record_version = record_version + 1, updated_at = ?
+                   WHERE admission_id = ? AND state = 'paused'
+                     AND attachment_generation = ? AND record_version = ?""",
+                (
+                    next_generation,
+                    _timestamp(),
+                    record["admission_id"],
+                    record["attachment_generation"],
+                    record["record_version"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                return "none", None
+            _audit(
+                connection,
+                record["admission_id"],
+                "auto_resumed_after_recovery",
+                SYSTEM_SPACE_LIFECYCLE_ACTOR,
+                pause_reason,
+                _timestamp(),
+            )
+        assert capability is not None and record is not None
+        self._install_binding(capability)
+        try:
+            store = self._child_store_factory(Path(record["canonical_root"]))
+            store.append_event_once(
+                record["run_id"],
+                "nova.supervisor.auto_resumed_after_recovery",
+                {"reason": pause_reason},
+                idempotency_key=(
+                    "supervisor-auto-resume:" + str(capability._attachment_generation)
+                ),
+            )
+        except (OSError, RuntimeError, ValueError, KeyError, sqlite3.Error):
+            self._pause(capability, "auto_resume_audit_failed")
+            return "start_failed", record["run_id"]
+        started = self.start_admitted_run(capability, dispatcher=dispatcher)
+        return ("auto_resumed" if started else "start_failed"), record["run_id"]
     def _reconcile_completed_record(
         self,
         record: Mapping[str, Any],
@@ -1512,6 +2191,27 @@ class ManagedSpaceSupervisor:
             final_state="cancelled",
             actor=actor,
         )
+
+    def abandon_run_by_id(self, run_id: str, *, actor: str) -> bool:
+        """Human-only release by opaque run id for the Nova Presence card."""
+        _dashboard_actor(actor)
+        if not isinstance(run_id, str) or not _RUN_ID_RE.fullmatch(run_id):
+            raise ValueError("supervisor run id is invalid")
+        self.start()
+        with self._read_connection() as connection:
+            record = connection.execute(
+                "SELECT admission_id, canonical_root FROM supervisor_admissions "
+                "WHERE run_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        if record is None:
+            return False
+        child = ProjectSwarmStore.open_read_only(Path(record["canonical_root"])).get_run(run_id)
+        if child is None or child.status != "paused":
+            return False
+        if str(child.metadata.get("started_by") or "").strip().lower() == "nova":
+            raise PermissionError("Nova-owned runs cannot be released from Presence")
+        return self.abandon(str(record["admission_id"]), actor=actor)
 
     def abandon(self, admission_id: str, *, actor: str) -> bool:
         _dashboard_actor(actor)
@@ -1741,6 +2441,7 @@ class ManagedSpaceSupervisor:
         if (
             capability is None
             or Path(project_root).resolve() != capability._canonical_root
+            or not _diagnostic_metadata_matches_capability(run.metadata, capability)
         ):
             return None
         return capability
@@ -1819,6 +2520,41 @@ class ManagedSpaceSupervisor:
         if changed:
             self._remove_binding(capability)
             self._pause_existing_child(record, reason)
+
+    def target_key_for_run(self, project_root: Path, run_id: str) -> str | None:
+        """Resolve a bound run to its opaque Space key without mutating state."""
+        if not isinstance(project_root, Path) or not isinstance(run_id, str) or not run_id:
+            return None
+        status, record = self._routing_record(project_root, run_id)
+        if status != "known" or record is None:
+            return None
+        target = record["target_key"]
+        return target if isinstance(target, str) and target else None
+
+    def target_key_for_run_id(self, run_id: str) -> str | None:
+        """Resolve a run id across the supervisor ledger without mutation."""
+        if not isinstance(run_id, str) or not run_id:
+            return None
+        if not self._ledger_path.exists():
+            return None
+        with self._read_connection() as connection:
+            row = connection.execute(
+                "SELECT target_key FROM supervisor_admissions "
+                "WHERE run_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        target = row["target_key"] if row is not None else None
+        return target if isinstance(target, str) and target else None
+
+    def admission_id_for_run(self, project_root: Path, run_id: str) -> str | None:
+        """Resolve a ledger-bound run to its admission id without writing."""
+        if not isinstance(project_root, Path) or not isinstance(run_id, str) or not run_id:
+            return None
+        status, record = self._routing_record(project_root, run_id)
+        if status != "known" or record is None:
+            return None
+        admission_id = record["admission_id"]
+        return admission_id if isinstance(admission_id, str) and admission_id else None
 
     def _record(self, admission_id: str) -> sqlite3.Row | None:
         if not self._ledger_path.exists():
@@ -1946,6 +2682,25 @@ def _supervisor_ledger_schema_ready(connection: sqlite3.Connection) -> bool:
     )
 
 
+def _ensure_ticker_lease_schema(connection: sqlite3.Connection) -> None:
+    """Create the durable single-host-ticker lease table idempotently."""
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS supervisor_ticker_leases (
+            lease_id TEXT PRIMARY KEY,
+            owner_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            started_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            terminal_reason TEXT
+        )"""
+    )
+    connection.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_supervisor_one_ticker_lease
+           ON supervisor_ticker_leases((1)) WHERE state = 'active'"""
+    )
+
+
 def _sqlite_schema_objects_present(
     connection: sqlite3.Connection,
     schema_objects: tuple[str, ...],
@@ -1992,6 +2747,11 @@ def get_production_managed_space_supervisor() -> ManagedSpaceSupervisor:
                 ledger_path=ledger_path,
                 governance_resolver=resolve_managed_space_governance,
             )
+            # The executor is a host-owned proxy. It builds the action gateway
+            # only after a current capability/run binding has been revalidated.
+            from nova.production_workers import ProductionManagedActionExecutor
+
+            supervisor._action_executor = ProductionManagedActionExecutor(supervisor)
             _PRODUCTION_SUPERVISORS[ledger_path] = supervisor
         return supervisor
 
@@ -2029,6 +2789,33 @@ def resolve_managed_space_governance(target_key: str) -> ManagedSpaceGovernance:
         revision=management.get("revision"),
         policy_identity="space-governance:" + str(management.get("revision")),
     )
+
+
+def list_current_managed_space_governance() -> dict[str, ManagedSpaceGovernance]:
+    """Return a bounded, read-only snapshot of currently enrolled YOLO Spaces.
+
+    This registry enumeration is intentionally separate from the per-target
+    resolver: malformed, untrusted, or revoked Spaces are skipped rather than
+    becoming autonomous work. It performs no ledger writes and never touches a
+    model/provider; the host ticker supplies the snapshot to the runtime.
+    """
+    try:
+        from web.api.space_engine import get_all_spaces
+        spaces = get_all_spaces()
+    except Exception:
+        return {}
+    snapshot: dict[str, ManagedSpaceGovernance] = {}
+    for space in spaces[:256]:
+        target = getattr(space, "slug", "")
+        if not isinstance(target, str) or not target:
+            continue
+        try:
+            governance = resolve_managed_space_governance(target)
+        except Exception:
+            continue
+        if governance.yolo is True and governance.enrolled is True:
+            snapshot[target] = governance
+    return snapshot
 
 
 def managed_space_execution_options_for_run(
@@ -2108,9 +2895,11 @@ def _diagnostic_metadata(
         "goal": str(intent.get("goal", "Nova managed Space supervision")),
         "pack": "coding-team",
         "autonomy": "autonomous",
+        "started_by": "nova-supervisor",
         "project_root": str(capability._canonical_root),
         "integration_namespace": "nova-space-supervisor",
         "required_pre_completion_hook": ManagedSpacePreCompletionHook.hook_id,
+        "production_verifier": ManagedSpacePreCompletionHook.verifier_contract,
         "nova_supervisor": {
             "admission_id": capability._admission_id,
             "target_space_id": capability._target_space_id,
@@ -2337,6 +3126,40 @@ def _audit(
     )
 
 
+def _audit_auto_resume_wait_once(
+    connection: sqlite3.Connection,
+    admission_id: str,
+    reason: str,
+) -> None:
+    """Record one fixed recovery-block decision after each audited pause."""
+    if reason not in _AUTO_RESUME_WAIT_REASONS:
+        return
+    paused = connection.execute(
+        """SELECT MAX(sequence) FROM supervisor_audit
+           WHERE admission_id = ? AND event_type = 'paused'""",
+        (admission_id,),
+    ).fetchone()
+    pause_sequence = int(paused[0] or 0) if paused is not None else 0
+    if pause_sequence <= 0:
+        return
+    already_recorded = connection.execute(
+        """SELECT 1 FROM supervisor_audit
+           WHERE admission_id = ? AND event_type = ? AND sequence > ?
+           LIMIT 1""",
+        (admission_id, _AUTO_RESUME_WAIT_AUDIT_EVENT, pause_sequence),
+    ).fetchone()
+    if already_recorded is not None:
+        return
+    _audit(
+        connection,
+        admission_id,
+        _AUTO_RESUME_WAIT_AUDIT_EVENT,
+        SYSTEM_SPACE_LIFECYCLE_ACTOR,
+        reason,
+        _timestamp(),
+    )
+
+
 def _target_key(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError("managed Space target is required")
@@ -2372,3 +3195,5 @@ def _dashboard_actor(actor: str) -> None:
         raise PermissionError(
             "only a dashboard human actor may terminally transition a managed Space run"
         )
+
+

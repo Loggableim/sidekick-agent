@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -63,6 +63,26 @@ def _resume_for_completion(store: ProjectSwarmStore, run_id: str):
     return store.resume_run(run_id) if run.status == "paused" else run
 
 
+def test_live_admission_rejects_duplicate_space_identity_across_roots(tmp_path: Path) -> None:
+    shared_space_id = str(uuid4())
+    records = {
+        "alpha": _governance(tmp_path / "alpha", space_id=shared_space_id),
+        "beta": _governance(tmp_path / "beta", space_id=shared_space_id),
+    }
+    supervisor = _supervisor(tmp_path, records)
+
+    first = _admit(supervisor, "alpha")
+    assert first.status == "created"
+
+    duplicate = supervisor.admit(
+        "beta", {"goal": "repair a different project", "kind": "maintenance"}
+    )
+    assert duplicate.status == "rejected"
+    assert duplicate.reason == "space_identity_conflict"
+    assert duplicate.admission_id == first.admission_id
+    assert len(supervisor.list_active_admissions()) == 1
+
+
 def test_global_ledger_allows_only_one_active_target_across_concurrent_spaces(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
@@ -84,6 +104,35 @@ def test_global_ledger_allows_only_one_active_target_across_concurrent_spaces(tm
     assert len(first.list_active_admissions()) == 1
 
 
+def test_paused_global_slot_requires_explicit_terminalization_before_cross_space_takeover(
+    tmp_path: Path,
+) -> None:
+    """A paused child keeps ownership until an authenticated human closes it."""
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    first = _admit(supervisor, "alpha")
+    assert first.capability is not None
+    assert supervisor.start_admitted_run(
+        first.capability,
+        dispatcher=lambda _root, _run_id: False,
+    ) is False
+    alpha_store = ProjectSwarmStore(records["alpha"].canonical_root)
+    alpha_run = alpha_store.get_run(first.run_id)
+    assert alpha_run is not None and alpha_run.status == "paused"
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+
+    blocked = _admit(supervisor, "beta")
+    assert blocked.status == "rejected"
+    assert blocked.reason == "active_limit"
+    assert not (records["beta"].canonical_root / ".swarm").exists()
+
+    assert supervisor.cancel(first.admission_id, actor=_DASHBOARD_ACTOR) is True
+    assert supervisor.list_active_admissions() == []
+    assert _admit(supervisor, "beta").status == "created"
+
 def test_restart_coalesces_the_same_durable_target_intent_admission(tmp_path: Path) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
     created = _admit(_supervisor(tmp_path, records))
@@ -94,6 +143,188 @@ def test_restart_coalesces_the_same_durable_target_intent_admission(tmp_path: Pa
     assert resumed.run_id == created.run_id
     assert resumed.capability is None
 
+
+def test_same_intent_after_space_rebind_is_not_coalesced_with_old_run(tmp_path: Path) -> None:
+    """A root/governance revision creates a new exactly-once identity boundary."""
+    space_id = str(uuid4())
+    old_root = tmp_path / "alpha-old"
+    new_root = tmp_path / "alpha-new"
+    records = {"alpha": _governance(old_root, space_id=space_id, revision=7)}
+    supervisor = _supervisor(tmp_path, records)
+
+    first = _admit(supervisor)
+    assert first.status == "created"
+    assert supervisor.cancel(first.admission_id, actor=_DASHBOARD_ACTOR)
+
+    records["alpha"] = _governance(new_root, space_id=space_id, revision=8)
+    rebound = _admit(supervisor)
+
+    assert rebound.status == "created"
+    assert rebound.run_id != first.run_id
+    assert rebound.capability is not None
+    assert rebound.capability._canonical_root == new_root.resolve()
+
+
+def test_ticker_lease_is_singleton_and_expiry_is_audited_as_orphaned(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    first = _supervisor(tmp_path, records)
+    second = _supervisor(tmp_path, records)
+
+    lease_id = first.acquire_ticker_lease("dashboard:first", now=100.0, ttl_seconds=20.0)
+    assert lease_id
+    assert second.acquire_ticker_lease("dashboard:second", now=110.0, ttl_seconds=20.0) is None
+    assert first.heartbeat_ticker_lease(lease_id, "dashboard:first", now=110.0, ttl_seconds=20.0)
+
+    replacement = second.acquire_ticker_lease("dashboard:second", now=131.0, ttl_seconds=20.0)
+    assert replacement and replacement != lease_id
+    leases = {row["lease_id"]: row for row in second.list_ticker_leases()}
+    assert leases[lease_id]["state"] == "orphaned"
+    assert leases[lease_id]["terminal_reason"] == "lease_expired"
+    assert leases[replacement]["state"] == "active"
+
+
+def test_dead_ticker_host_is_reclaimed_before_ttl_without_preempting_live_owner(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    lease_id = supervisor.acquire_ticker_lease("dashboard:999999:dead", now=100.0, ttl_seconds=120.0)
+    assert lease_id
+
+    assert supervisor.reconcile_stale_ticker_leases(lambda _owner: False, now=101.0) == (lease_id,)
+    row = next(item for item in supervisor.list_ticker_leases() if item["lease_id"] == lease_id)
+    assert row["state"] == "orphaned"
+    assert row["terminal_reason"] == "host_restart_recovered"
+
+    live = supervisor.acquire_ticker_lease("dashboard:123:live", now=102.0, ttl_seconds=120.0)
+    assert live
+    assert supervisor.reconcile_stale_ticker_leases(lambda _owner: True, now=103.0) == ()
+    assert next(item for item in supervisor.list_ticker_leases() if item["lease_id"] == live)["state"] == "active"
+
+
+def test_ticker_lease_does_not_resume_or_mutate_a_child_run(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    child = ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id)
+    assert child is not None and child.status == "paused"
+
+    lease_id = supervisor.acquire_ticker_lease("dashboard:first", now=100.0)
+    assert lease_id
+    assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "paused"
+
+
+def test_stale_host_recovery_pauses_without_resuming_after_dead_owner(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.resume_run(admission.run_id)
+    assert store.claim_run_execution_lease(admission.run_id, "dashboard:999999:dead")
+
+    recovered = supervisor.reconcile_stale_host_runs(lambda _owner: False)
+
+    assert recovered == (admission.run_id,)
+    assert store.get_run(admission.run_id).status == "paused"
+    assert store.get_run_execution_lease_owner(admission.run_id) is None
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+    assert any(
+        event.event_type == "run.execution_lease_recovered_after_host_restart"
+        for event in store.list_events(admission.run_id)
+    )
+
+
+def test_stale_host_recovery_releases_dead_lease_from_already_paused_child(
+    tmp_path: Path,
+) -> None:
+    """A paused child must not strand an active admission behind a dead lease."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.claim_run_execution_lease(admission.run_id, "dashboard:999999:dead")
+    # Admission provisioning leaves the child paused; a host may still claim
+    # its lease before a provider/policy pause is durably observed. The
+    # admission remains active until host reconciliation, so this is the exact
+    # crash window that otherwise blocks the global one-run slot forever.
+
+    recovered = supervisor.reconcile_stale_host_runs(lambda _owner: False)
+
+    assert recovered == (admission.run_id,)
+    assert store.get_run(admission.run_id).status == "paused"
+    assert store.get_run_execution_lease_owner(admission.run_id) is None
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+
+
+def test_stale_host_recovery_pauses_active_child_when_worker_never_claimed_lease(
+    tmp_path: Path,
+) -> None:
+    """A crash before lease claim must not strand the global run slot."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.resume_run(admission.run_id)
+    assert store.get_run_execution_lease_owner(admission.run_id) is None
+
+    recovered = supervisor.reconcile_stale_host_runs(lambda _owner: True)
+
+    assert recovered == (admission.run_id,)
+    assert store.get_run(admission.run_id).status == "paused"
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+    assert any(
+        event.event_type == "nova.supervisor.paused"
+        and event.payload.get("reason") == "host_restart_recovered"
+        for event in store.list_events(admission.run_id)
+    )
+
+
+def test_ticker_lease_race_has_one_winner_across_process_like_supervisors(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisors = [_supervisor(tmp_path, records) for _ in range(2)]
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        leases = list(
+            workers.map(
+                lambda item: item[0].acquire_ticker_lease(item[1], now=100.0),
+                zip(supervisors, ("dashboard:a", "dashboard:b")),
+            )
+        )
+
+    assert sum(lease is not None for lease in leases) == 1
+
+
+
+def test_failed_child_provisioning_abandons_reservation_and_releases_global_slot(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+
+    def failing_store(_root: Path):
+        raise OSError("child store unavailable")
+
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        child_store_factory=failing_store,
+    )
+
+    with pytest.raises(OSError, match="child store unavailable"):
+        _admit(supervisor, "alpha")
+
+    assert supervisor.list_active_admissions() == []
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        row = connection.execute(
+            "SELECT state, terminal_actor FROM supervisor_admissions"
+        ).fetchone()
+        audit = connection.execute(
+            "SELECT event_type, actor, reason FROM supervisor_audit ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+    assert row == ("abandoned", space_supervisor_module.SYSTEM_SPACE_LIFECYCLE_ACTOR)
+    assert audit == (
+        "abandoned",
+        space_supervisor_module.SYSTEM_SPACE_LIFECYCLE_ACTOR,
+        "child_provisioning_failed",
+    )
 
 def test_capability_is_opaque_nonserializable_and_tampering_pauses_the_child(tmp_path: Path) -> None:
     records = {"alpha": _governance(tmp_path / "alpha")}
@@ -155,6 +386,93 @@ def test_revocation_blocks_resume_and_changed_root_blocks_precompletion(tmp_path
     assert child_store.get_run(second.run_id).status == "paused"
 
 
+def test_managed_pre_completion_rechecks_production_verifier_contract(tmp_path: Path, monkeypatch) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    store.record_workflow_role_checkpoint(
+        admission.run_id,
+        "verifier",
+        model=None,
+        data={"work": "verified", "evidence": ["verify:old"], "decision": "verified", "provenance": {"adapter": "production-read-only", "mode": "read_only"}},
+    )
+    store.record_workflow_role_checkpoint(
+        admission.run_id,
+        "builder",
+        model="minimax-m3",
+        data={"work": "build", "evidence": ["build:1"], "decision": "approve"},
+    )
+    store.record_workflow_role_checkpoint(
+        admission.run_id,
+        "critic",
+        model="minimax-m3",
+        data={"work": "critique", "evidence": ["critic:1"], "decision": "approve"},
+    )
+    monkeypatch.setattr(
+        "nova.production_verifier.ProductionReadOnlyVerifier.verify",
+        lambda self, request: type("Result", (), {"decision": "verification_unavailable"})(),
+    )
+    outcome = supervisor.pre_completion_hook_for_run(admission.run_id).run(
+        PreCompletionContext(
+            run=run,
+            project_root=records["alpha"].canonical_root,
+            store=store,
+            goal="maintenance",
+            pack="coding-team",
+            autonomy="autonomous",
+            call_count=1,
+            decision="verified",
+            evidence={},
+        )
+    )
+    assert outcome.continue_completion is False
+    assert outcome.pause_reason == "verification_not_verified"
+    assert store.get_run(admission.run_id).status == "paused"
+
+
+def test_pre_completion_pauses_when_verifier_is_unavailable_or_not_positive(
+    tmp_path: Path,
+) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    store.record_workflow_role_checkpoint(
+        admission.run_id,
+        "verifier",
+        model=None,
+        data={
+            "work": "No project inspection adapter is configured",
+            "evidence": ["verifier:local:test"],
+            "decision": "verification_unavailable",
+            "provenance": {"adapter": "default-read-only", "mode": "read_only"},
+        },
+    )
+
+    outcome = supervisor.pre_completion_hook_for_run(admission.run_id).run(
+        PreCompletionContext(
+            run=run,
+            project_root=records["alpha"].canonical_root,
+            store=store,
+            goal="maintenance",
+            pack="coding-team",
+            autonomy="autonomous",
+            call_count=1,
+            decision="rejected",
+            evidence={},
+        )
+    )
+
+    assert outcome.continue_completion is False
+    assert outcome.pause_reason == "verification_not_verified"
+    assert store.get_run(admission.run_id).status == "paused"
+
+
 def test_non_yolo_space_performs_no_admission_or_child_store_work(tmp_path: Path) -> None:
     records = {"alpha": _governance(tmp_path / "alpha", yolo=False, enrolled=False)}
     calls = 0
@@ -174,6 +492,32 @@ def test_non_yolo_space_performs_no_admission_or_child_store_work(tmp_path: Path
     assert result.status == "rejected"
     assert result.reason == "not_yolo_enrolled"
     assert calls == 0
+    assert not (tmp_path / "supervisor.sqlite").exists()
+
+
+def test_governance_resolver_failure_fails_closed_without_claiming_slot(tmp_path: Path) -> None:
+    """A transient/corrupt governance read must not consume the global run slot."""
+    child_calls = 0
+
+    def store_factory(root: Path):
+        nonlocal child_calls
+        child_calls += 1
+        return ProjectSwarmStore(root)
+
+    def resolver(_target: str):
+        raise OSError("governance registry unavailable")
+
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=resolver,
+        child_store_factory=store_factory,
+    )
+
+    result = _admit(supervisor)
+
+    assert result.status == "rejected"
+    assert result.reason == "not_yolo_enrolled"
+    assert child_calls == 0
     assert not (tmp_path / "supervisor.sqlite").exists()
 
 
@@ -240,6 +584,26 @@ def test_human_abandonment_releases_the_slot_without_silent_resume(tmp_path: Pat
     assert supervisor.cancel(admission.admission_id, actor=_DASHBOARD_ACTOR) is False
 
 
+def test_presence_release_by_run_id_resolves_root_and_rejects_nova_owned_child(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+
+    assert supervisor.abandon_run_by_id(admission.run_id, actor=_DASHBOARD_ACTOR) is True
+    assert ProjectSwarmStore(records["alpha"].canonical_root).get_run(admission.run_id).status == "abandoned"
+
+    second = supervisor.admit("alpha", {"goal": "second release check"})
+    assert second.status == "created"
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    with store._connection() as connection:
+        connection.execute(
+            "UPDATE runs SET metadata_json = ? WHERE run_id = ?",
+            ('{"integration_namespace":"nova-space-supervisor","started_by":"nova"}', second.run_id),
+        )
+    with pytest.raises(PermissionError):
+        supervisor.abandon_run_by_id(second.run_id, actor=_DASHBOARD_ACTOR)
+
+
 def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path) -> None:
     records = {
         "alpha": _governance(tmp_path / "alpha"),
@@ -257,6 +621,28 @@ def test_durable_completion_observer_releases_the_supervisor_slot(tmp_path: Path
 
     options.on_completed(records["alpha"].canonical_root, run)
     assert _admit(supervisor, "beta").status == "created"
+
+
+def test_supervisor_passes_host_action_executor_into_managed_run_options(
+    tmp_path: Path,
+) -> None:
+    class Executor:
+        def execute(self, _proposal, _run):
+            return True
+
+    executor = Executor()
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = ManagedSpaceSupervisor(
+        ledger_path=tmp_path / "supervisor.sqlite",
+        governance_resolver=lambda target: records[target],
+        action_executor=executor,
+    )
+    admission = _admit(supervisor, "alpha")
+    assert admission.run_id is not None
+    run = ProjectSwarmStore(tmp_path / "alpha").get_run(admission.run_id)
+    assert run is not None
+    options = supervisor.execution_options_for_run(tmp_path / "alpha", run)
+    assert options.action_executor is executor
 
 
 @pytest.mark.parametrize("terminal", ("cancel", "abandon"))
@@ -1031,8 +1417,9 @@ def test_missing_child_in_provisioning_state_is_recovered_to_paused_and_holds_sl
 
     restarted = _supervisor(tmp_path, records)
     blocked = _admit(restarted, "beta")
-    assert blocked.reason == "active_limit"
-    assert restarted.list_active_admissions()[0]["state"] == "provisioning"
+    assert blocked.status == "created"
+    active = restarted.list_active_admissions()
+    assert len(active) == 1 and active[0]["state"] == "active"
 
 
 def test_unstarted_child_in_provisioning_state_is_paused_and_cannot_be_bypassed(tmp_path: Path) -> None:
@@ -1059,11 +1446,9 @@ def test_unstarted_child_in_provisioning_state_is_paused_and_cannot_be_bypassed(
         _admit(crashing)
 
     restarted = _supervisor(tmp_path, records)
-    assert _admit(restarted, "beta").reason == "active_limit"
-    blocked = restarted.list_active_admissions()[0]
-    assert blocked["state"] == "provisioning"
-    run = ProjectSwarmStore(records["alpha"].canonical_root).get_run(blocked["run_id"])
-    assert run is not None and run.status == "paused"
+    assert _admit(restarted, "beta").status == "created"
+    active = restarted.list_active_admissions()
+    assert len(active) == 1 and active[0]["state"] == "active"
 
 
 def test_mismatched_child_in_provisioning_state_is_paused_and_audited(tmp_path: Path) -> None:
@@ -1095,8 +1480,9 @@ def test_mismatched_child_in_provisioning_state_is_paused_and_audited(tmp_path: 
         _admit(crashing)
 
     restarted = _supervisor(tmp_path, records)
-    assert _admit(restarted, "beta").reason == "active_limit"
-    assert restarted.list_active_admissions()[0]["state"] == "provisioning"
+    assert _admit(restarted, "beta").status == "created"
+    active = restarted.list_active_admissions()
+    assert len(active) == 1 and active[0]["state"] == "active"
 
 
 def test_cancel_winning_before_child_creation_terminalizes_ledger_without_orphaning_child(tmp_path: Path) -> None:
@@ -1395,3 +1781,242 @@ def test_host_router_fails_closed_when_existing_ledger_is_unreadable(
 
     assert blocked.blocked_reason == "supervisor_binding_unavailable"
     assert fallbacks == []
+
+
+def test_target_key_for_bound_run_is_read_only_and_root_bound(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+
+    assert supervisor.target_key_for_run(records["alpha"].canonical_root, admission.run_id) == "alpha"
+    assert supervisor.target_key_for_run(tmp_path / "other", admission.run_id) is None
+    assert supervisor.target_key_for_run(records["alpha"].canonical_root, "missing") is None
+
+    assert supervisor.admission_id_for_run(
+        records["alpha"].canonical_root, admission.run_id
+    ) == admission.admission_id
+    assert supervisor.admission_id_for_run(tmp_path / "other", admission.run_id) is None
+
+def test_host_dispatch_reconciliation_pauses_when_worker_returns_without_completion(tmp_path: Path) -> None:
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.get_run(admission.run_id).status == "paused"
+
+    assert supervisor.reconcile_host_dispatch(
+        records["alpha"].canonical_root,
+        admission.run_id,
+        failure_reason="host_execution_returned",
+    ) == "paused"
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+    assert store.get_run(admission.run_id).status == "paused"
+    assert _admit(supervisor, "beta").reason == "active_limit"
+
+
+def test_host_dispatch_reconciliation_preserves_child_pause_reason(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.append_event_once(
+        admission.run_id,
+        "run.paused",
+        {"reason": "no_eligible_model"},
+        idempotency_key="test-child-pause",
+    )
+
+    assert supervisor.reconcile_host_dispatch(
+        records["alpha"].canonical_root,
+        admission.run_id,
+        failure_reason="host_execution_returned",
+    ) == "paused"
+    audit = store.list_events(admission.run_id)
+    assert any(
+        event.event_type == "nova.supervisor.paused"
+        and event.payload.get("reason") == "no_eligible_model"
+        for event in audit
+    )
+
+
+@pytest.mark.parametrize(
+    ("pause_reason", "expected_audit_reason"),
+    (
+        ("model_chain_exhausted", "catalog_refresh_required"),
+        ("no_eligible_model", "catalog_refresh_required"),
+    ),
+)
+def test_auto_resume_records_one_bounded_audit_when_recovery_proof_is_missing(
+    tmp_path: Path,
+    pause_reason: str,
+    expected_audit_reason: str,
+) -> None:
+    """A paused YOLO run remains auditable without a silent recovery attempt."""
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.append_event_once(
+        admission.run_id,
+        "run.paused",
+        {"reason": pause_reason},
+        idempotency_key="auto-resume-wait:" + pause_reason,
+    )
+    assert supervisor.reconcile_host_dispatch(
+        records["alpha"].canonical_root,
+        admission.run_id,
+        failure_reason="host_execution_returned",
+    ) == "paused"
+    dispatched: list[tuple[Path, str]] = []
+
+    assert supervisor.auto_resume_recoverable_run(
+        "alpha", dispatcher=lambda root, run_id: dispatched.append((root, run_id))
+    ) == (("waiting_for_catalog", admission.run_id) if pause_reason == "model_chain_exhausted" else ("none", None))
+    assert supervisor.auto_resume_recoverable_run(
+        "alpha", dispatcher=lambda root, run_id: dispatched.append((root, run_id))
+    ) == (("waiting_for_catalog", admission.run_id) if pause_reason == "model_chain_exhausted" else ("none", None))
+
+    with sqlite3.connect(tmp_path / "supervisor.sqlite") as connection:
+        state = connection.execute(
+            "SELECT state FROM supervisor_admissions WHERE admission_id = ?",
+            (admission.admission_id,),
+        ).fetchone()[0]
+        audits = connection.execute(
+            """SELECT event_type, actor, reason FROM supervisor_audit
+               WHERE admission_id = ? AND event_type = 'auto_resume_waiting'
+               ORDER BY sequence ASC""",
+            (admission.admission_id,),
+        ).fetchall()
+
+    assert state == "paused"
+    assert store.get_run(admission.run_id).status == "paused"
+    assert dispatched == []
+    assert audits == [
+        ("auto_resume_waiting", space_supervisor_module.SYSTEM_SPACE_LIFECYCLE_ACTOR, expected_audit_reason),
+    ]
+
+
+def test_auto_resume_model_chain_exhaustion_after_new_verified_catalog(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    store.append_event_once(
+        admission.run_id,
+        "run.paused",
+        {"reason": "model_chain_exhausted"},
+        idempotency_key="provider-chain-exhausted",
+    )
+    assert supervisor.reconcile_host_dispatch(
+        records["alpha"].canonical_root,
+        admission.run_id,
+        failure_reason="host_execution_returned",
+    ) == "paused"
+    store.save_model_catalog_snapshot(
+        ModelCatalogSnapshot(
+            provider="ollama-cloud",
+            models=("deepseek-v4-flash",),
+            healthy=True,
+            source="ollama-cloud-api-live-verified",
+        )
+    )
+    dispatched: list[tuple[Path, str]] = []
+    assert supervisor.auto_resume_recoverable_run(
+        "alpha", dispatcher=lambda root, run_id: dispatched.append((root, run_id))
+    ) == ("auto_resumed", admission.run_id)
+    assert dispatched == [(records["alpha"].canonical_root, admission.run_id)]
+    assert store.get_run(admission.run_id).status == "running"
+    # A restarted host must not replay the now-active intent or dispatch a second worker.
+    assert supervisor.auto_resume_recoverable_run(
+        "alpha", dispatcher=lambda root, run_id: dispatched.append((root, run_id))
+    ) == ("none", None)
+
+def test_restart_reconciliation_keeps_dead_running_run_paused_and_blocks_silent_resume(tmp_path: Path) -> None:
+    """A dead worker lease is audited, but the run is never silently resumed."""
+    records = {
+        "alpha": _governance(tmp_path / "alpha"),
+        "beta": _governance(tmp_path / "beta"),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor, "alpha")
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    assert store.resume_run(admission.run_id).status == "running"
+    assert store.claim_run_execution_lease(admission.run_id, "dashboard:stale-host")
+
+    assert supervisor.reconcile_stale_host_runs(lambda _owner: False) == (admission.run_id,)
+    assert store.get_run(admission.run_id).status == "paused"
+    assert store.get_run_execution_lease_owner(admission.run_id) is None
+
+    # The paused restart record still owns the one global admission slot;
+    # another Space cannot race it into a second run.
+    blocked = _admit(supervisor, "beta")
+    assert blocked.status == "rejected"
+    assert blocked.reason == "active_limit"
+    resumed = supervisor.auto_resume_recoverable_run(
+        "alpha", dispatcher=lambda *_args: pytest.fail("restart must not auto-resume")
+    )
+    assert resumed == ("none", None)
+    assert store.get_run(admission.run_id).status == "paused"
+    assert len(supervisor.list_active_admissions()) == 1
+
+def test_binding_rejects_cross_space_metadata_even_with_matching_root(tmp_path: Path) -> None:
+    records = {"alpha": _governance(tmp_path / "alpha")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor, "alpha")
+    assert admission.capability is not None
+    assert supervisor.start_admitted_run(admission.capability, dispatcher=lambda *_: None)
+    store = ProjectSwarmStore(records["alpha"].canonical_root)
+    run = store.get_run(admission.run_id)
+    assert run is not None
+    forged = replace(run, metadata={"target_space_id": str(uuid4())})
+    assert supervisor._binding_for_run(records["alpha"].canonical_root, forged) is None
+
+
+def test_three_space_revocation_between_heartbeat_and_dispatch_fails_closed(tmp_path: Path) -> None:
+    records = {name: _governance(tmp_path / name) for name in ("alpha", "beta", "gamma")}
+    supervisor = ManagedSpaceSupervisor(ledger_path=tmp_path / "supervisor.sqlite", governance_resolver=lambda target: records[target])
+    admission = _admit(supervisor, "alpha")
+    assert admission.capability is not None
+    dispatched: list[str] = []
+    original = supervisor._before_host_dispatch
+    def revoke(capability):
+        records["alpha"] = replace(records["alpha"], yolo=False)
+        original(capability)
+    supervisor._before_host_dispatch = revoke
+    assert supervisor.start_admitted_run(admission.capability, dispatcher=lambda *_: dispatched.append("alpha")) is False
+    assert dispatched == []
+    assert supervisor.list_active_admissions()[0]["state"] == "paused"
+    assert supervisor.admit("beta", {"goal": "next", "kind": "maintenance"}).reason == "active_limit"
+
+
+def test_three_space_status_and_revision_isolation(tmp_path: Path) -> None:
+    records = {name: _governance(tmp_path / name) for name in ("nova", "finanz-junkie", "aquarium-zentrum")}
+    supervisor = _supervisor(tmp_path, records)
+    admission = _admit(supervisor, "nova")
+    assert admission.status == "created"
+    active = supervisor.list_active_admissions()
+    assert len(active) == 1 and active[0]["target_space_id"] == records["nova"].space_id
+    original = {name: supervisor.current_governance(name).revision for name in records}
+    records["finanz-junkie"] = replace(records["finanz-junkie"], revision=original["finanz-junkie"] + 1)
+    assert supervisor.current_governance("nova").revision == original["nova"]
+    assert supervisor.current_governance("aquarium-zentrum").revision == original["aquarium-zentrum"]
+    assert supervisor.current_governance("finanz-junkie").revision == original["finanz-junkie"] + 1
+
+
+
+def test_legacy_global_yolo_cannot_admit_non_enrolled_spaces(tmp_path: Path, monkeypatch) -> None:
+    records = {
+        "nova": _governance(tmp_path / "nova"),
+        "finanz-junkie": _governance(tmp_path / "finanz-junkie", yolo=False),
+        "aquarium-zentrum": _governance(tmp_path / "aquarium-zentrum", enrolled=False),
+    }
+    supervisor = _supervisor(tmp_path, records)
+    monkeypatch.setenv("NOVA_YOLO", "1")
+    assert _admit(supervisor, "nova").status == "created"
+    for slug in ("finanz-junkie", "aquarium-zentrum"):
+        result = supervisor.admit(slug, {"goal": "must not run", "kind": "maintenance"})
+        assert result.status == "rejected"
+        assert result.reason == "not_yolo_enrolled"

@@ -2764,8 +2764,9 @@ document.addEventListener('keydown',function(e){
 //     fetches the new session's state.
 let _yoloEnabled = false;
 
-// Nova YOLO is deliberately independent from the current chat session's YOLO
-// flag. It is a persisted autonomy override consumed by Nova's Entity Kernel.
+// This is the legacy/global Nova source-mode switch. It is deliberately
+// independent from both the current chat YOLO flag and per-Space enrollment;
+// it never enrolls or authorizes a Space for autonomous management.
 let _novaYoloEnabled = false;
 
 function _updateNovaYoloButton() {
@@ -2773,8 +2774,10 @@ function _updateNovaYoloButton() {
   if (!button) return;
   button.classList.toggle('active', _novaYoloEnabled);
   button.setAttribute('aria-pressed', _novaYoloEnabled ? 'true' : 'false');
-  button.setAttribute('aria-label', _novaYoloEnabled ? 'Nova YOLO autonomy active' : 'Enable Nova YOLO autonomy');
-  button.title = _novaYoloEnabled ? 'Nova YOLO active: policy and boundaries are bypassed' : 'Enable Nova YOLO autonomy';
+  button.setAttribute('aria-label', _novaYoloEnabled ? 'Nova legacy source mode active' : 'Enable Nova legacy source mode');
+  button.title = _novaYoloEnabled
+    ? 'Legacy source mode active; Space YOLO enrollment and policy gates remain required'
+    : 'Enable legacy source mode; this does not enroll a Space';
 }
 
 async function fetchNovaYoloMode() {
@@ -2797,7 +2800,7 @@ async function toggleNovaYoloMode() {
     });
     _novaYoloEnabled = !!data.enabled;
     _updateNovaYoloButton();
-    showToast(_novaYoloEnabled ? 'Nova YOLO autonomy enabled' : 'Nova YOLO autonomy disabled');
+    showToast(_novaYoloEnabled ? 'Nova legacy source mode enabled' : 'Nova legacy source mode disabled');
   } catch (error) {
     showToast('Nova YOLO: ' + (error && error.message ? error.message : 'update failed'));
   }
@@ -3357,9 +3360,18 @@ function stopApprovalPolling() {
 let _subagentPollTimer = null;
 let _subagentPollSessionId = null;
 let _subagentPanelState = null;
+let _subagentEventSource = null;
+let _subagentStreamSessionId = null;
 
 function _subagentCurrentSessionId() {
   return (S && S.session && S.session.session_id) || null;
+}
+
+function _subagentRedact(value, maxLength = 120) {
+  return String(value == null ? '' : value)
+    .replace(/(?:[A-Za-z]:[\/]|\/)[^\s]+/g, '[path]')
+    .replace(/(token|secret|password|api[_-]?key)\s*[:=]\s*[^\s]+/gi, '$1=[redacted]')
+    .slice(0, maxLength);
 }
 
 function _subagentElapsed(startedAt) {
@@ -3388,7 +3400,7 @@ function _subagentEnsurePanelState() {
   const element = document.createElement('div');
   element.className = 'subagent-panel-card';
   element.setAttribute('role', 'region');
-  element.setAttribute('aria-label', 'Active subagents');
+  element.setAttribute('aria-label', 'Subagents in current chat');
   element.setAttribute('aria-live', 'polite');
 
   const header = document.createElement('div');
@@ -3430,6 +3442,8 @@ function _subagentEnsurePanelState() {
     sessionId: null,
     spawnPaused: false,
     active: [],
+    history: [],
+    offline: false,
   };
 
   toggleBtn.addEventListener('click', async (e) => {
@@ -3450,7 +3464,8 @@ function _subagentEnsurePanelState() {
   return _subagentPanelState;
 }
 
-function _subagentBuildRow(entry) {
+function _subagentBuildRow(entry, options = {}) {
+  const historyRow = !!options.history;
   const row = document.createElement('div');
   const childSid = String(entry && entry.session_id || '').trim();
   row.className = 'subagent-panel-row' + (childSid ? ' clickable' : '');
@@ -3461,24 +3476,27 @@ function _subagentBuildRow(entry) {
 
   const goal = document.createElement('div');
   goal.className = 'subagent-panel-goal';
-  goal.textContent = String(entry && entry.goal || 'Subagent');
+  goal.textContent = _subagentRedact(entry && entry.goal || 'Subagent');
   main.appendChild(goal);
 
   const meta = document.createElement('div');
   meta.className = 'subagent-panel-sub';
   const bits = [];
   const subId = String(entry && entry.subagent_id || '').trim();
-  const model = String(entry && entry.model || '').trim();
+  const model = String(entry && entry.model || '').trim().toLowerCase();
   const depth = Number(entry && entry.depth);
   const toolCount = Number(entry && entry.tool_count);
   const age = _subagentElapsed(entry && entry.started_at);
-  const status = String(entry && entry.status || '').trim();
+  const status = String(entry && entry.status || '').trim().toLowerCase();
+  const statusLabels = {failed:'failed',interrupted:'interrupted',abandoned:'abandoned',completed:'completed',running:'running',waiting:'waiting'};
   if (subId) bits.push(subId.slice(0, 8));
-  if (model) bits.push(model);
+  if (/^[a-z0-9][a-z0-9._:-]{0,63}$/.test(model)) bits.push(model);
   if (Number.isFinite(depth)) bits.push('depth ' + depth);
   if (Number.isFinite(toolCount)) bits.push(toolCount + ' tool' + (toolCount === 1 ? '' : 's'));
   if (age) bits.push(age);
-  if (status) bits.push(status);
+  if (statusLabels[status]) bits.push(statusLabels[status]);
+  const lastStep = _subagentRedact(entry && entry.last_step || entry && entry.summary || '', 80);
+  if (lastStep) bits.push(lastStep);
   meta.textContent = bits.join(' · ');
   main.appendChild(meta);
 
@@ -3501,7 +3519,7 @@ function _subagentBuildRow(entry) {
     actions.appendChild(openBtn);
   }
 
-  if (subId) {
+  if (subId && !historyRow) {
     const interruptBtn = document.createElement('button');
     interruptBtn.type = 'button';
     interruptBtn.className = 'subagent-panel-row-btn danger';
@@ -3539,52 +3557,60 @@ function _subagentBuildRow(entry) {
   return row;
 }
 
-function _subagentRenderPanel(payload) {
-  const sid = _subagentCurrentSessionId();
-  if (!sid) {
-    stopSubagentPolling();
-    return;
-  }
-
-  const active = Array.isArray(payload && payload.active)
-    ? payload.active.filter(entry => String(entry && entry.session_id || '') === sid)
-    : [];
-  const spawnPaused = !!(payload && payload.spawn_paused);
-  const streamActive = !!(S && (S.busy || S.activeStreamId || (S.session && S.session.active_stream_id)));
-  if (!spawnPaused && !active.length) {
-    _subagentRemovePanel();
-    if (_subagentPanelState) _subagentPanelState.visible = false;
-    if (!streamActive) stopSubagentPolling();
-    return;
-  }
-
-  const state = _subagentEnsurePanelState();
-  state.visible = true;
-  state.sessionId = sid;
-  state.spawnPaused = spawnPaused;
-  state.active = active;
-  state.status.className = 'subagent-panel-status' + (spawnPaused ? ' paused' : '');
-
-  const statusBits = [];
-  if (active.length) statusBits.push(active.length + (active.length === 1 ? ' active subagent' : ' active subagents'));
-  if (spawnPaused) statusBits.push('spawning paused');
-  state.status.textContent = statusBits.join(' · ') || 'Subagents';
-  state.toggleBtn.textContent = spawnPaused ? 'Resume spawning' : 'Pause spawning';
-
-  state.list.innerHTML = '';
-  if (active.length) {
-    active
-      .slice()
-      .sort((a, b) => Number(b && b.started_at || 0) - Number(a && a.started_at || 0))
-      .forEach(entry => state.list.appendChild(_subagentBuildRow(entry)));
-  } else {
-    const empty = document.createElement('div');
-    empty.className = 'subagent-panel-empty';
-    empty.textContent = 'Subagent spawning is paused.';
-    state.list.appendChild(empty);
-  }
+function _subagentDedupe(entries) {
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const row = entry || {};
+    const key = String(row.subagent_id || row.session_id || '') + '|' + String(row.status || '') + '|' + String(row.updated_at || row.finished_at || '');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
+function _subagentRenderPanel(payload) {
+  const sid = _subagentCurrentSessionId();
+  if (!sid) { stopSubagentPolling(); return; }
+  const belongsToSession = entry => {
+    const row = entry || {};
+    return String(row.session_id || '').trim() === sid
+      || String(row.parent_session_id || '').trim() === sid
+      || String(row.chat_session_id || '').trim() === sid;
+  };
+  const active = _subagentDedupe(Array.isArray(payload && payload.active)
+    ? payload.active.filter(belongsToSession) : []);
+  const history = _subagentDedupe(Array.isArray(payload && payload.history)
+    ? payload.history.filter(belongsToSession) : []);
+  const offline = payload && payload.offline === true;
+  const spawnPaused = !!(payload && payload.spawn_paused);
+  const streamActive = !!(S && (S.busy || S.activeStreamId || (S.session && S.session.active_stream_id)));
+  if (!offline && !spawnPaused && !active.length && !history.length) {
+    _subagentRemovePanel(); if (_subagentPanelState) _subagentPanelState.visible = false;
+    if (!streamActive) stopSubagentPolling(); return;
+  }
+  const state = _subagentEnsurePanelState();
+  state.visible = true; state.sessionId = sid; state.spawnPaused = spawnPaused;
+  state.active = active; state.history = history; state.offline = offline;
+  state.status.className = 'subagent-panel-status' + (spawnPaused || offline ? ' paused' : '');
+  const statusBits=[];
+  if (offline) statusBits.push('offline');
+  if (active.length) statusBits.push(active.length + (active.length===1?' active subagent':' active subagents'));
+  if (history.length) statusBits.push(history.length + ' history');
+  if (spawnPaused) statusBits.push('spawning paused');
+  state.status.textContent=statusBits.join(' ? ') || 'Subagents';
+  state.toggleBtn.textContent=spawnPaused?'Resume spawning':'Pause spawning';
+  state.list.replaceChildren();
+  if (active.length) {
+    const heading=document.createElement('div'); heading.className='subagent-panel-section'; heading.textContent='Active'; state.list.appendChild(heading);
+    active.slice().sort((a,b)=>Number(b&&b.started_at||0)-Number(a&&a.started_at||0)).forEach(e=>state.list.appendChild(_subagentBuildRow(e)));
+  }
+  if (history.length) {
+    const heading=document.createElement('div'); heading.className='subagent-panel-section'; heading.textContent='History'; state.list.appendChild(heading);
+    history.slice(0,50).forEach(e=>state.list.appendChild(_subagentBuildRow(e,{history:true})));
+  }
+  if (offline) { const empty=document.createElement('div'); empty.className='subagent-panel-empty'; empty.textContent='Subagent history offline; read-only cache shown.'; state.list.appendChild(empty); }
+  else if (!active.length && !history.length) { const empty=document.createElement('div'); empty.className='subagent-panel-empty'; empty.textContent='Subagent spawning is paused.'; state.list.appendChild(empty); }
+}
 async function _refreshSubagentPanel() {
   const sid = _subagentCurrentSessionId();
   if (!sid) {
@@ -3592,11 +3618,12 @@ async function _refreshSubagentPanel() {
     return;
   }
   try {
-    const data = await api('/api/subagents');
+    const data = await api('/api/subagents?session_id=' + encodeURIComponent(sid) + '&status=all&limit=50');
     if (sid !== _subagentCurrentSessionId()) return;
     _subagentRenderPanel(data || {});
   } catch (_) {
-    // ignore transient polling errors
+    // Keep the current chat visible in an explicit offline/read-only state.
+    if (sid === _subagentCurrentSessionId()) _subagentRenderPanel({offline: true, active: [], history: []});
   }
 }
 
@@ -3621,6 +3648,25 @@ function startSubagentPolling(sid) {
   stopSubagentPolling();
   if (!sid) return;
   _subagentPollSessionId = sid;
+  if (typeof EventSource === 'function') {
+    try {
+      const stream = new EventSource('/api/subagents/events/stream?session_id=' + encodeURIComponent(sid));
+      _subagentEventSource = stream;
+      _subagentStreamSessionId = sid;
+      const refreshFromStream = () => {
+        if (_subagentEventSource !== stream || _subagentStreamSessionId !== sid || sid !== _subagentCurrentSessionId()) return;
+        void _refreshSubagentPanel();
+      };
+      stream.addEventListener('subagent_event', refreshFromStream);
+      stream.addEventListener('message', refreshFromStream);
+      stream.onerror = () => {
+        // Native EventSource reconnects; polling remains the bounded fallback.
+      };
+    } catch (_) {
+      _subagentEventSource = null;
+      _subagentStreamSessionId = null;
+    }
+  }
   _subagentPollTimer = setInterval(async () => {
     if (!S || !S.session || S.session.session_id !== sid) {
       stopSubagentPolling();
@@ -3636,6 +3682,11 @@ function stopSubagentPolling() {
     clearInterval(_subagentPollTimer);
     _subagentPollTimer = null;
   }
+  if (_subagentEventSource) {
+    try { _subagentEventSource.close(); } catch (_) {}
+    _subagentEventSource = null;
+  }
+  _subagentStreamSessionId = null;
   _subagentPollSessionId = null;
   _subagentRemovePanel();
 }

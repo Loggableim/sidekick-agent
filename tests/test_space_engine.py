@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import json
+import threading
+import uuid
 
 import pytest
 
@@ -67,6 +70,24 @@ def test_get_or_create_space_normalizes_default_alias(monkeypatch, tmp_path):
     assert (spaces_root / "nova" / "space.yaml").exists()
     assert space.load_config()["space_id"]
     assert not (spaces_root / "novaspace").exists()
+
+
+def test_get_or_create_space_repairs_missing_identity_on_explicit_selection(monkeypatch, tmp_path):
+    from web.api import space_engine
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+
+    space = space_engine.Space("legacy", "Legacy")
+    space.root.mkdir(parents=True)
+    space.save_config({"name": "Legacy"})
+    assert space.load_config()["space_id"] == ""
+
+    selected = space_engine.get_or_create_space("legacy")
+
+    assert selected.load_config()["space_id"]
+    assert selected.load_config()["space_id"] == space.load_config()["space_id"]
 
 
 def test_space_governance_defaults_off_and_malformed_records_fail_closed(monkeypatch, tmp_path):

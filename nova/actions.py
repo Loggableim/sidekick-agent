@@ -414,23 +414,12 @@ class ActionRegistry:
         return {"ok": True, "message": "Persisted an agenda-maintenance checkpoint.", "effects": {"path": str(path), "snapshot": snapshot}}
 
     def _aces_cycle(self, intent: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-        script = self.space_dir / "aces_cli.py"
-        if not script.exists():
-            return {"ok": False, "message": "ACES CLI is not installed."}
-        args = [sys.executable, str(script), "--cycle", "--apply" if bool((intent.get("payload") or {}).get("apply", intent.get("apply", False))) else "--dry-run"]
-        env = dict(os.environ)
-        if bool(intent.get("yolo_enabled")):
-            env["NOVA_YOLO_MODE"] = "1"
-        proc = self.runner(
-            args, cwd=str(self.space_dir), env=env, capture_output=True,
-            text=True, encoding="utf-8", errors="replace", timeout=180,
-        )
-        try:
-            report = json.loads(proc.stdout) if proc.stdout.strip() else {}
-        except ValueError:
-            report = {"raw": proc.stdout[-2000:]}
+        # Legacy ACES execution is deliberately fail-closed.  A direct
+        # interpreter subprocess would inherit secrets and bypass the
+        # capability-bound managed-space gateway, even in YOLO mode.
         return {
-            "ok": proc.returncode == 0,
-            "message": str(report.get("message") or proc.stderr[-500:] or "ACES cycle completed."),
-            "effects": {"report": report, "returncode": proc.returncode},
+            "ok": False,
+            "status": "host_admission_required",
+            "message": "ACES cycles require a host-managed admission.",
+            "effects": {"reason": "host_admission_required"},
         }

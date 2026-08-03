@@ -5,6 +5,15 @@
   'use strict';
 
   const SWARM_CALL_BUDGET = 48;
+
+  function _swarmCallBudgetForRun(run) {
+    const metadata = run && run.metadata && typeof run.metadata === 'object' ? run.metadata : {};
+    const managed = metadata.integration_namespace === 'nova-space-supervisor' || !!metadata.nova_supervisor;
+    if (!managed) return SWARM_CALL_BUDGET;
+    const explicit = Number(metadata.nova_max_calls || 0);
+    if (Number.isInteger(explicit) && explicit > 0 && explicit <= 128) return explicit;
+    return 128;
+  }
   const _swarmState = {
     projectPath: '',
     runs: [],
@@ -175,7 +184,7 @@
     const catalog = _swarmState.catalog;
     if (!catalog) return 'No persisted catalog snapshot. Refresh explicitly when you need current catalog health.';
     const health = catalog.healthy === true ? 'healthy' : catalog.healthy === false ? 'unhealthy' : 'unknown';
-    const models = Array.isArray(catalog.models) ? catalog.models.map(String).filter(Boolean) : [];
+    const models = Array.isArray(catalog.models) ? catalog.models.map(value => String(value || '').trim().toLowerCase()).filter(value => /^[a-z0-9][a-z0-9._:-]{0,63}$/.test(value)).slice(0, 12) : [];
     const count = models.length;
     return [
       String(catalog.provider || 'ollama-cloud'),
@@ -244,6 +253,7 @@
     const approvals = _swarmApprovalList();
     const pauseReason = _swarmLatestPauseReason(events);
     const callCount = _swarmCallCount(events);
+    const callBudget = _swarmCallBudgetForRun(run);
     const roles = _swarmRoleActivity(events);
     const evidence = _swarmEvidenceAndConflicts(events);
     const queue = _swarmApprovalQueue(events, approvals);
@@ -260,13 +270,14 @@
 
     const runCard = run ? '<section class="swarm-run-card">' +
       '<div class="swarm-run-card-header"><div><p class="swarm-eyebrow">Run</p><h2>' + swarmEsc(runGoal || run.run_id) + '</h2></div><span class="swarm-status swarm-status--' + swarmEsc(run.status || 'unknown') + '">' + swarmEsc(run.status || 'unknown') + '</span></div>' +
-      '<dl class="swarm-metrics"><div><dt>Autonomy</dt><dd>' + swarmEsc(autonomy) + '</dd></div><div><dt>Pack</dt><dd>' + swarmEsc(runPack || 'not recorded') + '</dd></div><div><dt>Calls</dt><dd>' + swarmEsc(String(callCount)) + ' / ' + SWARM_CALL_BUDGET + '</dd></div><div><dt>Updated</dt><dd>' + swarmEsc(_swarmFormatTime(run.updated_at)) + '</dd></div></dl>' +
+      '<dl class="swarm-metrics"><div><dt>Autonomy</dt><dd>' + swarmEsc(autonomy) + '</dd></div><div><dt>Pack</dt><dd>' + swarmEsc(runPack || 'not recorded') + '</dd></div><div><dt>Calls</dt><dd>' + swarmEsc(String(callCount)) + ' / ' + swarmEsc(String(callBudget)) + '</dd></div><div><dt>Updated</dt><dd>' + swarmEsc(_swarmFormatTime(run.updated_at)) + '</dd></div></dl>' +
       (pauseReason ? '<p class="swarm-pause-reason"><strong>Pause reason:</strong> ' + swarmEsc(pauseReason) + '</p>' : '') +
       projectionStatus +
       '<div class="swarm-run-actions">' +
       (run.status === 'running' ? '<button type="button" class="btn secondary" data-swarm-action="pause" data-run-id="' + swarmEsc(run.run_id) + '">Pause run</button>' : '') +
       (run.status === 'paused' ? '<button type="button" class="btn secondary" data-swarm-action="resume" data-run-id="' + swarmEsc(run.run_id) + '">Resume run</button>' : '') +
       ((run.status === 'running' || run.status === 'paused') ? '<button type="button" class="btn secondary" data-swarm-action="recover" data-run-id="' + swarmEsc(run.run_id) + '">Recover stopped host</button>' : '') +
+      (run.status === 'paused' && run.metadata && run.metadata.integration_namespace === 'nova-space-supervisor' ? '<button type="button" class="btn secondary" data-swarm-action="abandon" data-run-id="' + swarmEsc(run.run_id) + '">Release slot (human)</button>' : '') +
       '<button type="button" class="btn secondary" data-swarm-action="project-kanban" data-run-id="' + swarmEsc(run.run_id) + '">' + (projectionTask ? 'Kanban task ' + swarmEsc(projectionTask) : 'Project to Kanban triage') + '</button>' +
       '</div></section>' : '<section class="swarm-empty-state"><h2>No run selected</h2><p>Start a project-local run below, or choose one from the run list.</p></section>';
 
@@ -434,6 +445,17 @@
     );
   }
 
+  async function swarmAbandonSupervisedRun(runId) {
+    const projectPath = swarmProjectPath();
+    if (!projectPath || !runId) return;
+    if (!confirm('Mark this paused Nova supervisor run as permanently blocked and free the global slot? This is a human-only terminal decision.')) return;
+    await _swarmWrite(
+      '/api/swarm/runs/' + encodeURIComponent(runId) + '/abandon',
+      {project_path: projectPath},
+      'Nova supervisor run abandoned and global slot released.'
+    );
+  }
+
   async function swarmDecideApproval(runId, proposalId, deny) {
     const projectPath = swarmProjectPath();
     if (!projectPath || !runId || !proposalId) return;
@@ -464,7 +486,18 @@
     );
   }
 
+  function _swarmFakeMode() {
+    return window.__SWARM_FAKE_MODE__ === true;
+  }
+
   async function _swarmWrite(path, payload, successMessage) {
+    if (_swarmFakeMode()) {
+      // Browser smoke may exercise start/pause/resume controls without mutating
+      // a real run or invoking a provider. Production stays unchanged unless
+      // the explicit test flag is present.
+      _swarmNotify('Fake mode: ' + successMessage, 'info');
+      return;
+    }
     try {
       await _swarmRequest(path, {method: 'POST', body: JSON.stringify(payload)});
       _swarmNotify(successMessage, 'success');
@@ -484,6 +517,7 @@
     if (action === 'pause') void swarmPauseRun(runId);
     if (action === 'resume') void swarmResumeRun(runId);
     if (action === 'recover') void swarmRecoverExecutionLease(runId);
+    if (action === 'abandon') void swarmAbandonSupervisedRun(runId);
     if (action === 'approve') void swarmDecideApproval(runId, proposalId, false);
     if (action === 'deny') void swarmDecideApproval(runId, proposalId, true);
     if (action === 'refresh-catalog') void swarmRefreshCatalog();
@@ -496,6 +530,7 @@
   window.swarmPauseRun = swarmPauseRun;
   window.swarmResumeRun = swarmResumeRun;
   window.swarmRecoverExecutionLease = swarmRecoverExecutionLease;
+  window.swarmAbandonSupervisedRun = swarmAbandonSupervisedRun;
   window.swarmDecideApproval = swarmDecideApproval;
   window.swarmRefreshCatalog = swarmRefreshCatalog;
   window.swarmProjectToKanban = swarmProjectToKanban;

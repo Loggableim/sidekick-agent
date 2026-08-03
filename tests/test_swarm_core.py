@@ -45,7 +45,8 @@ def test_fix_round4_generic_core_executes_when_nova_imports_are_unavailable() ->
         """
         import builtins
         from pathlib import Path
-        from tempfile import TemporaryDirectory
+        import os
+        import shutil
 
         original_import = builtins.__import__
         def guarded_import(name, *args, **kwargs):
@@ -64,8 +65,15 @@ def test_fix_round4_generic_core_executes_when_nova_imports_are_unavailable() ->
             RequestedToolAction,
         )
 
-        with TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
+        # ``tempfile`` applies a private 0700 ACL on Windows.  The hosted
+        # runner's native CreateFileW policy rejects that ACL even for the
+        # creating process, while Swarm's Windows pinning intentionally uses
+        # native handles.  Use a plain repository-local directory here so the
+        # test exercises handle pinning instead of the runner's temp ACL.
+        directory = Path.cwd() / ".test-tmp" / f"swarm-core-subprocess-{os.getpid()}"
+        directory.mkdir(parents=True, exist_ok=True)
+        try:
+            root = directory.resolve()
             store = ProjectSwarmStore(root)
             run = store.create_run(metadata={"autonomy": "autonomous"})
             proposal = ActionProposal(
@@ -97,6 +105,8 @@ def test_fix_round4_generic_core_executes_when_nova_imports_are_unavailable() ->
                 run,
             )
             assert result == "local.test"
+        finally:
+            shutil.rmtree(directory, ignore_errors=True)
         """
     )
 

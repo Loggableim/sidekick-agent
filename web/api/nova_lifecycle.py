@@ -702,6 +702,7 @@ def _run_local_script(script: str, *args: str, timeout: int = 20) -> dict[str, A
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             timeout=timeout,
         )
         return {
@@ -710,8 +711,89 @@ def _run_local_script(script: str, *args: str, timeout: int = 20) -> dict[str, A
             "stdout": proc.stdout[-1000:],
             "stderr": proc.stderr[-1000:],
         }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "reason": "timeout", "script": script}
     except Exception as exc:
         return {"ok": False, "reason": repr(exc), "script": script}
+
+
+def _run_post_turn_effect(script: str, *args: str, timeout: int = 20) -> dict[str, Any]:
+    """Run one post-turn side effect; retry a timeout exactly once."""
+    result = _run_local_script(script, *args, timeout=timeout)
+    if result.get("ok") or result.get("reason") != "timeout":
+        return result
+    time.sleep(5)
+    retry = _run_local_script(script, *args, timeout=timeout)
+    retry["attempts"] = 2
+    return retry
+
+
+def _run_post_response_pipeline(
+    *,
+    user_text: str,
+    assistant_text: str,
+    topic: str,
+    summary: str,
+    memory_enabled: bool,
+) -> dict[str, Any] | None:
+    """Run Nova's isolated post-response worker when the live script is available.
+
+    ``None`` is reserved for compatibility with test/legacy hosts that return
+    no structured output. A real worker failure remains a structured failure and
+    must not silently fall back to the old sequential path.
+    """
+    result = _run_local_script(
+        "post_response.py",
+        "--query", _safe_snippet(user_text, 300),
+        "--thinking", _safe_snippet(assistant_text, 400),
+        "--response", _safe_snippet(assistant_text, 1200),
+        "--tags", "webui,post_turn",
+        "--topic", topic,
+        "--summary", summary,
+        "--digest",
+        *( ["--skip-resonanz"] if not memory_enabled else [] ),
+        timeout=180,
+    )
+    stdout = str(result.get("stdout") or "").strip()
+    if result.get("ok") and not stdout:
+        return None
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "steps": [
+                {"step": name, "status": "failed", "attempts": 1, "error": "worker_failed"}
+                for name in ("resonanz", "emotion", "continuity")
+            ],
+        }
+    try:
+        payload = json.loads(stdout.splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return {
+            "ok": False,
+            "steps": [
+                {"step": name, "status": "failed", "attempts": 1, "error": "invalid_worker_output"}
+                for name in ("resonanz", "emotion", "continuity")
+            ],
+        }
+    steps = payload.get("steps") if isinstance(payload, dict) else None
+    if not isinstance(steps, list):
+        return {"ok": False, "steps": []}
+    return {"ok": bool(payload.get("ok")), "steps": steps}
+
+
+def _append_post_turn_pipeline_summary(event: dict[str, Any], failures: list[str]) -> None:
+    """Write status-only observability; never let logging fail the turn."""
+    try:
+        path = get_nova_space_root() / "nova_pipeline.log"
+        payload = {
+            "timestamp": _now(),
+            "event_id": str(event.get("event_id") or ""),
+            "steps": {name: ("failed" if name in failures else "ok") for name in ("memory", "emotion", "continuity")},
+        }
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=True, sort_keys=True) + "\n")
+    except OSError:
+        pass
 
 
 def _game_mode_enabled() -> bool:
@@ -820,6 +902,7 @@ def post_turn(
                 assistant=_safe_snippet(assistant_text),
             )
         )
+        pipeline_failures: list[str] = []
         try:
             quality = assess_memory_quality(user_text, assistant_text)
             _append_jsonl(
@@ -834,18 +917,52 @@ def post_turn(
                 },
             )
             if quality["eligible_for_recall"]:
-                _run_local_script("vector_memory.py", "store", "--query", _safe_snippet(user_text, 180), "--thinking", _safe_snippet(assistant_text, 400), "--tags", "webui,post_turn", timeout=45)
-                _update_event(event, step="memory_done")
+                memory_result = _run_post_turn_effect("vector_memory.py", "store", "--query", _safe_snippet(user_text, 180), "--thinking", _safe_snippet(assistant_text, 400), "--tags", "webui,post_turn", timeout=45)
+                if memory_result.get("ok"):
+                    _update_event(event, step="memory_done")
+                else:
+                    pipeline_failures.append("memory")
+                    _update_event(event, step="memory_failed", pipeline_error="memory_effect_failed")
             else:
                 _update_event(event, step="memory_filtered", memory_quality=quality)
 
-            _run_local_script("emotion.py", "update", "--query", _safe_snippet(user_text, 300), timeout=20)
-            _update_event(event, step="emotion_done")
-
             topic = _safe_snippet(user_text, 80) or "webui-turn"
             summary = _safe_snippet(assistant_text, 260) or "No assistant text captured."
-            _run_local_script("chat_continuity.py", "save", "--topic", topic, "--summary", summary, "--query", _safe_snippet(user_text, 300), "--response", _safe_snippet(assistant_text, 300), "--digest", timeout=30)
-            _update_event(event, step="continuity_done")
+            isolated = _run_post_response_pipeline(
+                user_text=user_text,
+                assistant_text=assistant_text,
+                topic=topic,
+                summary=summary,
+                memory_enabled=bool(quality["eligible_for_recall"]),
+            )
+            if isolated is None:
+                # Compatibility path for legacy hosts and deterministic tests
+                # that do not expose the structured worker output.
+                emotion_result = _run_post_turn_effect(
+                    "emotion.py", "update", "--query", _safe_snippet(user_text, 300), timeout=20
+                )
+                continuity_result = _run_post_turn_effect(
+                    "chat_continuity.py", "save", "--topic", topic, "--summary", summary,
+                    "--query", _safe_snippet(user_text, 300), "--response", _safe_snippet(assistant_text, 300),
+                    "--digest", timeout=30,
+                )
+                isolated_steps = [
+                    {"step": "resonanz", "status": "filtered" if not quality["eligible_for_recall"] else "ok"},
+                    {"step": "emotion", "status": "ok" if emotion_result.get("ok") else "failed"},
+                    {"step": "continuity", "status": "ok" if continuity_result.get("ok") else "failed"},
+                ]
+            else:
+                isolated_steps = isolated.get("steps") or []
+            for item in isolated_steps:
+                name = str(item.get("step") or "")
+                status = str(item.get("status") or "failed")
+                if name not in {"resonanz", "emotion", "continuity"}:
+                    continue
+                if status in {"ok", "filtered"}:
+                    _update_event(event, step=("memory_filtered" if name == "resonanz" and status == "filtered" else f"{name}_done"))
+                else:
+                    pipeline_failures.append("memory" if name == "resonanz" else name)
+                    _update_event(event, step=f"{name}_failed", pipeline_error=f"{name}_effect_failed")
 
             if quality["eligible_for_personality"]:
                 _queue_reflection(event, user_text, assistant_text)
@@ -853,7 +970,8 @@ def post_turn(
                 _update_event(event, step="personality_filtered", memory_quality=quality)
             _update_personality_lightweight(event, user_text, assistant_text)
             final_step = "personality_queued" if quality["eligible_for_personality"] else "entity_perceived"
-            _update_event(event, step=final_step, status="completed", completed_at=_now())
+            _append_post_turn_pipeline_summary(event, pipeline_failures)
+            _update_event(event, step=final_step, status="completed", completed_at=_now(), pipeline_degraded=bool(pipeline_failures), pipeline_failures=pipeline_failures)
             return {"ok": True, "event_id": event["event_id"]}
         except Exception as exc:
             _update_event(event, status="failed", error=repr(exc))

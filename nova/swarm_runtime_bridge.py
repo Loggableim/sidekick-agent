@@ -701,11 +701,13 @@ class NovaSwarmRuntimeBridge:
         *,
         project_root: Path,
         trusted_project_root: _NovaBridgeContext | None = None,
+        space_governance: Any | None = None,
         dispatcher: Callable[[Path, str], Any] | None = None,
     ) -> None:
         self._kernel = kernel
         self._project_root = Path(project_root).expanduser().resolve()
         self._trusted_project_root = trusted_project_root
+        self._space_governance = space_governance
         self._dispatcher = dispatcher
 
     def submit(self, suggestion: Mapping[str, Any], *, source_slot: int) -> NovaBridgeResult:
@@ -735,9 +737,19 @@ class NovaSwarmRuntimeBridge:
         adapter = NovaSwarmAdapter(self._kernel, PolicyGate(store), enabled=True)
         proposal = adapter.translate(snapshot.to_suggestion(context))
         bound_proposal_digest = proposal_digest(proposal)
-        yolo = self._kernel.is_yolo_enabled()
-        if type(yolo) is not bool:
-            yolo = False
+        if self._space_governance is not None:
+            yolo = bool(
+                getattr(self._space_governance, "yolo", False)
+                and getattr(self._space_governance, "enrolled", False)
+            )
+        else:
+            # Explicitly legacy-only: production Space entry points resolve
+            # governance before constructing this bridge. This fallback keeps
+            # old project-local integrations compatible without granting a
+            # known Space authority through the global YOLO switch.
+            yolo = self._kernel.is_yolo_enabled()
+            if type(yolo) is not bool:
+                yolo = False
         mode, max_calls, rolling_limit = (
             ("autonomous", 128, None) if yolo else ("reviewed_execution", 48, 6)
         )
@@ -878,20 +890,68 @@ def submit_nova_intent(
                 candidate,
             ),
         )
+        space_governance = _resolve_space_governance_for_root(project_root)
+        if space_governance is _KNOWN_SPACE_NOT_MANAGED:
+            return _bounded_live_entry_result("space_not_yolo_enrolled")
     except Exception:
         return _bounded_live_entry_result("root_mismatch")
 
     try:
-        result = NovaSwarmRuntimeBridge(
-            kernel,
-            project_root=project_root,
-            trusted_project_root=context,
-        ).submit(proposal, source_slot=source_slot)
+        bridge_kwargs = {
+            "project_root": project_root,
+            "trusted_project_root": context,
+        }
+        if space_governance is not _UNKNOWN_SPACE_ROOT:
+            bridge_kwargs["space_governance"] = space_governance
+        result = NovaSwarmRuntimeBridge(kernel, **bridge_kwargs).submit(
+            proposal, source_slot=source_slot
+        )
         return _bounded_live_entry_result(result.status, result.run_id)
     except _NovaRootMismatch:
         return _bounded_live_entry_result("root_mismatch")
     except Exception:
         return _bounded_live_entry_result("submission_rejected")
+
+
+class _SpaceGovernanceSentinel:
+    pass
+
+
+_UNKNOWN_SPACE_ROOT = _SpaceGovernanceSentinel()
+_KNOWN_SPACE_NOT_MANAGED = _SpaceGovernanceSentinel()
+
+
+def _resolve_space_governance_for_root(root: Path) -> Any:
+    """Resolve managed-Space authority without consulting global YOLO state."""
+    # Keep the public bridge seam side-effect-free for ordinary legacy roots.
+    # A production-managed Space has a project-local Swarm directory because
+    # supervisor admission creates it before any bridge dispatch. Avoid
+    # importing the host Space registry for unrelated caller-owned roots.
+    if not (root / ".swarm").is_dir():
+        return _UNKNOWN_SPACE_ROOT
+    try:
+        from nova.space_supervisor import resolve_managed_space_governance
+        from web.api.space_engine import get_all_spaces
+
+        matches = [
+            space
+            for space in get_all_spaces()
+            if space.get_project_dir()
+            and Path(space.get_project_dir()).expanduser().resolve() == root
+        ]
+        if not matches:
+            return _UNKNOWN_SPACE_ROOT
+        if len(matches) != 1:
+            return _KNOWN_SPACE_NOT_MANAGED
+        try:
+            governance = resolve_managed_space_governance(matches[0].slug)
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return _KNOWN_SPACE_NOT_MANAGED
+        if governance.yolo is not True or governance.enrolled is not True:
+            return _KNOWN_SPACE_NOT_MANAGED
+        return governance
+    except (ImportError, OSError, RuntimeError, TypeError, ValueError):
+        return _UNKNOWN_SPACE_ROOT
 
 
 def nova_execution_options_for_run(
@@ -1120,11 +1180,15 @@ def _default_runtime_dispatcher(project_root: Path, run_id: str) -> None:
 
 
 def _pause_dispatch_failure(store: ProjectSwarmStore, run_id: str) -> None:
+    """Best-effort child pause; cleanup races must not escape a worker thread."""
     try:
         store.set_run_status(run_id, "paused")
-    except (RuntimeError, ValueError):
-        pass
-    store.append_event(run_id, "nova.bridge.dispatch_failed", {"reason": "nova_dispatch_failed"})
+    except Exception:
+        return
+    try:
+        store.append_event(run_id, "nova.bridge.dispatch_failed", {"reason": "nova_dispatch_failed"})
+    except Exception:
+        return
 
 
 def _run_worker(dispatcher: Callable[[Path, str], Any], project_root: Path, run_id: str) -> None:
@@ -1132,14 +1196,27 @@ def _run_worker(dispatcher: Callable[[Path, str], Any], project_root: Path, run_
     try:
         dispatcher(project_root, run_id)
     except BaseException:
-        store = ProjectSwarmStore(project_root)
-        completed = store.get_run(run_id)
+        try:
+            store = ProjectSwarmStore(project_root)
+            completed = store.get_run(run_id)
+        except BaseException:
+            # The project/.swarm may be removed while a daemon worker is
+            # unwinding. There is no durable child to mutate; drop only the
+            # process-local binding and never leak the exception/thread.
+            _unregister_runtime_binding(project_root, run_id)
+            return
         if completed is not None and completed.status in {"completed", "cancelled", "abandoned"}:
             _unregister_runtime_binding(project_root, run_id)
             return
         _pause_dispatch_failure(store, run_id)
         return
-    run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
+    try:
+        run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
+    except BaseException:
+        # A cleanup/pause race can remove the read-only store after dispatch.
+        # The binding is no longer usable, so fail closed without raw details.
+        _unregister_runtime_binding(project_root, run_id)
+        return
     if run is not None and run.status in {"completed", "cancelled", "abandoned"}:
         _unregister_runtime_binding(project_root, run_id)
 

@@ -25,6 +25,21 @@ def _supervisor(tmp_path: Path) -> ManagedSpaceSupervisor:
     )
 
 
+def test_env_notifier_is_disabled_without_explicit_private_target_or_token(monkeypatch) -> None:
+    from nova.notifications import build_env_notifier
+
+    monkeypatch.delenv("NOVA_TELEGRAM_CHAT_ID", raising=False)
+    monkeypatch.delenv("NOVA_TELEGRAM_CHAT_TYPE", raising=False)
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    supervisor = object.__new__(ManagedSpaceSupervisor)
+    assert build_env_notifier(supervisor) is None
+
+    monkeypatch.setenv("NOVA_TELEGRAM_CHAT_ID", "123456")
+    monkeypatch.setenv("NOVA_TELEGRAM_CHAT_TYPE", "private")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    notifier = build_env_notifier(supervisor)
+    assert notifier is not None
+
 class _Sender:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
@@ -46,6 +61,7 @@ def _notifier(tmp_path: Path, sender: _Sender):
         supervisor=_supervisor(tmp_path),
         target=target,
         sender=sender,
+        allowed_space_ids={"space-alpha"},
     )
 
 
@@ -231,3 +247,37 @@ def test_blocker_rejects_free_form_model_or_tool_text(tmp_path: Path) -> None:
         )
 
     assert sender.messages == []
+
+
+def test_notification_cross_space_isolation_fails_closed_before_claim_or_send(
+    tmp_path: Path,
+) -> None:
+    """Only host-resolved YOLO Space IDs may reach the private chat."""
+    from nova.notifications import NovaTelegramNotifications, PrivateTelegramTarget
+
+    sender = _Sender()
+    supervisor = _supervisor(tmp_path)
+    notifier = NovaTelegramNotifications(
+        supervisor=supervisor,
+        target=PrivateTelegramTarget.from_config(
+            {"chat_id": 123456, "chat_type": "private"}
+        ),
+        sender=sender,
+        allowed_space_ids={"space-alpha"},
+    )
+
+    assert notifier.send_blocker(
+        space_id="space-beta",
+        display_name="Finanzjunkie",
+        run_id="run-beta",
+        blocker_code="dispatch_failed",
+    ) == "ignored_unmanaged_space"
+    assert notifier.send_daily_digest(
+        space_id="space-beta",
+        display_name="Finanzjunkie",
+        status_counts={"blocked": 1},
+        utc_date="2026-08-03",
+    ) == "ignored_unmanaged_space"
+    assert sender.messages == []
+    # The rejected Space must not even create a durable notification claim.
+    assert not (tmp_path / "supervisor.sqlite").exists()

@@ -135,6 +135,8 @@ def handle_swarm_get(handler, parsed) -> bool | None:
 def handle_swarm_post(handler, parsed, body) -> bool | None:
     """Handle Swarm write routes after resolving a trusted project path."""
     path = parsed.path
+    if path == "/api/swarm/supervisor/release-slot":
+        return _release_supervisor_slot(handler, body)
     if path == "/api/swarm/runs":
         return _create_run(handler, parsed, body)
     if path == "/api/swarm/models/refresh":
@@ -152,9 +154,38 @@ def handle_swarm_post(handler, parsed, body) -> bool | None:
         return _change_status(handler, parsed, body, run_id, pause=False)
     if action == "recover":
         return _recover_execution_lease(handler, parsed, body, run_id)
+    if action == "abandon":
+        return _abandon_supervised_run(handler, parsed, body, run_id)
     if action == "kanban-projection":
         return _project_to_kanban(handler, parsed, body, run_id)
     return False
+
+
+def _release_supervisor_slot(handler, body: Mapping[str, Any]) -> bool | None:
+    """Human-only Presence action; the client never supplies a project path."""
+    try:
+        _reject_unknown_keys(body, {"run_id"})
+        run_id = _required_text(body, "run_id")
+        actor_id = _require_host_approval_actor(handler)
+        from nova.space_supervisor import get_production_managed_space_supervisor
+
+        supervisor = get_production_managed_space_supervisor()
+        if not supervisor.abandon_run_by_id(run_id, actor=actor_id):
+            raise RuntimeError("Nova supervisor slot could not be released")
+        target_key = supervisor.target_key_for_run_id(run_id)
+        if target_key:
+            from nova.space_supervision_runtime import wake_code_owned_space
+
+            wake_code_owned_space(target_key)
+        return j(handler, {"ok": True, "run_id": run_id, "slot": "available"}) or True
+    except KeyError as exc:
+        return bad(handler, str(exc), status=404)
+    except PermissionError as exc:
+        return bad(handler, str(exc), status=403)
+    except (TypeError, ValueError) as exc:
+        return bad(handler, str(exc), status=400)
+    except RuntimeError as exc:
+        return bad(handler, str(exc), status=409)
 
 
 def _create_run(handler, parsed, body: Mapping[str, Any]) -> bool | None:
@@ -324,6 +355,45 @@ def _recover_execution_lease(
                 run_id,
                 actor_id=actor_id,
             )
+        return j(handler, {"run": _jsonable(run)}) or True
+    except FileNotFoundError as exc:
+        return bad(handler, str(exc), status=404)
+    except KeyError as exc:
+        return bad(handler, str(exc), status=404)
+    except PermissionError as exc:
+        return bad(handler, str(exc), status=403)
+    except (TypeError, ValueError) as exc:
+        return bad(handler, str(exc), status=400)
+    except RuntimeError as exc:
+        return bad(handler, str(exc), status=409)
+
+
+def _abandon_supervised_run(
+    handler,
+    parsed,
+    body: Mapping[str, Any],
+    run_id: str,
+) -> bool | None:
+    """Human-only terminalize a paused Nova supervisor child and free its slot."""
+    try:
+        project_root = _resolve_project_path(parsed, body)
+        _reject_unknown_keys(body, {"project_path"})
+        actor_id = _require_host_approval_actor(handler)
+        reader = ProjectSwarmStore.open_read_only(project_root)
+        child = reader.get_run(run_id)
+        if child is None:
+            raise KeyError(f"Unknown Swarm run: {run_id}")
+        if child.metadata.get("integration_namespace") != "nova-space-supervisor":
+            raise PermissionError("Only Nova supervisor runs can be abandoned here")
+        if child.status != "paused":
+            raise RuntimeError("Only paused Nova supervisor runs can be abandoned")
+        from nova.space_supervisor import get_production_managed_space_supervisor
+
+        supervisor = get_production_managed_space_supervisor()
+        admission_id = supervisor.admission_id_for_run(project_root, run_id)
+        if not admission_id or not supervisor.abandon(admission_id, actor=actor_id):
+            raise RuntimeError("Nova supervisor run could not be abandoned")
+        run = ProjectSwarmStore.open_read_only(project_root).get_run(run_id)
         return j(handler, {"run": _jsonable(run)}) or True
     except FileNotFoundError as exc:
         return bad(handler, str(exc), status=404)

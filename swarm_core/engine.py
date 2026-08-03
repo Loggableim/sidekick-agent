@@ -11,10 +11,11 @@ from uuid import uuid4
 from .learning import ReputationLedger
 from .models import ModelRegistry, ModelResponse
 from .packs import PackRegistry
+from .policy import PolicyGate, proposal_digest
 from .router import ModelRouter
 from .store import ProjectSwarmStore
 from .transport import ModelTransport
-from .types import SwarmEvent, SwarmRun, WorkflowRoleCheckpoint
+from .types import ActionProposal, SwarmEvent, SwarmRun, WorkflowRoleCheckpoint
 from .verifier import (
     InvalidVerifierResult,
     ReadOnlyVerifier,
@@ -54,6 +55,10 @@ _WORKFLOW_COMPLETION_EVENT_TYPES = frozenset(
 # must not silently replay from Scout.
 _NON_WORKFLOW_ROLE_PREFIXES = ("external/", "integration/", "plugin/", "nova/")
 _HOST_METADATA_RESERVED_KEYS = frozenset({"goal", "pack", "project_root", "autonomy"})
+
+# These are host-wide safety ceilings, not tunable throughput settings. A direct SwarmEngine caller must not bypass the reviewed or YOLO ceiling.
+_MAX_REVIEWED_EXECUTION_CALLS = 48
+_MAX_AUTONOMOUS_CALLS = 128
 
 
 def _is_non_workflow_role(role: object) -> bool:
@@ -110,6 +115,12 @@ class PreCompletionHook(Protocol):
     def run(self, context: PreCompletionContext) -> PreCompletionResult: ...
 
 
+class ActionExecutor(Protocol):
+    """Host-owned action boundary used only after the reviewed workflow."""
+
+    def execute(self, proposal: ActionProposal, run: SwarmRun) -> Any: ...
+
+
 @dataclass(frozen=True)
 class _UnmatchedModelAttempt:
     sequence: int
@@ -136,6 +147,7 @@ class SwarmEngine:
         pre_completion_hook: PreCompletionHook | None = None,
         required_pre_completion_hook_id: str | None = None,
         execution_guard: Callable[[Path, SwarmRun], str | None] | None = None,
+        action_executor: ActionExecutor | None = None,
     ) -> None:
         self.transport = transport
         self.registry = registry or ModelRegistry()
@@ -145,6 +157,7 @@ class SwarmEngine:
         self.pre_completion_hook = pre_completion_hook
         self.required_pre_completion_hook_id = required_pre_completion_hook_id
         self.execution_guard = execution_guard
+        self.action_executor = action_executor
 
     def run(
         self,
@@ -173,6 +186,21 @@ class SwarmEngine:
         immediately, then call :meth:`execute_run` from their tracked worker.
         ``run`` above remains the synchronous convenience API.
         """
+        # Admission is the last cheap, host-neutral boundary before a run is
+        # made visible to an autonomous worker. Do not persist malformed
+        # goals or an unknown autonomy level and let the worker discover the
+        # problem only after spending a model call.
+        if not isinstance(goal, str) or not goal.strip():
+            raise ValueError("Swarm goal must be a non-empty string")
+        goal = goal.strip()
+        if len(goal) > 20_000:
+            raise ValueError("Swarm goal exceeds the 20000 character limit")
+        if not isinstance(pack, str) or not pack.strip():
+            raise ValueError("Swarm pack must be a non-empty string")
+        pack = pack.strip()
+        if autonomy is not None:
+            if not isinstance(autonomy, str) or autonomy not in PolicyGate._AUTONOMY_LEVELS:
+                raise ValueError(f"Unsupported Swarm autonomy level: {autonomy!r}")
         project_root = Path(project_root).resolve()
         PackRegistry(project_root).get(pack)
         store = ProjectSwarmStore(project_root)
@@ -284,6 +312,10 @@ class SwarmEngine:
         )
         attempt_recovery = self._recover_model_attempts(prior_events)
         prior_call_count = self._prior_model_call_count(prior_events)
+        limit = {"reviewed_execution": _MAX_REVIEWED_EXECUTION_CALLS, "autonomous": _MAX_AUTONOMOUS_CALLS}.get(run.metadata.get("autonomy"))
+        if limit is not None and self.max_calls > limit:
+            bounded_executor = ModelExecutor(ModelRouter(self.registry), self.transport, call_budget=CallBudget(limit, initial_used=prior_call_count), max_concurrent=self.max_concurrent)
+            return self._pause_summary(store, run.run_id, bounded_executor, WorkflowPaused("invalid_execution_limits", role="admission"))
         executor = ModelExecutor(
             ModelRouter(self.registry),
             self.transport,
@@ -378,6 +410,15 @@ class SwarmEngine:
                 WorkflowPaused("invalid_verifier_result", role="verifier"),
             )
 
+        action_pause = self._execute_action_proposals(
+            store,
+            run.run_id,
+            outcome.action_proposals,
+            checkpoint=boundary_checkpoint,
+        )
+        if action_pause is not None:
+            return self._pause_summary(store, run.run_id, executor, action_pause)
+
         pre_completion_pause = self._run_pre_completion_hook(
             store,
             run,
@@ -431,6 +472,78 @@ class SwarmEngine:
             pause_reason=None,
             events=tuple(store.list_events(run.run_id)),
         )
+
+    def _execute_action_proposals(
+        self,
+        store: ProjectSwarmStore,
+        run_id: str,
+        proposals: tuple[ActionProposal, ...],
+        *,
+        checkpoint: Callable[[], None] | None,
+    ) -> WorkflowPaused | None:
+        """Execute reviewed proposals exactly once through the host boundary."""
+        if not proposals:
+            return None
+        action_executor = self.action_executor
+        if action_executor is None or not callable(getattr(action_executor, "execute", None)):
+            return WorkflowPaused("action_executor_unavailable", role="action_executor")
+        run = store.get_run(run_id)
+        if run is None:
+            return WorkflowPaused("action_run_missing", role="action_executor")
+        existing = store.list_events(run_id)
+        completed = {
+            str(event.payload.get("proposal_digest"))
+            for event in existing
+            if event.event_type == "action.completed"
+        }
+        started = {
+            str(event.payload.get("proposal_digest"))
+            for event in existing
+            if event.event_type == "action.started"
+        }
+        for proposal in proposals:
+            digest = proposal_digest(proposal)
+            if digest in completed:
+                continue
+            if digest in started:
+                return WorkflowPaused("action_recovery_required", role="action_executor")
+            if checkpoint is not None:
+                try:
+                    checkpoint()
+                except WorkflowPaused as paused:
+                    return paused
+            store.append_event_once(
+                run_id,
+                "action.started",
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "name": proposal.requested_action.name,
+                    "proposal_digest": digest,
+                },
+                idempotency_key=f"action-started:{digest}",
+            )
+            try:
+                result = action_executor.execute(proposal, run)
+            except Exception:
+                return WorkflowPaused("action_execution_failed", role="action_executor")
+            ok = getattr(result, "ok", result)
+            if ok is not True:
+                return WorkflowPaused("action_execution_failed", role="action_executor")
+            code = getattr(result, "code", "completed")
+            if not isinstance(code, str) or not code or len(code) > 96:
+                code = "completed"
+            store.append_event_once(
+                run_id,
+                "action.completed",
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "name": proposal.requested_action.name,
+                    "proposal_digest": digest,
+                    "code": code,
+                },
+                idempotency_key=f"action-completed:{digest}",
+            )
+        return None
 
     @staticmethod
     def _validated_host_metadata(

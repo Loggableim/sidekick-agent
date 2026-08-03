@@ -1,5 +1,5 @@
 """
-Sidekick Agent — Web UI server.
+Sidekick Agent Ã¢â‚¬â€ Web UI server.
 
 Provides a FastAPI backend serving the Vite/React frontend and REST API
 endpoints for managing configuration, environment variables, and sessions.
@@ -15,6 +15,7 @@ import hmac
 import importlib.util
 import json
 import logging
+import math
 import os
 import secrets
 import subprocess
@@ -23,11 +24,35 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 
+
+def _persist_nova_feedback_entity(event: dict[str, object]) -> None:
+    """Persist only the bounded local feedback projection, never raw messages."""
+    try:
+        from nova.autobiography import AutobiographyStore
+        from nova.entity_types import EntityEvent
+        payload = event.get("payload") if isinstance(event, dict) else {}
+        payload = payload if isinstance(payload, dict) else {}
+        redacted = {
+            "target_key": str(payload.get("target_key") or "")[:128],
+            "run_id": str(payload.get("run_id") or "")[:64],
+            "status": str(payload.get("status") or "")[:32],
+            "detail": str(payload.get("detail") or "")[:200],
+        }
+        AutobiographyStore().record_entity_event(EntityEvent(
+            type="nova_feedback",
+            source="local_feedback_adapter",
+            payload=redacted,
+            visibility="private",
+            correlation_id=redacted["run_id"] or redacted["target_key"],
+        ))
+    except Exception:
+        _log.warning("Nova feedback entity persistence failed", exc_info=True)
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -102,6 +127,58 @@ _log = logging.getLogger(__name__)
 
 app = FastAPI(title="Sidekick Agent", version=__version__)
 _CRON_TICKER_STARTED = False
+_NOVA_SUPERVISION_TICKER_STARTED = False
+_NOVA_SUPERVISION_CONSUMER_INTERVAL_SECONDS = 60.0
+_NOVA_SUPERVISION_TICKER_LOCK = threading.RLock()
+_NOVA_SUPERVISION_TICKER_STATE: dict[str, Any] = {
+    "feedback_responder": "disabled",
+    "feedback_last_error": None,
+    "running": False,
+    "process": "cli.web_server",
+    "thread": "",
+    "interval_seconds": 60,
+    "consumer_interval_seconds": 60,
+    "last_catalog_refresh_attempts": 0,
+    "last_pulse_at": None,
+    "last_outcomes": [],
+    "error_count": 0,
+    "last_error": None,
+    "ticker_watchdog": {"status": "not_started", "alert_code": None, "last_pulse_at": None, "age_seconds": None},
+    "mind_watchdog": {"status": "not_started", "pid": None, "restarted": False, "crash_count": 0},
+}
+
+
+def _cleanup_nova_supervision_ticker_lifecycle(lifecycle: dict[str, Any]) -> None:
+    """Stop one ticker generation and release only its bound lease."""
+    stop_requested = lifecycle.get("stop_requested")
+    if callable(getattr(stop_requested, "set", None)):
+        try:
+            stop_requested.set()
+        except Exception:
+            pass
+    stop = lifecycle.get("lease_stop")
+    if callable(getattr(stop, "set", None)):
+        try:
+            stop.set()
+        except Exception:
+            pass
+    runtime = lifecycle.get("runtime")
+    if runtime is not None:
+        try:
+            from nova.space_supervision_runtime import clear_active_runtime
+            clear_active_runtime(runtime)
+        except Exception:
+            pass
+    supervisor = lifecycle.get("supervisor")
+    lease_id = lifecycle.get("ticker_lease_id")
+    owner = lifecycle.get("ticker_owner")
+    if supervisor is not None and isinstance(lease_id, str) and isinstance(owner, str):
+        try:
+            supervisor.release_ticker_lease(lease_id, owner, reason="ticker_thread_exited")
+        except Exception:
+            pass
+    lifecycle["runtime"] = None
+    lifecycle["ticker_lease_id"] = None
 
 
 def _is_asyncio_client_disconnect_context(context: dict[str, Any] | None) -> bool:
@@ -166,6 +243,732 @@ def _start_dashboard_cron_ticker() -> None:
     }
 
 
+def _poll_nova_space_inputs(supervisor: Any) -> None:
+    """Read-only Git/CI edge detector for already enrolled YOLO Spaces."""
+    try:
+        from nova.space_supervision_runtime import emit_code_owned_signal
+        from web.api.space_engine import get_all_spaces
+    except Exception:
+        return
+    try:
+        spaces = get_all_spaces()
+    except Exception:
+        return
+    heartbeat_bucket = int(time.time() // (15 * 60))
+
+    for space in spaces:
+        target_key = str(getattr(space, "slug", "") or "").strip().lower()
+        if not target_key:
+            continue
+        try:
+            governance = supervisor.current_governance(target_key)
+            if governance is None or governance.yolo is not True or governance.enrolled is not True:
+                continue
+            emit_code_owned_signal(
+                target_key,
+                source="heartbeat",
+                event_id=f"heartbeat:{heartbeat_bucket}",
+                reason_code="periodic_check",
+            )
+            root = governance.canonical_root
+            git = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=str(root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                check=False,
+            )
+            head = (git.stdout or "").strip().lower()
+            if git.returncode == 0 and len(head) == 40 and all(c in "0123456789abcdef" for c in head):
+                emit_code_owned_signal(
+                    target_key,
+                    source="git",
+                    event_id=f"git-head:{head}",
+                    reason_code="git_change",
+                )
+
+            # Kanban is a Space-local event source as well. Only the SQLite
+            # file's bounded identity is observed; task titles, IDs and board
+            # paths never enter the supervision ledger.
+            try:
+                kanban_path = Path(getattr(space, "kanban_path", root / "kanban.db"))
+                kanban_stat = kanban_path.stat()
+                kanban_identity = (
+                    f"kanban:{kanban_stat.st_ino}:{kanban_stat.st_size}:"
+                    f"{kanban_stat.st_mtime_ns}"
+                )
+                emit_code_owned_signal(
+                    target_key,
+                    source="kanban",
+                    event_id=kanban_identity,
+                    reason_code="kanban_change",
+                )
+            except (OSError, ValueError, TypeError):
+                # Missing or inaccessible Kanban storage must not stop
+                # supervision of Git, CI or heartbeat signals.
+                pass
+
+            # A managed Space can have meaningful work before its first
+            # commit. Detect that state as a redacted digest only; raw status
+            # output may contain filenames, secrets or user data and must not
+            # enter the supervision ledger or notifications.
+            status_returncode, status_prefix, status_truncated = _probe_nova_status_stream(root, timeout=5)
+            status_text = status_prefix.decode("utf-8", errors="replace")
+            status_digest = _bounded_nova_status_digest(status_text)
+            if status_truncated:
+                status_digest = _bounded_nova_status_digest_bytes(status_prefix, truncated=True)
+            if status_returncode == 0 and status_digest is not None:
+                emit_code_owned_signal(
+                    target_key,
+                    source="git",
+                    event_id=f"git-worktree:{status_digest}",
+                    reason_code="git_change",
+                )
+
+            marker = root / ".swarm" / "ci-status.json"
+            if marker.is_file():
+                payload = json.loads(marker.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    status = str(payload.get("status") or "").strip().lower()
+                    if status in {"success", "passed", "failure", "failed", "error", "cancelled"}:
+                        marker_identity = {
+                            "id": str(payload.get("id") or payload.get("run_id") or ""),
+                            "status": status,
+                            "updated_at": str(payload.get("updated_at") or ""),
+                        }
+                        if marker_identity["id"] or marker_identity["updated_at"]:
+                            event_id = hashlib.sha256(
+                                json.dumps(marker_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                            ).hexdigest()
+                            emit_code_owned_signal(
+                                target_key,
+                                source="ci",
+                                event_id=f"ci-status:{event_id}",
+                                reason_code="ci_failed" if status in {"failure", "failed", "error", "cancelled"} else "ci_change",
+                            )
+        except Exception:
+            # A malformed Space, Git checkout or CI marker cannot stop the ticker.
+            continue
+
+
+
+_PROVIDER_REFRESH_COOLDOWN_SECONDS = 15 * 60
+_PROVIDER_REFRESH_MAX_ATTEMPTS = 1024
+_PROVIDER_REFRESH_ATTEMPTS: dict[str, float] = {}
+
+def _refresh_recoverable_provider_catalogs(supervisor: Any, *, now: float | None = None) -> int:
+    """Refresh the verified Ollama catalog for paused eligible Spaces only.
+
+    The continuous host loop must not fall back to local providers or refresh
+    arbitrary projects. A refresh is attempted only for a currently paused
+    ``model_chain_exhausted``/provider-recoverable admission and is bounded by
+    the caller's host interval. Failures remain redacted and fail closed.
+    """
+    recoverable = {
+        "model_chain_exhausted",
+        "no_eligible_model",
+        "model_provider_unavailable",
+        "model_catalog_unavailable",
+        "provider_unavailable",
+    }
+    try:
+        from cli.swarm import get_swarm_service
+        from swarm_core.store import ProjectSwarmStore
+    except Exception:
+        return 0
+    try:
+        admissions = supervisor.list_active_admissions()
+    except Exception:
+        return 0
+    attempted = 0
+    service = None
+    current_time = time.monotonic() if now is None else float(now)
+    if not math.isfinite(current_time) or current_time < 0:
+        return 0
+    if len(_PROVIDER_REFRESH_ATTEMPTS) > _PROVIDER_REFRESH_MAX_ATTEMPTS:
+        cutoff = max(0.0, current_time - 86400.0)
+        stale = [key for key, value in _PROVIDER_REFRESH_ATTEMPTS.items() if not math.isfinite(float(value)) or float(value) < cutoff]
+        for key in stale:
+            _PROVIDER_REFRESH_ATTEMPTS.pop(key, None)
+        if len(_PROVIDER_REFRESH_ATTEMPTS) > _PROVIDER_REFRESH_MAX_ATTEMPTS:
+            overflow = len(_PROVIDER_REFRESH_ATTEMPTS) - _PROVIDER_REFRESH_MAX_ATTEMPTS
+            oldest = sorted(_PROVIDER_REFRESH_ATTEMPTS.items(), key=lambda item: float(item[1]))[:overflow]
+            for key, _value in oldest:
+                _PROVIDER_REFRESH_ATTEMPTS.pop(key, None)
+    for admission in admissions:
+        if str(admission.get("state") or "") != "paused":
+            continue
+        try:
+            record = supervisor._record(str(admission.get("admission_id") or ""))
+            if record is None:
+                continue
+            target_key = str(record["target_key"] or "").strip().lower()
+            governance = supervisor.current_governance(target_key)
+            if governance is None or governance.yolo is not True or governance.enrolled is not True:
+                continue
+            root = Path(record["canonical_root"]).resolve()
+            store = ProjectSwarmStore.open_read_only(root)
+            run = store.get_run(str(record["run_id"]))
+            if run is None or run.status != "paused":
+                continue
+            pause_reason = ""
+            for event in reversed(store.list_events(str(record["run_id"]))):
+                if event.event_type == "run.paused":
+                    payload = event.payload if isinstance(event.payload, dict) else {}
+                    pause_reason = str(payload.get("reason") or "").strip().lower()
+                    break
+            if pause_reason not in recoverable:
+                continue
+            refresh_key = str(record["run_id"] or "").strip()
+            if not refresh_key:
+                continue
+            last_attempt = _PROVIDER_REFRESH_ATTEMPTS.get(refresh_key)
+            if last_attempt is not None and current_time - last_attempt < _PROVIDER_REFRESH_COOLDOWN_SECONDS:
+                continue
+            if service is None:
+                service = get_swarm_service()
+            attempted += 1
+            _PROVIDER_REFRESH_ATTEMPTS[refresh_key] = current_time
+            service.refresh_models(root)
+        except Exception:
+            # Provider/ledger/space failures never escape into the host loop.
+            continue
+    return attempted
+
+
+def _dashboard_execution_owner_alive(owner_token: str) -> bool:
+    """Check a dashboard ticker owner without consulting HTTP readiness."""
+    parts = str(owner_token or "").split(":")
+    if not parts or parts[0] != "dashboard":
+        # Unknown worker owners cannot be proven dead by this dashboard.
+        return True
+    if len(parts) != 3:
+        # Unknown/malformed ownership is not proof of death. Keeping the
+        # lease is the fail-closed choice and prevents speculative reclaim.
+        return True
+    try:
+        pid = int(parts[1])
+    except (TypeError, ValueError):
+        return True
+    if pid <= 0:
+        return True
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            # Access-denied is not proof that a live owner exited.
+            # Reclaim only on definitive invalid/not-found process errors.
+            error_code = int(ctypes.windll.kernel32.GetLastError())
+            return error_code not in {87, 1168}
+        except Exception:
+            # Inspection failure is not proof that the other host exited.
+            return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def _build_nova_cloud_feedback_responder() -> Callable[[str], object] | None:
+    """Build the responder only after explicit host opt-in and Cloud auth."""
+    if os.environ.get("SIDEKICK_NOVA_CLOUD_RESPONDER") != "1":
+        return None
+    if not str(os.environ.get("OLLAMA_API_KEY") or "").strip():
+        _log.warning("Nova Cloud responder requested but OLLAMA_API_KEY is missing")
+        return None
+    try:
+        from nova.cloud_responder import NovaCloudResponder
+        from swarm_core.transport import OllamaCloudTransport
+        from runtime.auxiliary_client import call_llm
+        def _call_cloud(**kwargs: object) -> object:
+            return call_llm(**kwargs)
+        return NovaCloudResponder(
+            OllamaCloudTransport(_call_cloud),
+            model=os.environ.get("SIDEKICK_NOVA_CLOUD_MODEL", "deepseek-v4-flash"),
+            timeout_seconds=float(os.environ.get("SIDEKICK_NOVA_CLOUD_TIMEOUT", "5")),
+            enabled=True,
+        )
+    except Exception:
+        _log.exception("Nova Cloud responder activation failed closed")
+        return None
+def _start_nova_space_supervision_ticker(*, feedback_responder: Callable[[str], object] | None = None) -> None:
+    """Run the host-owned YOLO supervision pulse without owning model transport."""
+    global _NOVA_SUPERVISION_TICKER_STARTED
+    if feedback_responder is None:
+        feedback_responder = _build_nova_cloud_feedback_responder()
+    if (
+        _NOVA_SUPERVISION_TICKER_STARTED
+        or os.environ.get("SIDEKICK_DISABLE_NOVA_SUPERVISION") == "1"
+    ):
+        return
+    _NOVA_SUPERVISION_TICKER_STARTED = True
+    notification_sink = None
+    digest_sent_dates: dict[str, str] = {}
+    supervisor: Any | None = None
+
+    def _dispatch_run(project_root: Path, run_id: str) -> None:
+        # Admission has already provisioned and started this exact run. The
+        # worker only claims its durable execution lease; it cannot create a
+        # second run or bypass the supervisor's execution options.
+        def _worker() -> None:
+            try:
+                from cli.swarm import get_swarm_service
+                get_swarm_service().execute_run(project_root, run_id)
+                reconciliation = supervisor.reconcile_host_dispatch(
+                    project_root,
+                    run_id,
+                    failure_reason="host_execution_returned",
+                )
+                if reconciliation == "paused":
+                    _notify_supervision_blocker(project_root, run_id, "dispatch_failed")
+            except Exception:
+                try:
+                    reconciliation = supervisor.reconcile_host_dispatch(
+                        project_root,
+                        run_id,
+                        failure_reason="host_dispatch_failed",
+                    )
+                    if reconciliation == "paused":
+                        _notify_supervision_blocker(project_root, run_id, "dispatch_failed")
+                except Exception:
+                    _log.exception(
+                        "Nova supervision reconciliation failed: run_id=%s",
+                        run_id,
+                    )
+                _log.exception(
+                    "Nova supervision run failed: root=%s run_id=%s",
+                    project_root,
+                    run_id,
+                )
+
+        threading.Thread(
+            target=_worker,
+            daemon=True,
+        ).start()
+
+    def _notify_supervision_blocker(project_root: Path, run_id: str, blocker_code: str) -> None:
+        if notification_sink is None:
+            return
+        try:
+            target_key = supervisor.target_key_for_run(project_root, run_id)
+            governance = supervisor.current_governance(target_key) if target_key else None
+            if governance is None:
+                return
+            notification_sink.send_blocker(
+                space_id=governance.space_id,
+                display_name=target_key or "space",
+                run_id=run_id,
+                blocker_code=blocker_code,
+            )
+        except Exception:
+            # Notification failure must never change autonomous execution state.
+            _log.warning("Nova supervision blocker notification failed", exc_info=True)
+
+
+    def _notify_supervision_digest(runtime: Any, supervisor: Any) -> None:
+        if notification_sink is None:
+            return
+        utc_date = datetime.now(timezone.utc).date().isoformat()
+        try:
+            statuses = runtime.status()
+        except Exception:
+            return
+        status_by_target: dict[str, Any | None] = {}
+        for item in statuses:
+            target_key = getattr(item, "target_key", "")
+            if isinstance(target_key, str) and target_key:
+                status_by_target[target_key] = item
+        # A digest is a Space-level signal, not only a run-level signal. Include
+        # every currently enrolled YOLO Space, even when no event has created a
+        # runtime row yet; the zero-count payload is fixed and redacted.
+        try:
+            from web.api.space_engine import get_all_spaces
+            for space in get_all_spaces():
+                target_key = str(getattr(space, "slug", "") or "").strip().lower()
+                if target_key:
+                    status_by_target.setdefault(target_key, None)
+        except Exception:
+            pass
+        for target_key, item in status_by_target.items():
+            try:
+                governance = supervisor.current_governance(target_key)
+            except Exception:
+                continue
+            if governance is None or governance.yolo is not True or governance.enrolled is not True:
+                continue
+            if digest_sent_dates.get(target_key) == utc_date:
+                continue
+            outcome = str(getattr(item, "last_outcome", "") or "") if item is not None else ""
+            pending = bool(getattr(item, "pending", False)) if item is not None else False
+            if item is None:
+                active = 0; completed = 0; blocked = 0; paused = 0
+            elif pending:
+                active = 1; completed = 0; blocked = 0; paused = 0
+            elif outcome in {"admission_failed", "admission_rejected", "active_limit", "start_failed", "ineligible"}:
+                active = 0; completed = 0; blocked = 1; paused = 0
+            elif outcome in {"unchanged", "completed"}:
+                active = 0; completed = 1; blocked = 0; paused = 0
+            elif outcome in {"started", "running"}:
+                active = 1; completed = 0; blocked = 0; paused = 0
+            elif outcome in {"paused", "failed", "cancelled", "abandoned"}:
+                active = 0; completed = 0; blocked = 1; paused = 0
+            else:
+                active = 0; completed = 0; blocked = 0; paused = 1
+            digest_result = "failed"
+            try:
+                digest_result = notification_sink.send_daily_digest(
+                    space_id=governance.space_id,
+                    display_name=target_key,
+                    status_counts={"active": active, "completed": completed, "blocked": blocked, "paused": paused},
+                    utc_date=utc_date,
+                )
+            except Exception:
+                # A digest provider failure must never affect supervision.
+                _log.warning("Nova supervision daily digest failed", exc_info=True)
+            if digest_result in {"sent", "already_claimed"}:
+                digest_sent_dates[target_key] = utc_date
+
+    def _loop(ticker_lifecycle: dict[str, Any]) -> None:
+        nonlocal supervisor, notification_sink
+        runtime = None
+        feedback_consumer = None
+        stop_requested = ticker_lifecycle.get("stop_requested")
+        if not callable(getattr(stop_requested, "is_set", None)):
+            stop_requested = threading.Event()
+        ticker_owner = f"dashboard:{os.getpid()}:{uuid.uuid4().hex}"
+        ticker_lease_id: str | None = None
+        last_consumer_at = 0.0
+        lease_stop = threading.Event()
+        lease_lost = threading.Event()
+        ticker_lifecycle.update({"lease_stop": lease_stop, "supervisor": supervisor, "ticker_owner": ticker_owner, "runtime": None, "ticker_lease_id": None})
+
+        def _lease_heartbeat(lease_id: str, stop_event: threading.Event, loss_event: threading.Event) -> None:
+            while not stop_event.wait(10):
+                if not lease_id or supervisor is None:
+                    continue
+                try:
+                    if not supervisor.heartbeat_ticker_lease(lease_id, ticker_owner):
+                        loss_event.set()
+                        return
+                except Exception:
+                    # Fail closed: the pulse loop will stop until a fresh
+                    # durable lease can be acquired.
+                    loss_event.set()
+                    return
+
+        while not stop_requested.is_set():
+            if runtime is None:
+                try:
+                    from nova.space_supervision_runtime import (
+                        NovaSpaceSupervisionRuntime,
+                        install_active_runtime,
+                        clear_active_runtime,
+                    )
+                    from nova.space_supervisor import (
+                        get_production_managed_space_supervisor,
+                        list_current_managed_space_governance,
+                    )
+
+                    supervisor = get_production_managed_space_supervisor()
+                    try:
+                        supervisor.reconcile_stale_ticker_leases(
+                            _dashboard_execution_owner_alive
+                        )
+                    except Exception:
+                        # Liveness failures are fail-closed; the normal TTL
+                        # acquisition path remains the safe fallback.
+                        _log.exception("Nova ticker lease reconciliation failed")
+                    ticker_lease_id = supervisor.acquire_ticker_lease(ticker_owner)
+                    if not ticker_lease_id:
+                        with _NOVA_SUPERVISION_TICKER_LOCK:
+                            _NOVA_SUPERVISION_TICKER_STATE["last_error"] = "ticker_lease_unavailable"
+                        time.sleep(10)
+                        continue
+                    ticker_lifecycle.update({"supervisor": supervisor, "ticker_lease_id": ticker_lease_id, "ticker_owner": ticker_owner})
+                    try:
+                        supervisor.reconcile_stale_host_runs(_dashboard_execution_owner_alive)
+                    except Exception:
+                        _log.exception("Nova stale host-run reconciliation failed")
+                    lease_stop = threading.Event()
+                    lease_lost = threading.Event()
+                    threading.Thread(
+                        target=_lease_heartbeat,
+                        args=(ticker_lease_id, lease_stop, lease_lost),
+                        daemon=True,
+                        name="nova-supervision-lease-heartbeat",
+                    ).start()
+                    from nova.notifications import build_env_notifier
+                    from nova.feedback_adapter import LocalFeedbackLedger, LocalNovaFeedbackAdapter
+                    from nova.feedback_consumer import NovaFeedbackConsumer
+                    from nova.production_verifier import ProductionReadOnlyVerifier
+                    notification_sink = build_env_notifier(supervisor)
+                    if feedback_responder is not None and not callable(feedback_responder):
+                        raise TypeError("feedback responder must be callable")
+                    feedback_ledger = LocalFeedbackLedger(get_sidekick_home() / "state" / "nova-feedback.sqlite")
+                    feedback_consumer = NovaFeedbackConsumer(feedback_ledger, feedback_responder) if callable(feedback_responder) else None
+                    runtime = NovaSpaceSupervisionRuntime(
+                        supervisor=supervisor,
+                        dispatch_run=_dispatch_run,
+                        # A real host run is admitted only when the bound
+                        # Space exposes an explicit read-only verifier. This
+                        # is a project-local test-space gate; it is unrelated
+                        # to listener readiness or ticker lease ownership.
+                        readiness_check=ProductionReadOnlyVerifier.readiness,
+                        governance_snapshots=list_current_managed_space_governance,
+                        feedback_adapter=LocalNovaFeedbackAdapter(feedback_responder, ledger=feedback_ledger),
+                        entity_event_sink=_persist_nova_feedback_entity,
+                    )
+                    ticker_lifecycle["runtime"] = runtime
+                    install_active_runtime(runtime)
+                except Exception:
+                    _log.exception("Nova supervision ticker initialization failed")
+                    # Never leave a partially installed runtime reachable from
+                    # code-owned producers after the durable lease was
+                    # released.  Such a stale callback could otherwise ingest
+                    # signals (and dispatch with an old host binding) while a
+                    # replacement dashboard owns the lease.
+                    if runtime is not None:
+                        try:
+                            clear_active_runtime(runtime)
+                        except Exception:
+                            pass
+                    lease_stop.set()
+                    if supervisor is not None and ticker_lease_id:
+                        try:
+                            supervisor.release_ticker_lease(ticker_lease_id, ticker_owner, reason="initialization_failed")
+                        except Exception:
+                            pass
+                    ticker_lease_id = None
+                    time.sleep(60)
+                    continue
+            try:
+                if lease_lost.is_set() or not ticker_lease_id:
+                    lease_stop.set()
+                    # The in-process bridge is subordinate to the durable
+                    # ticker lease.  Remove the old runtime before reacquiring
+                    # so producers cannot route work through an expired host.
+                    try:
+                        from nova.space_supervision_runtime import clear_active_runtime
+                        clear_active_runtime(runtime)
+                    except Exception:
+                        pass
+                    ticker_lease_id = None
+                    runtime = None
+                    with _NOVA_SUPERVISION_TICKER_LOCK:
+                        _NOVA_SUPERVISION_TICKER_STATE["last_error"] = "ticker_lease_lost"
+                    time.sleep(10)
+                    continue
+                try:
+                    from nova.ticker_watchdog import inspect_ticker_liveness
+                    ticker_watchdog = inspect_ticker_liveness(supervisor=supervisor)
+                    with _NOVA_SUPERVISION_TICKER_LOCK:
+                        _NOVA_SUPERVISION_TICKER_STATE["ticker_watchdog"] = {
+                            "status": ticker_watchdog.status,
+                            "alert_code": ticker_watchdog.alert_code,
+                            "last_pulse_at": ticker_watchdog.last_pulse_at,
+                            "age_seconds": ticker_watchdog.age_seconds,
+                        }
+                    if not ticker_watchdog.healthy:
+                        with _NOVA_SUPERVISION_TICKER_LOCK:
+                            _NOVA_SUPERVISION_TICKER_STATE["last_error"] = f"ticker_watchdog_{ticker_watchdog.status}"
+                        # A stale or unavailable lease is no longer a valid host generation.
+                        # Stop this heartbeat-owned generation so the next loop can reacquire.
+                        lease_lost.set()
+                        time.sleep(10)
+                        continue
+                except Exception:
+                    with _NOVA_SUPERVISION_TICKER_LOCK:
+                        _NOVA_SUPERVISION_TICKER_STATE["ticker_watchdog"] = {"status": "unavailable", "alert_code": "ticker_unavailable", "last_pulse_at": None, "age_seconds": None}
+                try:
+                    from nova.mind_watchdog import check_and_recover
+
+                    watchdog = check_and_recover(
+                        home=Path(get_sidekick_home()),
+                        lease_owned=bool(ticker_lease_id),
+                    )
+                    with _NOVA_SUPERVISION_TICKER_LOCK:
+                        _NOVA_SUPERVISION_TICKER_STATE["mind_watchdog"] = {
+                            "status": watchdog.status,
+                            "pid": watchdog.pid,
+                            "restarted": bool(watchdog.restarted),
+                            "crash_count": int(watchdog.crash_count),
+                        }
+                except Exception:
+                    # Watchdog telemetry must never stop the governed ticker.
+                    with _NOVA_SUPERVISION_TICKER_LOCK:
+                        _NOVA_SUPERVISION_TICKER_STATE["mind_watchdog"] = {
+                            "status": "error",
+                            "pid": None,
+                            "restarted": False,
+                            "crash_count": 0,
+                        }
+                    _log.warning("Nova Mind watchdog failed", exc_info=True)
+                _poll_nova_space_inputs(supervisor)
+                outcomes = ()
+                resonance_consumed = 0
+                consumer_now = time.monotonic()
+                if consumer_now - last_consumer_at >= _NOVA_SUPERVISION_CONSUMER_INTERVAL_SECONDS:
+                    last_consumer_at = consumer_now
+                    catalog_refresh_attempts = _refresh_recoverable_provider_catalogs(supervisor)
+                    with _NOVA_SUPERVISION_TICKER_LOCK:
+                        _NOVA_SUPERVISION_TICKER_STATE["last_catalog_refresh_attempts"] = catalog_refresh_attempts
+                    if feedback_consumer is not None:
+                        try:
+                            feedback_results = feedback_consumer.consume(limit=8)
+                            with _NOVA_SUPERVISION_TICKER_LOCK:
+                                _NOVA_SUPERVISION_TICKER_STATE["last_feedback_received"] = len(feedback_results)
+                                _NOVA_SUPERVISION_TICKER_STATE["feedback_last_error"] = None
+                        except Exception:
+                            with _NOVA_SUPERVISION_TICKER_LOCK:
+                                _NOVA_SUPERVISION_TICKER_STATE["feedback_last_error"] = "provider_failed"
+                            _log.debug("Nova feedback consumer failed", exc_info=True)
+                    try:
+                        from nova.ticker_handler import consume_pending_events
+                        handler_result = consume_pending_events(
+                            supervisor=supervisor,
+                            runtime=runtime,
+                            publish_entity=True,
+                        )
+                        outcomes = handler_result.outcomes
+                        resonance_consumed = max(0, min(int(getattr(handler_result, "resonance_consumed", 0) or 0), 64))
+                    except Exception:
+                        # Dashboard telemetry/consumption must never affect the
+                        # governed ticker; the next bounded interval can retry safely.
+                        _log.debug("Nova ticker event consumer failed", exc_info=True)
+                        resonance_consumed = 0
+                _notify_supervision_digest(runtime, supervisor)
+                with _NOVA_SUPERVISION_TICKER_LOCK:
+                    _NOVA_SUPERVISION_TICKER_STATE["last_pulse_at"] = time.time()
+                    _NOVA_SUPERVISION_TICKER_STATE["last_resonance_consumed"] = resonance_consumed
+                    _NOVA_SUPERVISION_TICKER_STATE["last_outcomes"] = [
+                        {"space": outcome.target_key, "status": outcome.status}
+                        for outcome in outcomes[:16]
+                    ]
+                    _NOVA_SUPERVISION_TICKER_STATE["last_error"] = None
+            except Exception:
+                # A malformed Space or unavailable ledger must never stop the
+                # existing cron ticker or the WebUI process. Store only a fixed
+                # diagnostic code; exception text may contain paths/secrets.
+                with _NOVA_SUPERVISION_TICKER_LOCK:
+                    _NOVA_SUPERVISION_TICKER_STATE["error_count"] = int(
+                        _NOVA_SUPERVISION_TICKER_STATE["error_count"]
+                    ) + 1
+                    _NOVA_SUPERVISION_TICKER_STATE["last_error"] = "pulse_failed"
+                _log.exception("Nova supervision pulse failed")
+            stop_requested.wait(60)
+
+    def _ticker_thread_entry() -> None:
+        # Keep lifecycle ownership local to this generation. The restart guard
+        # can start a replacement while the previous thread is still
+        # unwinding; sharing one outer dict would let the old finally block
+        # release the replacement's lease/runtime.
+        ticker_lifecycle: dict[str, Any] = {
+            "stop_requested": threading.Event(),
+            "lease_stop": None,
+            "supervisor": None,
+            "ticker_lease_id": None,
+            "ticker_owner": None,
+            "runtime": None,
+        }
+        try:
+            _loop(ticker_lifecycle)
+        finally:
+            _cleanup_nova_supervision_ticker_lifecycle(ticker_lifecycle)
+
+    thread_holder: dict[str, threading.Thread | None] = {"thread": None}
+    guard = None
+
+    def _request_ticker_restart() -> bool:
+        new_thread = threading.Thread(target=_ticker_thread_entry, daemon=True, name="nova-supervision-ticker-restart")
+        thread_holder["thread"] = new_thread
+        new_thread.start()
+        return True
+
+    def _guard_loop() -> None:
+        from nova.ticker_thread_guard import TickerThreadGuard
+        restart_guard = TickerThreadGuard()
+        while True:
+            result = restart_guard.inspect(
+                ticker_thread=thread_holder.get("thread"),
+                request_start=_request_ticker_restart,
+            )
+            with _NOVA_SUPERVISION_TICKER_LOCK:
+                _NOVA_SUPERVISION_TICKER_STATE["ticker_watchdog"] = {
+                    "status": result.status,
+                    "alert_code": result.alert_code,
+                    "last_pulse_at": _NOVA_SUPERVISION_TICKER_STATE.get("last_pulse_at"),
+                    "age_seconds": None,
+                    "restart_count": int(result.restart_count),
+                }
+                if result.status == "restart_escalated":
+                    first_escalation = _NOVA_SUPERVISION_TICKER_STATE.get("last_error") != "ticker_thread_escalated"
+                    if first_escalation:
+                        _NOVA_SUPERVISION_TICKER_STATE["error_count"] = int(
+                            _NOVA_SUPERVISION_TICKER_STATE.get("error_count", 0)
+                        ) + 1
+                    _NOVA_SUPERVISION_TICKER_STATE["running"] = False
+                    _NOVA_SUPERVISION_TICKER_STATE["last_error"] = "ticker_thread_escalated"
+                    if first_escalation and notification_sink is not None:
+                        try:
+                            notification_sink.send_blocker(
+                                space_id="nova",
+                                display_name="nova",
+                                run_id="ticker",
+                                blocker_code="ticker_thread_escalated",
+                            )
+                        except Exception:
+                            _log.warning("Nova ticker escalation notification failed", exc_info=True)
+            time.sleep(10)
+
+    # Publish the bootstrap state before either daemon can run. Thread.start()
+    # is allowed to schedule immediately; initializing the public state after
+    # it races with the first pulse and can erase a real ``last_pulse_at`` (or
+    # outcomes), making a freshly booted ticker look idle to Presence/watchdog
+    # consumers. This state publication is telemetry only and does not grant
+    # a lease or bypass any admission gate.
+    explicit_cloud = os.environ.get("SIDEKICK_NOVA_CLOUD_RESPONDER") == "1"
+    feedback_status = "ready" if callable(feedback_responder) else ("unavailable" if explicit_cloud else "disabled")
+    feedback_error = ("cloud_auth_missing" if explicit_cloud and not str(os.environ.get("OLLAMA_API_KEY") or "").strip() else ("responder_activation_failed" if explicit_cloud else None))
+    ticker_state = {
+        "feedback_responder": feedback_status,
+        "feedback_last_error": feedback_error,
+        "running": True,
+        "process": "cli.web_server",
+        "thread": "nova-supervision-ticker",
+        "interval_seconds": 60,
+        "consumer_interval_seconds": int(_NOVA_SUPERVISION_CONSUMER_INTERVAL_SECONDS),
+        "last_catalog_refresh_attempts": 0,
+        "last_pulse_at": None,
+        "last_outcomes": [],
+        "last_resonance_consumed": 0,
+        "error_count": 0,
+        "last_error": None,
+        "ticker_watchdog": {"status": "not_started", "alert_code": None, "last_pulse_at": None, "age_seconds": None},
+        "mind_watchdog": {"status": "not_started", "pid": None, "restarted": False, "crash_count": 0},
+    }
+    with _NOVA_SUPERVISION_TICKER_LOCK:
+        _NOVA_SUPERVISION_TICKER_STATE.clear()
+        _NOVA_SUPERVISION_TICKER_STATE.update(ticker_state)
+    app.state.nova_supervision_ticker = ticker_state
+
+    thread = threading.Thread(target=_ticker_thread_entry, daemon=True, name="nova-supervision-ticker")
+    thread_holder["thread"] = thread
+    thread.start()
+    threading.Thread(target=_guard_loop, daemon=True, name="nova-supervision-ticker-guard").start()
+
 def _release_game_mode_resources_on_startup() -> None:
     """Release local model resources when Game Mode persisted across a restart."""
     try:
@@ -191,6 +994,7 @@ def _release_game_mode_resources_on_startup() -> None:
 
 app.router.on_startup.append(_install_asyncio_disconnect_exception_filter)
 app.router.on_startup.append(_start_dashboard_cron_ticker)
+app.router.on_startup.append(_start_nova_space_supervision_ticker)
 app.router.on_startup.append(_release_game_mode_resources_on_startup)
 
 
@@ -216,11 +1020,79 @@ def _webui_version_token() -> str:
 
 # ---------------------------------------------------------------------------
 # Session token for protecting sensitive endpoints (reveal).
-# Generated fresh on every server start — dies when the process exits.
+# Generated fresh on every server start Ã¢â‚¬â€ dies when the process exits.
 # Injected into the SPA HTML so only the legitimate web UI can use it.
 # ---------------------------------------------------------------------------
 _SESSION_TOKEN = secrets.token_urlsafe(32)
 _SESSION_HEADER_NAME = "X-Sidekick-Session-Token"
+
+# A dirty worktree is only a wake-up hint for the governed ticker. Never let
+# an unbounded ``git status`` payload turn the once-per-minute host pulse into
+# an accidental memory sink (large generated/untracked trees are common in
+# project Spaces). The digest remains deterministic for the retained prefix
+# and explicitly records truncation, so a later clean/full state still yields
+# a different signal identity.
+_NOVA_STATUS_DIGEST_MAX_BYTES = 64 * 1024
+_NOVA_STATUS_PROBE_CHUNK_BYTES = 8 * 1024
+
+
+def _bounded_nova_status_digest_bytes(raw: bytes, *, truncated: bool = False) -> str | None:
+    """Hash only a bounded status prefix, preserving the legacy digest format."""
+    if not raw:
+        return None
+    sample = raw[:_NOVA_STATUS_DIGEST_MAX_BYTES]
+    if truncated or len(raw) > _NOVA_STATUS_DIGEST_MAX_BYTES:
+        sample += b"\n[sidekick-status-truncated]"
+    return hashlib.sha256(sample).hexdigest()
+
+
+def _bounded_nova_status_digest(status_text: object) -> str | None:
+    """Return a bounded identity for dirty-worktree status output."""
+    if not isinstance(status_text, str) or not status_text.strip():
+        return None
+    raw = status_text.encode("utf-8", errors="replace")
+    return _bounded_nova_status_digest_bytes(raw, truncated=len(raw) > _NOVA_STATUS_DIGEST_MAX_BYTES)
+
+
+def _probe_nova_status_stream(cwd: object, *, timeout: float = 5.0) -> tuple[int, bytes, bool]:
+    """Run ``git status`` while retaining at most a small prefix in memory.
+
+    ``subprocess.run(capture_output=True)`` is unsafe for generated/untracked
+    trees because Git can emit an arbitrarily large status listing. This
+    reader drains stdout in chunks, keeps only ``limit + 1`` bytes (the extra
+    byte proves truncation), and discards the remainder. The digest therefore
+    remains deterministic while process output cannot become a memory sink.
+    """
+    process = subprocess.Popen(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        bufsize=0,
+    )
+    captured = bytearray()
+    truncated = False
+    stream = process.stdout
+    try:
+        if stream is not None:
+            while True:
+                chunk = stream.read(_NOVA_STATUS_PROBE_CHUNK_BYTES)
+                if not chunk:
+                    break
+                remaining = (_NOVA_STATUS_DIGEST_MAX_BYTES + 1) - len(captured)
+                if remaining > 0:
+                    captured.extend(chunk[:remaining])
+                if len(chunk) > max(remaining, 0) or len(captured) > _NOVA_STATUS_DIGEST_MAX_BYTES:
+                    truncated = True
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1)
+    finally:
+        if stream is not None:
+            stream.close()
+    return int(process.returncode or 0), bytes(captured), truncated
 
 _STREAMING_EXACT_PATHS: frozenset[str] = frozenset({
     "/api/chat/stream",
@@ -253,7 +1125,7 @@ def _allows_query_session_token(request: Request) -> bool:
         return False
     return _is_streaming_api_path(request.url.path)
 
-# In-browser Chat tab (/chat, /api/pty, …).  Off unless ``sidekick dashboard --tui``
+# In-browser Chat tab (/chat, /api/pty, Ã¢â‚¬Â¦).  Off unless ``sidekick dashboard --tui``
 # Set from :func:`start_server`.
 _DASHBOARD_EMBEDDED_CHAT_ENABLED = False
 
@@ -275,7 +1147,7 @@ app.add_middleware(
 
 # ---------------------------------------------------------------------------
 # Endpoints that do NOT require the session token.  Everything else under
-# /api/ is gated by the auth middleware below.  Keep this list minimal —
+# /api/ is gated by the auth middleware below.  Keep this list minimal Ã¢â‚¬â€
 # only truly non-sensitive, read-only endpoints belong here.
 # ---------------------------------------------------------------------------
 _PUBLIC_API_PATHS: frozenset = frozenset({
@@ -354,7 +1226,7 @@ def _require_token(request: Request) -> None:
 
 # Accepted Host header values for loopback binds. DNS rebinding attacks
 # point a victim browser at an attacker-controlled hostname (evil.test)
-# which resolves to 127.0.0.1 after a TTL flip — bypassing same-origin
+# which resolves to 127.0.0.1 after a TTL flip Ã¢â‚¬â€ bypassing same-origin
 # checks because the browser now considers evil.test and our dashboard
 # "same origin". Validating the Host header at the app layer rejects any
 # request whose Host isn't one we bound for. See GHSA-ppp5-vxwm-4cf7.
@@ -375,14 +1247,14 @@ def _is_accepted_host(host_header: str, bound_host: str) -> bool:
     if not host_header:
         return False
     # Strip port suffix. IPv6 addresses use bracket notation:
-    #   [::1]         — no port
-    #   [::1]:9119    — with port
+    #   [::1]         Ã¢â‚¬â€ no port
+    #   [::1]:9119    Ã¢â‚¬â€ with port
     # Plain hosts/v4:
     #   localhost:9119
     #   127.0.0.1:9119
     h = host_header.strip()
     if h.startswith("["):
-        # IPv6 bracketed — port (if any) follows "]:"
+        # IPv6 bracketed Ã¢â‚¬â€ port (if any) follows "]:"
         close = h.find("]")
         if close != -1:
             host_only = h[1:close]  # strip brackets
@@ -413,13 +1285,13 @@ async def host_header_middleware(request: Request, call_next):
 
     Defends against DNS rebinding: a victim browser on a localhost
     dashboard is tricked into fetching from an attacker hostname that
-    TTL-flips to 127.0.0.1. CORS and same-origin checks don't help —
+    TTL-flips to 127.0.0.1. CORS and same-origin checks don't help Ã¢â‚¬â€
     the browser now treats the attacker origin as same-origin with the
     dashboard. Host-header validation at the app layer catches it.
 
     See GHSA-ppp5-vxwm-4cf7.
     """
-    # Store the bound host on app.state so this middleware can read it —
+    # Store the bound host on app.state so this middleware can read it Ã¢â‚¬â€
     # set by start_server() at listen time.
     bound_host = getattr(app.state, "bound_host", None)
     if bound_host:
@@ -452,7 +1324,11 @@ async def auth_middleware(request: Request, call_next):
 
 def _nova_management_payload(space, trusted_project_root: Path | None = None) -> dict:
     """Serialize governance without creating config, a Space, or a workspace."""
-    from web.api.space_engine import SpaceConfigMalformedError, space_root_fingerprint
+    from web.api.space_engine import (
+        SpaceConfigMalformedError,
+        nova_enrollment_readiness,
+        space_root_fingerprint,
+    )
 
     config = space.load_config()
     if config.get("_space_config_malformed"):
@@ -466,7 +1342,103 @@ def _nova_management_payload(space, trusted_project_root: Path | None = None) ->
             if trusted_project_root is not None
             else ""
         ),
+        "enrollment_readiness": nova_enrollment_readiness(
+            space, trusted_project_root=trusted_project_root
+        ),
     }
+
+
+# Fixed, read-only inventory consumed by Nova's entity view. It must not become
+# a general filesystem/Space discovery endpoint: get_existing_space_read_only
+# never seeds, migrates, or creates a Space.
+_NOVA_INVENTORY_TARGETS = ("nova", "finanz-junkie", "aquarium-zentrum")
+_NOVA_INVENTORY_NEXT_STEPS = frozenset({
+    "none", "repair_space_config", "persist_space_id", "configure_project_dir",
+    "restore_project_dir", "register_trusted_workspace",
+    "repair_trusted_workspace_binding", "repair_nova_management",
+    "repair_management_audit", "enable_space_yolo", "enroll_nova_management",
+    "inspect_space_registry",
+})
+
+
+def _profile_inventory_space(slug: str, profile_home: Path):
+    """Resolve one fixed inventory Space below an explicit profile home."""
+    from web.api.space_engine import Space
+    normalized = str(slug or "").strip().lower()
+    if not normalized or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", normalized):
+        return None
+    try:
+        home = Path(profile_home).expanduser().resolve()
+    except (OSError, RuntimeError, TypeError):
+        return None
+    for root_name, legacy in (("spaces", False), ("workspaces", True)):
+        root = home / root_name
+        try:
+            root = root.resolve()
+            candidate = (root / normalized).resolve()
+            candidate.relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if candidate.is_dir() and (candidate / "space.yaml").is_file():
+            return Space(normalized, normalized, custom_root=root)
+    return None
+
+
+def _redacted_nova_space_inventory_entry(slug: str, *, profile_home: Path | None = None) -> dict[str, object]:
+    """Return a path-free, read-only Nova enrollment diagnostic."""
+    from web.api.space_engine import (
+        get_existing_space_read_only,
+        nova_enrollment_readiness,
+        space_root_fingerprint,
+    )
+    normalized = str(slug or "").strip().lower()
+    space = (_profile_inventory_space(normalized, profile_home)
+             if profile_home is not None else get_existing_space_read_only(normalized))
+    if space is None:
+        return {
+            "slug": normalized, "exists": False,
+            "identity": {"space_id": "", "space_id_persisted": False},
+            "root": {"status": "missing", "fingerprint": ""},
+            "enrollment_readiness": {
+                "state": "blocked", "ready": False,
+                "reason_codes": ["space_not_found"],
+                "next_step_code": "inspect_space_registry",
+                "requires_explicit_write": False,
+            },
+            "next_step_codes": ["inspect_space_registry"],
+        }
+    config = space.load_config()
+    trusted_root = _trusted_space_project_root(space, enrollment=True)
+    readiness = nova_enrollment_readiness(space, trusted_project_root=trusted_root)
+    configured_project = str(config.get("project_dir") or "").strip()
+    root_status = ("not_configured" if not configured_project else
+                   "verified" if trusted_root is not None else "unverified")
+    safe_id = str(config.get("space_id") or "").strip()
+    identity = {"space_id": safe_id if readiness.get("space_id_persisted") else "",
+                "space_id_persisted": bool(readiness.get("space_id_persisted"))}
+    safe_readiness = {key: readiness.get(key) for key in (
+        "state", "ready", "space_id_persisted", "project_dir_configured",
+        "project_dir_available", "trusted_root_verified", "yolo", "enrolled",
+        "governance_revision", "reason_codes", "next_step_code",
+        "requires_explicit_write")}
+    next_step = str(safe_readiness.get("next_step_code") or "none")
+    if next_step not in _NOVA_INVENTORY_NEXT_STEPS:
+        next_step = "inspect_space_registry"
+        safe_readiness["next_step_code"] = next_step
+    fingerprint = space_root_fingerprint(trusted_root) if trusted_root is not None else ""
+    return {"slug": normalized, "exists": True, "identity": identity,
+            "root": {"status": root_status, "fingerprint": fingerprint},
+            "enrollment_readiness": safe_readiness, "next_step_codes": [next_step]}
+
+
+def _nova_space_inventory(*, profile_name: str = "default", profile_home: Path | None = None) -> dict[str, object]:
+    """Build the fixed inventory without writes, bound to one profile home."""
+    entries = [_redacted_nova_space_inventory_entry(slug, profile_home=profile_home)
+               if profile_home is not None else _redacted_nova_space_inventory_entry(slug)
+               for slug in _NOVA_INVENTORY_TARGETS]
+    return {"spaces": entries, "read_only": True,
+            "targets": list(_NOVA_INVENTORY_TARGETS),
+            "profile": {"scope": str(profile_name or "default")}}
 
 
 def _trusted_space_project_root(space, *, read_only: bool = False, enrollment: bool = False) -> Path | None:
@@ -483,6 +1455,27 @@ def _trusted_space_project_root(space, *, read_only: bool = False, enrollment: b
     except Exception:
         return None
     return resolved if resolved.is_dir() else None
+
+
+@app.get("/api/nova/space-inventory")
+async def _get_nova_space_inventory_route(request: Request):
+    """Return fixed, redacted enrollment diagnostics without side effects."""
+    if request is None:
+        return _nova_space_inventory()
+    from web.api.profiles import get_active_profile_name, get_profile_home, _PROFILE_ID_RE
+    from web.api.helpers import get_profile_cookie_name
+    raw_profile = str(request.cookies.get(get_profile_cookie_name()) or "").strip()
+    profile_name = (raw_profile if raw_profile == "default" or _PROFILE_ID_RE.fullmatch(raw_profile)
+                    else str(get_active_profile_name() or "default"))
+    return _nova_space_inventory(profile_name=profile_name,
+                                 profile_home=get_profile_home(profile_name))
+
+
+async def get_nova_space_inventory(request: Request | None = None):
+    """Compatibility callable for tests and local read-only diagnostics."""
+    if request is None:
+        return _nova_space_inventory()
+    return await _get_nova_space_inventory_route(request)
 
 
 @app.get("/api/space/nova-management")
@@ -543,12 +1536,21 @@ async def update_space_nova_management(request: Request):
 @app.get("/api/space/nova-management/audit")
 async def get_space_nova_management_audit(slug: str = ""):
     """Return the append-only governance evidence without writing Space state."""
-    from web.api.space_engine import get_existing_space_read_only, list_nova_management_audit
+    from web.api.space_engine import (
+        SpaceConfigMalformedError,
+        SpaceGovernanceError,
+        get_existing_space_read_only,
+        list_nova_management_audit,
+    )
 
     space = get_existing_space_read_only(str(slug).strip().lower()) if slug else None
     if not space:
         raise HTTPException(status_code=404, detail="Space not found")
-    return {"slug": space.slug, "events": list_nova_management_audit(space)}
+    try:
+        events = list_nova_management_audit(space)
+    except (SpaceConfigMalformedError, SpaceGovernanceError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"slug": space.slug, "events": events}
 
 
 @app.get("/login", include_in_schema=False)
@@ -564,7 +1566,7 @@ async def login_page(request: Request):
 
 
 # ---------------------------------------------------------------------------
-# Config schema — auto-generated from DEFAULT_CONFIG
+# Config schema Ã¢â‚¬â€ auto-generated from DEFAULT_CONFIG
 # ---------------------------------------------------------------------------
 
 # Manual overrides for fields that need select options or custom types
@@ -675,13 +1677,13 @@ _CATEGORY_MERGE: Dict[str, str] = {
     "code_execution": "agent",
     "prompt_caching": "agent",
     "goals": "agent",
-    # Only `telegram.reactions` currently lives under telegram — fold it in
+    # Only `telegram.reactions` currently lives under telegram Ã¢â‚¬â€ fold it in
     # with the other messaging-platform config (discord) so it isn't an
     # orphan tab of one field.
     "telegram": "discord",
 }
 
-# Display order for tabs — unlisted categories sort alphabetically after these.
+# Display order for tabs Ã¢â‚¬â€ unlisted categories sort alphabetically after these.
 _CATEGORY_ORDER = [
     "general", "agent", "terminal", "display", "delegation",
     "memory", "compression", "security", "browser", "voice",
@@ -708,7 +1710,7 @@ def _build_schema_from_config(
     config: Dict[str, Any],
     prefix: str = "",
 ) -> Dict[str, Dict[str, Any]]:
-    """Walk DEFAULT_CONFIG and produce a flat dot-path → field schema dict."""
+    """Walk DEFAULT_CONFIG and produce a flat dot-path Ã¢â€ â€™ field schema dict."""
     schema: Dict[str, Dict[str, Any]] = {}
     for key, value in config.items():
         full_key = f"{prefix}.{key}" if prefix else key
@@ -732,7 +1734,7 @@ def _build_schema_from_config(
         else:
             entry: Dict[str, Any] = {
                 "type": _infer_type(value),
-                "description": full_key.replace(".", " → ").replace("_", " ").title(),
+                "description": full_key.replace(".", " Ã¢â€ â€™ ").replace("_", " ").title(),
                 "category": category,
             }
             # Apply manual overrides
@@ -776,12 +1778,12 @@ class EnvVarReveal(BaseModel):
 
 
 class ModelAssignment(BaseModel):
-    """Payload for POST /api/model/set — assign a provider/model to a slot.
+    """Payload for POST /api/model/set Ã¢â‚¬â€ assign a provider/model to a slot.
 
-    scope="main"        → writes model.provider + model.default
-    scope="auxiliary"   → writes auxiliary.<task>.provider + auxiliary.<task>.model
-    scope="auxiliary" with task=""  → applied to every auxiliary.* slot
-    scope="auxiliary" with task="__reset__"  → resets every slot to provider="auto"
+    scope="main"        Ã¢â€ â€™ writes model.provider + model.default
+    scope="auxiliary"   Ã¢â€ â€™ writes auxiliary.<task>.provider + auxiliary.<task>.model
+    scope="auxiliary" with task=""  Ã¢â€ â€™ applied to every auxiliary.* slot
+    scope="auxiliary" with task="__reset__"  Ã¢â€ â€™ resets every slot to provider="auto"
     """
     scope: str
     provider: str
@@ -794,7 +1796,7 @@ try:
     _GATEWAY_HEALTH_TIMEOUT = float(os.getenv("GATEWAY_HEALTH_TIMEOUT", "3"))
 except (ValueError, TypeError):
     _log.warning(
-        "Invalid GATEWAY_HEALTH_TIMEOUT value %r — using default 3.0s",
+        "Invalid GATEWAY_HEALTH_TIMEOUT value %r Ã¢â‚¬â€ using default 3.0s",
         os.getenv("GATEWAY_HEALTH_TIMEOUT"),
     )
     _GATEWAY_HEALTH_TIMEOUT = 3.0
@@ -803,7 +1805,7 @@ except (ValueError, TypeError):
 # Cross-container / cross-host gateway liveness detection will be folded into a
 # first-class dashboard config key so it's no longer Docker-adjacent lore buried
 # in env vars.  The env vars still work for now so existing Compose deployments
-# don't break.  Do not add new callers — wire new uses through the planned
+# don't break.  Do not add new callers Ã¢â‚¬â€ wire new uses through the planned
 # config surface.
 
 
@@ -820,11 +1822,11 @@ def _probe_gateway_health() -> tuple[bool, dict | None]:
     the simpler ``/health`` endpoint.  Returns ``(is_alive, body_dict)``.
 
     Accepts any of these as ``GATEWAY_HEALTH_URL``:
-    - ``http://gateway:8642``                (base URL — recommended)
+    - ``http://gateway:8642``                (base URL Ã¢â‚¬â€ recommended)
     - ``http://gateway:8642/health``         (explicit health path)
     - ``http://gateway:8642/health/detailed`` (explicit detailed path)
 
-    This is a **blocking** call — run via ``run_in_executor`` from async code.
+    This is a **blocking** call Ã¢â‚¬â€ run via ``run_in_executor`` from async code.
     """
     if not _GATEWAY_HEALTH_URL:
         return False, None
@@ -868,7 +1870,7 @@ async def get_status():
         )
         if alive:
             gateway_running = True
-            # PID from the remote container (display only — not locally valid)
+            # PID from the remote container (display only Ã¢â‚¬â€ not locally valid)
             if remote_health_body:
                 gateway_pid = remote_health_body.get("pid")
 
@@ -1123,13 +2125,13 @@ def _git_status_label(staged: str, worktree: str, raw: str) -> str:
 
 _ACTION_LOG_DIR: Path = get_sidekick_home() / "logs"
 
-# Short ``name`` (from the URL) → absolute log file path.
+# Short ``name`` (from the URL) Ã¢â€ â€™ absolute log file path.
 _ACTION_LOG_FILES: Dict[str, str] = {
     "gateway-restart": "gateway-restart.log",
     "sidekick-update": "sidekick-update.log",
 }
 
-# ``name`` → most recently spawned Popen handle.  Used so ``status`` can
+# ``name`` Ã¢â€ â€™ most recently spawned Popen handle.  Used so ``status`` can
 # report liveness and exit code without shelling out to ``ps``.
 _ACTION_PROCS: Dict[str, subprocess.Popen] = {}
 
@@ -1171,7 +2173,7 @@ def _spawn_sidekick_action(subcommand: List[str], name: str) -> subprocess.Popen
 
 
 def _tail_lines(path: Path, n: int) -> List[str]:
-    """Return the last ``n`` lines of ``path``.  Reads the whole file — fine
+    """Return the last ``n`` lines of ``path``.  Reads the whole file Ã¢â‚¬â€ fine
     for our small per-action logs.  Binary-decoded with ``errors='replace'``
     so log corruption doesn't 500 the endpoint."""
     if not path.exists():
@@ -1767,6 +2769,220 @@ def _slice_session_messages(session: dict[str, Any], *, load_messages: bool, msg
     return messages, False, 0
 
 
+def _load_space_session_metadata(path: Path) -> dict[str, Any] | None:
+    """Read only the metadata prefix of a Space session JSON file.
+
+    Space session files keep ``messages`` as their final top-level field.  A
+    metadata-only boot request must not decode the complete transcript just to
+    discover the title, stream state and model.  The parser is deliberately
+    conservative and returns ``None`` for layouts it cannot prove safe.
+    """
+    if not isinstance(path, Path):
+        return None
+    try:
+        with path.open("rb") as handle:
+            prefix = handle.read(128 * 1024)
+    except OSError:
+        return None
+    key_pos = prefix.find(b'"messages"')
+    if key_pos < 0:
+        return None
+    colon = prefix.find(b":", key_pos + len(b'"messages"'))
+    if colon < 0:
+        return None
+    array_start = colon + 1
+    while array_start < len(prefix) and prefix[array_start] in b" \t\r\n":
+        array_start += 1
+    if array_start >= len(prefix) or prefix[array_start] != ord("["):
+        return None
+    head = prefix[:key_pos].rstrip()
+    if not head.endswith(b","):
+        return None
+    try:
+        session = json.loads(head[:-1].decode("utf-8") + "}")
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(session, dict):
+        return None
+    session["messages"] = []
+    session["_metadata_only"] = True
+    return session
+
+
+def _space_session_index_message_count(slug: str, session_id: str) -> int | None:
+    """Return the compact message count without opening the transcript JSON."""
+    ws, _ = _get_space_workspace(str(slug or "").strip().lower())
+    if not ws:
+        return None
+    try:
+        raw = json.loads((ws.sessions_dir / "_index.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    if not isinstance(raw, list):
+        return None
+    for row in raw:
+        if isinstance(row, dict) and str(row.get("session_id") or "") == str(session_id):
+            try:
+                count = int(row.get("message_count"))
+            except (TypeError, ValueError):
+                return None
+            return max(0, count)
+    return None
+
+
+def _load_space_session_tail(path: Path, *, limit: int) -> dict[str, Any] | None:
+    """Read metadata plus a bounded tail without decoding a huge transcript.
+
+    Space session files keep ``messages`` as their final top-level field.  The
+    scanner reads a small prefix for metadata and grows a suffix window until
+    it finds ``limit + 1`` top-level message objects.  If the format is not
+    provably compatible, it returns ``None`` and callers use the safe full
+    JSON path instead. A bounded sidecar index is preferred when it matches
+    the canonical file; stale sidecars fall back to this scanner.
+    """
+    if not isinstance(path, Path) or limit < 1:
+        return None
+    try:
+        file_size = path.stat().st_size
+        with path.open("rb") as handle:
+            prefix = handle.read(min(file_size, 128 * 1024))
+    except OSError:
+        return None
+    key_pos = prefix.find(b'"messages"')
+    if key_pos < 0:
+        return None
+    colon = prefix.find(b":", key_pos + len(b'"messages"'))
+    if colon < 0:
+        return None
+    array_start = colon + 1
+    while array_start < len(prefix) and prefix[array_start] in b" \t\r\n":
+        array_start += 1
+    if array_start >= len(prefix) or prefix[array_start] != ord("["):
+        return None
+    # The message array must be the final top-level field; otherwise replacing
+    # it with a tail would silently discard metadata after the array.
+    if prefix[:key_pos].rstrip().endswith(b",") is False:
+        return None
+    sidecar = path.with_name(f"{path.stem}.tail.json")
+    try:
+        indexed = json.loads(sidecar.read_text(encoding="utf-8"))
+        stat = path.stat()
+        with path.open("rb") as handle:
+            head_bytes = handle.read(4096)
+            if stat.st_size > 4096:
+                handle.seek(max(0, stat.st_size - 4096))
+                tail_bytes = handle.read(4096)
+            else:
+                tail_bytes = head_bytes
+        fingerprint = hashlib.sha256(head_bytes + tail_bytes).hexdigest()
+        indexed_messages = indexed.get("messages")
+        indexed_count = int(indexed.get("message_count"))
+        if (
+            indexed.get("version") == 1
+            and int(indexed.get("file_size")) == stat.st_size
+            and int(indexed.get("file_mtime_ns")) == stat.st_mtime_ns
+            and indexed.get("fingerprint") == fingerprint
+            and isinstance(indexed_messages, list)
+            and indexed_count >= len(indexed_messages) >= limit
+            and all(isinstance(item, dict) for item in indexed_messages)
+        ):
+            head = prefix[:key_pos].rstrip()
+            if head.endswith(b","):
+                head = head[:-1]
+            session = json.loads(head.decode("utf-8") + "}")
+            if isinstance(session, dict):
+                session["messages"] = indexed_messages[-limit:]
+                session["_tail_message_count_unknown"] = False
+                session["_tail_messages_truncated"] = indexed_count > limit
+                session["_tail_messages_offset"] = max(0, indexed_count - limit)
+                return session
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+    suffix_size = min(max(256 * 1024, limit * 32 * 1024), 8 * 1024 * 1024)
+    decoder = json.JSONDecoder()
+    while suffix_size <= 8 * 1024 * 1024:
+        try:
+            with path.open("rb") as handle:
+                start_offset = max(0, file_size - suffix_size)
+                handle.seek(start_offset)
+                suffix = handle.read()
+        except OSError:
+            return None
+        starts: list[int] = []
+        depth = 0
+        in_string = False
+        for index in range(len(suffix) - 1, -1, -1):
+            value = suffix[index]
+            if value == ord('"'):
+                slash_count = 0
+                cursor = index - 1
+                while cursor >= 0 and suffix[cursor] == ord("\\"):
+                    slash_count += 1
+                    cursor -= 1
+                if slash_count % 2 == 0:
+                    in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if value == ord("}"):
+                depth += 1
+            elif value == ord("{") and depth:
+                depth -= 1
+                absolute = start_offset + index
+                # The enclosing session object contributes one brace while
+                # scanning backwards. A message object therefore closes when
+                # the remaining depth is exactly one; depth zero is the
+                # session itself.
+                if depth == 1 and absolute > array_start:
+                    starts.append(index)
+        if len(starts) < limit + 1 and suffix_size < 8 * 1024 * 1024:
+            suffix_size = min(suffix_size * 2, 8 * 1024 * 1024)
+            continue
+        if len(starts) < limit:
+            return None
+        start = starts[limit - 1]
+        try:
+            text = suffix[start:].decode("utf-8")
+            messages: list[dict[str, Any]] = []
+            cursor = 0
+            while len(messages) < limit:
+                while cursor < len(text) and text[cursor] in " \t\r\n,":
+                    cursor += 1
+                item, cursor = decoder.raw_decode(text, cursor)
+                if not isinstance(item, dict):
+                    return None
+                messages.append(item)
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            return None
+        try:
+            head = prefix[:key_pos].rstrip()
+            if head.endswith(b","):
+                head = head[:-1]
+            session = json.loads(head.decode("utf-8") + "}")
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            return None
+        if not isinstance(session, dict):
+            return None
+        message_count = session.get("message_count")
+        count_known = True
+        try:
+            message_count = int(message_count)
+        except (TypeError, ValueError):
+            # Older session files do not persist a count. Do not pretend the
+            # bounded tail is the complete transcript; callers can fall back
+            # to the full JSON path when an exact count is required.
+            count_known = False
+            message_count = None
+        session["messages"] = messages
+        session["_tail_message_count_unknown"] = not count_known
+        session["_tail_messages_truncated"] = (
+            (message_count > len(messages)) if count_known else bool(starts and (start_offset + starts[-1]) > array_start)
+        )
+        session["_tail_messages_offset"] = max(0, message_count - len(messages)) if count_known else 0
+        return session
+    return None
+
+
 @app.get("/api/session")
 async def get_space_session_detail(request: Request):
     t0 = time.perf_counter()
@@ -1782,18 +2998,6 @@ async def get_space_session_detail(request: Request):
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail="Session not found")
 
-    try:
-        session = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        _log.exception("Failed to load space session %s", sid)
-        raise HTTPException(status_code=500, detail=f"Failed to load session: {exc}") from exc
-    if not isinstance(session, dict):
-        raise HTTPException(status_code=500, detail="Invalid session file")
-    t_load = time.perf_counter()
-
-    _repair_stale_space_session_stream(session, path, slug)
-    t_repair_stream = time.perf_counter()
-
     load_messages = request.query_params.get("messages", "1") != "0"
     try:
         msg_limit_raw = request.query_params.get("msg_limit")
@@ -1805,6 +3009,54 @@ async def get_space_session_detail(request: Request):
         msg_before = int(msg_before_raw) if msg_before_raw else None
     except Exception:
         msg_before = None
+
+    # Fast session switching normally asks for a bounded recent tail.  Read
+    # only that tail when the on-disk format proves safe; metadata-only and
+    # paginated/history requests retain the full JSON fallback.
+    session = None
+    tail_loaded = False
+    if load_messages and msg_limit is not None and msg_before is None:
+        session = _load_space_session_tail(path, limit=msg_limit)
+        tail_loaded = session is not None
+
+    if session is None and not load_messages:
+        session = _load_space_session_metadata(path)
+        if session is not None:
+            indexed_count = _space_session_index_message_count(slug, sid)
+            if indexed_count is not None:
+                session["message_count"] = indexed_count
+
+    if session is None:
+        try:
+            session = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            _log.exception("Failed to load space session %s", sid)
+            raise HTTPException(status_code=500, detail=f"Failed to load session: {exc}") from exc
+    if not isinstance(session, dict):
+        raise HTTPException(status_code=500, detail="Invalid session file")
+    t_load = time.perf_counter()
+
+    # A truncated tail cannot safely be repaired or written back. If it still
+    # advertises an active stream, reload the complete document instead.
+    if tail_loaded and session.get("active_stream_id"):
+        try:
+            session = json.loads(path.read_text(encoding="utf-8"))
+            tail_loaded = False
+        except Exception as exc:
+            _log.exception("Failed to reload active space session %s", sid)
+            raise HTTPException(status_code=500, detail=f"Failed to load session: {exc}") from exc
+    # A stale stream requires the full transcript for safe recovery.  Keep the
+    # metadata-only path strictly read-only unless that exceptional condition
+    # is present, then reload the complete document before repairing it.
+    if session.get("_metadata_only") and session.get("active_stream_id"):
+        try:
+            session = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            _log.exception("Failed to reload active space session %s", sid)
+            raise HTTPException(status_code=500, detail=f"Failed to load session: {exc}") from exc
+    session.pop("_metadata_only", None)
+    _repair_stale_space_session_stream(session, path, slug)
+    t_repair_stream = time.perf_counter()
     include_tool_calls_raw = request.query_params.get("include_tool_calls")
     if include_tool_calls_raw is None:
         # Fast session switching uses a bounded tail window. Do not include the
@@ -1815,7 +3067,7 @@ async def get_space_session_detail(request: Request):
     else:
         include_session_tool_calls = str(include_tool_calls_raw).strip().lower() not in {"0", "false", "no", "off"}
 
-    _repair_space_session_slug(session, slug, path)
+    _repair_space_session_slug(session, slug, None if tail_loaded else path)
     t_repair_slug = time.perf_counter()
     messages, truncated, offset = _slice_session_messages(
         session,
@@ -1823,6 +3075,12 @@ async def get_space_session_detail(request: Request):
         msg_limit=msg_limit,
         msg_before=msg_before,
     )
+    if tail_loaded:
+        truncated = bool(session.pop("_tail_messages_truncated", truncated))
+        offset = int(session.pop("_tail_messages_offset", offset) or 0)
+        tail_message_count_unknown = bool(session.pop("_tail_message_count_unknown", False))
+    else:
+        tail_message_count_unknown = False
     t_slice = time.perf_counter()
     payload = dict(session)
     payload.pop("context_messages", None)
@@ -1832,7 +3090,9 @@ async def get_space_session_detail(request: Request):
     if not load_messages:
         payload["pending_attachments"] = []
     stored_message_count = session.get("message_count")
-    if isinstance(stored_message_count, int) and stored_message_count >= 0:
+    if tail_message_count_unknown:
+        payload["message_count"] = None
+    elif isinstance(stored_message_count, int) and stored_message_count >= 0:
         payload["message_count"] = stored_message_count
     else:
         payload["message_count"] = _session_message_count(session)
@@ -1855,6 +3115,12 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
         include_archived_raw = str(request.query_params.get("include_archived") or "").strip().lower()
         include_archived = include_archived_raw in {"1", "true", "yes", "on"}
         workspace_slug = _workspace_slug_from_request(request)
+        defer_cli = str(request.query_params.get("defer_cli") or "").strip().lower() in {"1", "true", "yes", "on"}
+        startup_fallback = (
+            not workspace_slug
+            and str(request.query_params.get("startup") or "").strip().lower()
+            in {"1", "true", "yes", "on"}
+        )
         if workspace_slug:
             sessions = _load_space_sessions(workspace_slug)
             archived_count = sum(1 for s in sessions if s.get("archived"))
@@ -1872,7 +3138,35 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
         try:
-            sessions = db.list_sessions(limit=limit, offset=offset)
+            # The first-paint fallback is deliberately bounded.  Passing the
+            # normal sidebar limit through here still makes SessionDB inspect
+            # and normalize hundreds of legacy rows before we slice them to
+            # ten below, which can keep the UI on "Restoring conversations"
+            # for several seconds on a cold profile.  Bound the database
+            # query itself; normal non-startup callers retain their limit.
+            db_limit = min(limit, 10) if startup_fallback else limit
+            try:
+                sessions = db.list_sessions(limit=db_limit, offset=offset, derive_titles=not defer_cli)
+            except TypeError:
+                # Keep compatibility with older injected/embedded SessionDBs.
+                sessions = db.list_sessions(limit=db_limit, offset=offset)
+            if startup_fallback:
+                # A missing space during first paint must not serialize the
+                # entire global store. Normal unscoped callers keep the
+                # historical behavior; only the explicitly marked boot
+                # fallback is capped and projected.
+                sessions = sessions[:10]
+                sidebar_keys = {
+                    "session_id", "id", "title", "workspace", "workspace_slug",
+                    "model", "model_provider", "message_count", "created_at",
+                    "updated_at", "last_message_at", "pinned", "archived",
+                    "profile", "source", "source_tag", "parent_session_id",
+                    "active_stream_id", "pending_user_message", "is_streaming",
+                }
+                sessions = [
+                    {key: row.get(key) for key in sidebar_keys if key in row}
+                    for row in sessions
+                ]
             if not include_archived:
                 sessions = [s for s in sessions if not s.get("archived")]
             total = len(sessions)
@@ -1887,7 +3181,13 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
                     s.get("ended_at") is None
                     and (now - s.get("last_active", s.get("started_at", 0))) < 300
                 )
-            return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
+            return {
+                "sessions": sessions,
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "cli_pending": bool(defer_cli),
+            }
         finally:
             db.close()
     except Exception as exc:
@@ -1930,7 +3230,7 @@ async def search_sessions(request: Request, q: str = "", limit: int = 20):
         db = SessionDB()
         try:
             # Auto-add prefix wildcards so partial words match
-            # e.g. "nimb" → "nimb*" matches "nimby"
+            # e.g. "nimb" Ã¢â€ â€™ "nimb*" matches "nimby"
             # Preserve quoted phrases and existing wildcards as-is
             import re
             terms = []
@@ -1941,7 +3241,7 @@ async def search_sessions(request: Request, q: str = "", limit: int = 20):
                     terms.append(token + "*")
             prefix_query = " ".join(terms)
             matches = db.search_messages(query=prefix_query, limit=limit)
-            # Group by session_id — return unique sessions with their best snippet
+            # Group by session_id Ã¢â‚¬â€ return unique sessions with their best snippet
             seen: dict = {}
             for m in matches:
                 sid = m["session_id"]
@@ -2168,7 +3468,7 @@ def get_model_info():
                 model=model_name,
                 base_url=base_url,
                 provider=provider,
-                config_context_length=None,  # ignore override — we want auto value
+                config_context_length=None,  # ignore override Ã¢â‚¬â€ we want auto value
             )
         except Exception:
             auto_ctx = 0
@@ -2211,13 +3511,13 @@ def get_model_info():
 
 
 # ---------------------------------------------------------------------------
-# Model assignment — pick provider+model for main slot or auxiliary slots.
+# Model assignment Ã¢â‚¬â€ pick provider+model for main slot or auxiliary slots.
 # Mirrors the model.options JSON-RPC from tui_gateway but uses REST so the
 # Models page (which has no chat PTY open) can drive it.
 # ---------------------------------------------------------------------------
 
 # Canonical auxiliary task slots. Keep in sync with DEFAULT_CONFIG["auxiliary"]
-# in sidekick_cli/config.py — listed here for deterministic ordering in the UI.
+# in sidekick_cli/config.py Ã¢â‚¬â€ listed here for deterministic ordering in the UI.
 _AUX_TASK_SLOTS: Tuple[str, ...] = (
     "vision",
     "web_extract",
@@ -2327,7 +3627,7 @@ def get_auxiliary_models():
 async def set_model_assignment(body: ModelAssignment):
     """Assign a model to the main slot or an auxiliary task slot.
 
-    Writes to ``~/.sidekick/config.yaml`` — applies to **new** sessions only.
+    Writes to ``~/.sidekick/config.yaml`` Ã¢â‚¬â€ applies to **new** sessions only.
     The currently running chat PTY (if any) is not affected; use the
     ``/model`` slash command inside a chat to hot-swap that specific session.
     """
@@ -2353,7 +3653,7 @@ async def set_model_assignment(body: ModelAssignment):
             # Clear stale base_url so the resolver picks the provider's own default.
             if "base_url" in model_cfg and model_cfg.get("base_url"):
                 model_cfg["base_url"] = ""
-            # Also clear hardcoded context_length override — new model may have
+            # Also clear hardcoded context_length override Ã¢â‚¬â€ new model may have
             # a different context window.
             if "context_length" in model_cfg:
                 model_cfg.pop("context_length", None)
@@ -2367,7 +3667,7 @@ async def set_model_assignment(body: ModelAssignment):
             aux = {}
 
         if task == "__reset__":
-            # Reset every slot to provider="auto", model="" — keeps other fields intact.
+            # Reset every slot to provider="auto", model="" Ã¢â‚¬â€ keeps other fields intact.
             for slot in _AUX_TASK_SLOTS:
                 slot_cfg = aux.get(slot)
                 if not isinstance(slot_cfg, dict):
@@ -2419,7 +3719,7 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
     stripped from the GET response.  The frontend only sees model as a flat
     string; the rest is preserved transparently.
 
-    Also handles ``model_context_length`` — writes it back into the model dict
+    Also handles ``model_context_length`` Ã¢â‚¬â€ writes it back into the model dict
     as ``context_length``.  A value of 0 or absent means "auto-detect" (omitted
     from the dict so get_model_context_length() uses its normal resolution).
     """
@@ -2451,7 +3751,7 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     disk_model.pop("context_length", None)
                 config["model"] = disk_model
-            # Model was previously a bare string — upgrade to dict if
+            # Model was previously a bare string Ã¢â‚¬â€ upgrade to dict if
             # user is setting a context_length override
             elif ctx_override > 0:
                 config["model"] = {
@@ -2459,7 +3759,7 @@ def _denormalize_config_from_web(config: Dict[str, Any]) -> Dict[str, Any]:
                     "context_length": ctx_override,
                 }
         except Exception:
-            pass  # can't read disk config — just use the string form
+            pass  # can't read disk config Ã¢â‚¬â€ just use the string form
     return config
 
 
@@ -2547,7 +3847,7 @@ async def reveal_env_var(body: EnvVarReveal, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# OAuth provider endpoints — status + disconnect (Phase 1)
+# OAuth provider endpoints Ã¢â‚¬â€ status + disconnect (Phase 1)
 # ---------------------------------------------------------------------------
 #
 # Phase 1 surfaces *which OAuth providers exist* and whether each is
@@ -2570,19 +3870,19 @@ def _truncate_token(value: Optional[str], visible: int = 6) -> str:
         return ""
     s = str(value)
     if "." in s and s.count(".") >= 2:
-        # Looks like a JWT — show the trailing piece of the signature only.
+        # Looks like a JWT Ã¢â‚¬â€ show the trailing piece of the signature only.
         s = s.rsplit(".", 1)[-1]
     if len(s) <= visible:
         return s
-    return f"…{s[-visible:]}"
+    return f"Ã¢â‚¬Â¦{s[-visible:]}"
 
 
 def _anthropic_oauth_status() -> Dict[str, Any]:
     """Combined status across the three Anthropic credential sources we read.
 
     Sidekick resolves Anthropic creds in this order at runtime:
-    1. ``~/.sidekick/.anthropic_oauth.json`` — Sidekick-managed PKCE flow
-    2. ``~/.claude/.credentials.json`` — Claude Code CLI credentials (auto)
+    1. ``~/.sidekick/.anthropic_oauth.json`` Ã¢â‚¬â€ Sidekick-managed PKCE flow
+    2. ``~/.claude/.credentials.json`` Ã¢â‚¬â€ Claude Code CLI credentials (auto)
     3. ``ANTHROPIC_TOKEN`` / ``ANTHROPIC_API_KEY`` env vars
     The dashboard reports the highest-priority source that's actually present.
     """
@@ -2666,7 +3966,7 @@ def _claude_code_only_status() -> Dict[str, Any]:
     return {"logged_in": False, "source": None}
 
 
-# Provider catalog. The order matters — it's how we render the UI list.
+# Provider catalog. The order matters Ã¢â‚¬â€ it's how we render the UI list.
 # ``cli_command`` is what the dashboard surfaces as the copy-to-clipboard
 # fallback while Phase 2 (in-browser flows) isn't built yet.
 # ``flow`` describes the OAuth shape so the future modal can pick the
@@ -2778,7 +4078,7 @@ async def list_oauth_providers():
         cli_command     fallback CLI command for users to run manually
         docs_url        external docs/portal link for the "Learn more" link
         status:
-          logged_in        bool — currently has usable creds
+          logged_in        bool Ã¢â‚¬â€ currently has usable creds
           source           short slug ("sidekick_pkce", "claude_code", ...)
           source_label     human-readable origin (file path, env var name)
           token_preview    last N chars of the token, never the full token
@@ -2814,7 +4114,7 @@ async def disconnect_oauth_provider(provider_id: str, request: Request):
 
     # Anthropic and claude-code clear the same Sidekick-managed PKCE file
     # AND forget the Claude Code import. We don't touch ~/.claude/* directly
-    # — that's owned by the Claude Code CLI; users can re-auth there if they
+    # Ã¢â‚¬â€ that's owned by the Claude Code CLI; users can re-auth there if they
     # want to undo a disconnect.
     if provider_id in {"anthropic", "claude-code"}:
         try:
@@ -2843,30 +4143,30 @@ async def disconnect_oauth_provider(provider_id: str, request: Request):
 
 
 # ---------------------------------------------------------------------------
-# OAuth Phase 2 — in-browser PKCE & device-code flows
+# OAuth Phase 2 Ã¢â‚¬â€ in-browser PKCE & device-code flows
 # ---------------------------------------------------------------------------
 #
 # Two flow shapes are supported:
 #
 #   PKCE (Anthropic):
 #     1. POST /api/providers/oauth/anthropic/start
-#          → server generates code_verifier + challenge, builds claude.ai
+#          Ã¢â€ â€™ server generates code_verifier + challenge, builds claude.ai
 #            authorize URL, stashes verifier in _oauth_sessions[session_id]
-#          → returns { session_id, flow: "pkce", auth_url }
+#          Ã¢â€ â€™ returns { session_id, flow: "pkce", auth_url }
 #     2. UI opens auth_url in a new tab. User authorizes, copies code.
 #     3. POST /api/providers/oauth/anthropic/submit { session_id, code }
-#          → server exchanges (code + verifier) → tokens at console.anthropic.com
-#          → persists to ~/.sidekick/.anthropic_oauth.json AND credential pool
-#          → returns { ok: true, status: "approved" }
+#          Ã¢â€ â€™ server exchanges (code + verifier) Ã¢â€ â€™ tokens at console.anthropic.com
+#          Ã¢â€ â€™ persists to ~/.sidekick/.anthropic_oauth.json AND credential pool
+#          Ã¢â€ â€™ returns { ok: true, status: "approved" }
 #
 #   Device code (OpenAI Codex):
 #     1. POST /api/providers/oauth/{openai-codex}/start
-#          → server hits provider's device-auth endpoint
-#          → gets { user_code, verification_url, device_code, interval, expires_in }
-#          → spawns background poller thread that polls the token endpoint
+#          Ã¢â€ â€™ server hits provider's device-auth endpoint
+#          Ã¢â€ â€™ gets { user_code, verification_url, device_code, interval, expires_in }
+#          Ã¢â€ â€™ spawns background poller thread that polls the token endpoint
 #            every `interval` seconds until approved/expired
-#          → stores poll status in _oauth_sessions[session_id]
-#          → returns { session_id, flow: "device_code", user_code,
+#          Ã¢â€ â€™ stores poll status in _oauth_sessions[session_id]
+#          Ã¢â€ â€™ returns { session_id, flow: "device_code", user_code,
 #                      verification_url, expires_in, poll_interval }
 #     2. UI opens verification_url in a new tab and shows user_code.
 #     3. UI polls GET /api/providers/oauth/{provider}/poll/{session_id}
@@ -2939,7 +4239,7 @@ def _save_anthropic_oauth_creds(access_token: str, refresh_token: str, expires_a
     _SIDEKICK_OAUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
     _SIDEKICK_OAUTH_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     # Best-effort credential-pool insert. Failure here doesn't invalidate
-    # the file write — pool registration only matters for the rotation
+    # the file write Ã¢â‚¬â€ pool registration only matters for the rotation
     # strategy, not for runtime credential resolution.
     try:
         from runtime.credential_pool import (
@@ -3081,7 +4381,7 @@ async def _start_device_code_flow(provider_id: str) -> Dict[str, Any]:
         # We can't extract just the start step without refactoring auth.py,
         # so we run the full helper in a worker and proxy the user_code +
         # verification_url back via the session dict. The helper prints
-        # to stdout — we capture nothing here, just status.
+        # to stdout Ã¢â‚¬â€ we capture nothing here, just status.
         threading.Thread(
             target=_codex_full_login_worker, args=(sid,), daemon=True,
             name=f"oauth-codex-{sid[:6]}",
@@ -3157,7 +4457,7 @@ async def _start_device_code_flow(provider_id: str) -> Dict[str, Any]:
         sess["portal_base_url"] = portal_base_url
         sess["client_id"] = MINIMAX_OAUTH_CLIENT_ID
         sess["region"] = "global"
-        # `expired_in` from MiniMax is overloaded — could be a unix-ms
+        # `expired_in` from MiniMax is overloaded Ã¢â‚¬â€ could be a unix-ms
         # timestamp OR a seconds-from-now duration. Mirror the heuristic
         # in _minimax_poll_token. Stash the raw value for the poller;
         # compute a derived expires_at + UI-friendly expires_in seconds.
@@ -3194,7 +4494,7 @@ def _minimax_poller(session_id: str) -> None:
     Calls the MiniMax-specific token endpoint via PKCE-style ``code_verifier``
     + ``user_code``. On success, builds the same auth_state dict that
     ``_minimax_oauth_login`` (the CLI flow) builds
-    and persists via ``_minimax_save_auth_state`` — so the dashboard
+    and persists via ``_minimax_save_auth_state`` Ã¢â‚¬â€ so the dashboard
     path leaves the system in the same state as
     ``sidekick auth add minimax-oauth``.
     """
@@ -3282,7 +4582,7 @@ def _codex_full_login_worker(session_id: str) -> None:
 
     The flow is replicated inline (rather than calling
     _codex_device_code_login) because that helper prints/blocks/polls in a
-    single function — we need to surface the user_code to the dashboard the
+    single function Ã¢â‚¬â€ we need to surface the user_code to the dashboard the
     moment we receive it, well before polling completes.
     """
     try:
@@ -3370,7 +4670,7 @@ def _codex_full_login_worker(session_id: str) -> None:
         if not access_token:
             raise RuntimeError("token exchange did not return access_token")
 
-        # Persist via credential pool — same shape as auth_commands.add_command
+        # Persist via credential pool Ã¢â‚¬â€ same shape as auth_commands.add_command
         from runtime.credential_pool import (
             PooledCredential,
             load_pool,
@@ -3458,7 +4758,7 @@ async def submit_oauth_code(provider_id: str, body: OAuthSubmitBody, request: Re
 
 @app.get("/api/providers/oauth/{provider_id}/poll/{session_id}")
 async def poll_oauth_session(provider_id: str, session_id: str):
-    """Poll a device-code session's status (no auth — read-only state)."""
+    """Poll a device-code session's status (no auth Ã¢â‚¬â€ read-only state)."""
     with _oauth_sessions_lock:
         sess = _oauth_sessions.get(session_id)
     if not sess:
@@ -3646,7 +4946,7 @@ async def get_logs(
     except ImportError:
         COMPONENT_PREFIXES = {}
 
-    # Normalize "ALL" / "all" / empty → no filter. _matches_filters treats an
+    # Normalize "ALL" / "all" / empty Ã¢â€ â€™ no filter. _matches_filters treats an
     # empty tuple as "must match a prefix" (startswith(()) is always False),
     # so passing () instead of None silently drops every line.
     min_level = level if level and level.upper() != "ALL" else None
@@ -3706,6 +5006,60 @@ async def nova_status_endpoint():
     return build_status_projection()
 
 
+def _public_nova_supervision_outcomes(raw: object, *, managed_spaces: set[str] | None = None) -> list[dict[str, str]]:
+    """Project bounded ticker outcomes without run IDs, paths, or errors."""
+    allowed = {
+        "started", "auto_resumed", "coalesced", "unchanged", "completed",
+        "waiting_for_catalog", "active_limit", "admission_failed",
+        "admission_rejected", "start_failed", "ineligible", "verifier_unavailable",
+    }
+    public: list[dict[str, str]] = []
+    for item in raw if isinstance(raw, list) else ():
+        if not isinstance(item, dict):
+            continue
+        space = str(item.get("space") or "").strip()
+        status = str(item.get("status") or "").strip().lower()
+        if (
+            (managed_spaces is not None and space.lower() not in managed_spaces)
+            or not space
+            or len(space) > 128
+            or any(not (char.isalnum() or char in "_.:-") for char in space)
+            or status not in allowed
+        ):
+            continue
+        public.append({"space": space, "status": status})
+        if len(public) >= 16:
+            break
+    return public
+
+
+def _public_nova_supervision_error(raw: object) -> str | None:
+    value = str(raw or "").strip().lower()
+    allowed = {
+        "pulse_failed",
+        "ticker_lease_lost",
+        "ticker_lease_unavailable",
+        "ticker_thread_escalated",
+        "ticker_watchdog_missing",
+        "ticker_watchdog_stale",
+        "ticker_watchdog_unavailable",
+    }
+    return value if value in allowed else None
+
+
+def _bounded_presence_int(raw: object, *, default: int, minimum: int, maximum: int) -> int:
+    """Coerce ticker telemetry for the read-only presence projection.
+
+    The ticker state is process-local and may be partially initialized or
+    corrupted after a restart. A malformed telemetry field must not turn a
+    GET-only presence request into a 500 response.
+    """
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        value = default
+    return max(minimum, min(maximum, value))
+
 @app.get("/api/nova/presence-card")
 async def nova_presence_card_endpoint():
     """Return Nova's public card without invoking lifecycle/status helpers.
@@ -3714,9 +5068,47 @@ async def nova_presence_card_endpoint():
     page loads must not initialise a Space, repair Nova state, or dispatch
     background work merely to render the empty chat view.
     """
-    from web.api.nova_presence import build_presence_card
+    from web.api.nova_presence import build_presence_card, _operational_projection
 
-    return build_presence_card()
+    payload = build_presence_card()
+    # Keep the durable lease projection from the pure card. The host ticker
+    # state below is process-local and may be absent when the HTTP listener is
+    # offline; dropping the lease would falsely imply no owner exists.
+    ledger_supervision = payload.get("supervision") if isinstance(payload.get("supervision"), dict) else {}
+    managed_spaces = {str(item.get("space") or "").strip().lower() for item in (payload.get("managed_spaces") or []) if isinstance(item, dict) and str(item.get("space") or "").strip()}
+    with _NOVA_SUPERVISION_TICKER_LOCK:
+        raw_mind_status = str((_NOVA_SUPERVISION_TICKER_STATE.get("mind_watchdog") or {}).get("status") or "").strip().lower()
+        mind_status = raw_mind_status if raw_mind_status in {"healthy", "restart_pending", "restarted", "not_started"} else "unavailable"
+        raw_ticker_status = str((_NOVA_SUPERVISION_TICKER_STATE.get("ticker_watchdog") or {}).get("status") or "").strip().lower()
+        ticker_status = raw_ticker_status if raw_ticker_status in {"healthy", "restart_requested", "restart_backoff", "restart_failed", "restart_escalated", "not_started"} else "unavailable"
+        raw_ticker_watchdog = _NOVA_SUPERVISION_TICKER_STATE.get("ticker_watchdog") or {}
+        ticker_watchdog = {
+            "status": ticker_status,
+            "alert_code": raw_ticker_watchdog.get("alert_code") if ticker_status != "unavailable" else "ticker_unavailable",
+            "last_pulse_at": raw_ticker_watchdog.get("last_pulse_at"),
+            "age_seconds": raw_ticker_watchdog.get("age_seconds"),
+        }
+        payload["supervision"] = {
+            "running": bool(_NOVA_SUPERVISION_TICKER_STATE.get("running")),
+            "feedback_responder": str(_NOVA_SUPERVISION_TICKER_STATE.get("feedback_responder") or "disabled")[:16],
+            "feedback_last_error": str(_NOVA_SUPERVISION_TICKER_STATE.get("feedback_last_error") or "")[:32] or None,
+            "lease": ledger_supervision.get("lease") or {"state": "inactive", "liveness": "not_observed"},
+            "interval_seconds": _bounded_presence_int(_NOVA_SUPERVISION_TICKER_STATE.get("interval_seconds"), default=60, minimum=1, maximum=3600),
+            "consumer_interval_seconds": _bounded_presence_int(_NOVA_SUPERVISION_TICKER_STATE.get("consumer_interval_seconds"), default=_NOVA_SUPERVISION_CONSUMER_INTERVAL_SECONDS, minimum=1, maximum=3600),
+            "last_catalog_refresh_attempts": _bounded_presence_int(_NOVA_SUPERVISION_TICKER_STATE.get("last_catalog_refresh_attempts"), default=0, minimum=0, maximum=16),
+            "last_pulse_at": _NOVA_SUPERVISION_TICKER_STATE.get("last_pulse_at"),
+            "last_outcomes": _public_nova_supervision_outcomes(_NOVA_SUPERVISION_TICKER_STATE.get("last_outcomes", []), managed_spaces=managed_spaces),
+            "error_count": _bounded_presence_int(_NOVA_SUPERVISION_TICKER_STATE.get("error_count"), default=0, minimum=0, maximum=1000000),
+            "last_error": _public_nova_supervision_error(_NOVA_SUPERVISION_TICKER_STATE.get("last_error")),
+            "ticker_watchdog": ticker_watchdog,
+            "mind_watchdog": {"status": mind_status},
+        }
+        payload["operational"] = _operational_projection(
+            managed_spaces=payload.get("managed_spaces") or [],
+            blockers=payload.get("blockers") or [],
+            supervision=payload["supervision"],
+        )
+    return payload
 
 
 class NovaYoloToggle(BaseModel):
@@ -3866,7 +5258,7 @@ async def delete_cron_job(job_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Profile management endpoints (minimal — list/create/rename/delete + SOUL.md)
+# Profile management endpoints (minimal Ã¢â‚¬â€ list/create/rename/delete + SOUL.md)
 # ---------------------------------------------------------------------------
 
 
@@ -4219,10 +5611,53 @@ async def update_config_raw(body: RawConfigUpdate):
 
 @app.get("/api/analytics/usage")
 async def get_usage_analytics(days: int = 30):
+    import sqlite3
     from runtime._compat.shim_state import SessionDB
     from runtime.insights import InsightsEngine
 
-    db = SessionDB()
+    def _degraded_payload() -> dict[str, object]:
+        return {
+            "daily": [],
+            "by_model": [],
+            "totals": {
+                "total_input": 0,
+                "total_output": 0,
+                "total_cache_read": 0,
+                "total_reasoning": 0,
+                "total_estimated_cost": 0,
+                "total_actual_cost": 0,
+                "total_sessions": 0,
+                "total_api_calls": 0,
+            },
+            "period_days": days,
+            "degraded": True,
+            "degraded_reason": "session_db_unavailable",
+            "skills": {
+                "summary": {
+                    "total_skill_loads": 0,
+                    "total_skill_edits": 0,
+                    "total_skill_actions": 0,
+                    "distinct_skills_used": 0,
+                },
+                "top_skills": [],
+            },
+        }
+
+    try:
+        from sidekick_constants import get_sidekick_home
+        state_path = get_sidekick_home() / "state.db"
+        # Analytics is a polling surface; never let a multi-gigabyte state DB
+        # turn a read-only dashboard refresh into a long SQLite scan.
+        if state_path.stat().st_size > 1_073_741_824:
+            _log.warning("usage analytics degraded (state_db_too_large)")
+            return _degraded_payload()
+    except OSError:
+        pass
+    try:
+        db = SessionDB()
+    except (sqlite3.Error, OSError, RuntimeError) as exc:
+        _log.warning("usage analytics degraded (%s)", type(exc).__name__)
+        return _degraded_payload()
     try:
         cutoff = time.time() - (days * 86400)
         session_columns = {
@@ -4315,6 +5750,9 @@ async def get_usage_analytics(days: int = 30):
             "period_days": days,
             "skills": skills,
         }
+    except (sqlite3.Error, OSError, RuntimeError) as exc:
+        _log.warning("usage analytics degraded (%s)", type(exc).__name__)
+        return _degraded_payload()
     finally:
         db.close()
 
@@ -4413,7 +5851,7 @@ async def get_models_analytics(days: int = 30):
 
 
 # ---------------------------------------------------------------------------
-# /api/pty — PTY-over-WebSocket bridge for the dashboard "Chat" tab.
+# /api/pty Ã¢â‚¬â€ PTY-over-WebSocket bridge for the dashboard "Chat" tab.
 #
 # The endpoint spawns the same ``sidekick --tui`` binary the CLI uses, behind
 # a POSIX pseudo-terminal, and forwards bytes + resize escapes across a
@@ -4422,7 +5860,7 @@ async def get_models_analytics(days: int = 30):
 #
 # Auth: ``?token=<session_token>`` query param (browsers can't set
 # Authorization on the WS upgrade).  Same ephemeral ``_SESSION_TOKEN`` as
-# REST.  Localhost-only — we defensively reject non-loopback clients even
+# REST.  Localhost-only Ã¢â‚¬â€ we defensively reject non-loopback clients even
 # though uvicorn binds to 127.0.0.1.
 # ---------------------------------------------------------------------------
 
@@ -4461,8 +5899,8 @@ def _ws_client_is_allowed(ws: "WebSocket") -> bool:
         return True
     return client_host in _LOOPBACK_HOSTS
 
-# Per-channel subscriber registry used by /api/pub (PTY-side gateway → dashboard)
-# and /api/events (dashboard → browser sidebar).  Keyed by an opaque channel id
+# Per-channel subscriber registry used by /api/pub (PTY-side gateway Ã¢â€ â€™ dashboard)
+# and /api/events (dashboard Ã¢â€ â€™ browser sidebar).  Keyed by an opaque channel id
 # the chat tab generates on mount; entries auto-evict when the last subscriber
 # drops AND the publisher has disconnected.
 _event_channels: dict[str, set] = {}
@@ -4476,10 +5914,10 @@ def _resolve_chat_argv(
     """Resolve the argv + cwd + env for the chat PTY.
 
     Default: whatever ``sidekick --tui`` would run.  Tests monkeypatch this
-    function to inject a tiny fake command (``cat``, ``sh -c 'printf …'``)
+    function to inject a tiny fake command (``cat``, ``sh -c 'printf Ã¢â‚¬Â¦'``)
     so nothing has to build Node or the TUI bundle.
 
-    Session resume is propagated via the ``SIDEKICK_TUI_RESUME`` env var —
+    Session resume is propagated via the ``SIDEKICK_TUI_RESUME`` env var Ã¢â‚¬â€
     matching what ``sidekick_cli.main._launch_tui`` does for the CLI path.
     Appending ``--resume <id>`` to argv doesn't work because ``ui-tui`` does
     not parse its argv.
@@ -4567,7 +6005,7 @@ async def pty_ws(ws: WebSocket) -> None:
 
     await ws.accept()
 
-    # PTY bridge unavailable — tell the client and close cleanly.
+    # PTY bridge unavailable Ã¢â‚¬â€ tell the client and close cleanly.
     if not _PTY_BRIDGE_AVAILABLE:
         if sys.platform.startswith("win"):
             await ws.send_text(
@@ -4611,7 +6049,7 @@ async def pty_ws(ws: WebSocket) -> None:
 
     loop = asyncio.get_running_loop()
 
-    # --- reader task: PTY master → WebSocket ----------------------------
+    # --- reader task: PTY master Ã¢â€ â€™ WebSocket ----------------------------
     async def pump_pty_to_ws() -> None:
         while True:
             chunk = await loop.run_in_executor(
@@ -4629,7 +6067,7 @@ async def pty_ws(ws: WebSocket) -> None:
 
     reader_task = asyncio.create_task(pump_pty_to_ws())
 
-    # --- writer loop: WebSocket → PTY master ----------------------------
+    # --- writer loop: WebSocket Ã¢â€ â€™ PTY master ----------------------------
     try:
         while True:
             msg = await ws.receive()
@@ -4664,7 +6102,7 @@ async def pty_ws(ws: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /api/ws — JSON-RPC WebSocket sidecar for the dashboard "Chat" tab.
+# /api/ws Ã¢â‚¬â€ JSON-RPC WebSocket sidecar for the dashboard "Chat" tab.
 #
 # Drives the same `tui_gateway.dispatch` surface Ink uses over stdio, so the
 # dashboard can render structured metadata (model badge, tool-call sidebar,
@@ -4695,7 +6133,7 @@ async def gateway_ws(ws: WebSocket) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /api/pub + /api/events — chat-tab event broadcast.
+# /api/pub + /api/events Ã¢â‚¬â€ chat-tab event broadcast.
 #
 # The PTY-side ``tui_gateway.entry`` opens /api/pub at startup (driven by
 # SIDEKICK_TUI_SIDECAR_URL set in /api/pty's PTY env) and writes every
@@ -4762,7 +6200,7 @@ async def events_ws(ws: WebSocket) -> None:
 
     try:
         while True:
-            # Subscribers don't speak — the receive() just blocks until
+            # Subscribers don't speak Ã¢â‚¬â€ the receive() just blocks until
             # disconnect so the connection stays open as long as the
             # browser holds it.
             await ws.receive_text()
@@ -4919,16 +6357,16 @@ def mount_spa(application: FastAPI):
 # Dashboard theme endpoints
 # ---------------------------------------------------------------------------
 
-# Built-in dashboard themes — label + description only.  The actual color
+# Built-in dashboard themes Ã¢â‚¬â€ label + description only.  The actual color
 # definitions live in the frontend (web/src/themes/presets.ts).
 _BUILTIN_DASHBOARD_THEMES = [
-    {"name": "default",       "label": "Sidekick Teal",         "description": "Classic dark teal — the canonical Sidekick look"},
+    {"name": "default",       "label": "Sidekick Teal",         "description": "Classic dark teal Ã¢â‚¬â€ the canonical Sidekick look"},
     {"name": "default-large", "label": "Sidekick Teal (Large)", "description": "Sidekick Teal with bigger fonts and roomier spacing"},
     {"name": "midnight",      "label": "Midnight",            "description": "Deep blue-violet with cool accents"},
-    {"name": "ember",     "label": "Ember",          "description": "Warm crimson and bronze — forge vibes"},
-    {"name": "mono",      "label": "Mono",           "description": "Clean grayscale — minimal and focused"},
-    {"name": "cyberpunk", "label": "Cyberpunk",      "description": "Neon green on black — matrix terminal"},
-    {"name": "rose",      "label": "Rosé",           "description": "Soft pink and warm ivory — easy on the eyes"},
+    {"name": "ember",     "label": "Ember",          "description": "Warm crimson and bronze Ã¢â‚¬â€ forge vibes"},
+    {"name": "mono",      "label": "Mono",           "description": "Clean grayscale Ã¢â‚¬â€ minimal and focused"},
+    {"name": "cyberpunk", "label": "Cyberpunk",      "description": "Neon green on black Ã¢â‚¬â€ matrix terminal"},
+    {"name": "rose",      "label": "RosÃƒÂ©",           "description": "Soft pink and warm ivory Ã¢â‚¬â€ easy on the eyes"},
 ]
 
 
@@ -5055,7 +6493,7 @@ def _normalise_theme_definition(data: Dict[str, Any]) -> Optional[Dict[str, Any]
     if isinstance(density, str) and density in {"compact", "comfortable", "spacious"}:
         layout["density"] = density
 
-    # Color overrides — keep only valid keys with string values.
+    # Color overrides Ã¢â‚¬â€ keep only valid keys with string values.
     overrides_src = data.get("colorOverrides", {})
     color_overrides: Dict[str, str] = {}
     if isinstance(overrides_src, dict):
@@ -5063,7 +6501,7 @@ def _normalise_theme_definition(data: Dict[str, Any]) -> Optional[Dict[str, Any]
             if key in _THEME_OVERRIDE_KEYS and isinstance(val, str) and val.strip():
                 color_overrides[key] = val
 
-    # Assets — named slots + arbitrary user-defined keys.  Values must be
+    # Assets Ã¢â‚¬â€ named slots + arbitrary user-defined keys.  Values must be
     # strings (URLs or CSS ``url(...)``/``linear-gradient(...)`` expressions).
     # We don't fetch remote assets here; the frontend just injects them as
     # CSS vars.  Empty values are dropped so a theme can explicitly clear a
@@ -5088,17 +6526,17 @@ def _normalise_theme_definition(data: Dict[str, Any]) -> Optional[Dict[str, Any]
         if custom_assets:
             assets_out["custom"] = custom_assets
 
-    # Custom CSS — raw CSS text the frontend injects as a scoped <style>
+    # Custom CSS Ã¢â‚¬â€ raw CSS text the frontend injects as a scoped <style>
     # tag on theme apply.  Clipped to _THEME_CUSTOM_CSS_MAX to keep the
     # payload bounded.  We intentionally do NOT parse/sanitise the CSS
-    # here — the dashboard is localhost-only and themes are user-authored
+    # here Ã¢â‚¬â€ the dashboard is localhost-only and themes are user-authored
     # YAML in ~/.sidekick/, same trust level as the config file itself.
     custom_css_val = data.get("customCSS")
     custom_css: Optional[str] = None
     if isinstance(custom_css_val, str) and custom_css_val.strip():
         custom_css = custom_css_val[:_THEME_CUSTOM_CSS_MAX]
 
-    # Component style overrides — per-bucket dicts of camelCase CSS
+    # Component style overrides Ã¢â‚¬â€ per-bucket dicts of camelCase CSS
     # property -> CSS string.  The frontend converts these into CSS vars
     # that shell components (Card, App header, Backdrop) consume.
     component_styles_src = data.get("componentStyles", {})
@@ -5676,7 +7114,7 @@ def _mount_plugin_api_routes():
 
 
 # ---------------------------------------------------------------------------
-# Discord API endpoints — Role & Member Drag & Drop
+# Discord API endpoints Ã¢â‚¬â€ Role & Member Drag & Drop
 # ---------------------------------------------------------------------------
 #
 # These endpoints provide data for the Discord role-management UI.  When the
@@ -5829,7 +7267,7 @@ async def put_member_roles(member_id: str, body: _DiscordMemberRolesBody, reques
 # Mount plugin API routes before the SPA catch-all.
 _mount_plugin_api_routes()
 
-# ── Onboarding routes ──────────────────────────────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ Onboarding routes Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 
 @app.get("/api/onboarding/status")
 async def onboarding_status():
@@ -5901,7 +7339,7 @@ async def onboarding_probe(body: dict | None = None):
         raise HTTPException(status_code=500, detail=f"probe failed: {e}") from e
 
 
-# ── API proxy / fallback ─────────────────────────────────────────────────────────
+# Ã¢â€â‚¬Ã¢â€â‚¬ API proxy / fallback Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 @app.api_route(
     "/api/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"],
@@ -5932,13 +7370,13 @@ def start_server(
     _LOCALHOST = ("127.0.0.1", "localhost", "::1")
     if host not in _LOCALHOST and not allow_public:
         raise SystemExit(
-            f"Refusing to bind to {host} — the dashboard exposes API keys "
+            f"Refusing to bind to {host} Ã¢â‚¬â€ the dashboard exposes API keys "
             f"and config without robust authentication.\n"
             f"Use --insecure to override (NOT recommended on untrusted networks)."
         )
     if host not in _LOCALHOST:
         _log.warning(
-            "Binding to %s with --insecure — the dashboard has no robust "
+            "Binding to %s with --insecure Ã¢â‚¬â€ the dashboard has no robust "
             "authentication. Only use on trusted networks.", host,
         )
 
@@ -5958,5 +7396,5 @@ def start_server(
 
         threading.Thread(target=_open, daemon=True).start()
 
-    print(f"  Sidekick Web UI → http://{host}:{port}")
+    print(f"  Sidekick Web UI Ã¢â€ â€™ http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")

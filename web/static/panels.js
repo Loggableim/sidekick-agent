@@ -2902,6 +2902,9 @@ async function switchKanbanBoard(slug){
 
 // ── Create / rename / archive board modals ──────────────────────────────────
 
+//  Create / rename / archive board modals 
+// ── Create / rename / archive board modals ──
+// â”€â”€ Create / rename / archive board modals â”€
 function openKanbanCreateBoard(){
   const modal = document.getElementById('kanbanBoardModal');
   if (!modal) return;

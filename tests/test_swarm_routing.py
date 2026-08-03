@@ -169,8 +169,8 @@ def test_router_uses_exact_ollama_only_role_chains_without_gpt_oss():
         "planner": ("deepseek-v4-pro", "kimi-k2.6"),
         "builder": ("minimax-m3",),
         "critic": ("minimax-m3",),
-        "coding": ("glm-5.2",),
-        "review_a": ("glm-5.2",),
+        "coding": ("glm-5.2", "glm-5.1"),
+            "review_a": ("glm-5.2",),
         "review_b": ("kimi-k2.7-code",),
         "integrator": ("nemotron-3-super",),
         "referee": ("nemotron-3-super",),
@@ -221,6 +221,22 @@ def test_independent_review_pair_uses_distinct_required_model_families():
     assert (first.model, second.model) == ("glm-5.2", "kimi-k2.7-code")
     assert first.family != second.family
     assert first.provider == second.provider == "ollama-cloud"
+
+
+def test_required_review_pauses_when_approved_glm_is_unavailable():
+    """YOLO quorum must not substitute an unapproved same-family sibling."""
+    router = ModelRouter(ModelRegistry(catalog={"glm-5.1", "kimi-k2.7-code"}))
+    with pytest.raises(NoEligibleModel):
+        router.select("review_a", {"review", "structured-output"})
+
+
+def test_coding_uses_catalogued_glm_sibling_when_primary_is_unavailable():
+    """A coding provider/schema failure must try the safe GLM sibling."""
+    selection = ModelRouter(
+        ModelRegistry(catalog={"glm-5.1"})
+    ).select("coding", {"coding", "structured-output"})
+    assert selection.models == ("glm-5.1",)
+    assert selection.family == "glm-5"
 
 
 def test_planner_challenger_is_a_separate_kimi_route_not_normal_plan_work():
@@ -360,6 +376,21 @@ def test_ollama_transport_invokes_only_the_injected_call_with_explicit_route():
     ]
     assert response.model == "deepseek-v4-pro"
     assert response.data == {"work": "ok", "evidence": [], "decision": "go"}
+
+@pytest.mark.parametrize(
+    ("model", "provider"),
+    [("gpt-oss:20b", "ollama-cloud"), ("deepseek-v4-flash", "local")],
+)
+def test_ollama_transport_denies_unapproved_route_before_call(model: str, provider: str):
+    calls: list[dict[str, Any]] = []
+    transport = OllamaCloudTransport(lambda **kwargs: calls.append(kwargs))
+    request = ModelRequest(
+        run_id="denied-route", role="scout", model=model, prompt="inspect", context={},
+        provider=provider,
+    )
+    with pytest.raises(ModelProviderError):
+        transport.complete(request)
+    assert calls == []
 
 
 @pytest.mark.parametrize(
@@ -742,3 +773,22 @@ def test_overlapping_executors_share_the_transport_call_concurrency_ceiling():
 
     assert failures == []
     assert transport.max_active == 3
+
+
+def test_swarm_run_contract_keeps_reviewed_and_yolo_budgets_and_cloud_quorum():
+    """YOLO raises only the call ceiling; review routing stays exact Cloud-only."""
+    from swarm_core.workflow import CallBudget, WorkflowPaused
+
+    for limit in (48, 128):
+        budget = CallBudget(limit)
+        for index in range(limit):
+            budget.claim(role="scout", attempted_models=())
+        with pytest.raises(WorkflowPaused) as raised:
+            budget.claim(role="scout", attempted_models=())
+        assert raised.value.reason == "call_budget_exhausted"
+        assert budget.used == limit
+
+    first, second = ModelRouter(ModelRegistry()).select_review_pair()
+    assert (first.model, second.model) == ("glm-5.2", "kimi-k2.7-code")
+    assert first.provider == second.provider == "ollama-cloud"
+    assert all("gpt-oss" not in name.lower() for name in (*first.models, *second.models))

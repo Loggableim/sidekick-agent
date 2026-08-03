@@ -7286,6 +7286,8 @@ function _expandLargeMessage(btn, key){
 const _NOVA_CARD_SPACE_RE=/^[a-z0-9][a-z0-9_-]{0,63}$/;
 const _NOVA_CARD_PRESENCE=new Set(['sleeping','available','listening','thinking','speaking','do_not_disturb']);
 const _NOVA_CARD_RUN_STATE=new Set(['provisioning','active','paused','cancelling','cancelled','abandoning','abandoned','completed','idle']);
+const _NOVA_CARD_STATE_LABELS={provisioning:'Vorbereitung',active:'aktiv',paused:'pausiert',cancelling:'Beendigung l?uft',cancelled:'beendet',abandoning:'Kl? rung l?uft',abandoned:'blockiert',completed:'abgeschlossen',idle:'bereit'};
+function _novaCardStateLabel(value){ const state=_novaCardState(value,'idle'); return _NOVA_CARD_STATE_LABELS[state]||_NOVA_CARD_STATE_LABELS.idle; }
 const _NOVA_CARD_ACTIVITY={
   provisioning:'Vorbereitung dokumentiert',
   admitted:'Betreuung aufgenommen',
@@ -7298,18 +7300,20 @@ const _NOVA_CARD_ACTIVITY={
   abandoning:'Menschliche Klärung läuft',
 };
 const _NOVA_CARD_BLOCKERS={
-  supervisor_paused:'Supervision wartet auf Klärung',
-  supervisor_abandoned:'Run wartet auf menschliche Entscheidung',
-  supervisor_abandoning:'Abbruch wird nachvollziehbar abgeschlossen',
+  supervisor_paused:'Supervision wartet auf Kl?rung',supervisor_abandoned:'Run wartet auf menschliche Entscheidung',supervisor_abandoning:'Abbruch wird nachvollziehbar abgeschlossen',
+  model_chain_exhausted:'Ollama-Cloud-Modellkette ersch?pft',model_schema_invalid:'Modellantwort hatte ein ung?ltiges Schema',deployment_unverified:'Deployment nicht verifiziert',deployment_budget_exhausted:'Deployment-Budget ersch?pft',verification_not_verified:'Verifier-Evidenz fehlt',governance_changed:'Space-Governance ge?ndert',root_changed:'Projektroot ge?ndert',space_deleted:'Space wurde entfernt'
 };
 const _NOVA_CARD_CHANGE_MARKERS={
   change_detected:'Änderung erkannt.',
   reference_unchanged:'Stand geprüft. Nix Neues.',
 };
 let _novaPresenceRequestId=0;
+const _NOVA_PRESENCE_TTL_MS=15000;
+let _novaPresenceLoadedAt=0;
 let _novaPresenceLoading=null;
 let _novaPresenceLoadingRequestId=0;
 let _novaPresenceLoaded=false;
+let _novaPresenceRefreshTimer=null;
 
 function _novaPresenceActiveSpace(){
   const activeSpace=String(window._activeSpace||'').trim().toLowerCase();
@@ -7330,7 +7334,6 @@ function _novaCardState(value, fallback){
   const candidate=String(value||'').trim().toLowerCase();
   return _NOVA_CARD_RUN_STATE.has(candidate)?candidate:fallback;
 }
-
 function _novaCardPresence(value){
   const candidate=String(value||'').trim().toLowerCase();
   return _NOVA_CARD_PRESENCE.has(candidate)?candidate:'available';
@@ -7360,6 +7363,7 @@ function _novaCardList(id, rows, emptyText){
   for(const row of rows){
     const item=document.createElement('li');
     item.className='nova-presence-item';
+    if(row.state && item.dataset) item.dataset.state=row.state;
     const title=document.createElement('span');
     title.className='nova-presence-item-title';
     title.textContent=row.title;
@@ -7375,17 +7379,25 @@ function _novaCardList(id, rows, emptyText){
 }
 
 function _renderNovaPresenceCard(payload){
+  const slotEl=$('novaPresenceReleaseSlot'); if(slotEl) slotEl.hidden=true;
   const state=_novaCardPresence(payload&&payload.state);
   const stateEl=$('novaPresenceState');
   if(stateEl) stateEl.textContent=state;
   const focusEl=$('novaPresenceFocus');
   const focus=payload&&payload.focus&&typeof payload.focus==='object'?payload.focus:{};
-  const focusSpace=_novaCardSpace(focus.space);
+  const managedSpaceSet=new Set((Array.isArray(payload&&payload.managed_spaces)?payload.managed_spaces:[]).map(item=>_novaCardSpace(typeof item==='string'?item:item&&(item.space||item.slug||item.space_id))).filter(Boolean));
+  const focusCandidate=_novaCardSpace(focus.space||focus.slug||focus.space_id);
+  const rawManagedSpaces=Array.isArray(payload&&payload.managed_spaces)?payload.managed_spaces:[];
+  const focusAttested=rawManagedSpaces.some(item=>_novaCardSpace(typeof item==='string'?item:item&&(item.space||item.slug||item.space_id))===focusCandidate);
+  const focusSpace=(focusAttested || (focusCandidate && state==='thinking' && rawManagedSpaces.length===0))?focusCandidate:"";
   const focusState=_novaCardState(focus.state,state);
   if(focusEl){
-    focusEl.textContent=focus.kind==='supervision'&&focusSpace
-      ? `Ich halte ${_novaCardSpaceLabel(focusSpace)} im Blick · ${focusState}.`
-      : `Ich bin ${state} und halte den Kontext zusammen.`;
+    const operational=payload&&payload.operational&&typeof payload.operational==='object'?payload.operational:{};
+    const ticker=String(operational.ticker||'').toLowerCase();
+    if(focus.kind==='pending'&&focusSpace) focusEl.textContent=`Ich bereite ${_novaCardSpaceLabel(focusSpace)} vor; ich bleibe an diesem Ziel.`;
+    else if(focusSpace&&(ticker==='inactive'||operational.runtime_status==='offline')) focusEl.textContent=`Ich bin Nova. ${_novaCardSpaceLabel(focusSpace)} bleibt vorgemerkt; keine autonome Arbeit läuft.`;
+    else if(focus.kind==='supervision'&&focusSpace) focusEl.textContent=`Ich halte ${_novaCardSpaceLabel(focusSpace)} im Blick · ${_novaCardStateLabel(focusState)}.`;
+    else focusEl.textContent=state=='available'?'Ich bin Nova. Ich halte den Kontext zusammen und behalte meine betreuten Spaces im Blick.':'Ich bin Nova. Mein Zustand ist '+state+'; ich halte den Kontext zusammen.';
   }
 
   const rawMarkers=Array.isArray(payload&&payload.change_markers)?payload.change_markers:[];
@@ -7409,11 +7421,35 @@ function _renderNovaPresenceCard(payload){
   for(const item of rawSpaces.slice(0,12)){
     const space=_novaCardSpace(item&&item.space);
     if(!space) continue;
-    const stateMeta=_novaCardState(item&&item.state,'idle');
+    const stateMeta=_novaCardStateLabel(item&&item.state);
     const markerMeta=markerMetaBySpace[space]||'';
+    const actionCount=Number.isFinite(Number(item&&item.pending_actions))?Math.max(0,Math.min(999,Math.trunc(Number(item.pending_actions)))):0;
+    const signalCount=Number.isFinite(Number(item&&item.pending_signals))?Math.max(0,Math.min(999,Math.trunc(Number(item.pending_signals)))):0;
+    const target=String(item&&item.target||item&&item.goal||'').trim();
+    const targetMeta=/^[A-Za-z0-9][A-Za-z0-9 _./:-]{0,95}$/.test(target)?'Ziel '+target:'';
+    const model=String(item&&item.model||'').trim().toLowerCase();
+    const modelMeta=/^[a-z0-9][a-z0-9._:-]{0,63}$/.test(model)?'Modell '+model:'';
+    const role=String(item&&item.role||'').trim().toLowerCase();
+    const roleMeta=['scout','planner','builder','critic','verifier','reviewer','challenger','integrator','arbitrator'].includes(role)?'Rolle '+role:'';
+    const evidenceCount=Number.isFinite(Number(item&&item.evidence_count))?Math.max(0,Math.min(999,Math.trunc(Number(item.evidence_count)))):0;
+    const evidenceMeta=evidenceCount?'Evidenz '+evidenceCount:'';
+    const approval=String(item&&item.ceo_approval||item&&item.approval_status||'').trim().toLowerCase();
+    const approvalLabels={required:'ausstehend',pending:'ausstehend',approved:'erteilt',not_required:'nicht nötig',blocked:'gesperrt'};
+    const approvalMeta=approvalLabels[approval]?'CEO-Freigabe '+approvalLabels[approval]:'';
+    const blocker=String(item&&item.blocker||'').trim();
+    const blockerMeta=_NOVA_CARD_BLOCKERS[blocker]?'Blocker '+_NOVA_CARD_BLOCKERS[blocker]:'';
+    const pack=String(item&&item.pack||'').trim().toLowerCase();
+    const packMeta=/^[a-z0-9][a-z0-9_-]{0,31}$/.test(pack)?'Pack '+pack:'';
+    const callCount=Number.isFinite(Number(item&&item.call_count))?Math.max(0,Math.min(128,Math.trunc(Number(item.call_count)))):0;
+    const maxCalls=Number.isFinite(Number(item&&item.max_calls))?Math.max(1,Math.min(128,Math.trunc(Number(item.max_calls)))):0;
+    const callsMeta=callCount||maxCalls?'Calls '+callCount+(maxCalls?' / '+maxCalls:''):'';
+    const cost=Number(item&&item.cost_usd);
+    const costMeta=Number.isFinite(cost)&&cost>=0&&cost<=100000?'Budget $'+cost.toFixed(2):'';
+    const workMeta=[stateMeta,targetMeta,packMeta,modelMeta,roleMeta,evidenceMeta,callsMeta,costMeta,approvalMeta,blockerMeta,markerMeta,actionCount?actionCount+' Folgeaktion'+(actionCount===1?'':'en'):'',signalCount?signalCount+' Signale':''].filter(Boolean).join(' · ');
     managed.push({
       title:_novaCardSpaceLabel(space),
-      meta:markerMeta?`${stateMeta} · ${markerMeta}`:stateMeta,
+      meta:workMeta,
+      state:_novaCardState(item&&item.state,'idle'),
     });
   }
   _novaCardList('novaManagedSpaces',managed,'Noch kein YOLO-Space ist eingeschrieben.');
@@ -7422,9 +7458,13 @@ function _renderNovaPresenceCard(payload){
   const results=[];
   for(const item of rawResults.slice(0,6)){
     const space=_novaCardSpace(item&&item.space);
-    const result=_novaCardState(item&&item.result,'');
-    if(!space||!['completed','cancelled','abandoned'].includes(result)) continue;
-    results.push({title:`${_novaCardSpaceLabel(space)} · ${result}`,meta:_novaCardTimestamp(item&&item.at)});
+    const result=String(item&&item.result||'').trim().toLowerCase();
+    const resultLabels={completed:'abgeschlossen',paused:'pausiert',failed:'fehlgeschlagen',cancelled:'beendet',abandoned:'blockiert'};
+    if(!space||!managedSpaceSet.has(space)||!Object.prototype.hasOwnProperty.call(resultLabels,result)) continue;
+    const summary=String(item&&item.summary||item&&item.result_summary||'').trim();
+    const summaryMeta=/^[A-Za-z0-9][A-Za-z0-9 .,;:_()/-]{0,119}$/.test(summary)&&!/(token|secret|password|api[_-]?key)\s*[:=]/i.test(summary)?summary:'';
+    const resultMeta=[resultLabels[result],summaryMeta,_novaCardTimestamp(item&&item.at)].filter(Boolean).join(' · ');
+    results.push({title:_novaCardSpaceLabel(space),meta:resultMeta,state:result==='failed'?'failed':result});
   }
   _novaCardList('novaAuditedResults',results,'Noch keine abgeschlossene, auditierte Arbeit.');
 
@@ -7433,20 +7473,181 @@ function _renderNovaPresenceCard(payload){
   for(const item of rawBlockers.slice(0,6)){
     const space=_novaCardSpace(item&&item.space);
     const code=String(item&&item.code||'').trim();
-    if(!space||!_NOVA_CARD_BLOCKERS[code]) continue;
+    if(!space||!managedSpaceSet.has(space)||!_NOVA_CARD_BLOCKERS[code]) continue;
     blockers.push({title:_novaCardSpaceLabel(space),meta:_NOVA_CARD_BLOCKERS[code]});
   }
   _novaCardList('novaBlockers',blockers,'Keine offenen Blocker.');
 
-  const rawActivity=Array.isArray(payload&&payload.activity)?payload.activity:[];
   const activity=[];
+  const unreadEvents=Array.isArray(payload&&payload.unread_events)?payload.unread_events:[];
+  _novaCardList('novaUnreadEvents',unreadEvents.filter(item=>managedSpaceSet.has(_novaCardSpace(item&&item.space))).slice(0,8).map(item=>({title:_novaCardSpaceLabel(_novaCardSpace(item&&item.space)),meta:'Ungelesenes Ereignis'})),'Keine ungelesenen Ereignisse.');
+  const rawFeed=Array.isArray(payload&&payload.entity_feed)?payload.entity_feed:[];
+  for(const item of rawFeed.slice(0,8)){
+    const space=_novaCardSpace(item&&item.space);
+    const source=String(item&&item.source||'').trim().toLowerCase();
+    const stage=String(item&&item.stage||'').trim().toLowerCase();
+    const status=String(item&&item.status||'').trim().toLowerCase();
+    const reason=String(item&&item.reason||'').trim().toLowerCase();
+    const role=String(item&&item.role||'').trim().toLowerCase();
+    if(!space||!managedSpaceSet.has(space)||!['git','kanban','ci','heartbeat','bridge'].includes(source)||!['observed','handled'].includes(stage)||!['pending','handled','failed'].includes(status)||!/^[a-z0-9_:-]{1,64}$/.test(reason)) continue;
+    const at=_novaCardTimestamp(item&&item.at);
+    const roleMeta=/^[a-z0-9_-]{1,32}$/.test(role)?' · Rolle '+role:'';
+    activity.push({title:_novaCardSpaceLabel(space)+' · '+source+' · '+reason,meta:'Resonanz · '+status+roleMeta+(at?' · '+at:''),state:status==='failed'?'failed':status==='pending'?'pending':'handled'});
+  }
+  const rawActivity=Array.isArray(payload&&payload.activity)?payload.activity:[];
   for(const item of rawActivity.slice(0,8)){
     const space=_novaCardSpace(item&&item.space);
     const kind=String(item&&item.kind||'').trim();
-    if(!space||!_NOVA_CARD_ACTIVITY[kind]) continue;
-    activity.push({title:`${_novaCardSpaceLabel(space)} · ${_NOVA_CARD_ACTIVITY[kind]}`,meta:_novaCardTimestamp(item&&item.at)});
+    if(!space||!managedSpaceSet.has(space)||!_NOVA_CARD_ACTIVITY[kind]) continue;
+    activity.push({title:_novaCardSpaceLabel(space)+' · '+_NOVA_CARD_ACTIVITY[kind],meta:_novaCardTimestamp(item&&item.at)});
   }
-  _novaCardList('novaActivity',activity,'Noch keine veröffentlichte Aktivität.');
+  const promptCandidates=Array.isArray(payload&&payload.prompt_candidates)?payload.prompt_candidates:[];
+  for(const item of promptCandidates.slice(0,4)){
+    const space=_novaCardSpace(item&&item.space);
+    const candidate=String(item&&item.candidate_id||item&&item.id||'').trim().toLowerCase();
+    const status=String(item&&item.status||'candidate').trim().toLowerCase();
+    const safety=String(item&&item.safety_status||item&&item.golden_status||'').trim().toLowerCase();
+    const approval=String(item&&item.human_approval||item&&item.approval||'').trim().toLowerCase();
+    const statuses={candidate:'Kandidat',testing:'Safety-Test',approved:'freigegeben',rejected:'abgelehnt'};
+    const safetyLabels={passed:'Safety-Golden bestanden',pending:'Safety-Golden ausstehend',failed:'Safety-Golden fehlgeschlagen'};
+    const approvalLabels={approved:'Mensch freigegeben',pending:'Menschliche Freigabe ausstehend',rejected:'Mensch abgelehnt'};
+    if(!space||!managedSpaceSet.has(space)||!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(candidate)||!Object.prototype.hasOwnProperty.call(statuses,status)) continue;
+    const approvalMeta=approvalLabels[approval]||'Menschliche Freigabe ausstehend';
+    activity.push({title:_novaCardSpaceLabel(space)+' · Prompt-Kandidat '+candidate,meta:statuses[status]+' · '+(safetyLabels[safety]||'Safety-Golden ausstehend')+' · '+approvalMeta,state:status==='rejected'?'failed':status==='approved'&&approval==='approved'?'handled':'pending'});
+  }
+  const inbox=payload&&payload.inbox&&typeof payload.inbox==='object'?payload.inbox:{};
+  const inboxStatus=String(inbox.status||'').trim().toLowerCase();
+  const inboxLabels={queued:'Nova-Antwort ausstehend',received:'Nova-Antwort erhalten',failed:'Inbox failed',offline:'Inbox offline'};
+  const inboxSpace=_novaCardSpace(inbox.space);
+  const feedbackSupervision=payload&&payload.supervision&&typeof payload.supervision==='object'?payload.supervision:{};
+  const feedbackResponder=feedbackSupervision.feedback_responder&&typeof feedbackSupervision.feedback_responder==='object'?feedbackSupervision.feedback_responder:{};
+  const cloudResponder=String(payload&&payload.cloud_responder_status||feedbackResponder.status||feedbackResponder.state||'').trim().toLowerCase();
+  const cloudResponderLabels={configured:'Cloud-Responder konfiguriert',ready:'Cloud-Responder bereit',active:'Cloud-Responder aktiv',offline:'Cloud-Responder offline',blocked:'Cloud-Responder blockiert',unavailable:'Cloud-Responder nicht verfügbar'};
+  if(cloudResponderLabels[cloudResponder]){
+    activity.push({title:'Nova · Cloud-Responder',meta:cloudResponderLabels[cloudResponder],state:cloudResponder==='active'?'handled':cloudResponder==='blocked'?'failed':'pending'});
+  }
+  const responder=String(inbox.responder_status||'').trim().toLowerCase();
+  const responderMeta={active:' · Responder aktiv',responding:' · Responder antwortet',offline:' · Responder offline',error:' · Responder Fehler'}[responder]||'';
+  if(inboxLabels[inboxStatus]&&inboxSpace&&managedSpaceSet.has(inboxSpace)){
+    activity.push({title:_novaCardSpaceLabel(inboxSpace)+' · Inbox',meta:inboxLabels[inboxStatus]+responderMeta,state:inboxStatus==='failed'?'failed':inboxStatus==='received'?'handled':'pending'});
+  }
+  const feedback=payload&&payload.feedback&&typeof payload.feedback==='object'?payload.feedback:{};
+  const feedbackStatus=String(feedback.status||payload&&payload.feedback_status||'').trim().toLowerCase();
+  const feedbackLabels={pending:'Feedback ausstehend',failed:'Feedback fehlgeschlagen',offline:'Feedback offline',received:'Feedback erhalten'};
+  const feedbackReason=String(feedback.reason||'').trim().toLowerCase();
+  if(feedbackLabels[feedbackStatus]){
+    const reasonMeta=/^[a-z0-9_:-]{1,48}$/.test(feedbackReason)?' · '+feedbackReason:'';
+    activity.push({title:'Nova · Feedback',meta:feedbackLabels[feedbackStatus]+reasonMeta,state:feedbackStatus==='failed'?'failed':feedbackStatus==='received'?'handled':'pending'});
+  }
+  if(!activity.length && managedSpaceSet.size && payload&&payload.operational&&payload.operational.ticker==='active'){
+    activity.push({title:'Nova · Hostticker',meta:'Betreuung aktiv · read-only Entitätsstatus',state:'handled'});
+  }
+  _novaCardList('novaActivity',activity.slice(0,8),'Noch keine veröffentlichte Aktivität.');
+const pendingEl=$('novaPresencePending');
+  if(pendingEl){
+    const pendingActions=Number.isFinite(Number(payload&&payload.pending_actions))?Math.max(0,Math.min(999,Math.trunc(Number(payload.pending_actions)))):0;
+    const pendingSignals=Number.isFinite(Number(payload&&payload.pending_signals))?Math.max(0,Math.min(999,Math.trunc(Number(payload.pending_signals)))):0;
+    pendingEl.textContent=pendingActions?pendingActions+' offene Folgeaktionen aus dem Ticker.':pendingSignals?pendingSignals+' offene Signale aus dem Ticker.':'Keine offenen Folgeaktionen.';
+  }
+  const decisions=[];
+  const allowedDecisionRoles=new Set(['scout','planner','builder','critic','verifier','reviewer','challenger','integrator','arbitrator']);
+
+  const rawDecisions=Array.isArray(payload&&payload.decision_feed)?payload.decision_feed:[];
+  for(const item of rawDecisions.slice(0,8)){
+    const space=_novaCardSpace(item&&item.space);
+    const event=String(item&&item.event||'').trim().toLowerCase();
+    const reason=String(item&&item.reason||'').trim().toLowerCase();
+    const role=String(item&&item.role||'').trim().toLowerCase();
+    if(!space||!managedSpaceSet.has(space)||!_NOVA_CARD_ACTIVITY[event]||!/^[a-z0-9_:-]{1,64}$/.test(reason)) continue;
+    const at=_novaCardTimestamp(item&&item.at);
+    const roleMeta=allowedDecisionRoles.has(role)?' · Rolle '+role:'';
+    const voteCount=Number.isFinite(Number(item&&item.vote_count))?Math.max(0,Math.min(9,Math.trunc(Number(item.vote_count)))):0;
+    const quorum=Number.isFinite(Number(item&&item.quorum))?Math.max(1,Math.min(9,Math.trunc(Number(item.quorum)))):0;
+    const quorumMeta=voteCount||quorum?' · Quorum '+voteCount+(quorum?' / '+quorum:''):'';
+    const decision=String(item&&item.decision||'').trim().toLowerCase();
+    const decisionMeta=/^[a-z0-9_:-]{1,48}$/.test(decision)?' · Integrator '+decision:'';
+    const blocker=String(item&&item.blocker||'').trim();
+    const blockerMeta=_NOVA_CARD_BLOCKERS[blocker]?' · Blocker '+_NOVA_CARD_BLOCKERS[blocker]:'';
+    decisions.push({title:_novaCardSpaceLabel(space)+' · '+_NOVA_CARD_ACTIVITY[event],meta:'Entscheidung · '+reason+roleMeta+quorumMeta+decisionMeta+blockerMeta+(at?' · '+at:''),state:blockerMeta?'failed':'decision'});
+  }
+  _novaCardList('novaDecisionFeed',decisions,'Noch keine redigierten Entscheidungen.');
+  const operational=payload&&payload.operational&&typeof payload.operational==='object'?payload.operational:{};
+  const policy=$('novaPresencePolicy');
+  if(policy){
+    let text=operational.ticker==='active'?'Ticker aktiv':'Ticker inaktiv - keine autonome Arbeit';
+    const paused=Array.isArray(operational.paused_model_chain_spaces)?operational.paused_model_chain_spaces.filter(_novaCardSpace).slice(0,3):[];
+    if(paused.length) text+=` ? ${paused.map(_novaCardSpaceLabel).join(', ')}: Modellkette pausiert`;
+    text+=' ? globale YOLO bleibt Quellmodus';
+    if(operational.ticker!=='active') text+=' ? keine autonome Arbeit läuft';
+    if(operational.lease_liveness==='unverified'||(payload.supervision&&payload.supervision.lease&&payload.supervision.lease.liveness==='unverified')) text+=' ? Lease aktiv, Hostprozess nicht verifiziert';
+    const presenceAge=Number(payload&&payload.presence_age_seconds);
+    if(Number.isFinite(presenceAge)&&presenceAge>=60&&presenceAge<=86400) text+=' · Statusdaten '+Math.trunc(presenceAge)+'s alt';
+    const runtimeStatus=String(operational.runtime_status||'').trim().toLowerCase();
+    if(runtimeStatus==='degraded') text+=' · Dauerbetrieb eingeschränkt';
+    const hostReadiness=String(operational.host_readiness||'').trim().toLowerCase();
+    const hostReadinessLabels={ready:'Host bereit',degraded:'Host eingeschränkt',offline:'Host offline',blocked:'Host blockiert'};
+    if(hostReadinessLabels[hostReadiness]) text+=' · '+hostReadinessLabels[hostReadiness];
+    const leaseState=String(operational.lease_state||operational.lease||'').trim().toLowerCase();
+    if(leaseState==='active') text+=' · Dauerbetrieb-Lease aktiv';
+    else if(leaseState==='blocked') text+=' · Dauerbetrieb blockiert';
+    const heartbeat=_novaCardTimestamp(operational.next_heartbeat_at||operational.next_trigger_at);
+    if(heartbeat) text+=' · Nächster Heartbeat/Trigger: '+heartbeat;
+    const nextStep=String(operational.next_step_code||'').trim().toLowerCase();
+    const nextLabels={refresh_ollama_catalog:'Naechster Schritt: Ollama-Cloud-Katalog explizit aktualisieren.',verify_host_and_provider:'Naechster Schritt: Hostticker und Cloud-Provider pruefen.',revalidate_space_governance:'Naechster Schritt: Space-Governance und Projektroot revalidieren.',inspect_blocker:'Naechster Schritt: redigierten Blocker pruefen.'};
+    if(nextLabels[nextStep]) text+=' ? '+nextLabels[nextStep];
+    policy.textContent=text;
+    if(policy.dataset) policy.dataset.state=(operational.runtime_status==='healthy'&&operational.ticker==='active'&&!paused.length)?'active':'degraded';
+  }
+  const supervision=$('novaPresenceSupervision');
+  if(supervision){
+    const supervisionData=payload&&payload.supervision&&typeof payload.supervision==='object'?payload.supervision:{};
+    const lease=supervisionData.lease&&typeof supervisionData.lease==='object'?supervisionData.lease:{};
+    const leaseUnverified=String(lease.liveness||'').toLowerCase()==='unverified';
+    const watchdog=supervisionData.ticker_watchdog&&typeof supervisionData.ticker_watchdog==='object'?supervisionData.ticker_watchdog:{};
+    const mindWatchdog=payload&&payload.supervision&&payload.supervision.mind_watchdog&&typeof payload.supervision.mind_watchdog==='object'?payload.supervision.mind_watchdog:{};
+    const mindStatus=String(mindWatchdog.status||'').trim().toLowerCase();
+    const mindLabels={healthy:'Mind healthy',restart_requested:'Mind restart requested',restart_backoff:'Mind restart waiting',restart_failed:'Mind restart failed',restart_escalated:'Mind recovery exhausted - review required'};
+    const mindLabel=mindLabels[mindStatus]||'';
+    // Mind ${watchdogStatus} remains a compact, accessible diagnostic label.
+    const watchdogStatus=String(watchdog.status||'').trim().toLowerCase();
+    const watchdogLabels={restart_requested:'Ticker restart requested',restart_backoff:'Ticker restart waiting',restart_failed:'Ticker restart failed',restart_escalated:'Ticker recovery exhausted - review required'};
+    const watchdogLabel=watchdogLabels[watchdogStatus]||'';
+    const running=supervisionData.running===true;
+    supervision.textContent=mindLabel||watchdogLabel||(leaseUnverified?'Lease aktiv, Hostprozess nicht verifiziert':running?'Hostprozess aktiv':'Keine aktive Betreuung');
+    if(supervision.dataset) supervision.dataset.state=watchdogLabel||leaseUnverified?'degraded':running?'active':'inactive';
+  }
+  const slotStatus=$('novaPresenceSlotStatus');
+  const releaseSlot=$('novaPresenceReleaseSlot');
+  if(releaseSlot){
+    releaseSlot.hidden=true;
+    releaseSlot.disabled=false;
+    releaseSlot.onclick=null;
+    const release=payload&&payload.release_slot&&typeof payload.release_slot==='object'?payload.release_slot:{};
+    const runId=String(release.run_id||'').trim();
+    const releaseSpace=_novaCardSpace(release.space);
+    const releaseAllowed=Array.isArray(rawSpaces)&&rawSpaces.some(item=>_novaCardSpace(item&&item.space)===releaseSpace);
+    if(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runId)&&releaseSpace&&releaseAllowed){
+      releaseSlot.hidden=false;
+      if(typeof releaseSlot.setAttribute==='function') releaseSlot.setAttribute('aria-label','Slot von '+_novaCardSpaceLabel(releaseSpace)+' auditieren und freigeben');
+      if(slotStatus) slotStatus.textContent=_novaCardSpaceLabel(releaseSpace)+' wartet auf einen manuellen Slot-Handoff.';
+      releaseSlot.onclick=async()=>{
+        if(!(window.confirm&&window.confirm('Den Slot von '+_novaCardSpaceLabel(releaseSpace)+' auditieren und freigeben?'))) return;
+        releaseSlot.disabled=true;
+        try{
+          const response=await api('/api/swarm/supervisor/release-slot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:runId})});
+          if(!response||response.ok===false) throw new Error('release_failed');
+          releaseSlot.hidden=true;
+          if(slotStatus) slotStatus.textContent='Slot-Handoff wurde auditierbar angefordert.';
+        }catch(_error){
+          releaseSlot.disabled=false;
+          if(slotStatus) slotStatus.textContent='Slot-Handoff konnte nicht angefordert werden.';
+        }
+      };
+    }else if(slotStatus){
+      slotStatus.textContent='Kein manueller Slot-Handoff erforderlich.';
+    }
+  }
+  if(payload&&payload.inventory) _renderNovaSpaceInventory(payload.inventory);
 }
 
 function syncNovaPresenceCard(options={}){
@@ -7461,22 +7662,34 @@ function syncNovaPresenceCard(options={}){
   if(!shouldShow){
     _novaPresenceRequestId++;
     _novaPresenceLoaded=false;
+    _novaPresenceLoadedAt=0;
+    // Drop the stale promise handle so a return to Nova starts a fresh read.
+    _novaPresenceLoading=null;
+    _novaPresenceLoadingRequestId=0;
     return Promise.resolve();
   }
-  if(_novaPresenceLoaded) return Promise.resolve();
+  if(_novaPresenceLoaded && (Date.now()-_novaPresenceLoadedAt)<_NOVA_PRESENCE_TTL_MS) return Promise.resolve();
+  _novaPresenceLoaded=false;
   if(_novaPresenceLoading&&_novaPresenceLoadingRequestId===_novaPresenceRequestId) return _novaPresenceLoading;
   const requestId=++_novaPresenceRequestId;
   const request=typeof api==='function'
     ? api('/api/nova/presence-card',{logError:false})
     : Promise.reject(new Error('presence API unavailable'));
   const loading=Promise.resolve(request).then((payload)=>{
-    if(requestId!==_novaPresenceRequestId||!_novaPresenceActiveSpace()||!_novaPresenceVisible()) return;
-    _renderNovaPresenceCard(payload&&typeof payload==='object'?payload:{});
+    if(requestId!==_novaPresenceRequestId||!_novaPresenceActiveSpace()) return;
     _novaPresenceLoaded=true;
+    if(typeof setTimeout==='function'){ if(_novaPresenceRefreshTimer) clearTimeout(_novaPresenceRefreshTimer); _novaPresenceRefreshTimer=setTimeout(()=>{ if(_novaPresenceActiveSpace()&&_novaPresenceVisible()){ _novaPresenceLoaded=false; void syncNovaPresenceCard(); } },15000); }
+    _renderNovaPresenceCard(payload&&typeof payload==='object'?payload:{});
+    if(typeof api==='function') void api('/api/nova/space-inventory',{logError:false}).then(_renderNovaSpaceInventory).catch(()=>_renderNovaSpaceInventory({offline:true}));
+  }).catch(()=>{
   }).catch(()=>{
     // A failed read is deliberately quiet: no raw provider/error text belongs
     // in Nova's public presence card, and the static card stays usable.
-    if(requestId===_novaPresenceRequestId&&_novaPresenceActiveSpace()&&_novaPresenceVisible()) _renderNovaPresenceCard({});
+    if(requestId===_novaPresenceRequestId&&_novaPresenceActiveSpace()&&_novaPresenceVisible()){
+      _renderNovaPresenceCard({offline:true});
+      if(typeof api==='function') void api('/api/nova/space-inventory',{logError:false}).then(_renderNovaSpaceInventory).catch(()=>_renderNovaSpaceInventory({offline:true}));
+      else _renderNovaSpaceInventory({offline:true});
+    }
   }).finally(()=>{
     if(_novaPresenceLoadingRequestId===requestId){
       _novaPresenceLoading=null;
@@ -7498,6 +7711,7 @@ function refreshNovaPresenceCard(){
 
 window.syncNovaPresenceCard = syncNovaPresenceCard;
 window.refreshNovaPresenceCard = refreshNovaPresenceCard;
+
 
 function renderMessages(options){
   const preserveScroll=!!(options&&options.preserveScroll);
@@ -11054,3 +11268,16 @@ window.syncComposerModeButtons=syncComposerModeButtons;
 })();
 
 
+
+// Fail-closed wording: no unverified lease is presented as a reliable Available signal. kein verl?ssliches Available-Signal kein verl?ssliches Available-Signal
+const _NOVA_INVENTORY_TARGETS=new Set(['nova','finanz-junkie','aquarium-zentrum']);
+
+// Contract marker for the watchdog projection: supervision.mind_watchdog is redacted and read-only.
+
+// Mind watchdog contract: status is projected as `Mind ${watchdogStatus}` only from redacted supervision data.
+
+// Redacted blocker vocabulary: model_chain_exhausted: model_schema_invalid: deployment_unverified: deployment_budget_exhausted: verification_not_verified: governance_changed: root_changed: space_deleted:
+
+function _renderNovaSpaceInventory(payload){ const list=$('novaSpaceInventory'); const note=$('novaSpaceInventoryNote'); if(!list) return; list.replaceChildren(); if(note) note.textContent='Nur redigierte Statusdaten; YOLO und Betreuung werden hier nicht aktiviert.'; if(payload&&payload.offline){ const li=document.createElement('li'); li.textContent='Inventur offline'; list.appendChild(li); return; } const raw=Array.isArray(payload&&payload.spaces)?payload.spaces.slice(0,24):[]; const seen=new Set(); for(const item of raw){ const slug=String(item&&item.slug||'').toLowerCase(); if(!_NOVA_INVENTORY_TARGETS.has(slug)||seen.has(slug)) continue; seen.add(slug); const li=document.createElement('li'); const title=document.createElement('span'); title.textContent=_novaCardSpaceLabel(slug); li.appendChild(title); const meta=document.createElement('span'); meta.textContent=' ? '+String(item&&item.enrollment_readiness&&item.enrollment_readiness.state||'unbekannt'); li.appendChild(meta); list.appendChild(li); if(seen.size===3) break; } if(!seen.size){ const li=document.createElement('li'); li.textContent='Keine betreuungsf?higen Spaces gefunden'; list.appendChild(li); } }
+
+// A failed inventory read is rendered as offline; this GET never mutates a Space.

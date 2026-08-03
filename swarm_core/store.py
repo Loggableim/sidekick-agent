@@ -607,6 +607,55 @@ class ProjectSwarmStore:
             ).fetchone()
         return row is not None and row["owner_token"] == owner_token
 
+    def get_run_execution_lease_owner(self, run_id: str) -> str | None:
+        """Return the opaque execution owner for host-restart reconciliation."""
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT owner_token FROM run_execution_leases WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        return str(row["owner_token"]) if row is not None else None
+
+    def recover_run_execution_lease_after_host_restart(self, run_id: str) -> SwarmRun:
+        """Recover a dead host lease into paused state without resuming work."""
+        updated_at = _utc_now()
+        with self._immediate_connection() as connection:
+            row = connection.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Unknown Swarm run: {run_id}")
+            if row["status"] in {"completed", "cancelled", "abandoned"}:
+                raise ValueError("Terminal Swarm runs cannot recover a host lease")
+            lease = connection.execute(
+                "SELECT owner_token FROM run_execution_leases WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if lease is None:
+                raise ValueError("Swarm run has no execution lease to recover")
+            connection.execute(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ?",
+                ("paused", _timestamp_text(updated_at), run_id),
+            )
+            connection.execute(
+                "DELETE FROM run_execution_leases WHERE run_id = ?", (run_id,)
+            )
+            connection.execute(
+                """INSERT INTO events (
+                    event_id, timestamp, event_type, run_id, payload_json, visibility
+                ) VALUES (?, ?, ?, ?, ?, 'project')""",
+                (
+                    str(uuid4()),
+                    _timestamp_text(updated_at),
+                    "run.execution_lease_recovered_after_host_restart",
+                    run_id,
+                    json.dumps({"owner_token": str(lease["owner_token"])[:128]}, sort_keys=True),
+                ),
+            )
+        run = self.get_run(run_id)
+        assert run is not None
+        return run
+
     def recover_run_execution_lease(self, run_id: str, *, actor_id: str) -> SwarmRun:
         """Human-audit an abandoned lease without automatically executing it.
 

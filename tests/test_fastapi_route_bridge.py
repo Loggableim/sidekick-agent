@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 import hmac
 import json
 import time
@@ -542,6 +542,175 @@ def test_space_management_enrollment_uses_server_resolved_root(monkeypatch, tmp_
     assert all(value == str(project) for value in resolved_inputs)
 
 
+def test_three_product_spaces_management_and_presence_gets_stay_fail_closed(
+    monkeypatch, tmp_path
+):
+    """The read APIs expose only the audited YOLO Space and never start work.
+
+    This mirrors the three production Space roles: Nova is the controlling
+    Space, Finanzjunkie is an ordinary Space, and Aquarium is the one explicit
+    YOLO enrollment. A stale global switch must not make either of the first
+    two autonomous. Snapshotting the temporary home catches accidental
+    config/ledger/bootstrap writes from either GET endpoint.
+    """
+    from cli import web_server
+    from web.api import space_engine
+    from web.api import workspace
+
+    spaces_root = tmp_path / "spaces"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "workspaces")
+    project_roots: dict[str, Path] = {}
+    spaces: dict[str, object] = {}
+    for slug in ("nova", "finanzjunkie", "aquarium-zentrum"):
+        project = tmp_path / "projects" / slug
+        project.mkdir(parents=True)
+        project_roots[slug] = project
+        space = space_engine.Space(slug, slug)
+        space.save_config({"name": slug, "project_dir": str(project)}, mint_space_id=True)
+        spaces[slug] = space
+
+    aquarium = spaces["aquarium-zentrum"]
+    aquarium_config = aquarium.load_config()
+    aquarium_id = aquarium_config["space_id"]
+    aquarium_fingerprint = space_engine.space_root_fingerprint(project_roots["aquarium-zentrum"])
+    space_engine.update_nova_management(
+        aquarium,
+        yolo=True,
+        enrolled=True,
+        confirmation={
+            "space_id": aquarium_id,
+            "root_fingerprint": aquarium_fingerprint,
+        },
+        trusted_project_root=project_roots["aquarium-zentrum"],
+        actor=DASHBOARD_ACTOR,
+    )
+
+    # Resolve only server-side persisted roots; a GET must not invoke the
+    # mutating trusted-workspace resolver.
+    monkeypatch.setattr(
+        web_server,
+        "resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+    monkeypatch.setattr(
+        workspace,
+        "resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        web_server,
+        "_start_nova_space_supervision_ticker",
+        lambda: (_ for _ in ()).throw(AssertionError("read APIs must not start Nova")),
+    )
+    before = {
+        str(path.relative_to(tmp_path)): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+
+    management = {
+        slug: client.get(f"/api/space/nova-management?slug={slug}", headers=headers)
+        for slug in spaces
+    }
+    assert all(response.status_code == 200 for response in management.values())
+    assert management["aquarium-zentrum"].json()["nova_management"] == {
+        "yolo": True,
+        "enrolled": True,
+        "revision": 1,
+    }
+    for slug in ("nova", "finanzjunkie"):
+        assert management[slug].json()["nova_management"] == {
+            "yolo": False,
+            "enrolled": False,
+            "revision": 0,
+        }
+
+    presence = client.get("/api/nova/presence-card", headers=headers)
+    assert presence.status_code == 200
+    payload = presence.json()
+    assert [item["space"] for item in payload["managed_spaces"]] == ["aquarium-zentrum"]
+    managed_render = json.dumps(payload["managed_spaces"]).lower()
+    activity_render = json.dumps(payload.get("activity") or []).lower()
+    assert "nova" not in managed_render and "nova" not in activity_render
+    assert "finanzjunkie" not in managed_render and "finanzjunkie" not in activity_render
+    if payload["activity"]:
+        assert "run_id" not in payload["activity"][0]
+    after = {
+        str(path.relative_to(tmp_path)): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    assert before == after
+
+
+def test_space_management_cannot_self_trust_mutable_project_dirs_for_any_product_space(
+    monkeypatch, tmp_path
+):
+    """Enrollment must require an independent trust record for every Space.
+
+    The production roles deliberately have different autonomy: Nova is the
+    controller, Finanzjunkie is ordinary, and Aquarium is the candidate YOLO
+    Space. A ``project_dir`` written into any Space YAML is still mutable
+    configuration, so neither the management GET nor a forged enrollment POST
+    may treat it as trusted evidence. This exercises the real FastAPI route
+    boundary rather than only the lower-level governance helper.
+    """
+    from cli import web_server
+    from web.api import space_engine, workspace
+
+    spaces_root = tmp_path / "spaces"
+    isolated_home = tmp_path / "home-not-trusted"
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "legacy-spaces")
+    monkeypatch.setattr(workspace.Path, "home", lambda: isolated_home)
+    # The route imports this resolver directly; force the production trust\r\n    # boundary to fail closed regardless of the host profile registry.\r\n    monkeypatch.setattr(\r\n        web_server,\r\n        "resolve_enrollment_trusted_workspace_read_only",\r\n        lambda _value: (_ for _ in ()).throw(ValueError("untrusted fixture root")),\r\n    )\r\n
+    spaces = {}
+    before = {}
+    for slug in ("nova", "finanzjunkie", "aquarium-zentrum"):
+        project = tmp_path / "projects" / slug
+        project.mkdir(parents=True)
+        space = space_engine.Space(slug, slug)
+        space.save_config({"name": slug, "project_dir": str(project)}, mint_space_id=True)
+        spaces[slug] = space
+        before[slug] = space.config_path.read_bytes()
+
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+    for slug, space in spaces.items():
+        snapshot = client.get(
+            f"/api/space/nova-management?slug={slug}", headers=headers
+        )
+        assert snapshot.status_code == 200
+        assert snapshot.json()["root_fingerprint"] == ""
+        assert snapshot.json()["nova_management"] == {
+            "yolo": False,
+            "enrolled": False,
+            "revision": 0,
+        }
+
+        forged = client.post(
+            "/api/space/nova-management",
+            headers=headers,
+            json={
+                "slug": slug,
+                "yolo": True,
+                "enrolled": True,
+                "confirmation": {
+                    "space_id": space.load_config()["space_id"],
+                    "root_fingerprint": space_engine.space_root_fingerprint(
+                        Path(space.load_config()["project_dir"])
+                    ),
+                },
+            },
+        )
+        assert forged.status_code == 400
+        assert space.config_path.read_bytes() == before[slug]
+
+
 def test_generic_space_config_refuses_nova_management_patch(monkeypatch, tmp_path):
     """Governance cannot be changed through the broad Space config endpoint."""
     from cli import web_server
@@ -669,7 +838,8 @@ def test_space_management_get_is_pure_with_a_cold_space_cache(monkeypatch, tmp_p
 def test_enrollment_rejects_a_project_dir_that_only_the_space_config_trusts(monkeypatch, tmp_path):
     """A generic project_dir write cannot become its own enrollment trust root."""
     from cli import web_server
-    from web.api import space_engine, workspace
+    from web.api import space_engine
+    from web.api import workspace
 
     spaces_root = tmp_path / "spaces"
     project = Path(r"C:\\sidekick")
@@ -966,3 +1136,34 @@ def test_all_space_management_routes_fail_closed_for_corrupt_top_level_yaml(
     assert management_post.status_code == 409
     assert generic_post.status_code == 409
     assert space.config_path.read_bytes() == before
+
+
+
+def test_three_space_nova_enrollment_readiness_is_read_only_and_fail_closed(tmp_path):
+    from web.api.space_engine import Space, nova_enrollment_readiness
+    states = {}
+    for slug, yolo, enrolled in (("nova", True, True), ("finanz-junkie", True, False), ("aquarium-zentrum", False, False)):
+        space = Space(slug, custom_root=tmp_path / slug)
+        space.root.mkdir(parents=True, exist_ok=True)
+        space.config_path.write_text("nova_management:\n  yolo: %s\n  enrolled: %s\n  revision: 1\n" % (str(yolo).lower(), str(enrolled).lower()), encoding="utf-8")
+        states[slug] = nova_enrollment_readiness(space)
+    assert states["nova"]["enrolled"] is True
+    assert states["finanz-junkie"]["enrolled"] is False
+    assert states["aquarium-zentrum"]["ready"] is False
+    assert states["aquarium-zentrum"]["enrolled"] is False
+
+
+
+def test_three_space_readiness_does_not_mutate_governance_files(tmp_path):
+    from web.api.space_engine import Space, nova_enrollment_readiness
+    spaces = []
+    for slug in ("nova", "finanz-junkie", "aquarium-zentrum"):
+        space = Space(slug, custom_root=tmp_path / slug)
+        space.root.mkdir(parents=True, exist_ok=True)
+        space.config_path.write_text("space_id: %s\nnova_management:\n  yolo: false\n  enrolled: false\n  revision: 0\n" % slug, encoding="utf-8")
+        spaces.append(space)
+    before = [space.config_path.read_bytes() for space in spaces]
+    results = [nova_enrollment_readiness(space) for space in spaces]
+    after = [space.config_path.read_bytes() for space in spaces]
+    assert all(result["enrolled"] is False for result in results)
+    assert before == after

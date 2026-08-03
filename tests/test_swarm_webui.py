@@ -291,6 +291,65 @@ def test_swarm_client_counts_durable_model_attempts_while_running_or_paused():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_swarm_client_uses_managed_yolo_call_budget_instead_of_reviewed_default():
+    """Managed Nova runs must not display the generic 48-call budget."""
+    node = shutil.which("node")
+    if node is None:
+        import pytest
+
+        pytest.skip("Node.js is required to execute the Swarm budget regression")
+
+    swarm_js = Path("web/static/swarm.js").resolve()
+    harness = textwrap.dedent(
+        """
+        const fs = require('fs');
+        const vm = require('vm');
+        const main = {innerHTML: '', onclick: null};
+        const sidebar = {innerHTML: '', onclick: null};
+        global.window = {
+          _activeSpaceConfig: {project_dir: 'C:/swarm-project'},
+          _activeSpace: '',
+          _spacesCache: [],
+        };
+        global.document = {getElementById: (id) => id === 'swarmMain' ? main : (id === 'swarmRunList' ? sidebar : null)};
+        global.EventSource = undefined;
+        global.api = (path) => {
+          if (path.includes('/api/swarm/runs/run-1?')) {
+            return Promise.resolve({
+              run: {
+                run_id: 'run-1', status: 'running',
+                metadata: {goal: 'Managed YOLO work', integration_namespace: 'nova-space-supervisor', nova_supervisor: {target_space_id: 'space-1'}},
+              },
+              events: [{event_type: 'model.attempt_started', payload: {role: 'scout'}}],
+              approvals: [],
+            });
+          }
+          if (path.includes('/api/swarm/runs?')) return Promise.resolve({runs: [{run_id: 'run-1', status: 'running', metadata: {goal: 'Managed YOLO work', integration_namespace: 'nova-space-supervisor', nova_supervisor: {target_space_id: 'space-1'}}}]});
+          if (path.includes('/api/swarm/packs?')) return Promise.resolve({packs: []});
+          if (path.includes('/api/swarm/models?')) return Promise.resolve({catalog: null});
+          throw new Error('unexpected request: ' + path);
+        };
+        vm.runInThisContext(fs.readFileSync(process.argv[1], 'utf8'), {filename: process.argv[1]});
+        (async () => {
+          await window.loadSwarm();
+          if (!main.innerHTML.includes('<dd>1 / 128</dd>')) {
+            throw new Error('managed YOLO run did not render 128-call budget: ' + main.innerHTML);
+          }
+        })().catch((error) => {
+          console.error(error && error.stack || error);
+          process.exitCode = 1;
+        });
+        """
+    )
+    result = subprocess.run(
+        [node, "-e", harness, str(swarm_js)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 def test_swarm_client_makes_lease_recovery_an_explicit_non_resuming_handoff():
     """A crash recovery control must not silently restart a possibly stale run."""
     swarm_js = Path("web/static/swarm.js").read_text(encoding="utf-8")

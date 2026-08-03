@@ -31,8 +31,9 @@ _MAX_SPACES = 12
 # response is still bounded, while a noisy Space cannot hide another one.
 _MAX_ACTIVITY = _MAX_SPACES
 _MAX_RESULTS = _MAX_SPACES
+_MAX_TICKER_EVENTS = _MAX_SPACES
 _LATEST_ADMISSION_SQL = """
-    SELECT admission_id, target_key, state, updated_at
+    SELECT admission_id, target_key, state, run_id, canonical_root, updated_at
     FROM supervisor_admissions
     WHERE target_key = ?
     ORDER BY updated_at DESC
@@ -48,7 +49,7 @@ _LATEST_TERMINAL_ADMISSION_SQL = """
     LIMIT 1
 """
 _LATEST_AUDIT_SQL = """
-    SELECT event_type, created_at, sequence
+    SELECT event_type, reason, created_at, sequence
     FROM supervisor_audit
     WHERE admission_id = ?
     ORDER BY sequence DESC
@@ -106,6 +107,29 @@ _BLOCKER_CODES = {
     "paused": "supervisor_paused",
     "abandoned": "supervisor_abandoned",
     "abandoning": "supervisor_abandoning",
+}
+_PUBLIC_REASON_CODES = {
+    # Keep global single-run slot contention distinct from generic paused state.
+    "active_limit": "global_run_slot_busy",
+    "skipped_slot_occupied": "global_run_slot_busy",
+    "no_eligible_model": "model_catalog_unavailable",
+    "model_catalog_unavailable": "model_catalog_unavailable",
+    "model_chain_exhausted": "model_chain_exhausted",
+    "provider_unavailable": "model_provider_unavailable",
+    "model_provider_unavailable": "model_provider_unavailable",
+    "schema_invalid": "model_schema_invalid",
+    "deployment_unverified": "deployment_unverified",
+    "deployment_budget_exhausted": "deployment_budget_exhausted",
+    "verification_not_verified": "verification_not_verified",
+    "host_dispatch_failed": "host_dispatch_failed",
+    "host_start_failed": "host_start_failed",
+    "supervisor_capacity": "supervisor_capacity",
+    # A revoked or changed Space binding is actionable and security-relevant.
+    # Keep these reasons public as fixed codes (never the audit text/root), so
+    # the entity card can tell the operator why supervision is paused.
+    "governance_changed": "governance_changed",
+    "root_changed": "root_changed",
+    "space_deleted": "space_deleted",
 }
 _SPACE_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _TIMESTAMP_RE = re.compile(r"[0-9T:+.\-Z]{1,40}")
@@ -208,6 +232,25 @@ _MODEL_STRATEGY: dict[str, dict[str, Any]] = {
 }
 
 
+# The presence card is intentionally read-only and must never infer the
+# currently reachable catalog. Still, the entity should explain which model
+# chain it is waiting for when a cloud call pauses a Space. Keep this as a
+# fixed allow-list mirroring ``swarm_core.router``; it contains no local
+# models and no provider fallback outside Ollama Cloud. Availability is
+# reported separately as ``not_checked``/``paused`` rather than by probing a
+# provider from a GET request.
+_PUBLIC_SWARM_MODEL_CHAINS: dict[str, tuple[str, ...]] = {
+    "scout": ("deepseek-v4-flash", "deepseek-v4-pro"),
+    "planner": ("deepseek-v4-pro", "kimi-k2.6"),
+    "builder": ("minimax-m3",),
+    "critic": ("minimax-m3",),
+    "coding": ("glm-5.2", "glm-5.1"),
+    "review_a": ("glm-5.2",),
+    "review_b": ("kimi-k2.7-code",),
+    "integrator": ("nemotron-3-super",),
+    "vision": ("qwen3.5", "gemma4:31b"),
+}
+
 def build_presence_status(*, home: Path | None = None) -> dict[str, Any]:
     """Read Nova's voice-presence projection without opening a state store."""
     resolved_home = _read_only_home(home)
@@ -308,6 +351,7 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
     presence = _public_presence_state(entity_state)
     managed_spaces = _managed_space_summaries(spaces_root)
     ledger_path = resolved_home / "state" / "nova-space-supervisor.sqlite"
+    pending_actions, pending_signals = _pending_actions_for(ledger_path, managed_spaces)
     marker_bindings = _managed_space_marker_bindings(spaces_root)
     managed_keys = set(_managed_space_keys(managed_spaces))
     change_markers = _change_markers_for(
@@ -320,26 +364,188 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
     )
     admissions = _read_supervisor_admissions(ledger_path, managed_spaces)
     admission_by_space = _latest_admission_by_space(admissions, managed_spaces)
+    # The card UI consumes one opaque human-release affordance at the payload
+    # root. Keep the per-Space copy as well for ownership, but lift the first
+    # globally eligible paused run so the control cannot disappear merely
+    # because it was nested under ``managed_spaces``.
+    release_slot: dict[str, str] | None = None
     for summary in managed_spaces:
-        summary["state"] = admission_by_space.get(summary["space"], {}).get("state", "idle")
+        admission = admission_by_space.get(summary["space"], {})
+        summary["state"] = admission.get("state", "idle")
+        release = _release_slot_for(admission)
+        if release is not None:
+            summary["release_slot"] = release
+            if release_slot is None:
+                release_slot = release
 
+    supervision = _supervision_for(ledger_path)
     focus = _focus_for(admissions, managed_spaces, presence)
     events = _read_latest_supervisor_events(ledger_path, admissions)
     activity = _activity_for(events)
+    decision_feed = _decision_feed_for(events)
     results = _audited_results_for(_read_latest_terminal_events(ledger_path, managed_spaces))
-    blockers = _blockers_for(managed_spaces)
+    blockers = _blockers_for(managed_spaces, events)
+    for space in _read_durable_slot_blockers(ledger_path, marker_bindings):
+        existing = next((item for item in blockers if item.get("space") == space), None)
+        if existing is None:
+            blockers.append({"space": space, "code": "global_run_slot_busy"})
+        elif existing.get("code") in {"supervisor_paused", "global_run_slot_busy"}:
+            existing["code"] = "global_run_slot_busy"
+    global_run_slot = _global_run_slot_projection(admissions)
+    tombstoned_resonance_ids = _read_resonance_tombstone_ids(ledger_path, managed_spaces)
+    ticker_events = _read_ticker_events(
+        ledger_path, managed_spaces, excluded_event_ids=tombstoned_resonance_ids
+    )
+    entity_feed = _read_resonance_entity_feed(
+        ledger_path, managed_spaces, excluded_event_ids=tombstoned_resonance_ids
+    )
+    feedback = _read_feedback_inbox(nova_root, managed_spaces)
+    # Include durable events rotated out of the JSONL ticker and deduplicate.
+    unread_events = _unread_resonance_events(ticker_events, entity_feed)
+    operational = _operational_projection(
+        managed_spaces=managed_spaces,
+        blockers=blockers,
+        supervision=supervision,
+    )
     return {
         "identity": {
             "name": "Nova",
             "voice": "direct, curious, accountable",
         },
         "state": presence,
+        "supervision": supervision,
+        "operational": operational,
         "focus": focus,
         "managed_spaces": managed_spaces,
         "change_markers": change_markers,
         "audited_results": results,
         "blockers": blockers,
         "activity": activity,
+        "decision_feed": decision_feed,
+        "pending_actions": pending_actions,
+        "pending_signals": pending_signals,
+        "release_slot": release_slot,
+        "global_run_slot": global_run_slot,
+        "ticker_events": ticker_events,
+        "entity_feed": entity_feed,
+        "feedback": feedback,
+        "unread_events": unread_events,
+        "unread_event_count": len(unread_events),
+    }
+
+def _read_feedback_inbox(
+    nova_root: Path, managed_spaces: Iterable[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Read local Nova feedback events without writes or model calls."""
+    allowed = {
+        str(item.get("space") or "").strip().lower()
+        for item in managed_spaces
+        if _safe_space(item.get("space"))
+    }
+    path = nova_root / "nova_data" / "entity" / "autobiography.db"
+    if not allowed or not path.is_file():
+        return {"status": "offline", "items": []}
+    connection = None
+    latest: dict[str, dict[str, Any]] = {}
+    try:
+        connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        rows = connection.execute(
+            "SELECT timestamp, payload_json, correlation_id FROM events "
+            "WHERE type = 'nova_feedback' AND source = 'local_feedback_adapter' "
+            "AND visibility = 'private' ORDER BY timestamp DESC LIMIT 32"
+        ).fetchall()
+        for timestamp, payload_json, correlation_id in rows:
+            try:
+                payload = json.loads(payload_json or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, Mapping):
+                continue
+            space = str(payload.get("target_key") or "").strip().lower()
+            status = str(payload.get("status") or "").strip().lower()
+            if space not in allowed or status not in {"queued", "received", "acked", "failed", "offline"}:
+                continue
+            if status == "acked":
+                status = "received"
+            latest.setdefault(space, {
+                "space": space, "status": status,
+                "correlation_id": str(correlation_id or "")[:128],
+                "at": str(timestamp or "")[:64],
+            })
+    except (OSError, sqlite3.Error, ValueError):
+        return {"status": "offline", "items": []}
+    finally:
+        if connection is not None:
+            connection.close()
+    items = list(latest.values())[:_MAX_SPACES]
+    return {"status": items[0]["status"] if len(items) == 1 else ("received" if items else "offline"), "items": items}
+
+def _operational_projection(
+    *,
+    managed_spaces: Iterable[Mapping[str, Any]],
+    blockers: Iterable[Mapping[str, Any]],
+    supervision: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Expose fixed Space-YOLO policy and actionable runtime health facts."""
+    blocker_codes = {str(item.get("code") or "").strip() for item in blockers}
+    if "model_chain_exhausted" in blocker_codes:
+        next_step_code = "refresh_ollama_catalog"
+    elif "model_catalog_unavailable" in blocker_codes:
+        next_step_code = "refresh_ollama_catalog"
+    elif blocker_codes & {"model_provider_unavailable", "host_dispatch_failed", "host_start_failed"}:
+        next_step_code = "verify_host_and_provider"
+    elif blocker_codes & {"governance_changed", "root_changed", "space_deleted"}:
+        next_step_code = "revalidate_space_governance"
+    elif blocker_codes or not (supervision.get("running") is True):
+        next_step_code = "inspect_blocker"
+    else:
+        next_step_code = "continue_supervision"
+    paused_models = sorted({
+        space
+        for item in blockers
+        if str(item.get("code") or "") == "model_chain_exhausted"
+        and (space := _safe_space(item.get("space")))
+    })
+    managed_count = sum(1 for item in managed_spaces if _safe_space(item.get("space")))
+    ticker_active = supervision.get("running") is True
+    # Never probe or infer catalog availability from this read-only route.
+    # ``paused`` is durable evidence from a blocker; otherwise the chain is
+    # explicitly ``not_checked`` until worker admission. This prevents the
+    # entity from implying a local/GPT-OSS or foreign-provider fallback.
+    model_chain_state = "paused" if paused_models else "not_checked"
+    # A lease is not a health check: a stale host can retain it while the
+    # HTTP listener is gone. Surface degraded until a fresh host pulse is
+    # observed, and offline when no lease is visible.
+    lease = supervision.get("lease")
+    lease_state = str(lease.get("state") or "inactive") if isinstance(lease, Mapping) else "inactive"
+    lease_liveness = str(lease.get("liveness") or "not_observed") if isinstance(lease, Mapping) else "not_observed"
+    if not managed_count:
+        runtime_status = "idle"
+    elif not ticker_active:
+        runtime_status = "offline"
+    elif lease_liveness != "verified" or paused_models:
+        runtime_status = "degraded"
+    else:
+        runtime_status = "healthy"
+    return {
+        "management_mode": "space_yolo_only",
+        "enrollment_required": True,
+        "legacy_global_yolo": "source_mode_only",
+        "managed_space_count": min(managed_count, _MAX_SPACES),
+        "ticker": "active" if supervision.get("running") is True else "inactive",
+        "runtime_status": runtime_status,
+        "lease_state": lease_state,
+        "lease_liveness": lease_liveness,
+        "availability": "available" if runtime_status == "healthy" else runtime_status,
+        "paused_model_chain_spaces": paused_models[:_MAX_SPACES],
+        "model_provider": "ollama-cloud",
+        "model_chain_state": model_chain_state,
+        "model_chains": {
+            role: list(chain) for role, chain in _PUBLIC_SWARM_MODEL_CHAINS.items()
+        },
+        # Fixed public next-step code; no raw provider errors or paths leave
+        # the read-only entity projection.
+        "next_step_code": next_step_code,
     }
 
 
@@ -523,6 +729,8 @@ def _managed_space_summaries(spaces_root: Path) -> list[dict[str, Any]]:
     except OSError:
         return []
     summaries: list[dict[str, Any]] = []
+    seen_space_ids: set[str] = set()
+    seen_root_fingerprints: set[str] = set()
     for child in children:
         slug = child.name.lower()
         if not child.is_dir() or slug == _NOVA_SLUG or not _SPACE_SLUG_RE.fullmatch(slug):
@@ -531,6 +739,20 @@ def _managed_space_summaries(spaces_root: Path) -> list[dict[str, Any]]:
         management = config.get("nova_management") if isinstance(config, Mapping) else None
         if not _is_enrolled_yolo_management(management):
             continue
+        # A mutable `nova_management`` flag alone is not proof that Nova may
+        # supervise this directory.  Require the same independently trusted
+        # root, stable space id, and chained governance audit used by the
+        # scheduler marker projection.  This keeps the public card and its
+        # ledger lookups from treating a spoofed Space YAML as enrolled.
+        binding = _marker_binding_from_config(config)
+        if binding is None:
+            continue
+        binding_space_id = str(binding.get("space_id") or "")
+        binding_root_fingerprint = str(binding.get("root_fingerprint") or "")
+        if binding_space_id in seen_space_ids or binding_root_fingerprint in seen_root_fingerprints:
+            continue
+        seen_space_ids.add(binding_space_id)
+        seen_root_fingerprints.add(binding_root_fingerprint)
         summaries.append(
             {
                 "space": slug,
@@ -546,6 +768,244 @@ def _managed_space_summaries(spaces_root: Path) -> list[dict[str, Any]]:
     return summaries
 
 
+def _pending_actions_for(
+    ledger_path: Path, managed_spaces: list[dict[str, Any]]
+) -> tuple[int, int]:
+    """Project coalesced actions plus raw signal counts without writes."""
+    allowed = _managed_space_keys(managed_spaces)
+    if not allowed:
+        return 0, 0
+    connection = _open_read_only_ledger(ledger_path)
+    if connection is None:
+        return 0, 0
+    try:
+        placeholders = ", ".join("?" for _ in allowed)
+        rows = connection.execute(
+            f"SELECT target_key, pending_count FROM nova_supervision_space_state "
+            f"WHERE target_key IN ({placeholders})",
+            allowed,
+        ).fetchall()
+    except sqlite3.Error:
+        return 0, 0
+    finally:
+        connection.close()
+    by_space: dict[str, int] = {}
+    for row in rows:
+        space = _safe_space(row["target_key"])
+        try:
+            count = int(row["pending_count"])
+        except (TypeError, ValueError):
+            continue
+        if space and count >= 0:
+            by_space[space] = min(count, 256)
+    total_actions = 0
+    total_signals = 0
+    for summary in managed_spaces:
+        space = _safe_space(summary.get("space"))
+        count = by_space.get(space, 0)
+        if count:
+            # The runtime coalesces all signals for one Space into one
+            # pending_digest. Presence should therefore show one actionable
+            # item, while retaining the raw signal count for transparency.
+            summary["pending_actions"] = 1
+            summary["pending_signals"] = min(count, 256)
+            total_actions += 1
+            total_signals += min(count, 256)
+    return min(total_actions, 12), min(total_signals, 12 * 256)
+
+
+def _read_ticker_events(
+    ledger_path: Path,
+    managed_spaces: Iterable[Mapping[str, Any]],
+    *,
+    excluded_event_ids: Iterable[str] = (),
+) -> list[dict[str, str]]:
+    """Read only existing redacted ticker lines; never create or repair state."""
+    path = ledger_path.with_name("ticker_events.jsonl")
+    if not path.is_file():
+        return []
+    allowed = set(_managed_space_keys(managed_spaces))
+    if not allowed:
+        return []
+    excluded = {
+        str(event_id).strip().lower()
+        for event_id in excluded_event_ids
+        if re.fullmatch(r"[0-9a-f]{16,128}", str(event_id).strip().lower())
+    }
+    events: list[dict[str, str]] = []
+    seen_event_ids: set[str] = set()
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.readlines()[-(_MAX_TICKER_EVENTS * 2):]
+    except OSError:
+        return []
+    for line in reversed(lines):
+        if len(events) >= _MAX_TICKER_EVENTS:
+            break
+        try:
+            item = json.loads(line)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(item, Mapping):
+            continue
+        space = _safe_space(item.get("space"))
+        source = str(item.get("source") or "").strip().lower()
+        stage = str(item.get("stage") or "").strip().lower()
+        status = str(item.get("status") or "").strip().lower()
+        reason = str(item.get("reason") or "").strip().lower()
+        if space not in allowed or source not in {"git", "kanban", "ci", "heartbeat", "bridge"}:
+            continue
+        if stage not in {"observed", "handled"} or status not in {"pending", "handled", "failed"} or not re.fullmatch(r"[a-z0-9_:-]{1,64}", reason):
+            continue
+        event_id = str(item.get("event_id") or "").strip().lower()
+        if (
+            not re.fullmatch(r"[a-z0-9]{16,128}", event_id)
+            or event_id in seen_event_ids
+            or event_id in excluded
+        ):
+            continue
+        seen_event_ids.add(event_id)
+        at = _safe_timestamp(item.get("at"))
+        events.append({"event_id": event_id, "space": space, "source": source, "stage": stage, "status": status, "reason": reason, "at": at})
+    return events
+
+
+def _read_resonance_tombstone_ids(
+    ledger_path: Path, managed_spaces: Iterable[Mapping[str, Any]]
+) -> set[str]:
+    """Read revoked resonance identities without opening the DB for write.
+
+    Tombstones are the durable revocation contract.  Presence must apply them
+    to both the compact resonance projection and the rotated JSONL ticker, or a
+    revoked event could reappear in the attention badge after re-enrollment.
+    Older databases without the table simply have no tombstones to apply.
+    """
+    path = ledger_path.with_name("resonance_memory.sqlite")
+    allowed = tuple(_managed_space_keys(managed_spaces))
+    if not allowed or not path.is_file():
+        return set()
+    try:
+        uri = "file:" + path.resolve().as_posix() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as connection:
+            table = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='resonance_entity_tombstone'"
+            ).fetchone()
+            if table is None:
+                return set()
+            placeholders = ", ".join("?" for _ in allowed)
+            rows = connection.execute(
+                f"""SELECT DISTINCT t.event_id
+                    FROM resonance_entity_tombstone t
+                    JOIN resonance_events e ON e.event_id = t.event_id
+                    WHERE e.space IN ({placeholders})
+                    LIMIT ?""",
+                (*allowed, _MAX_TICKER_EVENTS * 2),
+            ).fetchall()
+    except (OSError, sqlite3.Error, ValueError):
+        return set()
+    return {
+        str(row[0]).strip().lower()
+        for row in rows
+        if re.fullmatch(r"[0-9a-f]{16,128}", str(row[0]).strip().lower())
+    }
+
+
+def _read_resonance_entity_feed(
+    ledger_path: Path,
+    managed_spaces: Iterable[Mapping[str, Any]],
+    *,
+    excluded_event_ids: Iterable[str] = (),
+) -> list[dict[str, str]]:
+    """Read the durable resonance projection without opening SQLite for write."""
+    path = ledger_path.with_name("resonance_memory.sqlite")
+    allowed = set(_managed_space_keys(managed_spaces))
+    if not allowed or not path.is_file():
+        return []
+    event_re = re.compile(r"[0-9a-f]{16,128}\Z")
+    space_re = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z")
+    field_re = re.compile(r"[a-z0-9_:-]{1,64}\Z")
+    source_values = {"git", "kanban", "ci", "heartbeat", "bridge"}
+    try:
+        uri = "file:" + path.resolve().as_posix() + "?mode=ro"
+        with sqlite3.connect(uri, uri=True) as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT event_id, space, source, stage, status, reason, observed_at "
+                "FROM resonance_events ORDER BY observed_at DESC, event_id DESC LIMIT ?",
+                (_MAX_TICKER_EVENTS * 2,),
+            ).fetchall()
+    except (OSError, sqlite3.Error, ValueError):
+        return []
+    excluded = {
+        str(event_id).strip().lower()
+        for event_id in excluded_event_ids
+        if re.fullmatch(r"[0-9a-f]{16,128}", str(event_id).strip().lower())
+    }
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in rows:
+        event_id = str(row["event_id"] or "").strip().lower()
+        space = str(row["space"] or "").strip().lower()
+        source = str(row["source"] or "").strip().lower()
+        stage = str(row["stage"] or "").strip().lower()
+        status = str(row["status"] or "").strip().lower()
+        reason = str(row["reason"] or "").strip().lower()
+        if (event_id in seen or event_id in excluded or event_re.fullmatch(event_id) is None or
+            space not in allowed or space_re.fullmatch(space) is None or
+            source not in source_values or stage not in {"observed", "handled"} or
+            status not in {"pending", "handled", "failed"} or field_re.fullmatch(reason) is None):
+            continue
+        try:
+            timestamp = float(row["observed_at"])
+            if not math.isfinite(timestamp):
+                continue
+            at = _marker_checkpoint_iso(timestamp)
+            if at is None:
+                continue
+        except (TypeError, ValueError, OverflowError):
+            continue
+        seen.add(event_id)
+        result.append({"event_id": event_id, "space": space, "source": source, "stage": stage, "status": status, "reason": reason, "at": at})
+        if len(result) >= _MAX_TICKER_EVENTS:
+            break
+    return result
+
+def _unread_resonance_events(
+    ticker_events: Iterable[Mapping[str, Any]],
+    entity_feed: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    """Merge pending/failed ticker and durable resonance observations.
+
+    The browser uses this bounded projection for the attention badge.  Keep
+    only already-redacted fields and deduplicate by the stable event id so a
+    ticker line and its persisted resonance cannot double-count work.
+    """
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for source_items in (ticker_events, entity_feed):
+        for item in source_items:
+            if not isinstance(item, Mapping):
+                continue
+            status = str(item.get("status") or "").strip().lower()
+            stage = str(item.get("stage") or "").strip().lower()
+            event_id = str(item.get("event_id") or "").strip().lower()
+            if status not in {"pending", "failed"} or (stage == "handled" and status == "handled"):
+                continue
+            if not re.fullmatch(r"[0-9a-f]{16,128}", event_id) or event_id in seen:
+                continue
+            seen.add(event_id)
+            result.append({
+                "event_id": event_id,
+                "space": str(item.get("space") or "").strip().lower(),
+                "source": str(item.get("source") or "").strip().lower(),
+                "stage": stage,
+                "status": status,
+                "reason": str(item.get("reason") or "").strip().lower(),
+                "at": str(item.get("at") or "").strip(),
+            })
+            if len(result) >= _MAX_TICKER_EVENTS:
+                return result
+    return result
 def _managed_space_marker_bindings(spaces_root: Path) -> dict[str, dict[str, object]]:
     """Read only audited scheduler bindings; unprovable Spaces are omitted."""
     try:
@@ -553,6 +1013,8 @@ def _managed_space_marker_bindings(spaces_root: Path) -> dict[str, dict[str, obj
     except OSError:
         return {}
     bindings: dict[str, dict[str, object]] = {}
+    seen_space_ids: set[str] = set()
+    seen_root_fingerprints: set[str] = set()
     for child in children:
         slug = child.name.lower()
         if not child.is_dir() or slug == _NOVA_SLUG or not _SPACE_SLUG_RE.fullmatch(slug):
@@ -560,6 +1022,12 @@ def _managed_space_marker_bindings(spaces_root: Path) -> dict[str, dict[str, obj
         binding = _marker_binding_from_config(_read_space_config(child / "space.yaml"))
         if binding is None:
             continue
+        binding_space_id = str(binding.get("space_id") or "")
+        binding_root_fingerprint = str(binding.get("root_fingerprint") or "")
+        if binding_space_id in seen_space_ids or binding_root_fingerprint in seen_root_fingerprints:
+            continue
+        seen_space_ids.add(binding_space_id)
+        seen_root_fingerprints.add(binding_root_fingerprint)
         bindings[slug] = binding
         if len(bindings) >= _MAX_SPACES:
             break
@@ -889,11 +1357,76 @@ def _read_supervisor_admissions(
                 "admission_id": admission_id,
                 "space": space,
                 "state": _safe_run_state(row["state"]),
+                "run_id": _safe_run_id(row["run_id"]),
+                "canonical_root": _safe_canonical_root(row["canonical_root"]),
                 "at": _safe_timestamp(row["updated_at"]),
             }
         )
     return sorted(admissions, key=lambda item: (item["at"], item["space"]), reverse=True)
 
+
+def _global_run_slot_projection(
+    admissions: Iterable[Mapping[str, str]],
+) -> dict[str, str | None]:
+    """Project only the durable global admission owner, never a run/root id."""
+    for admission in admissions:
+        if admission.get("state") in {
+            "provisioning",
+            "active",
+            "paused",
+            "cancelling",
+            "abandoning",
+        }:
+            return {
+                "state": "occupied",
+                "occupied_by": _safe_space(admission.get("space")) or None,
+                "occupied_at": _safe_timestamp(admission.get("at")),
+                # Admissions have no automatic expiry; humans release paused
+                # runs explicitly. Keep the absence explicit instead of
+                # inventing a timeout in a read-only projection.
+                "expires_at": None,
+            }
+    return {
+        "state": "available",
+        "occupied_by": None,
+        "occupied_at": None,
+        "expires_at": None,
+    }
+
+
+def _read_durable_slot_blockers(
+    path: Path, marker_bindings: Mapping[str, Mapping[str, object]]
+) -> list[str]:
+    """Return only marker-backed Spaces whose retry was durably slot-blocked."""
+    if not marker_bindings or _ledger_has_active_sidecar(path):
+        return []
+    connection = _open_read_only_ledger(path)
+    if connection is None or not _has_marker_state_columns(connection):
+        if connection is not None:
+            connection.close()
+        return []
+    try:
+        spaces: list[str] = []
+        for space, binding in marker_bindings.items():
+            try:
+                row = connection.execute(_MARKER_STATE_SQL, (space,)).fetchone()
+            except sqlite3.Error:
+                continue
+            if (
+                row is not None
+                and _marker_row_matches_binding(row, space, binding)
+                and _valid_marker_digest(row["pending_digest"])
+                and str(row["last_check_code"] or "") in {
+                    "active_limit",
+                    "skipped_slot_occupied",
+                }
+            ):
+                spaces.append(space)
+        return spaces[:_MAX_SPACES]
+    except sqlite3.Error:
+        return []
+    finally:
+        connection.close()
 
 def _latest_admission_by_space(
     admissions: Iterable[Mapping[str, str]], managed_spaces: Iterable[Mapping[str, Any]]
@@ -907,6 +1440,70 @@ def _latest_admission_by_space(
     return latest
 
 
+def _release_slot_for(admission: Mapping[str, str]) -> dict[str, str] | None:
+    """Expose only an opaque, human-only release affordance for paused runs."""
+    if admission.get("state") != "paused":
+        return None
+    run_id = _safe_run_id(admission.get("run_id"))
+    root = str(admission.get("canonical_root") or "").strip()
+    if not run_id or not root:
+        return None
+    try:
+        from swarm_core.store import ProjectSwarmStore
+
+        run = ProjectSwarmStore.open_read_only(Path(root)).get_run(run_id)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return None
+    if run is None or run.status != "paused":
+        return None
+    if str(run.metadata.get("started_by") or "").strip().lower() == "nova":
+        return None
+    return {"run_id": run_id, "space": _safe_space(admission.get("space"))}
+
+
+def _supervision_for(ledger_path: Path) -> dict[str, object]:
+    """Project only the current host-ticker liveness from the durable lease.
+
+    A Presence GET must not inspect processes or refresh the lease.  The lease
+    is therefore considered live only while its active record has not expired;
+    owner and lease identifiers deliberately never leave this function.
+    """
+    # Presence is a read-only projection and cannot prove that the process
+    # owning a durable lease is still serving HTTP. Keep that distinction
+    # explicit so the UI never turns an unverified lease into a false
+    # "available" signal.
+    inactive: dict[str, object] = {
+        "running": False,
+        "last_pulse_at": None,
+        "lease": {"state": "inactive", "liveness": "not_observed"},
+    }
+    connection = _open_read_only_ledger(ledger_path)
+    if connection is None:
+        return inactive
+    try:
+        row = connection.execute(
+            """SELECT expires_at, updated_at
+               FROM supervisor_ticker_leases
+               WHERE state = 'active'
+               ORDER BY updated_at DESC
+               LIMIT 1"""
+        ).fetchone()
+    except sqlite3.Error:
+        return inactive
+    finally:
+        connection.close()
+    if row is None or not _valid_marker_epoch(row["expires_at"]):
+        return inactive
+    if float(row["expires_at"]) <= datetime.now(timezone.utc).timestamp():
+        return inactive
+    return {
+        "running": True,
+        "last_pulse_at": _marker_checkpoint_iso(row["updated_at"]),
+        "lease": {"state": "active", "liveness": "lease_unverified"},
+    }
+
+
+
 def _focus_for(
     admissions: Iterable[Mapping[str, str]],
     managed_spaces: Iterable[Mapping[str, Any]],
@@ -918,6 +1515,17 @@ def _focus_for(
         state = str(admission.get("state") or "")
         if space in allowed_spaces and state in _PUBLIC_RUN_STATES:
             return {"kind": "supervision", "space": space, "state": state}
+    # A coalesced ticker signal is real autonomous work even before admission
+    # is created. Surface that Space as Nova's focus instead of generic idle.
+    for summary in managed_spaces:
+        space = _safe_space(summary.get("space"))
+        try:
+            pending = int(summary.get("pending_actions") or 0)
+        except (TypeError, ValueError):
+            pending = 0
+        if space in allowed_spaces and pending > 0:
+            state = _safe_run_state(summary.get("state"))
+            return {"kind": "pending", "space": space, "state": state if state != "unknown" else "idle"}
     return {"kind": "presence", "state": presence}
 
 
@@ -989,6 +1597,7 @@ def _read_latest_audit_events(
             {
                 "space": space,
                 "event_type": str(row["event_type"] or "").strip().lower(),
+                "reason": str(row["reason"] or "").strip().lower(),
                 "at": _safe_timestamp(row["created_at"]),
                 "sequence": str(row["sequence"] or ""),
             }
@@ -1008,6 +1617,22 @@ def _activity_for(events: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
     return activity
 
 
+def _decision_feed_for(events: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
+    """Bounded public explanations for Nova's latest supervisor decisions."""
+    decisions: list[dict[str, str]] = []
+    for event in events:
+        space = _safe_space(event.get("space"))
+        kind = _PUBLIC_ACTIVITY_KINDS.get(str(event.get("event_type") or ""))
+        if not space or not kind:
+            continue
+        raw_reason = str(event.get("reason") or "").strip().lower()
+        reason = _PUBLIC_REASON_CODES.get(raw_reason, "policy_checked")
+        decisions.append({"space": space, "event": kind, "reason": reason, "at": event.get("at", "")})
+        if len(decisions) >= _MAX_ACTIVITY:
+            break
+    return decisions
+
+
 def _audited_results_for(events: Iterable[Mapping[str, str]]) -> list[dict[str, str]]:
     results: list[dict[str, str]] = []
     for event in events:
@@ -1021,11 +1646,20 @@ def _audited_results_for(events: Iterable[Mapping[str, str]]) -> list[dict[str, 
     return results
 
 
-def _blockers_for(managed_spaces: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
+def _blockers_for(
+    managed_spaces: Iterable[Mapping[str, Any]],
+    events: Iterable[Mapping[str, str]] = (),
+) -> list[dict[str, str]]:
     blockers: list[dict[str, str]] = []
+    reason_by_space = {
+        _safe_space(event.get("space")): _PUBLIC_REASON_CODES.get(event.get("reason", ""), "")
+        for event in events
+        if _safe_space(event.get("space"))
+    }
     for space in managed_spaces:
         state = str(space.get("state") or "")
-        code = _BLOCKER_CODES.get(state)
+        key = _safe_space(space.get("space"))
+        code = reason_by_space.get(key) or _BLOCKER_CODES.get(state)
         if code:
             blockers.append({"space": str(space["space"]), "code": code})
     return blockers
@@ -1039,6 +1673,17 @@ def _safe_space(value: object) -> str:
 def _safe_run_state(value: object) -> str:
     candidate = str(value or "").strip().lower()
     return candidate if candidate in _PUBLIC_RUN_STATES else "unknown"
+
+
+def _safe_run_id(value: object) -> str:
+    candidate = str(value or "").strip().lower()
+    return candidate if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", candidate) else ""
+
+
+def _safe_canonical_root(value: object) -> str:
+    # Kept internal to the read-only projection; never returned to the client.
+    candidate = str(value or "").strip()
+    return candidate if len(candidate) <= 1024 and candidate else ""
 
 
 def _safe_timestamp(value: object) -> str:

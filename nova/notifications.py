@@ -13,9 +13,11 @@ from dataclasses import dataclass
 from datetime import date
 from hashlib import sha256
 import json
+import os
 import re
 import sqlite3
 from typing import Mapping, Protocol
+import urllib.request
 
 from nova.space_supervisor import ManagedSpaceSupervisor
 from runtime.redact import redact_sensitive_text
@@ -25,6 +27,7 @@ _OPAQUE_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _BLOCKER_CODES = frozenset(
     {
         "governance_revoked",
+        "ticker_thread_escalated",
         "root_mismatch",
         "dispatch_failed",
         "verification_failed",
@@ -63,6 +66,64 @@ class PrivateTelegramTarget:
         return cls(chat_id=_private_chat_id(value.get("chat_id")))
 
 
+class TelegramBotPrivateSender:
+    """Minimal Telegram Bot API sender bound to one injected token."""
+
+    def __init__(self, token: str, *, endpoint: str = "https://api.telegram.org") -> None:
+        if not isinstance(token, str) or not token.strip() or len(token) > 512:
+            raise ValueError("Telegram bot token is invalid")
+        if not isinstance(endpoint, str) or not endpoint.startswith("https://"):
+            raise ValueError("Telegram endpoint must use HTTPS")
+        self._token = token.strip()
+        self._endpoint = endpoint.rstrip("/")
+
+    def send_private(self, chat_id: int, text: str) -> object:
+        payload = json.dumps({"chat_id": chat_id, "text": text}, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self._endpoint}/bot{self._token}/sendMessage",
+            data=payload,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        if not isinstance(result, Mapping) or result.get("ok") is not True:
+            raise RuntimeError("Telegram notification was not accepted")
+        return result
+
+
+
+def build_env_notifier(
+    supervisor: ManagedSpaceSupervisor,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> "NovaTelegramNotifications | None":
+    """Build only from an explicit private target and token.
+
+    No target discovery, update polling, group fallback, or default activation
+    is permitted. Missing or malformed configuration keeps notifications off.
+    """
+    if not isinstance(supervisor, ManagedSpaceSupervisor):
+        raise TypeError("Nova Telegram notifications require a supervisor")
+    source = os.environ if env is None else env
+    token = str(source.get("TELEGRAM_BOT_TOKEN", "") or "").strip()
+    chat_id = str(source.get("NOVA_TELEGRAM_CHAT_ID", "") or "").strip()
+    chat_type = str(source.get("NOVA_TELEGRAM_CHAT_TYPE", "") or "").strip().lower()
+    if not token or not chat_id or chat_type != "private":
+        return None
+    try:
+        target = PrivateTelegramTarget.from_config(
+            {"chat_id": int(chat_id), "chat_type": chat_type}
+        )
+        sender = TelegramBotPrivateSender(token)
+    except (TypeError, ValueError):
+        return None
+    return NovaTelegramNotifications(
+        supervisor=supervisor,
+        target=target,
+        sender=sender,
+        allowed_space_ids=_discover_managed_space_ids(supervisor),
+    )
 class NovaTelegramNotifications:
     """Fixed-template notifier with central durable at-most-once claims."""
 
@@ -72,6 +133,7 @@ class NovaTelegramNotifications:
         supervisor: ManagedSpaceSupervisor,
         target: PrivateTelegramTarget,
         sender: PrivateTelegramSender,
+        allowed_space_ids: set[str] | frozenset[str],
     ) -> None:
         if not isinstance(supervisor, ManagedSpaceSupervisor):
             raise TypeError("Nova Telegram notifications require a supervisor")
@@ -82,6 +144,13 @@ class NovaTelegramNotifications:
         self._supervisor = supervisor
         self._target = target
         self._sender = sender
+        # Host-resolved YOLO+enrolled IDs form the notification boundary.
+        if not isinstance(allowed_space_ids, (set, frozenset)):
+            raise TypeError("Nova Telegram notifications require managed Space IDs")
+        self._allowed_space_ids = frozenset(
+            value for value in allowed_space_ids
+            if isinstance(value, str) and _OPAQUE_ID_RE.fullmatch(value)
+        )
 
     def send_blocker(
         self,
@@ -97,6 +166,8 @@ class NovaTelegramNotifications:
         del display_name
         space = _opaque_id(space_id, "space id")
         run = _opaque_id(run_id, "run id")
+        if space not in self._allowed_space_ids:
+            return "ignored_unmanaged_space"
         if blocker_code not in _BLOCKER_CODES:
             raise ValueError("Nova blocker code is not allowlisted")
         claim_digest = _claim_digest(
@@ -126,6 +197,8 @@ class NovaTelegramNotifications:
         del display_name
         space = _opaque_id(space_id, "space id")
         day = _utc_date(utc_date)
+        if space not in self._allowed_space_ids:
+            return "ignored_unmanaged_space"
         counts = _status_counts(status_counts)
         claim_digest = _claim_digest(
             {"kind": "daily_digest", "space_id": space, "utc_date": day}
@@ -182,6 +255,29 @@ class NovaTelegramNotifications:
             return "failed"
         return result
 
+
+def _discover_managed_space_ids(supervisor: ManagedSpaceSupervisor) -> frozenset[str]:
+    """Resolve only currently enrolled YOLO Space IDs without writing state."""
+    try:
+        from web.api.space_engine import get_all_spaces
+        spaces = get_all_spaces()
+    except Exception:
+        return frozenset()
+    ids: set[str] = set()
+    for space in spaces:
+        target = str(getattr(space, "slug", "") or "").strip().lower()
+        if not target:
+            continue
+        try:
+            governance = supervisor.current_governance(target)
+        except Exception:
+            continue
+        if governance is None or governance.yolo is not True or governance.enrolled is not True:
+            continue
+        value = str(governance.space_id or "")
+        if _OPAQUE_ID_RE.fullmatch(value):
+            ids.add(value)
+    return frozenset(ids)
 
 def _ensure_claim_schema(connection: sqlite3.Connection) -> None:
     connection.execute(

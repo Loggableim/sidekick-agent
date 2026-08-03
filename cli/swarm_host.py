@@ -18,7 +18,7 @@ from typing import Any, Callable, ContextManager, Iterator, Mapping
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from swarm_core.engine import PreCompletionHook, RunSummary, SwarmEngine
+from swarm_core.engine import ActionExecutor, PreCompletionHook, RunSummary, SwarmEngine
 from swarm_core.models import (
     ModelCatalogSnapshot,
     ModelRegistry,
@@ -55,6 +55,7 @@ class SwarmExecutionOptions:
     pre_completion_hook: PreCompletionHook | None = None
     required_pre_completion_hook_id: str | None = None
     execution_guard: Callable[[Path, SwarmRun], str | None] | None = None
+    action_executor: ActionExecutor | None = None
     on_completed: RunCompletionObserver | None = None
     blocked_reason: str | None = None
 
@@ -64,6 +65,7 @@ ExecutionOptionsResolver = Callable[[Path, SwarmRun], SwarmExecutionOptions | No
 OLLAMA_CLOUD_VERIFIED_CATALOG_SOURCE = "ollama-cloud-api-live-verified"
 OLLAMA_CLOUD_UNAVAILABLE_CATALOG_SOURCE = "ollama-cloud-api-live-unavailable"
 OLLAMA_CLOUD_CANONICAL_BASE_URL = "https://ollama.com/v1"
+SWARM_MODEL_TIMEOUT_SECONDS = 30.0
 
 _ALLOWED_BLOCKED_EXECUTION_OPTION_REASONS = frozenset(
     {
@@ -199,7 +201,7 @@ class SidekickSwarmService:
         """Continue a durable run, waiting at model boundaries while paused."""
         project_root = Path(project_root).resolve()
         store = ProjectSwarmStore(project_root)
-        owner_token = str(uuid4())
+        owner_token = f"dashboard:{os.getpid()}:{uuid4().hex}"
         if not store.claim_run_execution_lease(run_id, owner_token):
             raise RuntimeError("Swarm execution is already active for this run")
         release_lease_here = True
@@ -287,6 +289,7 @@ class SidekickSwarmService:
                     options.required_pre_completion_hook_id if options is not None else None
                 ),
                 execution_guard=(options.execution_guard if options is not None else None),
+                action_executor=(options.action_executor if options is not None else None),
             ),
             snapshot,
             store,
@@ -685,6 +688,10 @@ def _valid_execution_options(run: SwarmRun, options: SwarmExecutionOptions) -> b
         and _is_pre_completion_hook(options.pre_completion_hook)
         and _valid_required_pre_completion_hook_contract(run, options)
         and (options.execution_guard is None or callable(options.execution_guard))
+        and (
+            options.action_executor is None
+            or callable(getattr(options.action_executor, "execute", None))
+        )
         and (options.on_completed is None or callable(options.on_completed))
     )
 
@@ -784,6 +791,7 @@ def _sidekick_call_llm(**kwargs: Any) -> Any:
 
     return call_llm(
         required_base_url=OLLAMA_CLOUD_CANONICAL_BASE_URL,
+        timeout=SWARM_MODEL_TIMEOUT_SECONDS,
         **kwargs,
     )
 
