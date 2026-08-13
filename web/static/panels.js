@@ -8532,6 +8532,9 @@ function _buildProviderCard(p){
         const account=document.createElement('div'); account.className='provider-card-hint';
         account.textContent='Google-Konto: '+p.oauth_email; body.appendChild(account);
       }
+      const quotaHint=document.createElement('div'); quotaHint.className='provider-card-hint';
+      quotaHint.textContent='Google AI Pro/Ultra: Kontingent wird mit Gemini CLI und Code Assist geteilt.';
+      body.appendChild(quotaHint);
       const btn=document.createElement('button'); btn.className='sm-btn';
       btn.textContent=p.has_key?'Re-authenticate with Google':'Mit Google anmelden';
       btn.addEventListener('click',()=>window.startGoogleGeminiOAuth&&window.startGoogleGeminiOAuth(btn));
