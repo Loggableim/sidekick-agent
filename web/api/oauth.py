@@ -818,6 +818,16 @@ def cancel_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
     return result
 
 
+def disconnect_google_oauth() -> dict[str, Any]:
+    """Remove Google OAuth credentials for the active profile only."""
+    from runtime.google_oauth import clear_credentials, load_credentials
+    had_credentials = load_credentials() is not None
+    clear_credentials()
+    from runtime.credential_pool import write_credential_pool
+    write_credential_pool("google-gemini-cli", [])
+    return {"ok": True, "provider": "google-gemini-cli", "disconnected": had_credentials}
+
+
 # Backward-compatible names from the abandoned spike. They intentionally do not
 # expose provider device secrets to callers anymore.
 def start_codex_device_code():

@@ -8528,10 +8528,19 @@ function _buildProviderCard(p){
     body.appendChild(hint);
     if(p.id==='google-gemini-cli'){
       const actions=document.createElement('div'); actions.className='provider-card-actions';
+      if(p.oauth_email){
+        const account=document.createElement('div'); account.className='provider-card-hint';
+        account.textContent='Google-Konto: '+p.oauth_email; body.appendChild(account);
+      }
       const btn=document.createElement('button'); btn.className='sm-btn';
       btn.textContent=p.has_key?'Re-authenticate with Google':'Mit Google anmelden';
       btn.addEventListener('click',()=>window.startGoogleGeminiOAuth&&window.startGoogleGeminiOAuth(btn));
       actions.appendChild(btn); body.appendChild(actions);
+      if(p.has_key){
+        const disconnect=document.createElement('button'); disconnect.className='sm-btn'; disconnect.textContent='Verbindung trennen';
+        disconnect.addEventListener('click',async()=>{if(!confirm('Google-Verbindung für dieses Profil trennen?'))return; await api('/api/oauth/google/disconnect',{method:'POST'}); location.reload();});
+        actions.appendChild(disconnect);
+      }
     }
     card.appendChild(body);
     header.addEventListener('click',()=>card.classList.toggle('open'));

@@ -62,7 +62,7 @@ def _custom_provider_name_matches(provider_id: str, name: object) -> bool:
 _OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
 _PROVIDER_QUOTA_TIMEOUT_SECONDS = 3.0
 _ACCOUNT_USAGE_SUBPROCESS_TIMEOUT_SECONDS = 35.0
-_ACCOUNT_USAGE_PROVIDERS = frozenset({"openai-codex", "anthropic"})
+_ACCOUNT_USAGE_PROVIDERS = frozenset({"openai-codex", "anthropic", "google-gemini-cli"})
 _RESPONSE_METADATA_MAX_AGE_SECONDS = 15 * 60
 
 # Upper bound on simultaneous profile-isolated quota probe subprocesses.
@@ -880,6 +880,25 @@ def _fetch_account_usage_with_profile_context(provider: str) -> Any:
 
 
 def _provider_account_usage_status(provider: str, display_name: str) -> dict[str, Any]:
+    if provider == "google-gemini-cli":
+        try:
+            from runtime.google_oauth import get_valid_access_token, load_credentials
+            from runtime.google_code_assist import retrieve_user_quota
+            creds = load_credentials()
+            if not creds:
+                raise RuntimeError("not connected")
+            token = get_valid_access_token()
+            buckets = retrieve_user_quota(token, project_id=creds.project_id)
+            windows = [{"label": b.model_id or "Gemini", "remaining_percent": f"{b.remaining_fraction * 100:.0f}%", "detail": b.reset_time_iso or "daily quota"} for b in buckets]
+            return {"ok": True, "provider": provider, "display_name": display_name, "supported": True,
+                    "status": "available", "label": "Gemini Code Assist quota", "quota": None,
+                    "account_limits": {"plan": "Google Gemini / Code Assist", "windows": windows,
+                                       "details": [f"Account: {creds.email}" if creds.email else "Google account"]},
+                    "message": "Google Gemini quota loaded."}
+        except Exception as exc:
+            return {"ok": False, "provider": provider, "display_name": display_name, "supported": True,
+                    "status": "unavailable", "quota": None, "account_limits": None,
+                    "message": "Google Gemini quota is unavailable. Reconnect Google or check project access."}
     snapshot = _fetch_account_usage_with_profile_context(provider)
     account_limits = _serialize_account_usage_snapshot(snapshot)
     if account_limits and account_limits.get("available"):
@@ -1220,6 +1239,8 @@ def get_providers() -> dict[str, Any]:
         # Determine key source
         key_source = "none"
         auth_error = None
+        oauth_email = ""
+        auth_state = "not_connected"
         if is_oauth:
             key_source = "oauth"
             # Check if actually authenticated via sidekick_cli.
@@ -1228,8 +1249,22 @@ def get_providers() -> dict[str, Any]:
             # returns logged_in=False (e.g. token not in the sidekick credential pool,
             # or refresh token consumed by native Codex CLI / VS Code extension).
             try:
-                from cli.auth import get_auth_status as _gas
-                status = _gas(pid)
+                if pid == "google-gemini-cli":
+                    from runtime.google_oauth import load_credentials
+                    creds = load_credentials()
+                    status = None
+                    has_key = bool(creds and creds.access_token)
+                    oauth_email = str(getattr(creds, "email", "") or "")
+                    if has_key and creds.access_token_expired():
+                        auth_error = "Google token expired; sign in again."
+                        auth_state = "expired"
+                    elif has_key:
+                        auth_state = "connected"
+                    else:
+                        auth_error = "Google Gemini is not connected."
+                else:
+                    from cli.auth import get_auth_status as _gas
+                    status = _gas(pid)
                 if isinstance(status, dict) and status.get("logged_in"):
                     has_key = True
                     key_source = status.get("key_source", "oauth")
@@ -1386,6 +1421,8 @@ def get_providers() -> dict[str, Any]:
             "is_oauth": is_oauth,
             "key_source": key_source,
             "auth_error": auth_error,
+            "oauth_email": oauth_email,
+            "auth_state": auth_state,
             "models": models,
             # models_total reflects the complete catalog size (e.g. 396 for
             # an enterprise Nous Portal account), even when "models" is

@@ -2143,6 +2143,7 @@ from web.api.onboarding import (
 )
 from web.api.oauth import (
     cancel_onboarding_oauth_flow,
+    disconnect_google_oauth,
     poll_onboarding_oauth_flow,
     start_onboarding_oauth_flow,
 )
@@ -7747,6 +7748,12 @@ def handle_post(handler, parsed) -> bool:
             return j(handler, cancel_onboarding_oauth_flow(body), extra_headers={"Cache-Control": "no-store"})
         except ValueError as e:
             return bad(handler, str(e))
+
+    if parsed.path == "/api/oauth/google/disconnect":
+        try:
+            return j(handler, disconnect_google_oauth(), extra_headers={"Cache-Control": "no-store"})
+        except Exception:
+            return bad(handler, "Google credentials could not be disconnected.", 500)
 
     if parsed.path == "/api/onboarding/setup":
         # Writing API keys to disk - restrict to local/private networks unless auth is active.
