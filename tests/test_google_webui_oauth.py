@@ -96,3 +96,13 @@ def test_google_callback_rejects_wrong_state():
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_google_disconnect_clears_runtime_and_pool(monkeypatch):
+    calls = []
+    monkeypatch.setattr("runtime.google_oauth.load_credentials", lambda: object())
+    monkeypatch.setattr("runtime.google_oauth.clear_credentials", lambda: calls.append("runtime"))
+    monkeypatch.setattr("runtime.credential_pool.write_credential_pool", lambda provider, entries: calls.append((provider, entries)))
+    result = oauth.disconnect_google_oauth()
+    assert result["disconnected"] is True
+    assert calls == ["runtime", ("google-gemini-cli", [])]
