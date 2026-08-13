@@ -1,6 +1,8 @@
 """Contract tests for the browser-facing Google Gemini OAuth integration."""
 
 from pathlib import Path
+import threading
+import urllib.request
 
 import pytest
 
@@ -71,3 +73,26 @@ def test_google_token_persistence_rejects_incomplete_response():
     with pytest.raises(google_oauth.GoogleOAuthError) as exc:
         google_oauth._persist_token_response({"access_token": "only-access"})
     assert exc.value.code == "google_oauth_incomplete_token_response"
+
+
+def test_google_callback_rejects_wrong_state():
+    server, _ = google_oauth._bind_callback_server(0)
+    port = server.server_address[1]
+    google_oauth._OAuthCallbackHandler.expected_state = "expected"
+    google_oauth._OAuthCallbackHandler.captured_code = None
+    google_oauth._OAuthCallbackHandler.captured_error = None
+    google_oauth._OAuthCallbackHandler.ready = threading.Event()
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(Exception):
+            urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/oauth2callback?state=wrong&code=unsafe",
+                timeout=3,
+            )
+        assert google_oauth._OAuthCallbackHandler.captured_error == "state_mismatch"
+        assert google_oauth._OAuthCallbackHandler.captured_code is None
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
