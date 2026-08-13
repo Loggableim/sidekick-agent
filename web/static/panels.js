@@ -8516,6 +8516,9 @@ function _buildProviderCard(p){
     hint.className='provider-card-hint';
     if(p.key_source==='config_yaml'){
       hint.textContent=_providerText('providers_oauth_config_yaml_hint', 'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run sidekick auth.');
+    } else if(p.id==='google-gemini-cli' && !p.has_key){
+      hint.textContent='Nicht verbunden. Starte die Google-Anmeldung direkt hier in der WebUI.';
+      hint.style.color='var(--muted)';
     } else if(p.auth_error){
       hint.textContent=p.auth_error;
       hint.style.color='var(--accent)';

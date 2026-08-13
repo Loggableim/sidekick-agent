@@ -305,6 +305,8 @@ function _renderOnboardingBody(){
       const providerLabel=esc(currentProviderName);
       const codexOauthPendingBody=currentProviderName==='openai-codex'
         ? 'This instance is configured to use <strong>openai-codex</strong>, which uses OAuth rather than an API key. Use the button below to authenticate with ChatGPT, then continue once provider status refreshes.'
+        : currentProviderName==='google-gemini-cli'
+          ? 'Gemini CLI wird direkt über die WebUI mit deinem Google-Konto verbunden.'
         : t('onboarding_oauth_provider_not_ready_body').replace('{provider}',providerLabel);
       if(isReady){
         _setOnboardingNotice(t('onboarding_notice_setup_already_ready'),'success');
@@ -333,6 +335,7 @@ function _renderOnboardingBody(){
               <strong>${t('onboarding_oauth_provider_not_ready_title')}</strong>
               <p>${codexOauthPendingBody}</p>
               ${currentProviderName==='openai-codex'?`<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="sm-btn" id="codexOAuthBtn" onclick="startCodexOAuth()" type="button">${t('oauth_login_codex')}</button></div><div id="codexOAuthFlow" style="display:none;margin-top:12px"></div>`:''}
+              ${currentProviderName==='google-gemini-cli'?`<div style="margin-top:12px"><button class="sm-btn" id="googleGeminiOAuthBtn" onclick="startGoogleGeminiOnboardingOAuth()" type="button">Mit Google verbinden</button></div><div id="googleGeminiOAuthFlow" style="margin-top:12px"></div>`:''}
             </div>
           </div>
           <p class="onboarding-copy" style="margin-top:20px">${t('onboarding_oauth_switch_hint')}</p>
