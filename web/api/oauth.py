@@ -39,13 +39,12 @@ CODEX_REDIRECT_URI = f"{CODEX_ISSUER}/deviceauth/callback"
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
 CODEX_FLOW_MAX_WAIT_SECONDS = 15 * 60
 
-_ALLOWED_ONBOARDING_OAUTH_PROVIDERS = {"openai-codex", "anthropic", "claude", "claude-code"}
+_ALLOWED_ONBOARDING_OAUTH_PROVIDERS = {"openai-codex", "anthropic", "claude", "claude-code", "google-gemini-cli"}
 _ANTHROPIC_PROVIDER_ALIASES = {"anthropic", "claude", "claude-code"}
 _REJECTED_ONBOARDING_OAUTH_PROVIDERS = {
     "nous",
     "qwen-oauth",
     "gemini-cli",
-    "google-gemini-cli",
     "minimax",
     "minimax-oauth",
     "copilot",
@@ -59,6 +58,38 @@ ANTHROPIC_PUBLIC_LINK_ERROR = "Claude Code credential linking failed. Check serv
 _OAUTH_FLOWS: dict[str, dict[str, Any]] = {}
 _OAUTH_FLOWS_LOCK = threading.Lock()
 _ANTHROPIC_ENV_KEYS = ("ANTHROPIC_TOKEN", "ANTHROPIC_API_KEY")
+GOOGLE_FLOW_MAX_WAIT_SECONDS = 15 * 60
+
+
+def _spawn_google_oauth_worker(flow_id: str, sidekick_home: Path) -> None:
+    def worker() -> None:
+        try:
+            from web.api.profiles import cron_profile_context_for_home
+            from runtime.google_oauth import start_oauth_flow
+            with cron_profile_context_for_home(sidekick_home):
+                creds = start_oauth_flow(force_relogin=True, open_browser=True,
+                                         callback_wait_seconds=GOOGLE_FLOW_MAX_WAIT_SECONDS)
+            # Keep the runtime file authoritative; seed the pool with a
+            # metadata-only entry so the Providers card can report readiness.
+            from runtime.credential_pool import read_credential_pool, write_credential_pool
+            entries = read_credential_pool("google-gemini-cli")
+            if not any(str(e.get("email") or "") == creds.email for e in entries):
+                entries.append({"id": uuid.uuid4().hex, "label": creds.email or "Google account",
+                                "auth_type": "oauth", "source": "google_pkce",
+                                "access_token": creds.access_token, "refresh_token": creds.refresh_token,
+                                "expires_at_ms": creds.expires_ms, "extra": {"email": creds.email}})
+                write_credential_pool("google-gemini-cli", entries)
+            with _OAUTH_FLOWS_LOCK:
+                flow = _OAUTH_FLOWS.get(flow_id)
+                if flow:
+                    flow.update({"status": "success", "email": creds.email, "updated_at": time.time()})
+        except Exception as exc:
+            logger.warning("Google OAuth flow failed: %s", exc)
+            with _OAUTH_FLOWS_LOCK:
+                flow = _OAUTH_FLOWS.get(flow_id)
+                if flow:
+                    flow.update({"status": "error", "error": "Google sign-in failed. Please try again.", "updated_at": time.time()})
+    threading.Thread(target=worker, name="sidekick-google-oauth", daemon=True).start()
 
 
 def _clear_process_anthropic_env_values() -> None:
@@ -702,6 +733,23 @@ def start_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
     if provider in _ANTHROPIC_PROVIDER_ALIASES:
         return _start_anthropic_flow(_get_active_profile_home())
 
+    if provider == "google-gemini-cli":
+        sidekick_home = _get_active_profile_home()
+        with _OAUTH_FLOWS_LOCK:
+            if any(f.get("provider") == provider and f.get("status") == "pending"
+                   and f.get("sidekick_home") == str(sidekick_home) for f in _OAUTH_FLOWS.values()):
+                raise ValueError("A Google sign-in is already in progress for this profile")
+            flow_id = uuid.uuid4().hex
+            flow = {"provider": provider, "status": "pending",
+                    "expires_at": time.time() + GOOGLE_FLOW_MAX_WAIT_SECONDS,
+                    "sidekick_home": str(sidekick_home), "created_at": time.time(),
+                    "updated_at": time.time()}
+            _OAUTH_FLOWS[flow_id] = flow
+        _spawn_google_oauth_worker(flow_id, sidekick_home)
+        return {"ok": True, "provider": provider, "flow_id": flow_id,
+                "status": "pending", "expires_at": flow["expires_at"],
+                "message": "Google sign-in opened in your browser."}
+
     # Codex flow
     sidekick_home = _get_active_profile_home()
     try:
@@ -756,7 +804,7 @@ def cancel_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
     if not fid:
         raise ValueError("flow_id is required")
     requested_provider = _normalize_onboarding_oauth_provider(str((body or {}).get("provider") or ""))
-    if requested_provider not in {"openai-codex", "anthropic"}:
+    if requested_provider not in {"openai-codex", "anthropic", "google-gemini-cli"}:
         requested_provider = "openai-codex"
     with _OAUTH_FLOWS_LOCK:
         flow = _OAUTH_FLOWS.get(fid)

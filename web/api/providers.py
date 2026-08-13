@@ -426,6 +426,7 @@ _OAUTH_PROVIDERS = frozenset({
     "copilot-acp",
     "nous",
     "openai-codex",
+    "google-gemini-cli",
     "qwen-oauth",
 })
 

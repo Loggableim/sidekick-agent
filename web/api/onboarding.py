@@ -74,6 +74,17 @@ _SUPPORTED_PROVIDER_SETUPS = {
         "models": list(_PROVIDER_MODELS.get("openai", [])),
         "category": "easy_start",
     },
+    "google-gemini-cli": {
+        "label": "Google Gemini (OAuth)",
+        "env_var": "",
+        "default_model": "gemini-3.1-pro-preview",
+        "requires_base_url": False,
+        "models": list(_PROVIDER_MODELS.get("google-gemini-cli", [])),
+        "category": "easy_start",
+        "oauth_provider": "google-gemini-cli",
+        "oauth_label": "Google-Konto / Gemini CLI",
+        "key_optional": True,
+    },
     # ── Open / self-hosted ─────────────────────────────────────────────
     "ollama": {
         "label": "Ollama",
@@ -559,7 +570,7 @@ def _provider_api_key_present(
     # var names and can check os.environ for a valid key.
     # Exclude known OAuth/token-flow providers — those are handled separately by
     # _provider_oauth_authenticated() and should not be short-circuited here.
-    _known_oauth = {"openai-codex", "copilot", "copilot-acp", "qwen-oauth", "nous", "anthropic"}
+    _known_oauth = {"openai-codex", "copilot", "copilot-acp", "qwen-oauth", "nous", "anthropic", "google-gemini-cli"}
     if provider not in _SUPPORTED_PROVIDER_SETUPS and provider not in _known_oauth:
         try:
             from cli.auth import get_auth_status as _gas
@@ -607,9 +618,15 @@ def _provider_oauth_authenticated(provider: str, sidekick_home: "Path") -> bool:
     if not provider:
         return False
 
-    _known_oauth_providers = {"openai-codex", "copilot", "copilot-acp", "qwen-oauth", "nous", "anthropic"}
+    _known_oauth_providers = {"openai-codex", "copilot", "copilot-acp", "qwen-oauth", "nous", "anthropic", "google-gemini-cli"}
     if provider not in _known_oauth_providers:
         return False
+    if provider == "google-gemini-cli":
+        try:
+            from runtime.google_oauth import load_credentials
+            return load_credentials() is not None
+        except Exception:
+            return False
 
     try:
         import json as _j

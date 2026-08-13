@@ -13,7 +13,11 @@ from typing import Any, Iterable, Mapping
 OLLAMA_CLOUD_PROVIDER = "ollama-cloud"
 # Dated Ollama Cloud tags explicitly prove availability for the stable route.
 # Unknown tags remain fail-closed.
-MODEL_CATALOG_ALIASES = {"deepseek-v4-flash:0731-cloud": "deepseek-v4-flash"}
+MODEL_CATALOG_ALIASES = {
+    "deepseek-v4-flash:0731-cloud": "deepseek-v4-flash",
+    "deepseek-v4-flash:0731": "deepseek-v4-flash",
+    "deepseek-v4-flash:preview": "deepseek-v4-flash",
+}
 MODEL_HEALTH_HEALTHY = "healthy"
 MODEL_HEALTH_UNAVAILABLE = "unavailable"
 MODEL_HEALTH_UNVERIFIED = "unverified"

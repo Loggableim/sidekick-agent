@@ -1015,7 +1015,7 @@
   .titlebar-action-btn-danger:hover{color:#ef4444;}
   .titlebar-action-btn:disabled{opacity:0.4;cursor:not-allowed;}
   .titlebar-utility-actions #btnCastToggle,
-  .titlebar-actions #btnRebootSidekick,
+  .titlebar-actions #btnRuntimeRestart,
   .titlebar-actions #btnShutdownSidekick{display:inline-flex!important;}
   .game-mode-toggle-btn{position:relative;}
   .game-mode-toggle-btn.active{background:rgba(245,158,11,.16);color:#f59e0b;box-shadow:0 0 0 1px rgba(245,158,11,.38) inset;}
@@ -2657,7 +2657,7 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
     .app-titlebar-inner{flex:1 1 auto;}
     .titlebar-actions{display:none;}
     .titlebar-utility-actions{margin-left:4px;}
-    .titlebar-actions #btnRebootSidekick,
+    .titlebar-actions #btnRuntimeRestart,
     .titlebar-actions #btnShutdownSidekick{display:none!important;}
     .system-health-panel.insights-card{gap:10px;padding:12px;}
     .system-health-head{align-items:flex-start;}

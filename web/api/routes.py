@@ -5349,7 +5349,7 @@ def handle_get(handler, parsed) -> bool:
             return j(handler, {"error": "not found"}, status=404)
         return _handle_clarify_inject(handler, parsed)
 
-    if parsed.path == "/api/onboarding/oauth/poll":
+    if parsed.path in {"/api/onboarding/oauth/poll", "/api/oauth/google/status"}:
         qs = parse_qs(parsed.query)
         flow_id = qs.get("flow_id", [""])[0]
         try:
@@ -7718,7 +7718,7 @@ def handle_post(handler, parsed) -> bool:
         handler.wfile.write(response_body)
         return True
 
-    if parsed.path == "/api/onboarding/oauth/start":
+    if parsed.path in {"/api/onboarding/oauth/start", "/api/oauth/google/start"}:
         from web.api.auth import is_auth_enabled
         import os as _os
         if not is_auth_enabled() and not (
@@ -7742,7 +7742,7 @@ def handle_post(handler, parsed) -> bool:
         except RuntimeError as e:
             return bad(handler, str(e), 500)
 
-    if parsed.path == "/api/onboarding/oauth/cancel":
+    if parsed.path in {"/api/onboarding/oauth/cancel", "/api/oauth/google/cancel"}:
         try:
             return j(handler, cancel_onboarding_oauth_flow(body), extra_headers={"Cache-Control": "no-store"})
         except ValueError as e:

@@ -756,6 +756,7 @@ _PROVIDER_DISPLAY = {
     "openrouter": "OpenRouter",
     "anthropic": "Anthropic",
     "openai-codex": "OpenAI Codex",
+    "google-gemini-cli": "Google Gemini (OAuth)",
     "zai": "Z.AI / GLM",
     "minimax": "MiniMax",
     "minimax-oauth": "MiniMax (OAuth)",
@@ -1032,6 +1033,12 @@ _PROVIDER_MODELS = {
         {"id": "gpt-5.5", "label": "GPT-5.5"},
         {"id": "gpt-5.4-mini", "label": "GPT-5.4 Mini"},
         {"id": "gpt-5.3-codex-spark", "label": "GPT-5.3 Codex Spark"},
+    ],
+    "google-gemini-cli": [
+        {"id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview"},
+        {"id": "gemini-3-flash-preview", "label": "Gemini 3 Flash Preview"},
+        {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+        {"id": "gemini-2.5-flash", "label": "Gemini 2.5 Flash"},
     ],
     "google": [
         {"id": "gemini-router", "label": "Gemini Router (Free Tier)"},

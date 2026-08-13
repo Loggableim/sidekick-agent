@@ -224,7 +224,9 @@ function _renderOnboardingModelField(){
 }
 
 function _renderOnboardingProviderOAuthField(provider){
-  if(!provider||provider.oauth_provider!=='anthropic')return '';
+  if(!provider||!provider.oauth_provider)return '';
+  if(provider.oauth_provider==='google-gemini-cli') return `<div class="onboarding-oauth-card onboarding-oauth-pending" style="margin-top:12px"><div class="onboarding-oauth-icon">G</div><div><strong>Mit Google anmelden</strong><p style="margin-top:6px;color:var(--muted);font-size:13px">Verwendet das Gemini-CLI-Kontingent deines Google-Kontos. Tokens bleiben auf Sidekick.</p><button class="sm-btn" type="button" id="googleGeminiOAuthBtn" onclick="startGoogleGeminiOnboardingOAuth()">Google-Login starten</button><div id="googleGeminiOAuthFlow" style="margin-top:8px"></div></div></div>`;
+  if(provider.oauth_provider!=='anthropic')return '';
   return `<div class="onboarding-oauth-card onboarding-oauth-pending" style="margin-top:12px">
     <div class="onboarding-oauth-icon">🔑</div>
     <div style="flex:1">
@@ -234,6 +236,14 @@ function _renderOnboardingProviderOAuthField(provider){
       <div id="anthropicOAuthFlow" style="display:none;margin-top:12px"></div>
     </div>
   </div>`;
+}
+
+async function startGoogleGeminiOnboardingOAuth(){
+  const btn=$('googleGeminiOAuthBtn'), out=$('googleGeminiOAuthFlow'); if(!btn)return;
+  btn.disabled=true; btn.textContent='Anmeldung läuft …';
+  try{const s=await api('/api/oauth/google/start',{method:'POST',body:JSON.stringify({provider:'google-gemini-cli'})}); if(s.error)throw new Error(s.error);
+    const poll=async()=>{const p=await api('/api/oauth/google/status?flow_id='+encodeURIComponent(s.flow_id)); if(p.status==='pending'){setTimeout(poll,2000);return;} if(p.status==='success'){out.textContent='Google verbunden';btn.textContent='Google verbunden';}else{throw new Error(p.error||'Login fehlgeschlagen');} btn.disabled=false;}; poll();
+  }catch(e){out.textContent=e.message;btn.disabled=false;btn.textContent='Google-Login starten';}
 }
 
 function _providerStatusLabel(system){

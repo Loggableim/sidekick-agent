@@ -8526,6 +8526,13 @@ function _buildProviderCard(p){
       hint.style.color='var(--muted)';
     }
     body.appendChild(hint);
+    if(p.id==='google-gemini-cli'){
+      const actions=document.createElement('div'); actions.className='provider-card-actions';
+      const btn=document.createElement('button'); btn.className='sm-btn';
+      btn.textContent=p.has_key?'Re-authenticate with Google':'Mit Google anmelden';
+      btn.addEventListener('click',()=>window.startGoogleGeminiOAuth&&window.startGoogleGeminiOAuth(btn));
+      actions.appendChild(btn); body.appendChild(actions);
+    }
     card.appendChild(body);
     header.addEventListener('click',()=>card.classList.toggle('open'));
     return card;
@@ -10433,6 +10440,26 @@ const _origLoadAppstorePanel = loadAppstorePanel;
 loadAppstorePanel = async function() {
   await _origLoadAppstorePanel.apply(this, arguments);
   _appstoreSyncMailButtons();
+};
+
+// Browser-driven Google Gemini OAuth. Tokens remain server-side; the UI only
+// receives a flow id and high-level status.
+window.startGoogleGeminiOAuth = async function(button){
+  if(!button) return;
+  button.disabled=true; const old=button.textContent; button.textContent='Google-Anmeldung läuft …';
+  try{
+    const start=await api('/api/oauth/google/start',{method:'POST',body:JSON.stringify({provider:'google-gemini-cli'})});
+    if(start.error) throw new Error(start.error);
+    const flowId=start.flow_id;
+    const poll=async()=>{
+      const s=await api('/api/oauth/google/status?flow_id='+encodeURIComponent(flowId));
+      if(s.status==='pending'){ setTimeout(poll,2000); return; }
+      button.disabled=false;
+      if(s.status==='success'){button.textContent='Google verbunden'; showToast&&showToast('Google Gemini verbunden');}
+      else {button.textContent=old; showToast&&showToast(s.error||'Google-Anmeldung fehlgeschlagen');}
+    };
+    setTimeout(poll,1000);
+  }catch(e){button.disabled=false;button.textContent=old;showToast&&showToast(e.message||'Google-Anmeldung fehlgeschlagen');}
 };
 
 

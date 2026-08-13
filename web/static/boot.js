@@ -2415,11 +2415,14 @@ function confirmShutdown() {
   api('/api/system/shutdown').catch(function(){});
   setTimeout(function(){ window.close(); }, 1200);
 }
-function confirmReboot() {
-  if (!confirm('⚠️ Sidekick Server neustarten?\n\nBrowser schliessen, Cache löschen, Server+Browser neu starten.')) return;
-  const btn = document.getElementById('btnRebootSidekick');
+function confirmRuntimeRestart() {
+  if (!confirm('Sidekick-Runtime neu starten?\n\nAktive festgefahrene Antworten werden abgebrochen. Session-Historien bleiben erhalten.')) return;
+  const btn = document.getElementById('btnRuntimeRestart');
   btn.disabled = true;
   btn.style.opacity = '0.5';
-  api('/api/system/restart').catch(function(){});
-  setTimeout(function(){ window.close(); }, 1200);
+  api('/api/gateway/restart', { method: 'POST' }).catch(function(){
+    btn.disabled = false;
+    btn.style.opacity = '';
+    alert('Runtime-Neustart konnte nicht gestartet werden.');
+  });
 }
