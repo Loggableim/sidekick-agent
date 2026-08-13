@@ -841,6 +841,7 @@ def start_oauth_flow(
     callback_wait_seconds: float = CALLBACK_WAIT_SECONDS,
     project_id: str = "",
     on_auth_url=None,
+    cancel_event=None,
 ) -> GoogleCredentials:
     """Run the interactive browser OAuth flow and persist credentials.
 
@@ -910,7 +911,12 @@ def start_oauth_flow(
 
     code: Optional[str] = None
     try:
-        if ready.wait(timeout=callback_wait_seconds):
+        deadline = time.time() + callback_wait_seconds
+        while not ready.is_set() and time.time() < deadline:
+            if cancel_event is not None and cancel_event.is_set():
+                raise GoogleOAuthError("Google OAuth cancelled.", code="google_oauth_cancelled")
+            ready.wait(timeout=min(1.0, max(0.05, deadline - time.time())))
+        if ready.is_set():
             code = _OAuthCallbackHandler.captured_code
             error = _OAuthCallbackHandler.captured_error
             if error:

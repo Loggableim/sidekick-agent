@@ -75,7 +75,8 @@ def _spawn_google_oauth_worker(flow_id: str, sidekick_home: Path) -> None:
                             current["updated_at"] = time.time()
                 creds = start_oauth_flow(force_relogin=True, open_browser=False,
                                          callback_wait_seconds=GOOGLE_FLOW_MAX_WAIT_SECONDS,
-                                         on_auth_url=publish_auth_url)
+                                         on_auth_url=publish_auth_url,
+                                         cancel_event=_OAUTH_FLOWS.get(flow_id, {}).get("cancel_event"))
             # Keep the runtime file authoritative; seed the pool with a
             # metadata-only entry so the Providers card can report readiness.
             from runtime.credential_pool import read_credential_pool, write_credential_pool
@@ -760,7 +761,7 @@ def start_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
             flow = {"provider": provider, "status": "pending",
                     "expires_at": time.time() + GOOGLE_FLOW_MAX_WAIT_SECONDS,
                     "sidekick_home": str(sidekick_home), "created_at": time.time(),
-                    "updated_at": time.time()}
+                    "updated_at": time.time(), "cancel_event": threading.Event()}
             _OAUTH_FLOWS[flow_id] = flow
         _spawn_google_oauth_worker(flow_id, sidekick_home)
         # Let the worker publish the loopback callback URL without making the
@@ -839,6 +840,9 @@ def cancel_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
         if not flow:
             return {"ok": True, "provider": requested_provider, "flow_id": fid, "status": "cancelled"}
         if flow.get("status") == "pending":
+            cancel_event = flow.get("cancel_event")
+            if cancel_event is not None and hasattr(cancel_event, "set"):
+                cancel_event.set()
             flow["status"] = "cancelled"
             flow["updated_at"] = time.time()
             _drop_sensitive_flow_fields(flow)
