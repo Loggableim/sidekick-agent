@@ -7,13 +7,16 @@ import web.api.oauth as oauth
 
 def test_google_start_is_non_blocking_and_profile_scoped(monkeypatch, tmp_path):
     monkeypatch.setattr(oauth, "_get_active_profile_home", lambda: tmp_path)
-    monkeypatch.setattr(oauth, "_spawn_google_oauth_worker", lambda *_args: None)
+    def publish_url(flow_id, *_args):
+        oauth._OAUTH_FLOWS[flow_id]["auth_url"] = "https://accounts.google.com/o/oauth2/auth?state=test&code_challenge=test"
+    monkeypatch.setattr(oauth, "_spawn_google_oauth_worker", publish_url)
     oauth._OAUTH_FLOWS.clear()
 
     payload = oauth.start_onboarding_oauth_flow({"provider": "google-gemini-cli"})
     assert payload["status"] == "pending"
     assert payload["provider"] == "google-gemini-cli"
     assert payload["flow_id"]
+    assert payload["auth_url"].startswith("https://accounts.google.com/")
     assert "access_token" not in payload
     assert "refresh_token" not in payload
 

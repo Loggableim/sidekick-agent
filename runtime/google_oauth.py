@@ -840,6 +840,7 @@ def start_oauth_flow(
     open_browser: bool = True,
     callback_wait_seconds: float = CALLBACK_WAIT_SECONDS,
     project_id: str = "",
+    on_auth_url=None,
 ) -> GoogleCredentials:
     """Run the interactive browser OAuth flow and persist credentials.
 
@@ -888,6 +889,8 @@ def start_oauth_flow(
         "prompt": "consent",
     }
     auth_url = AUTH_ENDPOINT + "?" + urllib.parse.urlencode(params) + "#sidekick"
+    if callable(on_auth_url):
+        on_auth_url(auth_url)
 
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()

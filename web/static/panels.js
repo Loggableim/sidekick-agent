@@ -10462,6 +10462,7 @@ window.startGoogleGeminiOAuth = async function(button){
   try{
     const start=await api('/api/oauth/google/start',{method:'POST',body:JSON.stringify({provider:'google-gemini-cli'})});
     if(start.error) throw new Error(start.error);
+    if(start.auth_url){ window.open(start.auth_url,'sidekick-google-oauth','width=640,height=760'); }
     const flowId=start.flow_id;
     const poll=async()=>{
       const s=await api('/api/oauth/google/status?flow_id='+encodeURIComponent(flowId));

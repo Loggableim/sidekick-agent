@@ -67,8 +67,15 @@ def _spawn_google_oauth_worker(flow_id: str, sidekick_home: Path) -> None:
             from web.api.profiles import cron_profile_context_for_home
             from runtime.google_oauth import start_oauth_flow
             with cron_profile_context_for_home(sidekick_home):
-                creds = start_oauth_flow(force_relogin=True, open_browser=True,
-                                         callback_wait_seconds=GOOGLE_FLOW_MAX_WAIT_SECONDS)
+                def publish_auth_url(url: str) -> None:
+                    with _OAUTH_FLOWS_LOCK:
+                        current = _OAUTH_FLOWS.get(flow_id)
+                        if current and current.get("status") == "pending":
+                            current["auth_url"] = url
+                            current["updated_at"] = time.time()
+                creds = start_oauth_flow(force_relogin=True, open_browser=False,
+                                         callback_wait_seconds=GOOGLE_FLOW_MAX_WAIT_SECONDS,
+                                         on_auth_url=publish_auth_url)
             # Keep the runtime file authoritative; seed the pool with a
             # metadata-only entry so the Providers card can report readiness.
             from runtime.credential_pool import read_credential_pool, write_credential_pool
@@ -585,6 +592,16 @@ def _public_status_payload(flow_id: str, flow: dict[str, Any]) -> dict[str, Any]
     provider = flow.get("provider", "openai-codex")
     if provider == "anthropic":
         return _anthropic_public_status_payload(flow_id, flow)
+    if provider == "google-gemini-cli":
+        payload = {"ok": True, "provider": provider, "flow_id": flow_id,
+                   "status": flow.get("status", "error")}
+        if flow.get("auth_url") and flow.get("status") == "pending":
+            payload["auth_url"] = str(flow["auth_url"])
+        if flow.get("email") and flow.get("status") == "success":
+            payload["email"] = str(flow["email"])
+        if flow.get("status") == "error":
+            payload["error"] = "Google sign-in failed. Please try again."
+        return payload
     return _codex_public_status_payload(flow_id, flow)
 
 
@@ -746,9 +763,20 @@ def start_onboarding_oauth_flow(body: dict[str, Any] | None) -> dict[str, Any]:
                     "updated_at": time.time()}
             _OAUTH_FLOWS[flow_id] = flow
         _spawn_google_oauth_worker(flow_id, sidekick_home)
+        # Let the worker publish the loopback callback URL without making the
+        # request wait for Google. This is bounded and remains non-blocking.
+        auth_url = ""
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            with _OAUTH_FLOWS_LOCK:
+                auth_url = _OAUTH_FLOWS.get(flow_id, {}).get("auth_url")
+            if auth_url:
+                break
+            time.sleep(0.02)
         return {"ok": True, "provider": provider, "flow_id": flow_id,
                 "status": "pending", "expires_at": flow["expires_at"],
-                "message": "Google sign-in opened in your browser."}
+                "auth_url": auth_url if isinstance(auth_url, str) else "",
+                "message": "Open the Google sign-in URL to continue."}
 
     # Codex flow
     sidekick_home = _get_active_profile_home()

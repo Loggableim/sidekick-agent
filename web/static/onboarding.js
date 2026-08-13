@@ -242,6 +242,7 @@ async function startGoogleGeminiOnboardingOAuth(){
   const btn=$('googleGeminiOAuthBtn'), out=$('googleGeminiOAuthFlow'); if(!btn)return;
   btn.disabled=true; btn.textContent='Anmeldung läuft …';
   try{const s=await api('/api/oauth/google/start',{method:'POST',body:JSON.stringify({provider:'google-gemini-cli'})}); if(s.error)throw new Error(s.error);
+    if(s.auth_url) window.open(s.auth_url,'sidekick-google-oauth','width=640,height=760');
     const poll=async()=>{const p=await api('/api/oauth/google/status?flow_id='+encodeURIComponent(s.flow_id)); if(p.status==='pending'){setTimeout(poll,2000);return;} if(p.status==='success'){out.textContent='Google verbunden';btn.textContent='Google verbunden';}else{throw new Error(p.error||'Login fehlgeschlagen');} btn.disabled=false;}; poll();
   }catch(e){out.textContent=e.message;btn.disabled=false;btn.textContent='Google-Login starten';}
 }
