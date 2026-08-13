@@ -8536,6 +8536,9 @@ function _buildProviderCard(p){
       btn.textContent=p.has_key?'Re-authenticate with Google':'Mit Google anmelden';
       btn.addEventListener('click',()=>window.startGoogleGeminiOAuth&&window.startGoogleGeminiOAuth(btn));
       actions.appendChild(btn); body.appendChild(actions);
+      const quotaBtn=document.createElement('button'); quotaBtn.className='sm-btn'; quotaBtn.textContent='Quota prüfen';
+      quotaBtn.addEventListener('click',async()=>{quotaBtn.disabled=true; quotaBtn.textContent='Quota lädt …'; try{const q=await api('/api/provider/quota?provider=google-gemini-cli'); quotaBtn.textContent=q.status==='available'?'Quota geladen':'Quota nicht verfügbar';}catch(e){quotaBtn.textContent='Quota nicht verfügbar';} finally{quotaBtn.disabled=false;}});
+      actions.appendChild(quotaBtn);
       if(p.has_key){
         const disconnect=document.createElement('button'); disconnect.className='sm-btn'; disconnect.textContent='Verbindung trennen';
         disconnect.addEventListener('click',async()=>{if(!confirm('Google-Verbindung für dieses Profil trennen?'))return; await api('/api/oauth/google/disconnect',{method:'POST'}); location.reload();});
