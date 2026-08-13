@@ -25,11 +25,18 @@ class GeminiProfile(ProviderProfile):
         """Emit extra_body.thinking_config (native) or extra_body.extra_body.google.thinking_config
         (OpenAI-compat /openai subpath), mirroring the legacy path's behavior.
         """
-        from agent.transports.chat_completions import (
-            _build_gemini_thinking_config,
-            _is_gemini_openai_compat_base_url,
-            _snake_case_gemini_thinking_config,
-        )
+        try:
+            from agent.transports.chat_completions import (
+                _build_gemini_thinking_config,
+                _is_gemini_openai_compat_base_url,
+                _snake_case_gemini_thinking_config,
+            )
+        except ImportError:
+            # The WebUI/runtime package exposes the Gemini adapters directly
+            # and does not ship the legacy ``agent`` namespace. Thinking
+            # metadata is optional; never make OAuth inference fail because
+            # this compatibility-only helper is unavailable.
+            return {}
 
         model = context.get("model") or ""
         reasoning_config = context.get("reasoning_config")

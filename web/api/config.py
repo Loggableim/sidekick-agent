@@ -756,7 +756,7 @@ _PROVIDER_DISPLAY = {
     "openrouter": "OpenRouter",
     "anthropic": "Anthropic",
     "openai-codex": "OpenAI Codex",
-    "google-gemini-cli": "Google Gemini (OAuth)",
+    "google-gemini-cli": "Gemini CLI",
     "zai": "Z.AI / GLM",
     "minimax": "MiniMax",
     "minimax-oauth": "MiniMax (OAuth)",

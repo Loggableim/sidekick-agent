@@ -75,7 +75,7 @@ _SUPPORTED_PROVIDER_SETUPS = {
         "category": "easy_start",
     },
     "google-gemini-cli": {
-        "label": "Google Gemini (OAuth)",
+        "label": "Gemini CLI",
         "env_var": "",
         "default_model": "gemini-3.1-pro-preview",
         "requires_base_url": False,
