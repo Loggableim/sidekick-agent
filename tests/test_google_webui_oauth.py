@@ -2,7 +2,10 @@
 
 from pathlib import Path
 
+import pytest
+
 import web.api.oauth as oauth
+from runtime import google_oauth
 
 
 def test_google_start_is_non_blocking_and_profile_scoped(monkeypatch, tmp_path):
@@ -50,3 +53,21 @@ def test_google_webui_contract_surfaces_exist():
     assert "startGoogleGeminiOAuth" in panels
     assert "oauth_email" in panels
     assert "startGoogleGeminiOnboardingOAuth" in onboarding
+
+
+def test_google_poll_expires_without_exposing_flow_secrets():
+    oauth._OAUTH_FLOWS.clear()
+    oauth._OAUTH_FLOWS["expired-flow"] = {
+        "provider": "google-gemini-cli", "status": "pending", "expires_at": 0,
+        "updated_at": 0, "access_token": "secret", "refresh_token": "secret",
+    }
+    result = oauth.poll_onboarding_oauth_flow("expired-flow")
+    assert result["status"] == "expired"
+    assert "access_token" not in result
+    assert "refresh_token" not in result
+
+
+def test_google_token_persistence_rejects_incomplete_response():
+    with pytest.raises(google_oauth.GoogleOAuthError) as exc:
+        google_oauth._persist_token_response({"access_token": "only-access"})
+    assert exc.value.code == "google_oauth_incomplete_token_response"
