@@ -35,3 +35,21 @@ def tmp_path(request: pytest.FixtureRequest) -> Path:
         # into a teardown failure on Windows.
         shutil.rmtree(path, ignore_errors=True)
 
+
+@pytest.fixture
+def symlink_capable(tmp_path):
+    """Skip symlink attacks only when the OS denies creating the test fixture."""
+    target = tmp_path / "symlink-probe-target"
+    link = tmp_path / "symlink-probe-link"
+    target.touch()
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
+    finally:
+        if link.is_symlink():
+            link.unlink()
+        target.unlink()
+

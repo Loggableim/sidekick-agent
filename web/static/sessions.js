@@ -27,6 +27,10 @@ function _markExplicitSessionNavigation(skipBootRestore){
 }
 
 function _cancelActiveSessionLoad(){
+  if (_liveStreamRehydrateTimer) {
+    clearTimeout(_liveStreamRehydrateTimer);
+    _liveStreamRehydrateTimer = null;
+  }
   if (_activeSessionLoadAbortController) {
     try { _activeSessionLoadAbortController.abort(); } catch (_) {}
   }
@@ -88,9 +92,11 @@ function _showConversationHydrationShell(sid){
 
 function _scheduleConversationPaneRecovery(sid){
   if(!sid) return;
+  const epoch = Number(window.__sidekickSessionNavigationEpoch || 0);
   for(const delay of [50, 300, 1200]){
     setTimeout(() => {
       try{
+        if (Number(window.__sidekickSessionNavigationEpoch || 0) !== epoch) return;
         if(_loadingSessionId !== sid) return;
         if(!S.session || S.session.session_id !== sid) return;
         if(!_conversationPaneShowsLoading()) return;
@@ -160,12 +166,16 @@ async function _sessionApi(path, timeoutMs, externalSignal, options) {
 
 function _scheduleLiveStreamRehydrate(sid) {
   if (!sid || _liveStreamRehydrateTimer) return;
+  const epoch = Number(window.__sidekickSessionNavigationEpoch || 0);
+  const isCurrent = () => Number(window.__sidekickSessionNavigationEpoch || 0) === epoch
+    && S.session && S.session.session_id === sid;
   _liveStreamRehydrateTimer = setTimeout(async () => {
     _liveStreamRehydrateTimer = null;
     try {
-      if (!S.session || S.session.session_id !== sid) return;
+      if (!isCurrent()) return;
       if (S.activeStreamId) return;
       const data = await _sessionApi(`/api/session?session_id=${encodeURIComponent(sid)}&messages=0&resolve_model=0`, 8000);
+      if (!isCurrent() || S.activeStreamId) return;
       const session = data && data.session;
       const streamId = session && session.active_stream_id;
       if (!session || session.session_id !== sid || !streamId) return;
@@ -1157,6 +1167,7 @@ async function loadSession(sid, options){
       if (!deferTranscript && !S.messages.length && initialMessageCount > 0) {
         setTimeout(() => {
           try {
+            if (!isCurrentNavigationEpoch() || loadAbortController.signal.aborted) return;
             if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
             if (!S.session || S.session.session_id !== sid) return;
             if (Array.isArray(S.messages) && S.messages.length) return;
@@ -1227,6 +1238,7 @@ async function loadSession(sid, options){
   if (S.session && S.session.session_id === sid) {
     requestAnimationFrame(() => {
       try {
+        if (!isCurrentNavigationEpoch() || !S.session || S.session.session_id !== sid) return;
         const inner = $('msgInner');
         if (inner && /Loading conversation/i.test(inner.innerText || '')) {
           renderMessages({ preserveScroll: true });

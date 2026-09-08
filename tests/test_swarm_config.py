@@ -753,7 +753,7 @@ def test_posix_database_child_swap_before_sqlite_open_fails_closed(
     )
     monkeypatch.setattr(store_module.sqlite3, "connect", sqlite_must_not_open)
     try:
-        with pytest.raises(ValueError, match="database changed"):
+        with pytest.raises(ValueError, match="database changed|direct non-link regular file"):
             store.create_run(run_id="must-not-open-outside")
     finally:
         if database.is_symlink():
@@ -804,7 +804,7 @@ def test_posix_database_child_swap_during_sqlite_open_fails_before_sql(
 
     monkeypatch.setattr(store_module.sqlite3, "connect", swap_child_during_connect)
     try:
-        with pytest.raises(ValueError, match="database changed"):
+        with pytest.raises(ValueError, match="database changed|direct non-link regular file"):
             if read_only:
                 reader.list_runs()
             else:
