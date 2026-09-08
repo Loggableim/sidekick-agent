@@ -2031,13 +2031,21 @@ async function _syncGameModeStateFromServer() {
   })();
   const savedLocal=localStorage.getItem('sidekick-webui-session');
   const saved=urlSession||savedLocal;
-  const _bootRestoreEpoch=Number(window.__sidekickSessionNavigationEpoch||0)||0;
+  let _bootRestoreEpoch=Number(window.__sidekickSessionNavigationEpoch||0)||0;
   const _bootRestoreCanceled=()=>(
     !!window.__sidekickSkipBootSessionRestore ||
     ((Number(window.__sidekickSessionNavigationEpoch||0)||0)!==_bootRestoreEpoch)
   );
   if (urlSession && saved && !_bootRestoreCanceled()) {
     _setConversationRestorePlaceholder('Restoring conversation...');
+  }
+  // A restore owns the epoch created synchronously by its own loadSession.
+  // Only a later user navigation cancels it.
+  function _bootLoadSession(sid, options) {
+    const pending = loadSession(sid, options);
+    _bootRestoreEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
+    pending.catch(() => {}); // The sidebar may still be loading before we await it.
+    return pending;
   }
   let _bootSavedSessionLoadPromise = null;
   let _bootMissingSession = false;
@@ -2046,7 +2054,7 @@ async function _syncGameModeStateFromServer() {
   // decoration and can hydrate in parallel. This removes the cold-start gap
   // where "Restoring conversation..." waited for /api/sessions first.
   if (urlSession && saved && !_bootRestoreCanceled()) {
-    _bootSavedSessionLoadPromise = loadSession(saved, {
+    _bootSavedSessionLoadPromise = _bootLoadSession(saved, {
       expectedSpace: urlWorkspace || '',
       suppressMissingSessionMessage: true,
       deferTranscript: true,
@@ -2062,7 +2070,7 @@ async function _syncGameModeStateFromServer() {
   const _bootSavedSessionExists = !!(saved && Array.isArray(_allSessions) && _allSessions.some((s) => s && s.session_id === saved));
   if (urlSession && saved && !_bootRestoreCanceled()) {
     if (!_bootSavedSessionLoadPromise && _bootSavedSessionExists) {
-      _bootSavedSessionLoadPromise = loadSession(saved, {
+      _bootSavedSessionLoadPromise = _bootLoadSession(saved, {
         expectedSpace: urlWorkspace || '',
         suppressMissingSessionMessage: true,
         deferTranscript: true,
@@ -2102,16 +2110,17 @@ async function _syncGameModeStateFromServer() {
         _bootDeferredTranscript = true;
       }
       else if(!_bootRestoreCanceled() && !_bootMissingSession) {
-        const _bootLoadResult = await loadSession(saved);
+        const _bootLoadResult = await _bootLoadSession(saved);
         _bootMissingSession = !!(_bootLoadResult && _bootLoadResult.missingSession);
       }
       if(_bootRestoreCanceled()) throw new Error('boot session restore canceled');
       if (saved && !_bootMissingSession && !_bootDeferredTranscript && (!_bootSavedSessionLoadPromise || !S.session || S.session.session_id !== saved || !Array.isArray(S.messages) || !S.messages.length)) {
-        const _bootRetryResult = await loadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
+        const _bootRetryResult = await _bootLoadSession(saved, { expectedSpace: urlWorkspace || '', suppressMissingSessionMessage: true }).catch(() => {});
         _bootMissingSession = _bootMissingSession || !!(_bootRetryResult && _bootRetryResult.missingSession);
       }
       if (_bootMissingSession && urlSession && saved) {
         await _spaceConfigReady;
+        if (_bootRestoreCanceled()) throw new Error('boot session restore canceled');
         if (typeof newSession === 'function') {
           S._bootReady=true;
           await newSession();

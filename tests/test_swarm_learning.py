@@ -1170,6 +1170,7 @@ def test_pack_registry_has_exact_packaged_defaults_and_safe_project_override(
 
     override_dir = tmp_path / ".swarm" / "packs"
     override_dir.mkdir(parents=True)
+    override_dir.parent.chmod(0o700)
     (override_dir / "coding-team.yaml").write_text(
         "description: Local metadata only\n"
         "workflow: local-review-metadata\n"
@@ -1200,6 +1201,7 @@ def test_pack_registry_rejects_malformed_or_unsafe_project_yaml(
     """Catches pack files granting models, providers, tools, or policy authority."""
     override_dir = tmp_path / ".swarm" / "packs"
     override_dir.mkdir(parents=True)
+    override_dir.parent.chmod(0o700)
     (override_dir / "coding-team.yaml").write_text(document, encoding="utf-8")
 
     with pytest.raises(ValueError):

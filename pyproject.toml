@@ -34,6 +34,12 @@ nova = [
 telegram = [
     "python-telegram-bot>=21,<23",
 ]
+gateway = [
+    "aiohttp>=3.9,<4",
+]
+browser = [
+    "playwright>=1.48,<2",
+]
 all = [
     "fastapi>=0.104,<1",
     "uvicorn[standard]>=0.24,<1",
@@ -47,6 +53,7 @@ all = [
     "tiktoken>=0.5",
     "croniter>=2.0",
     "python-telegram-bot>=21,<23",
+    "aiohttp>=3.9,<4",
     "beautifulsoup4>=4.12",
     "numpy>=2.0",
     "chromadb>=1.0",
