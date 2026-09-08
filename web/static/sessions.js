@@ -34,20 +34,12 @@ function _cancelActiveSessionLoad(){
   _loadingSessionId = null;
 }
 
-function _abortStaleSessionLoad(sid, previousState) {
+function _abortStaleSessionLoad(sid, previousState, controller) {
+  // Session IDs are not request identities: A -> B -> A can leave two loads
+  // for A alive. The cancelled one must never restore its previous transcript.
+  if (_activeSessionLoadAbortController !== controller || controller.signal.aborted) return;
   const newerLoadActive = _loadingSessionId && _loadingSessionId !== sid;
   if (newerLoadActive) return;
-  if (previousState && previousState.session && previousState.session.session_id !== sid && previousState.messages && previousState.messages.length) {
-    S.session = previousState.session;
-    S.messages = previousState.messages;
-    S.toolCalls = previousState.toolCalls || [];
-    try {
-      if (typeof syncTopbar === 'function') syncTopbar();
-      renderMessages({preserveScroll:true});
-      if (typeof updateQueueBadge === 'function') updateQueueBadge(previousState.session.session_id);
-    } catch (_) {}
-    return;
-  }
   if (_loadingSessionId === sid) _loadingSessionId = null;
   const inner = $('msgInner');
   const txt = (inner && inner.textContent || '').trim();
@@ -143,13 +135,21 @@ async function _sessionApi(path, timeoutMs, externalSignal, options) {
     if (externalSignal.aborted) abortFromExternal();
     else externalSignal.addEventListener('abort', abortFromExternal, {once: true});
   }
-  const timer = setTimeout(() => controller.abort(), timeoutMs || _SESSION_LOAD_TIMEOUT_MS);
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs || _SESSION_LOAD_TIMEOUT_MS);
   try {
     const scopedPath = (typeof _spaceScopedApiPath === 'function')
       ? _spaceScopedApiPath(path)
       : path;
     const apiOptions = Object.assign({signal: controller.signal}, options || {});
     return await api(scopedPath, apiOptions);
+  } catch (error) {
+    if (timedOut && !(externalSignal && externalSignal.aborted)) {
+      const timeout = new Error('Session request timed out');
+      timeout.name = 'TimeoutError';
+      throw timeout;
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
     if (externalSignal) {
@@ -552,6 +552,8 @@ function _markPollingCompletionUnreadTransitions(sessions) {
 }
 
 async function newSession(flash, options={}){
+  const navigationEpoch = _markExplicitSessionNavigation(false);
+  _cancelActiveSessionLoad();
   let spaceLoadKey = (typeof _activeSpaceLoadKey === 'function') ? _activeSpaceLoadKey() : '';
   if(typeof _clearQueuePanelDom==='function' && S.session && S.session.session_id){
     _clearQueuePanelDom(S.session.session_id);
@@ -597,7 +599,8 @@ async function newSession(flash, options={}){
   if(options&&options.worktree) reqBody.worktree=true;
   if(_activeProject&&_activeProject!==NO_PROJECT_FILTER) reqBody.project_id=_activeProject;
   if (typeof browserPrepareSessionSwitch === 'function') browserPrepareSessionSwitch();
-  const data=await api('/api/session/new' + spaceQS,{method:'POST',body:JSON.stringify(reqBody)});
+  const data=await _sessionApi('/api/session/new' + spaceQS, _SESSION_LOAD_TIMEOUT_MS, null, {method:'POST',body:JSON.stringify(reqBody)});
+  if (Number(window.__sidekickSessionNavigationEpoch || 0) !== navigationEpoch) return data;
   if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return data;
   S.session=data.session;S.messages=data.session.messages||[];
   S.lastUsage={...(data.session.last_usage||{})};
@@ -792,7 +795,7 @@ async function loadSession(sid, options){
     const _msgInner = $('msgInner');
     if (_msgInner) {
       const showLoading = () => {
-        if (_loadingSessionId !== sid) return;
+        if (_loadingSessionId !== sid || !isCurrentNavigationEpoch() || loadAbortController.signal.aborted) return;
         _showConversationLoadingState(sid);
       };
       if (currentSid) setTimeout(showLoading, 350);
@@ -811,8 +814,10 @@ async function loadSession(sid, options){
       suppressMissingSessionMessage ? {logError:false} : undefined
     );
   } catch(e) {
+    if (!isCurrentNavigationEpoch() || _activeSessionLoadAbortController !== loadAbortController) return;
+    _clearConversationLoadingState();
     if (loadAbortController.signal.aborted || (e && e.name === 'AbortError')) {
-      _abortStaleSessionLoad(sid, previousState);
+      _abortStaleSessionLoad(sid, previousState, loadAbortController);
       return;
     }
     const _msgInner = $('msgInner');
@@ -852,12 +857,12 @@ async function loadSession(sid, options){
     return;
   }
   if (!isCurrentNavigationEpoch()) {
-    _abortStaleSessionLoad(sid, previousState);
+    _abortStaleSessionLoad(sid, previousState, loadAbortController);
     return;
   }
   const initialMessageCount = Number(data.session?.message_count || 0);
   if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) {
-    _abortStaleSessionLoad(sid, previousState);
+    _abortStaleSessionLoad(sid, previousState, loadAbortController);
     return;
   }
   const loadedSessionSpace = String(
@@ -865,7 +870,7 @@ async function loadSession(sid, options){
   ).trim().toLowerCase();
   const expectedSpace = String(options.expectedSpace || '').trim().toLowerCase();
   if (expectedSpace && loadedSessionSpace && loadedSessionSpace !== expectedSpace) {
-    _abortStaleSessionLoad(sid, previousState);
+    _abortStaleSessionLoad(sid, previousState, loadAbortController);
     return;
   }
   if (loadedSessionSpace && typeof _activeSpace !== 'undefined' && loadedSessionSpace !== _activeSpace) {
@@ -900,7 +905,7 @@ async function loadSession(sid, options){
   }
   // Stale response? A newer loadSession() call has already started (#1060).
   if (_loadingSessionId !== sid || !isCurrentNavigationEpoch()) {
-    _abortStaleSessionLoad(sid, previousState);
+    _abortStaleSessionLoad(sid, previousState, loadAbortController);
     return;
   }
   S.session=data.session;
@@ -992,7 +997,7 @@ async function loadSession(sid, options){
     if(INFLIGHT[sid].reattach&&activeStreamId&&typeof attachLiveStream==='function'){
       INFLIGHT[sid].reattach=false;
       if (_loadingSessionId !== sid || !isCurrentNavigationEpoch()) {
-        _abortStaleSessionLoad(sid, previousState);
+        _abortStaleSessionLoad(sid, previousState, loadAbortController);
         return;
       }
       attachLiveStream(sid, activeStreamId, S.session.pending_attachments||[], {reconnecting:true});
@@ -1020,8 +1025,10 @@ async function loadSession(sid, options){
         else await messageLoad;
       }
     } catch (e) {
+      if (!isCurrentNavigationEpoch() || _activeSessionLoadAbortController !== loadAbortController) return;
+      _clearConversationLoadingState();
       if (loadAbortController.signal.aborted || (e && e.name === 'AbortError')) {
-        _abortStaleSessionLoad(sid, previousState);
+        _abortStaleSessionLoad(sid, previousState, loadAbortController);
         return;
       }
       // Network errors, server failures, or SSE drops (Chrome error codes 4/5)
@@ -1030,7 +1037,7 @@ async function loadSession(sid, options){
       // persist forever with no recovery path.
       const _msgInner = $('msgInner');
       if (_loadingSessionId !== sid || !isCurrentNavigationEpoch()) {
-        _abortStaleSessionLoad(sid, previousState);
+        _abortStaleSessionLoad(sid, previousState, loadAbortController);
         return;
       }
       if (_msgInner) {
@@ -1042,6 +1049,7 @@ async function loadSession(sid, options){
     }
     if (deferredTranscriptLoad) {
       void deferredTranscriptLoad.then(() => {
+        if (!isCurrentNavigationEpoch() || loadAbortController.signal.aborted) return;
         if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
         if (!S.session || S.session.session_id !== sid) return;
         try {
@@ -1052,18 +1060,19 @@ async function loadSession(sid, options){
           _clearConversationLoadingState();
         } catch (_) {}
       }).catch(() => {
-        if (_loadingSessionId !== sid || !S.session || S.session.session_id !== sid) return;
+        if (!isCurrentNavigationEpoch() || loadAbortController.signal.aborted || !S.session || S.session.session_id !== sid) return;
+        _clearConversationLoadingState();
         const inner = $('msgInner');
         if (inner) inner.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Failed to load messages. Try switching sessions or refreshing.</div>';
       });
     }
     if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) {
-      _abortStaleSessionLoad(sid, previousState);
+      _abortStaleSessionLoad(sid, previousState, loadAbortController);
       return;
     }
     // Stale? A newer loadSession() call has already started (#1060).
     if (_loadingSessionId !== sid || !isCurrentNavigationEpoch()) {
-      _abortStaleSessionLoad(sid, previousState);
+      _abortStaleSessionLoad(sid, previousState, loadAbortController);
       return;
     }
 
@@ -1641,6 +1650,7 @@ const _INITIAL_MSG_LIMIT = 12;
 const _SESSION_MESSAGES_TIMEOUT_MS = 45000;
 
 async function _ensureMessagesLoaded(sid, signal) {
+  const navigationEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
   // Already have messages? (e.g. from INFLIGHT restore path, already set)
   if (S.messages && S.messages.length > 0 && S.messages[0] && S.messages[0].role) {
     return;
@@ -1653,6 +1663,7 @@ async function _ensureMessagesLoaded(sid, signal) {
   );
   // Guard: api() may have redirected (401) and returned undefined.
   if (!data || !data.session) return;
+  if ((signal && signal.aborted) || Number(window.__sidekickSessionNavigationEpoch || 0) !== navigationEpoch) return;
   if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
   if (!S.session || S.session.session_id !== sid) return;
   _applySessionMessagePayload(sid, data);
@@ -2429,7 +2440,7 @@ async function renderSessionList(){
   const activeWorkspace = (typeof getActiveSpaceQuery === 'function')
     ? (new URLSearchParams(getActiveSpaceQuery().slice(1)).get('workspace') || '')
     : '';
-  const requestKey = `${spaceLoadKey}|${activeWorkspace}|${_showAllProfiles ? 'all' : 'profile'}|${_showArchived ? 'archived' : 'active'}`;
+  const requestKey = `${spaceLoadKey}|${activeWorkspace}|${_showAllProfiles ? 'all' : 'profile'}|${_showArchived ? 'archived' : 'active'}|${options.throwOnError ? 'required' : 'background'}`;
   if(_sessionListInFlight && _sessionListInFlightPromise && _sessionListInFlightKey === requestKey) {
     return _sessionListInFlightPromise;
   }
@@ -2543,6 +2554,8 @@ async function renderSessionList(){
     }
     await hydrateProjects();
   }catch(e){
+    // Space selection must distinguish a failed list from a truly empty one.
+    if (options.throwOnError) throw e;
     if (listAbortController.signal.aborted || (e && e.name === 'AbortError')) return;
     if (_gen !== _renderSessionListGen) return;
     if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return;
