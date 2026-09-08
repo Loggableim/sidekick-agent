@@ -388,6 +388,23 @@ async function _loadSpaceConfigForSwitch(slug, switchRev, timeoutMs) {
   }
 }
 
+function _spaceSessionStorageKey(slug) {
+  const profile = (typeof S !== 'undefined' && S && S.activeProfile) || 'default';
+  return 'sidekick-space-session:' + JSON.stringify([profile, slug]);
+}
+
+function _rememberSpaceSession(slug, session) {
+  if (!session || !session.session_id || !_spaceSessionMatchesSlug(session, slug)) return;
+  try { localStorage.setItem(_spaceSessionStorageKey(slug), session.session_id); } catch (_) {}
+}
+
+function _preferredSpaceSession(slug, sessions) {
+  const candidates = (sessions || []).filter(s => s && s.session_id && _spaceSessionMatchesSlug(s, slug));
+  let remembered = null;
+  try { remembered = localStorage.getItem(_spaceSessionStorageKey(slug)); } catch (_) {}
+  return candidates.find(s => s.session_id === remembered) || candidates[0] || null;
+}
+
 async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, configPromise, navigationEpoch) {
   let selectionEpoch = navigationEpoch;
   try {
@@ -399,8 +416,9 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
     const activeSessionInTargetSpace = _spaceSessionMatchesSlug(currentSession, slug);
     const hasCurrentInSpace = !!(currentSid && activeSessionInTargetSpace && (sessionsInSpace || []).some(s => s && s.session_id === currentSid));
     if (!currentSid || !hasCurrentInSpace) {
-      if ((sessionsInSpace || []).length && typeof loadSession === 'function') {
-        const targetSid = sessionsInSpace[0].session_id;
+      const preferred = _preferredSpaceSession(slug, sessionsInSpace);
+      if (preferred && typeof loadSession === 'function') {
+        const targetSid = preferred.session_id;
         const load = loadSession(targetSid, {expectedSpace: slug, skipSidebarRender: true});
         selectionEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
         await load;
@@ -588,6 +606,7 @@ async function selectSpace(slug, options = {}) {
       }
     }
     const previousSpace = _activeSpace;
+    _rememberSpaceSession(previousSpace, activeSession);
     _activeSpace = slug;
     // The entity card is exclusive to the literal canonical Nova Space. Hide
     // it before the asynchronous session switch can render a target Space.

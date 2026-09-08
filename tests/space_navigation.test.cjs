@@ -53,6 +53,7 @@ function context(extra = {}) {
     section(sessions, 'function _markExplicitSessionNavigation(', 'const _SESSION_LOAD_TIMEOUT_MS') +
     section(spaces, 'function _spaceSwitchRev()', 'function _deferSpaceSelect(') +
     section(spaces, 'function _spaceSessionMatchesSlug(', 'function _spaceSlugFromLocation(') +
+    section(spaces, 'function _spaceSessionStorageKey(', 'async function _continueSpaceSessionSelection(') +
     section(sessions, 'async function _sessionApi(', 'function _scheduleLiveStreamRehydrate('),
     c,
   );
@@ -167,7 +168,7 @@ test('space auto-selection respects a chat clicked while its list was loading', 
   const c = context({loadSession() {loads++;}});
   vm.runInContext(section(spaces, 'async function _continueSpaceSessionSelection(', 'async function _loadSpaceSessionsForSwitch('), c);
   c._markExplicitSessionNavigation(true);
-  await c._continueSpaceSessionSelection('a', 0, [{session_id: 'first'}], null, 0);
+  await c._continueSpaceSessionSelection('a', 0, [{session_id: 'first', workspace_slug: 'a'}], null, 0);
   assert.equal(loads, 0);
 });
 test('late new-chat response cannot replace an explicitly selected chat', async () => {
@@ -216,4 +217,35 @@ test('failed initial and fallback lists show retry instead of creating an empty 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(creations, 0);
   assert.equal(c.pane.children[1].textContent, 'Retry');
+});
+
+test('returning to a Space restores its last viewed chat rather than its newest', async () => {
+  const storage = new Map();
+  let selected;
+  const c = context({
+    localStorage: {getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value)},
+    loadSession: async sid => {selected = sid;},
+  });
+  vm.runInContext(section(spaces, 'async function _continueSpaceSessionSelection(', 'async function _loadSpaceSessionsForSwitch('), c);
+  c._rememberSpaceSession('a', {session_id: 'older', workspace_slug: 'a'});
+  await c._continueSpaceSessionSelection('a', 0, [
+    {session_id: 'newest', workspace_slug: 'a'},
+    {session_id: 'older', workspace_slug: 'a'},
+  ], null, 0);
+  assert.equal(selected, 'older');
+});
+test('Space history is profile scoped and rejects missing or foreign sessions', () => {
+  const storage = new Map();
+  const c = context({
+    localStorage: {getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value)},
+  });
+  const first = {session_id: 'first', workspace_slug: 'a'};
+  const saved = {session_id: 'saved', workspace_slug: 'a'};
+  c.S.activeProfile = 'alice';
+  c._rememberSpaceSession('a', saved);
+  assert.equal(c._preferredSpaceSession('a', [first, saved]).session_id, 'saved');
+  assert.equal(c._preferredSpaceSession('a', [first]).session_id, 'first');
+  c.S.activeProfile = 'bob';
+  assert.equal(c._preferredSpaceSession('a', [first, saved]).session_id, 'first');
+  assert.equal(c._preferredSpaceSession('a', [{session_id: 'foreign', workspace_slug: 'b'}]), null);
 });
