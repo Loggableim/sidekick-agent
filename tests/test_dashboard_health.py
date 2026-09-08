@@ -5413,7 +5413,7 @@ def test_space_switch_does_not_block_on_space_config_load():
 
     assert "async function _loadSpaceConfigForSwitch(slug, switchRev, timeoutMs)" in spaces_js
     assert "const spaceConfigPromise = _loadSpaceConfigForSwitch(slug, switchRev, 1200)" in spaces_js
-    assert "void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise)" in spaces_js
+    assert "void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise, navigationEpoch)" in spaces_js
     assert "_markSpaceSwitchTiming(slug, switchRev, 'session-list-rendered')" in spaces_js
 
 

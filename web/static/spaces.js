@@ -171,6 +171,8 @@ function _spaceSwitchRev() {
 
 function _beginSpaceSwitch() {
   window._sidekickSpaceSwitchRev = _spaceSwitchRev() + 1;
+  if (typeof _markExplicitSessionNavigation === 'function') _markExplicitSessionNavigation(true);
+  if (typeof _cancelActiveSessionLoad === 'function') _cancelActiveSessionLoad();
   return window._sidekickSpaceSwitchRev;
 }
 
@@ -335,23 +337,28 @@ async function _syncSpaceProjectDirForActiveSession(slug) {
   if (!spaceCfg || !spaceCfg.project_dir || typeof loadDir !== 'function') return;
   const pdir = spaceCfg.project_dir.trim();
   if (!pdir || typeof S === 'undefined' || !S.session || !S.session.session_id) return;
+  const session = S.session;
+  const switchRev = _spaceSwitchRev();
+  const isCurrent = () => _isCurrentSpaceSwitch(switchRev, slug) && S.session === session;
+  if (!isCurrent() || !_spaceSessionMatchesSlug(session, slug)) return;
   try {
     if (!S.session.workspace || S.session.workspace !== pdir) {
       const upd = await api('/api/session/update', {
         method: 'POST',
         body: JSON.stringify({
-          session_id: S.session.session_id,
+          session_id: session.session_id,
           workspace: pdir
         })
       });
+      if (!isCurrent()) return;
       if (upd && upd.session) {
-        S.session.workspace = upd.session.workspace;
+        session.workspace = upd.session.workspace;
       }
     }
   } catch (e) {
     console.warn('selectSpace: failed to sync workspace to project_dir:', e);
   }
-  loadDir('.');
+  if (isCurrent()) loadDir('.');
 }
 
 async function _loadSpaceConfigForSwitch(slug, switchRev, timeoutMs) {
@@ -381,9 +388,11 @@ async function _loadSpaceConfigForSwitch(slug, switchRev, timeoutMs) {
   }
 }
 
-async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, configPromise) {
+async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, configPromise, navigationEpoch) {
+  let selectionEpoch = navigationEpoch;
   try {
     if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+    if (Number(window.__sidekickSessionNavigationEpoch || 0) !== navigationEpoch) return;
     _markSpaceSwitchTiming(slug, switchRev, 'session-selection-start');
     const currentSession = (typeof S !== 'undefined' && S && S.session) ? S.session : null;
     const currentSid = currentSession ? currentSession.session_id : null;
@@ -392,13 +401,18 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
     if (!currentSid || !hasCurrentInSpace) {
       if ((sessionsInSpace || []).length && typeof loadSession === 'function') {
         const targetSid = sessionsInSpace[0].session_id;
-        await _withSpaceTimeout(Promise.resolve(loadSession(targetSid, {expectedSpace: slug, skipSidebarRender: true})), 12000, 'load session');
+        const load = loadSession(targetSid, {expectedSpace: slug, skipSidebarRender: true});
+        selectionEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
+        await load;
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
         _markSpaceSwitchTiming(slug, switchRev, 'session-loaded');
       } else if (typeof newSession === 'function') {
         if (configPromise) await Promise.resolve(configPromise).catch(() => null);
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-        await _withSpaceTimeout(Promise.resolve(newSession()), 12000, 'create session');
+        if (Number(window.__sidekickSessionNavigationEpoch || 0) !== navigationEpoch) return;
+        const creation = newSession();
+        selectionEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
+        await creation;
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
         _markSpaceSwitchTiming(slug, switchRev, 'session-created');
         if (typeof renderSessionList === 'function') await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
@@ -419,7 +433,9 @@ async function _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, 
     void _syncSpaceProjectDirForActiveSession(slug);
     _markSpaceSwitchTiming(slug, switchRev, 'background-finished');
   } catch (e) {
-    if (_isCurrentSpaceSwitch(switchRev, slug)) console.warn('continue space session selection:', e);
+    if (_isCurrentSpaceSwitch(switchRev, slug) && Number(window.__sidekickSessionNavigationEpoch || 0) === selectionEpoch) {
+      _showSpaceSwitchError(slug, switchRev, e);
+    }
   }
 }
 
@@ -529,7 +545,25 @@ document.addEventListener('keydown', (ev) => {
   try { closeSpaceDropdowns(); } catch (_) {}
 });
 
-async function selectSpace(slug) {
+function _showSpaceSwitchError(slug, switchRev, error) {
+  if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
+  console.warn('Space conversations unavailable:', error);
+  const inner = document.getElementById('msgInner');
+  if (!inner) return;
+  inner.removeAttribute('aria-busy');
+  inner.replaceChildren();
+  const message = document.createElement('p');
+  message.textContent = 'Could not load conversations for this space.';
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = 'Retry';
+  retry.onclick = () => {
+    if (_isCurrentSpaceSwitch(switchRev, slug)) selectSpace(slug, {retry: true});
+  };
+  inner.append(message, retry);
+}
+
+async function selectSpace(slug, options = {}) {
   if (!slug) return;
   closeSpaceDropdowns();
   const startedInSpacesPanel = (typeof _currentPanel !== 'undefined' && _currentPanel === 'workspaces');
@@ -541,7 +575,7 @@ async function selectSpace(slug) {
     activeSession.session_id &&
     activeSessionInTargetSpace
   );
-  if (slug === _activeSpace && hasActiveSessionForSameSpace) {
+  if (!options.retry && slug === _activeSpace && hasActiveSessionForSameSpace) {
     updateTitlebarSpace();
     renderSpacesPanel();
     return;
@@ -559,6 +593,7 @@ async function selectSpace(slug) {
     // it before the asynchronous session switch can render a target Space.
     if(typeof syncNovaPresenceCard==='function') syncNovaPresenceCard({visible:false});
     const switchRev = _beginSpaceSwitch();
+    const navigationEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
     _startSpaceSwitchTiming(slug, switchRev);
     localStorage.setItem('sidekick-active-workspace', slug);
     const shouldClearSessionRoute = !!(
@@ -600,7 +635,7 @@ async function selectSpace(slug) {
         if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
         console.warn('space session metadata unavailable, falling back to full list render', e);
         if (typeof renderSessionList === 'function') {
-          await _withSpaceTimeout(Promise.resolve(renderSessionList()), 8000, 'render session list');
+          await _withSpaceTimeout(Promise.resolve(renderSessionList({throwOnError: true})), 8000, 'render session list');
           if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
           try {
             if (typeof _allSessions !== 'undefined' && Array.isArray(_allSessions)) {
@@ -611,8 +646,12 @@ async function selectSpace(slug) {
       }
       _markSpaceSwitchTiming(slug, switchRev, 'session-list-rendered');
       if (!_isCurrentSpaceSwitch(switchRev, slug)) return;
-      void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise);
-    })();
+      void _continueSpaceSessionSelection(slug, switchRev, sessionsInSpace, spaceConfigPromise, navigationEpoch);
+    })().catch(e => {
+      if (Number(window.__sidekickSessionNavigationEpoch || 0) === navigationEpoch) {
+        _showSpaceSwitchError(slug, switchRev, e);
+      }
+    });
     _markSpaceSwitchTiming(slug, switchRev, 'background-session-load-started');
     _scheduleActiveSpaceScopedPanelRefresh(slug, switchRev);
     // Refresh spaces panel UI if currently visible
