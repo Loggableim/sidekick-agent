@@ -13,6 +13,7 @@ def test_three_space_pack_overrides_cannot_inject_roles_or_models(tmp_path: Path
     for slug in ("nova", "finanz-junkie", "aquarium-zentrum"):
         root = tmp_path / slug; root.mkdir(parents=True)
         packs = root / ".swarm" / "packs"; packs.mkdir(parents=True)
+        packs.parent.chmod(0o700)
         (packs / "coding-team.yaml").write_text("id: coding-team\nroles:\n  scout: altered description\n", encoding="utf-8")
         definition = PackRegistry(root).get("coding-team")
         assert definition.roles["scout"] == "altered description"
@@ -34,13 +35,13 @@ def test_role_model_mapping_rejects_unrouted_roles_without_provider_calls() -> N
 
 
 
-def test_unavailable_versioned_deepseek_flash_fails_closed_without_provider_fallback():
+def test_unknown_deepseek_tag_fails_closed_without_provider_fallback():
     from swarm_core.models import ModelRegistry
     from swarm_core.router import ModelRouter, NoEligibleModel
-    registry = ModelRegistry(["deepseek-v4-flash:0731"])
+    registry = ModelRegistry(["deepseek-v4-flash:unknown", "deepseek-v4-pro"])
     try:
         ModelRouter(registry).select("scout", {"structured-output"})
     except NoEligibleModel as exc:
         assert "Ollama Cloud" in str(exc)
     else:
-        raise AssertionError("missing exact DeepSeek V4 Flash 0731 must pause, not fallback")
+        raise AssertionError("unknown DeepSeek Flash tag must pause, not fall back to Pro")

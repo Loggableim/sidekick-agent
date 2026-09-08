@@ -5431,136 +5431,45 @@ window.addEventListener('resize',()=>{
   if(dd&&dd.classList.contains('open')) _positionProfileDropdown();
 });
 
+let _profileSwitchPending = false;
 async function switchToProfile(name) {
-  // Profile switches are per-client cookie/TLS scoped, so a running stream in
-  // the current session can safely continue while this tab moves to another
-  // profile. The in-flight session stays attached to its original profile.
-
-  // ── Loading indicator ───────────────────────────────────────────────────
-  // Show spinner on the profile chip immediately so the user gets visual
-  // feedback while the async switch is in progress.
-  const _chip = $('profileChip');
-  const _chipLabel = $('profileChipLabel');
-  const _prevProfileName = S.activeProfile || 'default';
-  if (_chip) { _chip.classList.add('switching'); _chip.disabled = true; }
-  // Optimistic name update — shows the target name right away
-  if (_chipLabel) _chipLabel.textContent = name;
-
-  // Determine whether the current session has any messages.
-  // A session with messages is "in progress" and belongs to the current profile —
-  // we must not retag it.  We'll start a fresh session for the new profile instead.
-  const sessionInProgress = S.session && (
-    (S.messages && S.messages.length > 0) ||
-    S.session.active_stream_id ||
-    S.session.pending_user_message
-  );
-
+  if (_profileSwitchPending || !name || name === (S.activeProfile || 'default')) return;
+  _profileSwitchPending = true;
+  const chip = $('profileChip');
+  const label = $('profileChipLabel');
+  const previousName = S.activeProfile || 'default';
+  if (chip) { chip.classList.add('switching'); chip.disabled = true; }
+  if (label) label.textContent = name;
+  closeProfileDropdown();
+  _markExplicitSessionNavigation(true);
+  _cancelActiveSessionLoad();
   try {
-    const data = await api('/api/profile/switch', { method: 'POST', body: JSON.stringify({ name }) });
-    S.activeProfile = data.active || name;
-
-    // Update composer placeholder and title bar while the core profile-switch
-    // state is still close to the profile API response.
-    if (typeof applyBotName === 'function') applyBotName();
-
-    // ── Model + Workspace (parallelized) ───────────────────────────────────
-    // populateModelDropdown hits /api/models; loadWorkspaceList hits /api/workspaces.
-    // They are fully independent — run both simultaneously to cut switch time ~50%.
-    if(typeof _clearPersistedModelState==='function') _clearPersistedModelState();
-    else localStorage.removeItem('sidekick-webui-model');
-    _skillsData = null;
-    _workspaceList = null;
-    await Promise.all([populateModelDropdown(), loadWorkspaceList()]);
-
-    // ── Apply model ────────────────────────────────────────────────────────
-    if (data.default_model) {
-      const sel = $('modelSelect');
-      const resolved = _applyModelToDropdown(data.default_model, sel, window._activeProvider||null);
-      const modelToUse = resolved || data.default_model;
-      const modelState = (typeof _modelStateForSelect==='function')
-        ? _modelStateForSelect(sel, modelToUse)
-        : {model:modelToUse,model_provider:null};
-      S._pendingProfileModel = modelToUse;
-      S._pendingProfileModelProvider = modelState.model_provider||null;
-      // Only patch the in-memory session model if we're NOT about to replace the session
-      if (S.session && !sessionInProgress) {
-        S.session.model = modelToUse;
-        S.session.model_provider = modelState.model_provider||null;
-      }
+    if (S.session && S.session.session_id && typeof _saveComposerDraftNow === 'function') {
+      _saveComposerDraftNow(S.session.session_id, $('msg')?.value || '', []);
     }
-
-    // ── Apply workspace ────────────────────────────────────────────────────
-    if (data.default_workspace) {
-      // Always store the persistent profile default — used for blank-page display
-      // and workspace auto-bind throughout the session lifecycle (#804, #823).
-      S._profileDefaultWorkspace = data.default_workspace;
-      // Also set the one-shot flag consumed by newSession() so the first new
-      // session after a profile switch inherits this workspace (#424).
-      S._profileSwitchWorkspace = data.default_workspace;
-
-      if (S.session && !sessionInProgress) {
-        // Empty session (no messages yet) — safe to update it in place
-        try {
-          await api('/api/session/update', { method: 'POST', body: JSON.stringify({
-            session_id: S.session.session_id,
-            workspace: data.default_workspace,
-            model: S.session.model,
-            model_provider: S.session.model_provider||null,
-          })});
-          S.session.workspace = data.default_workspace;
-        } catch (_) {}
-      }
-    }
-
-    // ── Session ────────────────────────────────────────────────────────────
-    _showAllProfiles = false;
-
-    if (sessionInProgress) {
-      // The current session has messages and belongs to the previous profile.
-      // Start a new session for the new profile so nothing gets cross-tagged.
-      await newSession(false);
-      // Apply profile default workspace to the newly created session (fixes #424)
-      if (S._profileDefaultWorkspace && S.session) {
-        try {
-          await api('/api/session/update', { method: 'POST', body: JSON.stringify({
-            session_id: S.session.session_id,
-            workspace: S._profileDefaultWorkspace,
-            model: S.session.model,
-            model_provider: S.session.model_provider||null,
-          })});
-          S.session.workspace = S._profileDefaultWorkspace;
-        } catch (_) {}
-      }
-      // Keep topbar chips (workspace/profile) in sync after creating the
-      // new profile-scoped session.
-      syncTopbar();
-      await renderSessionList();
-      showToast(t('profile_switched_new_conversation', name));
-    } else {
-      // No messages yet — just refresh the list and topbar in place
-      await renderSessionList();
-      syncTopbar();
-      // Refresh workspace file tree so the right panel shows the new
-      // profile's workspace, not the previous one (#1214).
-      if (S.session && S.session.workspace) loadDir('.');
-      showToast(t('profile_switched', name));
-    }
-
-    // ── Sidebar panels ─────────────────────────────────────────────────────
-    if (_currentPanel === 'skills') await loadSkills();
-    if (_currentPanel === 'memory') await loadMemory();
-    if (_currentPanel === 'tasks') await loadCrons();
-    if (_currentPanel === 'kanban') await loadKanban();
-    if (_currentPanel === 'profiles') await loadProfilesPanel();
-    if (_currentPanel === 'workspaces') await loadWorkspacesPanel();
-
-  } catch (e) {
-    // Revert the optimistic name update on error
-    if (_chipLabel) _chipLabel.textContent = _prevProfileName;
-    showToast(t('switch_failed') + e.message);
+    await _sessionApi('/api/profile/switch', 15000, null, {
+      method: 'POST', body: JSON.stringify({name}),
+    });
+    // Profile ownership applies to even empty chats. Reload from the profile's
+    // root so previous model/workspace requests and streams cannot update it.
+    // Running server-side sessions stay in their original profile.
+    try {
+      localStorage.removeItem('sidekick-webui-session');
+      localStorage.removeItem('sidekick-active-workspace');
+      if (typeof _clearPersistedModelState === 'function') _clearPersistedModelState();
+      else localStorage.removeItem('sidekick-webui-model');
+    } catch (_) {}
+    const target = new URL(document.baseURI || location.href);
+    target.pathname = _clearSessionRoutePath(target.pathname);
+    target.search = '';
+    target.hash = '';
+    location.assign(target.href);
+  } catch (error) {
+    if (label) label.textContent = previousName;
+    showToast(t('switch_failed') + error.message);
   } finally {
-    // Always remove loading indicator regardless of success or failure
-    if (_chip) { _chip.classList.remove('switching'); _chip.disabled = false; }
+    _profileSwitchPending = false;
+    if (chip) { chip.classList.remove('switching'); chip.disabled = false; }
   }
 }
 

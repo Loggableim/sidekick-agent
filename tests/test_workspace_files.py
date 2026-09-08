@@ -117,7 +117,7 @@ def test_read_only_workspace_trust_excludes_another_profile_without_rewriting(
     )
 
     assert workspace._read_only_saved_workspace_paths() == set()
-    with pytest.raises(ValueError, match="outside the user home directory"):
+    with pytest.raises(ValueError, match="another profile"):
         workspace.resolve_trusted_workspace_read_only(str(foreign_project))
     assert workspace_file.read_bytes() == before
     assert profile_home_calls == []
@@ -176,7 +176,7 @@ def test_read_only_default_profile_never_trusts_a_named_profile_workspace(
     )
 
     assert workspace._read_only_saved_workspace_paths() == set()
-    with pytest.raises(ValueError, match="outside the user home directory"):
+    with pytest.raises(ValueError, match="another profile"):
         workspace.resolve_trusted_workspace_read_only(str(foreign_project))
 
 
@@ -283,6 +283,7 @@ def test_file_rename_rejects_windows_absolute_new_name(monkeypatch, tmp_path):
     assert not outside.exists()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_rename_renames_symlink_not_target(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -313,6 +314,7 @@ def test_file_rename_renames_symlink_not_target(monkeypatch, tmp_path):
     assert target.read_text(encoding="utf-8") == "keep target\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_rename_allows_broken_symlink(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -394,6 +396,7 @@ def test_file_create_reports_parent_file_conflict(monkeypatch, tmp_path):
     assert not (workspace / "parent" / "child.txt").exists()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_create_rejects_broken_symlink_path(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -467,6 +470,7 @@ def test_file_create_rejects_windows_alternate_data_stream_name(monkeypatch, tmp
     assert not (workspace / "notes.txt").exists()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_create_allows_symlink_workspace_root(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -492,6 +496,7 @@ def test_file_create_allows_symlink_workspace_root(monkeypatch, tmp_path):
     assert (real_workspace / "created.txt").read_text(encoding="utf-8") == "created\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_rename_symlink_in_symlink_workspace_root_returns_relative_path(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -524,6 +529,7 @@ def test_file_rename_symlink_in_symlink_workspace_root_returns_relative_path(mon
     assert target.read_text(encoding="utf-8") == "keep target\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_workspace_write_rejects_broken_symlink_path(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -574,6 +580,7 @@ def test_workspace_write_rejects_windows_device_name(monkeypatch, tmp_path):
     assert not (workspace / "nested").exists()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_workspace_write_allows_symlink_workspace_root(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -600,6 +607,7 @@ def test_workspace_write_allows_symlink_workspace_root(monkeypatch, tmp_path):
     assert (real_workspace / "nested" / "generated.txt").read_text(encoding="utf-8") == "generated\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_save_rejects_symlink_target(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -653,6 +661,7 @@ def test_file_save_rejects_windows_alternate_data_stream_name(monkeypatch, tmp_p
     assert notes.read_text(encoding="utf-8") == "visible\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_create_dir_rejects_broken_symlink_path(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -703,6 +712,7 @@ def test_create_dir_rejects_windows_device_name(monkeypatch, tmp_path):
     assert not (workspace / "AUX").exists()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_create_dir_allows_symlink_workspace_root(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -780,6 +790,7 @@ def test_file_delete_rejects_windows_alternate_data_stream_name(monkeypatch, tmp
     assert target.read_text(encoding="utf-8") == "keep stream-like path\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_delete_removes_symlink_not_target(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -809,6 +820,7 @@ def test_file_delete_removes_symlink_not_target(monkeypatch, tmp_path):
     assert target.read_text(encoding="utf-8") == "keep target\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_delete_removes_workspace_symlink_to_outside_target(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -838,6 +850,7 @@ def test_file_delete_removes_workspace_symlink_to_outside_target(monkeypatch, tm
     assert outside.read_text(encoding="utf-8") == "keep outside\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_delete_removes_symlink_in_symlink_workspace_root(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -869,6 +882,7 @@ def test_file_delete_removes_symlink_in_symlink_workspace_root(monkeypatch, tmp_
     assert target.read_text(encoding="utf-8") == "keep target\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_file_delete_rejects_raw_symlink_path_outside_workspace(monkeypatch, tmp_path):
     from web.api import routes
 
@@ -1021,6 +1035,7 @@ def test_file_path_rejects_windows_alternate_data_stream_name(monkeypatch, tmp_p
     assert response["status"] == 400
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_upload_rejects_existing_symlink_target(monkeypatch, tmp_path):
     from web.api import upload
 
@@ -1106,6 +1121,7 @@ def test_upload_sanitizer_rejects_windows_device_names():
             raise AssertionError(f"expected reserved device name to be rejected: {filename}")
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_extract_archive_rejects_symlink_destination(tmp_path):
     from web.api.upload import extract_archive
 
@@ -1165,3 +1181,49 @@ def test_extract_archive_rejects_windows_device_destination_name(tmp_path):
         assert "filename" in str(exc).lower()
     else:
         raise AssertionError("expected reserved archive destination name to be rejected")
+
+
+@pytest.mark.parametrize("active", ["default", "alice"])
+@pytest.mark.parametrize("resolver", ["resolve_trusted_workspace", "resolve_trusted_workspace_read_only", "resolve_enrollment_trusted_workspace_read_only"])
+def test_home_and_default_trust_cannot_bypass_profile_ownership(monkeypatch, tmp_path, active, resolver):
+    from web.api import profiles, workspace
+
+    base = tmp_path / "sidekick"
+    (base / "profiles" / "alice").mkdir(parents=True)
+    foreign = base / "profiles" / "bob" / "project"
+    foreign.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: active)
+    monkeypatch.setattr(profiles, "_DEFAULT_SIDEKICK_HOME", base)
+    monkeypatch.setattr(workspace.Path, "home", classmethod(lambda _cls: tmp_path))
+    monkeypatch.setattr(workspace, "_read_only_default_workspaces", lambda: (tmp_path,))
+    monkeypatch.setattr(workspace, "_current_default_workspace", lambda: tmp_path)
+    with pytest.raises(ValueError, match="another profile"):
+        getattr(workspace, resolver)(foreign)
+
+
+def test_implicit_default_workspace_cannot_bypass_profile_ownership(monkeypatch, tmp_path):
+    from web.api import profiles, workspace
+
+    base = tmp_path / "sidekick"
+    foreign = base / "profiles" / "bob" / "project"
+    foreign.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: "default")
+    monkeypatch.setattr(profiles, "_DEFAULT_SIDEKICK_HOME", base)
+    monkeypatch.setattr(workspace, "_current_default_workspace", lambda: foreign)
+
+    with pytest.raises(ValueError, match="another profile"):
+        workspace.resolve_trusted_workspace()
+
+
+def test_profile_namespace_fails_closed_when_active_profile_cannot_be_read(monkeypatch, tmp_path):
+    from web.api import profiles, workspace
+
+    base = tmp_path / "sidekick"
+    foreign = base / "profiles" / "bob" / "project"
+    foreign.mkdir(parents=True)
+    monkeypatch.setattr(profiles, "_DEFAULT_SIDEKICK_HOME", base)
+    monkeypatch.setattr(profiles, "get_active_profile_name", lambda: (_ for _ in ()).throw(RuntimeError("unavailable")))
+    monkeypatch.setattr(workspace.Path, "home", classmethod(lambda _cls: tmp_path))
+
+    with pytest.raises(ValueError, match="another profile"):
+        workspace.resolve_trusted_workspace(foreign)

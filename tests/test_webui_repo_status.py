@@ -15,7 +15,7 @@ PANELS_JS = ROOT / "web" / "static" / "panels.js"
 _TITLEBAR_ACTION_IDS = {
     "btnGameModeToggle",
     "btnCastToggle",
-    "btnRebootSidekick",
+    "btnRuntimeRestart",
     "btnShutdownSidekick",
 }
 
@@ -284,7 +284,7 @@ def test_titlebar_actions_stay_out_of_the_status_cluster() -> None:
     assert parser.inside_status_cluster == {
         "btnGameModeToggle": False,
         "btnCastToggle": False,
-        "btnRebootSidekick": False,
+        "btnRuntimeRestart": False,
         "btnShutdownSidekick": False,
     }
 
@@ -295,7 +295,7 @@ def test_titlebar_actions_do_not_expand_hidden_admin_buttons_on_focus() -> None:
     assert ".titlebar-utility-actions #btnCastToggle," in style_css
     assert ".titlebar-utility-actions:focus-within #btnCastToggle" not in style_css
     assert ".titlebar-actions:focus-within #btnCastToggle" not in style_css
-    assert ".titlebar-actions:focus-within #btnRebootSidekick" not in style_css
+    assert ".titlebar-actions:focus-within #btnRuntimeRestart" not in style_css
     assert ".titlebar-actions:focus-within #btnShutdownSidekick" not in style_css
 
 
@@ -353,12 +353,12 @@ def test_titlebar_destructive_actions_do_not_depend_on_hover() -> None:
     style_css = STYLE_CSS.read_text(encoding="utf-8")
 
     assert ".titlebar-utility-actions #btnCastToggle," in style_css
-    assert ".titlebar-actions #btnRebootSidekick," in style_css
+    assert ".titlebar-actions #btnRuntimeRestart," in style_css
     assert ".titlebar-actions #btnShutdownSidekick{display:none!important;}" in style_css
     assert ".titlebar-actions:hover #btnCastToggle," not in style_css
-    assert ".titlebar-actions:hover #btnRebootSidekick," not in style_css
+    assert ".titlebar-actions:hover #btnRuntimeRestart," not in style_css
     assert ".titlebar-actions:focus-within #btnCastToggle" not in style_css
-    assert ".titlebar-actions:focus-within #btnRebootSidekick" not in style_css
+    assert ".titlebar-actions:focus-within #btnRuntimeRestart" not in style_css
     assert ".titlebar-actions:focus-within #btnShutdownSidekick" not in style_css
 
 
@@ -392,7 +392,7 @@ def test_sidebar_theme_toggle_keeps_night_mode_accessible() -> None:
     assert "aria-pressed" in boot_js
     assert "Tagmodus aktivieren" in boot_js
     assert "Nachtmodus aktivieren" in boot_js
-    assert index_html.index('id="btnRebootSidekick"') < index_html.index('id="titlebarThemeToggle"') < index_html.index('id="btnShutdownSidekick"')
+    assert index_html.index('id="btnRuntimeRestart"') < index_html.index('id="titlebarThemeToggle"') < index_html.index('id="btnShutdownSidekick"')
 
 
 def test_active_session_preview_prefers_real_message_context() -> None:
@@ -551,7 +551,7 @@ def test_boot_marks_recreated_missing_sessions_ready_before_new_session_sync() -
     boot_js = (ROOT / "web" / "static" / "boot.js").read_text(encoding="utf-8")
 
     assert re.search(
-        r"if \(_bootMissingSession && urlSession && saved\) \{\s*if \(typeof newSession === 'function'\) \{\s*S\._bootReady=true;\s*await newSession\(\);",
+        r"if \(_bootMissingSession && urlSession && saved\) \{\s*await _spaceConfigReady;\s*if \(_bootRestoreCanceled\(\)\) throw new Error\([^;]+;\s*if \(typeof newSession === 'function'\) \{\s*S\._bootReady=true;\s*await newSession\(\);",
         boot_js,
         re.S,
     )

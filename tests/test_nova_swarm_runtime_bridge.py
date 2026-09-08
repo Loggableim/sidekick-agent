@@ -626,6 +626,7 @@ def test_action_specs_and_verifier_scope_match_the_real_action_handler(
         ),
     ],
 )
+@pytest.mark.usefixtures("symlink_capable")
 def test_automatic_action_rejects_a_link_at_its_exact_output_path(
     nova_project: Path,
     action: str,
@@ -661,6 +662,7 @@ def test_automatic_action_rejects_a_link_at_its_exact_output_path(
     assert output.is_symlink()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_automatic_action_rejects_a_link_in_its_parent_chain(
     nova_project: Path,
 ):
@@ -739,6 +741,7 @@ def test_automatic_action_replaces_a_hardlinked_output_without_mutating_outside(
     assert not output.samefile(outside)
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_automatic_action_pins_parent_components_against_a_swap(
     nova_project: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -794,6 +797,7 @@ def test_automatic_action_pins_parent_components_against_a_swap(
     assert sentinel.read_text(encoding="utf-8") == "unchanged\n"
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_automatic_action_rejects_a_swapped_atomic_replace_source(
     nova_project: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -848,6 +852,7 @@ def test_automatic_action_rejects_a_swapped_atomic_replace_source(
     assert not output.exists() and not output.is_symlink()
 
 
+@pytest.mark.usefixtures("symlink_capable")
 def test_automatic_action_rechecks_the_final_name_after_content_validation(
     nova_project: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -934,11 +939,11 @@ def test_snapshot_requires_a_real_trusted_project_root(tmp_path: Path):
         )
     with pytest.raises(ValueError):
         bridge._create_nova_bridge_context(
-            Path(os.environ["SystemRoot"]),
+            Path(os.environ.get("SystemRoot", "/")),
             validator=lambda _candidate: (_ for _ in ()).throw(ValueError("blocked")),
         )
     with pytest.raises(TypeError):
-        NovaIntentReadOnlyVerifier(Path(os.environ["SystemRoot"]))
+        NovaIntentReadOnlyVerifier(Path(os.environ.get("SystemRoot", "/")))
 
 
 def test_canonical_unicode_and_numeric_forms_have_one_identity(trusted_nova_project):

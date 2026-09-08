@@ -602,13 +602,16 @@ def resolve_trusted_workspace(path: str | Path | None = None) -> Path:
     trusted (it is validated by the workspace resolver).
     """
     if path in (None, ""):
-        return _current_default_workspace()
+        candidate = _current_default_workspace()
+        _assert_active_profile_workspace(candidate)
+        return candidate
 
     candidate = Path(path).expanduser().resolve()
 
     access_error = _workspace_access_error(candidate)
     if access_error:
         raise ValueError(access_error)
+    _assert_active_profile_workspace(candidate)
 
     # (A) Trusted if under the user's home directory — cross-platform via Path.home()
     # Must be checked before system roots to allow symlinks like /var/home.
@@ -693,6 +696,7 @@ def resolve_trusted_workspace_read_only(path: str | Path) -> Path:
     access_error = _workspace_access_error(candidate)
     if access_error:
         raise ValueError(access_error)
+    _assert_active_profile_workspace(candidate)
 
     home = Path.home().resolve()
     if home != Path("/") and _is_within(candidate, home):
@@ -733,6 +737,7 @@ def resolve_enrollment_trusted_workspace_read_only(path: str | Path) -> Path:
     access_error = _workspace_access_error(candidate)
     if access_error:
         raise ValueError(access_error)
+    _assert_active_profile_workspace(candidate)
     home = Path.home().resolve()
     if home != Path("/") and _is_within(candidate, home):
         return candidate
@@ -745,6 +750,27 @@ def resolve_enrollment_trusted_workspace_read_only(path: str | Path) -> Path:
         if _is_within(candidate, default_workspace):
             return candidate
     raise ValueError("Enrollment requires an independently trusted workspace root")
+
+
+def _assert_active_profile_workspace(candidate: Path) -> None:
+    """Home/default workspace trust must never override named-profile ownership."""
+    context = _read_only_profile_context()
+    if context is not None:
+        if _read_only_workspace_belongs_to_active_profile(candidate, context):
+            return
+        raise ValueError("Workspace belongs to another profile")
+    # If profile discovery itself is unavailable, outside workspaces retain the
+    # normal trust path. A directory beneath the profile namespace does not:
+    # accepting it would expose another profile precisely when isolation cannot
+    # be established.
+    try:
+        from web.api import profiles
+
+        profiles_root = (Path(profiles._DEFAULT_SIDEKICK_HOME) / "profiles").expanduser().resolve()
+    except (AttributeError, OSError, RuntimeError):
+        return
+    if _is_within(candidate, profiles_root):
+        raise ValueError("Workspace belongs to another profile or its ownership is unavailable")
 
 
 def _read_only_saved_workspace_paths(

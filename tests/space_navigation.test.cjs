@@ -33,6 +33,7 @@ function context(extra = {}) {
     _SESSION_LOAD_TIMEOUT_MS: 5, _SESSION_MESSAGES_TIMEOUT_MS: 5, _INITIAL_MSG_LIMIT: 12,
     _yoloEnabled: false, _activeProject: null, NO_PROJECT_FILTER: 'none',
     AbortController, URLSearchParams, console: {warn() {}},
+    _liveStreamRehydrateTimer: null,
     setTimeout, clearTimeout, Promise,
     $: () => pane,
     document: {getElementById: () => pane, createElement: () => ({})},
@@ -248,4 +249,82 @@ test('Space history is profile scoped and rejects missing or foreign sessions', 
   c.S.activeProfile = 'bob';
   assert.equal(c._preferredSpaceSession('a', [first, saved]).session_id, 'first');
   assert.equal(c._preferredSpaceSession('a', [{session_id: 'foreign', workspace_slug: 'b'}]), null);
+});
+
+
+test('late live-stream metadata cannot attach after A to B to A navigation', async () => {
+  const pending = deferred(); let timer, attached = 0;
+  const c = context({setTimeout(fn) {timer = fn; return 1;}, attachLiveStream() {attached++;}});
+  vm.runInContext(section(sessions, 'function _scheduleLiveStreamRehydrate(', '// ── Composer draft'), c);
+  c._sessionApi = () => pending.promise;
+  c.S.session = {session_id:'a'};
+  c._scheduleLiveStreamRehydrate('a');
+  const hydrate = timer();
+  c._markExplicitSessionNavigation(true);
+  c._markExplicitSessionNavigation(true);
+  c.S.session = {session_id:'a'};
+  pending.resolve({session:{session_id:'a',active_stream_id:'old'}});
+  await hydrate;
+  assert.equal(attached, 0);
+  assert.equal(c.S.session.active_stream_id, undefined);
+});
+
+test('late completion frame cannot clear a newer conversation loading state', () => {
+  let frame, cleared = 0;
+  const c = context({sid:'a', requestAnimationFrame(fn) {frame=fn;},
+    isCurrentNavigationEpoch: () => c.window.__sidekickSessionNavigationEpoch === 0,
+    _clearConversationLoadingState() {cleared++;}});
+  c.S.session = {session_id:'a'};
+  const tail = section(sessions, '  // Defensive re-render:', '  // ── Cross-channel handoff hint');
+  vm.runInContext(tail, c);
+  c._markExplicitSessionNavigation(true);
+  c.S.session = {session_id:'b'};
+  frame();
+  assert.equal(cleared, 0);
+});
+
+test('boot restore owns its load epoch but yields to subsequent user navigation', async () => {
+  const boot = fs.readFileSync(path.join(root, 'web/static/boot.js'), 'utf8');
+  const c = context();
+  c.loadSession = async () => {c._markExplicitSessionNavigation(false); return {missingSession:true};};
+  vm.runInContext(section(boot, '  let _bootRestoreEpoch=', '  if (urlSession && saved'), c);
+  vm.runInContext(section(boot, '  function _bootLoadSession(', '  let _bootSavedSessionLoadPromise'), c);
+  await c._bootLoadSession('missing');
+  assert.equal(vm.runInContext('_bootRestoreCanceled()', c), false);
+  c._markExplicitSessionNavigation(true);
+  assert.equal(vm.runInContext('_bootRestoreCanceled()', c), true);
+});
+
+test('missing-session boot fallback respects navigation during Space config wait', async () => {
+  const boot = fs.readFileSync(path.join(root, 'web/static/boot.js'), 'utf8');
+  const config = deferred(); let created = 0, canceled = false;
+  const c = context({_bootMissingSession:true,urlSession:'missing',saved:'missing',
+    _spaceConfigReady:config.promise,_bootRestoreCanceled:()=>canceled,newSession:async()=>{created++;}});
+  const block = section(boot, '      if (_bootMissingSession && urlSession && saved)', '      // If the restored session');
+  const running = vm.runInContext('(async()=>{' + block + '})()', c);
+  canceled = true; config.resolve();
+  await assert.rejects(running, /restore canceled/);
+  assert.equal(created, 0);
+});
+
+test('profile switch leaves even empty chats owned by their original profile', async () => {
+  const panels = fs.readFileSync(path.join(root, 'web/static/panels.js'), 'utf8');
+  const pending = deferred(); let calls = 0, redirected;
+  const removed = [];
+  const chip = {classList:{add(){},remove(){}},disabled:false,textContent:''};
+  const c = context({URL, $:()=>chip,closeProfileDropdown(){},
+    document:{baseURI:'http://localhost/sidekick/'},location:{href:'http://localhost/sidekick/session/empty',assign(url){redirected=url;}},
+    _clearSessionRoutePath(){return '/sidekick/';},
+    localStorage:{removeItem(key){removed.push(key);}},t:x=>x,showToast(){}});
+  c.S.activeProfile='alice'; c.S.session={session_id:'empty',profile:'alice'};
+  c._sessionApi = (url) => {assert.equal(url,'/api/profile/switch'); calls++; return pending.promise;};
+  vm.runInContext(section(panels, 'let _profileSwitchPending', 'function openProfileCreate('), c);
+  const switching = c.switchToProfile('bob');
+  await c.switchToProfile('charlie');
+  pending.resolve({active:'bob'}); await switching;
+  assert.equal(calls, 1);
+  assert.equal(c.S.session.profile, 'alice');
+  assert.equal(redirected, 'http://localhost/sidekick/');
+  assert.ok(removed.includes('sidekick-webui-session'));
+  assert.equal(chip.disabled, false);
 });
