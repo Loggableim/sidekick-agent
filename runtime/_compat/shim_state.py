@@ -160,8 +160,41 @@ class SessionDB:
             );
             """
         )
+        self._migrate_session_columns()
         self._repair_missing_parent_session_refs()
         self._init_message_search_index()
+
+    def _migrate_session_columns(self) -> None:
+        """Upgrade old stores without dropping their sessions or search API."""
+        additions = (
+            ("started_at", "REAL"),
+            ("ended_at", "REAL"),
+            ("status", "TEXT DEFAULT 'active'"),
+            ("input_tokens", "INTEGER DEFAULT 0"),
+            ("output_tokens", "INTEGER DEFAULT 0"),
+            ("cache_read_tokens", "INTEGER DEFAULT 0"),
+            ("reasoning_tokens", "INTEGER DEFAULT 0"),
+            ("estimated_cost_usd", "REAL DEFAULT 0"),
+            ("actual_cost_usd", "REAL DEFAULT 0"),
+            ("api_call_count", "INTEGER DEFAULT 0"),
+            ("tool_call_count", "INTEGER DEFAULT 0"),
+            ("billing_provider", "TEXT DEFAULT ''"),
+        )
+        columns = self._table_columns("sessions")
+        if all(name in columns for name, _ in additions):
+            return
+        # Two dashboard/gateway connections may upgrade the same file at once.
+        # Recheck under a write lock and roll back the whole migration on error.
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            columns = self._table_columns("sessions")
+            for name, definition in additions:
+                if name not in columns:
+                    self._conn.execute(f"ALTER TABLE sessions ADD COLUMN {name} {definition}")
+            self._conn.execute("COMMIT")
+        except Exception:
+            self._conn.execute("ROLLBACK")
+            raise
 
     def _repair_missing_parent_session_refs(self) -> int:
         """Drop parent links that point at sessions no longer present."""
