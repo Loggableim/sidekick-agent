@@ -5432,8 +5432,19 @@ window.addEventListener('resize',()=>{
 });
 
 let _profileSwitchPending = false;
+function _profileRootUrl() {
+  const target = new URL(document.baseURI || location.href);
+  target.pathname = _clearSessionRoutePath(target.pathname);
+  target.search = '';
+  target.hash = '';
+  return target.href;
+}
+
 async function switchToProfile(name) {
-  if (_profileSwitchPending || !name || name === (S.activeProfile || 'default')) return;
+  // The server-backed profile view is authoritative: this tab's S.activeProfile
+  // can lag behind a switch made in another tab while the profiles panel stays
+  // open. The dropdown already suppresses its known active item.
+  if (_profileSwitchPending || !name) return;
   _profileSwitchPending = true;
   const chip = $('profileChip');
   const label = $('profileChipLabel');
@@ -5459,14 +5470,18 @@ async function switchToProfile(name) {
       if (typeof _clearPersistedModelState === 'function') _clearPersistedModelState();
       else localStorage.removeItem('sidekick-webui-model');
     } catch (_) {}
-    const target = new URL(document.baseURI || location.href);
-    target.pathname = _clearSessionRoutePath(target.pathname);
-    target.search = '';
-    target.hash = '';
-    location.assign(target.href);
+    location.assign(_profileRootUrl());
   } catch (error) {
     if (label) label.textContent = previousName;
     showToast(t('switch_failed') + error.message);
+    // The active request was intentionally cancelled before the profile API
+    // call. If the switch fails, its cancelled load cannot clear the pending
+    // pane itself because it belongs to an older navigation epoch. Re-enter
+    // through the current profile root instead of leaving that pane blocked.
+    // Keep the stored session ID: on a confirmed failed switch it restores the
+    // previous profile's chat, and on an ambiguous network failure the server
+    // cookie remains the source of truth during boot.
+    try { location.assign(_profileRootUrl()); } catch (_) {}
   } finally {
     _profileSwitchPending = false;
     if (chip) { chip.classList.remove('switching'); chip.disabled = false; }

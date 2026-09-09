@@ -231,8 +231,9 @@ python -m pip install -e ".[web]"
 python -m pip install -e ".[gateway,browser]"
 python -m playwright install chromium
 
-# Everything (recommended for development)
+# Everything (recommended for development, including the embedded browser runtime)
 python -m pip install -e ".[all]"
+python -m playwright install chromium
 ```
 
 ## Known issues

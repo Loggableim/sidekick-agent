@@ -328,3 +328,58 @@ test('profile switch leaves even empty chats owned by their original profile', a
   assert.ok(removed.includes('sidekick-webui-session'));
   assert.equal(chip.disabled, false);
 });
+
+test('profile activation uses the server when this tab has a stale active profile', async () => {
+  const panels = fs.readFileSync(path.join(root, 'web/static/panels.js'), 'utf8');
+  let calls = 0, redirected;
+  const chip = {classList:{add(){},remove(){}},disabled:false,textContent:''};
+  const label = {textContent:'default'};
+  const c = context({
+    URL,
+    $: id => id === 'profileChip' ? chip : id === 'profileChipLabel' ? label : null,
+    closeProfileDropdown() {},
+    document:{baseURI:'http://localhost/sidekick/'},
+    location:{href:'http://localhost/sidekick/session/current',assign(url){redirected=url;}},
+    _clearSessionRoutePath(){return '/sidekick/';},
+    localStorage:{removeItem(){}}, t:x=>x, showToast(){},
+  });
+  c.S.activeProfile = 'default';
+  c.S.session = {session_id:'current',profile:'alice'};
+  c._sessionApi = async (url) => {assert.equal(url, '/api/profile/switch'); calls++; return {active:'alice'};};
+  vm.runInContext(section(panels, 'let _profileSwitchPending', 'function openProfileCreate('), c);
+  await c.switchToProfile('alice');
+  assert.equal(calls, 1);
+  assert.equal(redirected, 'http://localhost/sidekick/');
+  assert.equal(chip.disabled, false);
+});
+
+test('failed profile switch recovers a cancelled conversation through the current profile root', async () => {
+  const panels = fs.readFileSync(path.join(root, 'web/static/panels.js'), 'utf8');
+  let redirected; const toasts = [];
+  const chip = {classList:{add(){},remove(){}},disabled:false,textContent:''};
+  const label = {textContent:'alice'};
+  const c = context({
+    URL,
+    $: id => id === 'profileChip' ? chip : id === 'profileChipLabel' ? label : null,
+    closeProfileDropdown() {},
+    document:{baseURI:'http://localhost/sidekick/'},
+    location:{href:'http://localhost/sidekick/session/loading',assign(url){redirected=url;}},
+    _clearSessionRoutePath(){return '/sidekick/';},
+    localStorage:{removeItem(){}},
+    t:x=>x,
+    showToast(message){toasts.push(message);},
+  });
+  const controller = new AbortController();
+  c._activeSessionLoadAbortController = controller;
+  c._loadingSessionId = 'loading';
+  c.S.activeProfile = 'alice';
+  c.S.session = {session_id:'loading',profile:'alice'};
+  c._sessionApi = async () => {throw new Error('offline');};
+  vm.runInContext(section(panels, 'let _profileSwitchPending', 'function openProfileCreate('), c);
+  await c.switchToProfile('bob');
+  assert.equal(controller.signal.aborted, true);
+  assert.equal(redirected, 'http://localhost/sidekick/');
+  assert.equal(label.textContent, 'alice');
+  assert.equal(toasts.length, 1);
+  assert.equal(chip.disabled, false);
+});
