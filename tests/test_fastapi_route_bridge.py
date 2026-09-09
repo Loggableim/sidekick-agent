@@ -667,7 +667,14 @@ def test_space_management_cannot_self_trust_mutable_project_dirs_for_any_product
     monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
     monkeypatch.setattr(space_engine, "_OLD_ROOT", tmp_path / "legacy-spaces")
     monkeypatch.setattr(workspace.Path, "home", lambda: isolated_home)
-    # The route imports this resolver directly; force the production trust\r\n    # boundary to fail closed regardless of the host profile registry.\r\n    monkeypatch.setattr(\r\n        web_server,\r\n        "resolve_enrollment_trusted_workspace_read_only",\r\n        lambda _value: (_ for _ in ()).throw(ValueError("untrusted fixture root")),\r\n    )\r\n
+    # The route imports this resolver directly; make the trust boundary fail
+    # closed and verify the route cannot turn mutable Space metadata into trust.
+    monkeypatch.setattr(
+        web_server,
+        "resolve_enrollment_trusted_workspace_read_only",
+        lambda _value: (_ for _ in ()).throw(ValueError("untrusted fixture root")),
+    )
+
     spaces = {}
     before = {}
     for slug in ("nova", "finanzjunkie", "aquarium-zentrum"):

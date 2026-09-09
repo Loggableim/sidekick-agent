@@ -65,7 +65,7 @@ const context={window:{_activeSpace:'nova'},document:{createElement:el},$:id=>el
 vm.runInNewContext(__CODE__,context,{filename:'ui.js'});
 context._renderNovaPresenceCard({state:'available',managed_spaces:[{space:'aquarium-zentrum',state:'paused'}],operational:{management_mode:'space_yolo_only',managed_space_count:1,ticker:'inactive',paused_model_chain_spaces:['aquarium-zentrum']},supervision:{running:false},blockers:[{space:'aquarium-zentrum',code:'model_chain_exhausted'}]});
 const text=elements.novaPresencePolicy.textContent;
-if(!text.includes('keine autonome Arbeit l?uft')) throw new Error(text);
+if(!text.includes('keine autonome Arbeit läuft')) throw new Error(text);
 if(!text.includes('Aquarium Zentrum')) throw new Error(text);
 if(!text.includes('globale YOLO bleibt Quellmodus')) throw new Error(text);
 '''.replace('__CODE__',json.dumps(code))
@@ -212,7 +212,7 @@ const context={window:{_activeSpace:'nova'},document:{createElement:el},$:id=>el
 vm.runInNewContext(__CODE__,context,{filename:'ui.js'});
 context._renderNovaPresenceCard({state:'available',managed_spaces:[{space:'aquarium-zentrum',state:'paused'}],focus:{kind:'supervision',space:'aquarium-zentrum',state:'paused'},operational:{management_mode:'space_yolo_only',managed_space_count:1,ticker:'inactive',runtime_status:'offline'},supervision:{running:false}});
 const text=elements.novaPresenceFocus.textContent;
-if(!text.includes('keine autonome Arbeit l?uft')) throw new Error(text);
+if(!text.includes('keine autonome Arbeit läuft')) throw new Error(text);
 if(text.includes('als Nova-Entität im Blick')) throw new Error(text);
 """.replace('__CODE__',json.dumps(code))
     result=subprocess.run(['node','-e',program],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=15)

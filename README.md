@@ -227,7 +227,11 @@ python -m pip install -e .
 # With WebUI extras
 python -m pip install -e ".[web]"
 
-# Everything (recommended for development)
+# With inbound webhooks and the embedded browser runtime
+python -m pip install -e ".[gateway,browser]"
+python -m playwright install chromium
+
+# Development dependencies (the embedded browser runtime stays opt-in)
 python -m pip install -e ".[all]"
 ```
 

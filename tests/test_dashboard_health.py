@@ -2384,7 +2384,7 @@ def test_titlebar_global_actions_remain_visible_on_desktop():
     assert ".titlebar-utility-actions{display:flex;align-items:center;gap:2px;margin-left:8px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
     assert ".titlebar-actions{display:flex;align-items:center;gap:2px;margin-right:4px;-webkit-app-region:no-drag;flex-shrink:0;position:relative;z-index:6;}" in style_css
     assert ".titlebar-utility-actions #btnCastToggle," in style_css
-    assert ".titlebar-actions #btnRebootSidekick," in style_css
+    assert ".titlebar-actions #btnRuntimeRestart," in style_css
     assert ".titlebar-actions #btnShutdownSidekick{display:inline-flex!important;}" in style_css
     assert ".titlebar-utility-actions .lang-dropdown{left:0;right:auto;}" in style_css
     assert ".titlebar-actions:hover #btnCastToggle," not in style_css
@@ -5667,7 +5667,7 @@ def test_swarm_panel_exposes_human_only_supervisor_slot_release():
 
 def test_boot_starts_session_restore_before_nonessential_metadata_finishes():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
-    restore_start = boot_js.index("  await renderSessionList();", boot_js.index("const _bootRestoreEpoch"))
+    restore_start = boot_js.index("  await renderSessionList();", boot_js.index("_bootRestoreEpoch"))
     # Cold-start conversation restore must not wait for workspace/space metadata.
     assert "await _workspaceReady" not in boot_js[:restore_start]
     assert "await _spaceConfigReady" not in boot_js[:restore_start]
@@ -5677,21 +5677,21 @@ def test_boot_starts_session_restore_before_nonessential_metadata_finishes():
 
 def test_boot_does_not_gate_session_restore_on_settings_or_game_mode():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
-    restore_start = boot_js.index("  await renderSessionList();", boot_js.index("const _bootRestoreEpoch"))
+    restore_start = boot_js.index("  await renderSessionList();", boot_js.index("_bootRestoreEpoch"))
     # Settings and game-mode decoration must be launched without gating restore.
     assert "const _bootSettingsReady = (async()=>{" in boot_js
     assert "void _bootSettingsReady;" in boot_js[:restore_start]
 
 def test_boot_defers_project_hydration_until_after_session_restore():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
-    restore_start = boot_js.index("  await renderSessionList({deferProjects:true,deferCli:true});", boot_js.index("const _bootRestoreEpoch"))
+    restore_start = boot_js.index("  await renderSessionList({deferProjects:true,deferCli:true});", boot_js.index("_bootRestoreEpoch"))
     assert restore_start > 0
 
 
 def test_boot_defers_expensive_cli_sidebar_hydration_until_after_restore():
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
     sessions_js = Path("web/static/sessions.js").read_text(encoding="utf-8")
-    restore_start = boot_js.index("const _bootRestoreEpoch")
+    restore_start = boot_js.index("_bootRestoreEpoch")
     restore_end = boot_js.index("// Workspace panel restore happens AFTER loadSession", restore_start)
     restore_block = boot_js[restore_start:restore_end]
     assert "renderSessionList({deferProjects:true,deferCli:true})" in restore_block
@@ -5739,7 +5739,7 @@ def test_boot_starts_url_session_restore_before_session_list_finishes():
         boot_js.index("// Workspace panel restore happens AFTER loadSession", boot_js.index("let _bootSavedSessionLoadPromise = null;"))
     ]
     assert "Start its metadata restore immediately" in restore_block
-    assert restore_block.index("_bootSavedSessionLoadPromise = loadSession(saved") < restore_block.index("await renderSessionList({deferProjects:true,deferCli:true})")
+    assert restore_block.index("_bootSavedSessionLoadPromise = _bootLoadSession(saved") < restore_block.index("await renderSessionList({deferProjects:true,deferCli:true})")
     assert "suppressMissingSessionMessage: true" in restore_block
     assert "deferTranscript: true" in restore_block
 

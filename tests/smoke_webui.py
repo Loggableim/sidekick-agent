@@ -253,7 +253,7 @@ def run_smoke() -> Result:
                     reasoning_chip = page.locator(".composer-reasoning-chip").first
                     app_titlebar_title = page.locator("#appTitlebarTitle").first
                     theme_toggle = page.locator("#titlebarThemeToggle").first
-                    reboot_btn = page.locator("#btnRebootSidekick").first
+                    reboot_btn = page.locator("#btnRuntimeRestart").first
                     shutdown_btn = page.locator("#btnShutdownSidekick").first
                     titlebar_hidden = all(
                         (not page.locator(sel).count()) or not page.locator(sel).first.is_visible()
@@ -450,9 +450,33 @@ def run_smoke() -> Result:
                         f"reasoning={boxes['reasoning_chip']} "
                         f"theme_before={dark_before} theme_after={dark_after} theme_restored={dark_restored}"
                     )
-                    topbar_clean = all(v is None for v in topbar_tooltips.values())
-                    composer_clean = all(v is None for v in composer_tooltips.values())
-                    _mark(result, "desktop browser layout", ok and topbar_clean and composer_clean and "browser browser" not in workflow_before.lower() and "browser browser" not in workflow_open.lower() and "browser browser" not in workflow_restored.lower() and "browser closed" in workflow_before.lower() and "browser open" in workflow_open.lower() and "browser closed" in workflow_restored.lower() and queue_empty_hidden and browser_empty_ok and busy_visible and busy_hidden and bool(busy_text.strip()) and "is-loading" in busy_loading, detail)
+                    tooltip_controls = (
+                        review_chip, profile_chip, composer_workspace_chip, composer_model_chip,
+                        composer_reasoning_chip, workflow_badge, attach_btn, goal_btn,
+                        browser_toggle, toolsets_chip, queue_mode_chip, steer_mode_chip,
+                        bg_mode_chip, workspace_panel_btn, sandbox_toggle_label, terminal_btn,
+                        mobile_config_btn, mobile_workspace_action, bg_badge, yolo_pill,
+                        mic_btn, voice_mode_btn, space_btn, game_mode_btn, cast_btn,
+                        theme_toggle, reboot_btn, shutdown_btn,
+                    )
+                    # The custom tooltip system deliberately removes native titles
+                    # to avoid the slow browser tooltip appearing alongside it.
+                    # The workspace and runtime controls intentionally use the
+                    # native fallback because they have no custom tooltip class.
+                    custom_tooltips_are_clean = all(
+                        not control.get_attribute("data-tooltip")
+                        or control.get_attribute("title") is None
+                        for control in tooltip_controls
+                    )
+                    native_tooltip_fallbacks_are_labelled = (
+                        workspace_panel_btn.get_attribute("data-tooltip") is None
+                        and workspace_panel_btn.get_attribute("title") in {
+                            "Show file tree panel", "Hide file tree panel",
+                        }
+                        and reboot_btn.get_attribute("data-tooltip") is None
+                        and reboot_btn.get_attribute("title") == "Runtime neu starten"
+                    )
+                    _mark(result, "desktop browser layout", ok and custom_tooltips_are_clean and native_tooltip_fallbacks_are_labelled and "browser browser" not in workflow_before.lower() and "browser browser" not in workflow_open.lower() and "browser browser" not in workflow_restored.lower() and "browser closed" in workflow_before.lower() and "browser open" in workflow_open.lower() and "browser closed" in workflow_restored.lower() and queue_empty_hidden and browser_empty_ok and busy_visible and busy_hidden and bool(busy_text.strip()) and "is-loading" in busy_loading, detail)
                     _mark(result, "theme toggle restores state", dark_after != dark_before and dark_restored == dark_before, f"before={dark_before} after={dark_after} restored={dark_restored}")
 
                     onboarding_skip = page.locator("#onboardingSkipBtn").first
