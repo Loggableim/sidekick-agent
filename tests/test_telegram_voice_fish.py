@@ -272,6 +272,7 @@ def test_gateway_and_browser_runtime_dependencies_are_available_from_extras():
     assert any(dep.startswith("aiohttp") for dep in optional["gateway"])
     assert any(dep.startswith("playwright") for dep in optional["browser"])
     assert any(dep.startswith("aiohttp") for dep in optional["all"])
+    assert any(dep.startswith("playwright") for dep in optional["all"])
 
 
 def test_gateway_adapter_fatal_error_contract_is_boolean_property():

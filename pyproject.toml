@@ -54,6 +54,7 @@ all = [
     "croniter>=2.0",
     "python-telegram-bot>=21,<23",
     "aiohttp>=3.9,<4",
+    "playwright>=1.48,<2",
     "beautifulsoup4>=4.12",
     "numpy>=2.0",
     "chromadb>=1.0",
