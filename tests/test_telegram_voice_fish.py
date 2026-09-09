@@ -272,7 +272,9 @@ def test_gateway_and_browser_runtime_dependencies_are_available_from_extras():
     assert any(dep.startswith("aiohttp") for dep in optional["gateway"])
     assert any(dep.startswith("playwright") for dep in optional["browser"])
     assert any(dep.startswith("aiohttp") for dep in optional["all"])
-    assert any(dep.startswith("playwright") for dep in optional["all"])
+    # The browser runtime also requires a separate Chromium download, so keep
+    # it opt-in instead of making ordinary ``.[all]`` CI installs launch it.
+    assert not any(dep.startswith("playwright") for dep in optional["all"])
 
 
 def test_gateway_adapter_fatal_error_contract_is_boolean_property():
