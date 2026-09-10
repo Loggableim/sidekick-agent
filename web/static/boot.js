@@ -1827,16 +1827,25 @@ function applyBotName(){
  * in sync so the first new chat honours the space's config.
  */
 async function _loadActiveSpaceConfig() {
-  const slug = (typeof _activeSpace !== 'undefined' ? _activeSpace : null)
+  const slug = String((typeof _activeSpace !== 'undefined' ? _activeSpace : null)
     || localStorage.getItem('sidekick-active-workspace')
-    || 'nova';
+    || 'nova').trim().toLowerCase();
+  const switchRev = Number(window._sidekickSpaceSwitchRev || 0);
+  const isCurrentSpaceConfigLoad = () => (
+    String(typeof _activeSpace !== 'undefined' ? _activeSpace : '').trim().toLowerCase() === slug
+    && Number(window._sidekickSpaceSwitchRev || 0) === switchRev
+  );
   try {
     const resp = await api('/api/space/config?slug=' + encodeURIComponent(slug));
-    window._activeSpaceConfig = resp.config || null;
+    if (!isCurrentSpaceConfigLoad()) return null;
+    const config = resp && resp.config || null;
+    window._activeSpaceConfig = config;
+    return config;
   } catch (_) {
     // Non-fatal — fall through with null config; newSession() inherits
     // from the session chain or the profile default workspace.
-    window._activeSpaceConfig = null;
+    if (isCurrentSpaceConfigLoad()) window._activeSpaceConfig = null;
+    return null;
   }
 }
 
@@ -1971,7 +1980,6 @@ async function _syncGameModeStateFromServer() {
     console.warn('[boot] workspace list unavailable, continuing', e);
   });
   const _spaceConfigReady = _bootTimeout(_loadActiveSpaceConfig(),8000,'space config').catch((e)=>{
-    window._activeSpaceConfig=null;
     console.warn('[boot] active space config unavailable, continuing', e);
   });
   // Fetch active profile as a background decoration.  Session-list and

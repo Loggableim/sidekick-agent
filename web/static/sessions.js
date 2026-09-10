@@ -770,6 +770,8 @@ async function loadSession(sid, options){
       const optimistic = (Array.isArray(_allSessions) ? _allSessions : []).find(s => s && s.session_id === sid);
       if (optimistic) {
         S.session = {...optimistic, session_id: sid, messages: []};
+        _bumpMessagesGeneration();
+        _invalidateOlderMessagesLoad();
         S.messages = [];
         S.toolCalls = [];
         S.busy = !!(optimistic.active_stream_id || optimistic.pending_user_message || optimistic.is_streaming);
@@ -860,10 +862,20 @@ async function loadSession(sid, options){
     if (_loadingSessionId === sid) _loadingSessionId = null;
     return;
   }
-  // Guard: api() may have redirected (401) and returned undefined; in that case
-  // the browser is already navigating away, so abort the rest of this flow.
-  if (!data) {
+  // A proxy/login redirect can yield undefined, a non-JSON body, or a 200
+  // response without session metadata. Treat every malformed payload as a
+  // recoverable load failure; dereferencing data.session below used to leave
+  // the conversation pane stuck in its loading state.
+  if (!data || !data.session || typeof data.session !== 'object' || !data.session.session_id) {
+    if (!isCurrentNavigationEpoch() || _activeSessionLoadAbortController !== loadAbortController) return;
+    _clearConversationLoadingState();
+    const _msgInner = $('msgInner');
+    if (_msgInner) {
+      _msgInner.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:14px;padding:40px;text-align:center;">Failed to load session. Try switching sessions or refreshing.</div>';
+    }
+    if (typeof showToast === 'function') showToast('Failed to load session',3000,'error');
     if (_loadingSessionId === sid) _loadingSessionId = null;
+    if (_activeSessionLoadAbortController === loadAbortController) _activeSessionLoadAbortController = null;
     return;
   }
   if (!isCurrentNavigationEpoch()) {
@@ -932,12 +944,13 @@ async function loadSession(sid, options){
   // Fast conversation switches can leave stale requests resolving late; clearing
   // global message state before this point makes the active pane appear empty or
   // stuck until the final request completes.
+  _bumpMessagesGeneration();
+  _invalidateOlderMessagesLoad();
   S.messages = [];
   S.toolCalls = [];
   if(typeof clearLiveToolCards==='function') clearLiveToolCards();
-    _messagesTruncated = false;
-    _oldestIdx = 0;
-    _loadingOlder = false;
+  _messagesTruncated = false;
+  _oldestIdx = 0;
   if (Array.isArray(data.session && data.session.messages) && data.session.messages.length) {
     _applySessionMessagePayload(sid, data);
   }
@@ -1700,6 +1713,10 @@ function _applySessionMessagePayload(sid, data) {
     S.toolCalls = [];
   }
   clearLiveToolCards();
+  // This replaces the full in-memory window, so any delayed page load belongs
+  // to an obsolete transcript even when the user navigated A → B → A.
+  _bumpMessagesGeneration();
+  _invalidateOlderMessagesLoad();
   S.messages = msgs;
   if(S.session&&S.session.session_id===sid){
     S.session.message_count=Number(data.session.message_count || msgs.length);
@@ -1711,6 +1728,22 @@ function _applySessionMessagePayload(sid, data) {
 // Load older messages when the user scrolls to the top of the conversation.
 // Prepends them to S.messages and re-renders, preserving scroll position.
 let _loadingOlder = false;
+// The boolean keeps the existing entry gate cheap; the token gives ownership
+// to the request that acquired it. A stale request must never clear a newer
+// transcript's lock after a Space or session switch.
+let _olderMessagesLoadToken = 0;
+function _beginOlderMessagesLoad() {
+  _olderMessagesLoadToken = (_olderMessagesLoadToken + 1) | 0;
+  _loadingOlder = true;
+  return _olderMessagesLoadToken;
+}
+function _finishOlderMessagesLoad(token) {
+  if (_olderMessagesLoadToken === token) _loadingOlder = false;
+}
+function _invalidateOlderMessagesLoad() {
+  _olderMessagesLoadToken = (_olderMessagesLoadToken + 1) | 0;
+  _loadingOlder = false;
+}
 // _oldestIdx tracks the index (in the server's full message array) of the
 // oldest message currently loaded in S.messages. Starts at 0 when all
 // messages are loaded, or > 0 when truncated by msg_limit.
@@ -1734,7 +1767,7 @@ async function _loadOlderMessages() {
   const sid = S.session ? S.session.session_id : null;
   if (!sid || !S.messages.length) return;
   if (_oldestIdx <= 0) { _messagesTruncated = false; return; }
-  _loadingOlder = true;
+  const loadToken = _beginOlderMessagesLoad();
   // Snapshot the generation BEFORE we await. If S.messages is wholesale
   // replaced while the request is in flight, the post-await check below
   // bails out so we never prepend stale older messages onto a freshly
@@ -1746,7 +1779,7 @@ async function _loadOlderMessages() {
       _SESSION_MESSAGES_TIMEOUT_MS
     );
     // Guard: api() may have redirected (401) and returned undefined.
-    if (!data || !data.session) { _loadingOlder = false; return; }
+    if (!data || !data.session) return;
     //  - response shape sane
     //  - the active session is still the one we issued the request for.
     //    Compare against S.session.session_id, NOT _loadingSessionId — the
@@ -1755,6 +1788,7 @@ async function _loadOlderMessages() {
     if (!data || !data.session) return;
     if (!S.session || S.session.session_id !== sid) return;
     if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
+    if (_olderMessagesLoadToken !== loadToken) return;
     // Generation guard: another code path (typically jumpToSessionStart →
     // _ensureAllMessagesLoaded) may have replaced S.messages while we were
     // awaiting. Prepending older messages onto that replacement would
@@ -1799,10 +1833,7 @@ async function _loadOlderMessages() {
   } catch(e) {
     console.warn('_loadOlderMessages failed:', e);
   } finally {
-    // Always clear the loading lock. If the user switched sessions while
-    // this request was in flight, loadSession() already set _loadingOlder=false
-    // (see line ~122), so this is a harmless double-reset.
-    _loadingOlder = false;
+    _finishOlderMessagesLoad(loadToken);
   }
 }
 
@@ -1821,6 +1852,15 @@ async function _loadOlderMessages() {
 //      in-flight prefetch's post-await generation check bails out.
 async function _ensureAllMessagesLoaded() {
   if (!_messagesTruncated || !S.session) return;
+  const sid = S.session.session_id;
+  const navigationEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
+  let expectedGeneration = _messagesGeneration;
+  const isStillCurrentTranscript = () => (
+    !!S.session
+    && S.session.session_id === sid
+    && Number(window.__sidekickSessionNavigationEpoch || 0) === navigationEpoch
+    && _messagesGeneration === expectedGeneration
+  );
   if (_loadingOlder) {
     // A prefetch is mid-flight (between the `_loadingOlder = true` line
     // and its post-await guards). Bumping the generation token now
@@ -1829,15 +1869,15 @@ async function _ensureAllMessagesLoaded() {
     // (its finally-block clears _loadingOlder) before fetching the full
     // history ourselves. The generation bump below ensures any other
     // future race against this same continuation also fails closed.
-    _bumpMessagesGeneration();
+    expectedGeneration = _bumpMessagesGeneration();
     while (_loadingOlder) {
       await new Promise(resolve => setTimeout(resolve, 16));
     }
-    if (!_messagesTruncated || !S.session) return;
+    if (!_messagesTruncated || !isStillCurrentTranscript()) return;
   }
-  _loadingOlder = true;
+  if (!isStillCurrentTranscript()) return;
+  const loadToken = _beginOlderMessagesLoad();
   try {
-    const sid = S.session.session_id;
     const data = await _sessionApi(
       `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0`,
       _SESSION_MESSAGES_TIMEOUT_MS
@@ -1846,13 +1886,14 @@ async function _ensureAllMessagesLoaded() {
     if (!data || !data.session) return;
     // Session may have been switched while we awaited. Bail rather than
     // overwrite the new session's messages.
-    if (!S.session || S.session.session_id !== sid) return;
+    if (!isStillCurrentTranscript()) return;
     if (_loadingSessionId !== null && _loadingSessionId !== sid) return;
+    if (_olderMessagesLoadToken !== loadToken) return;
     const msgs = (data.session.messages || []).filter(m => m && m.role);
     // Bump the generation BEFORE the wholesale replace so any racing
     // prefetch (whose snapshot was taken before this call's mutex
     // acquisition) sees the new value and aborts.
-    _bumpMessagesGeneration();
+    expectedGeneration = _bumpMessagesGeneration();
     S.messages = msgs;
     _messagesTruncated = false;
     _oldestIdx = 0;
@@ -1861,7 +1902,7 @@ async function _ensureAllMessagesLoaded() {
     }
     if (typeof renderMessages === 'function') renderMessages();
   } finally {
-    _loadingOlder = false;
+    _finishOlderMessagesLoad(loadToken);
   }
 }
 
@@ -2728,6 +2769,7 @@ function stopGatewaySSE(){
 
 let _searchDebounceTimer = null;
 let _contentSearchResults = [];  // results from /api/sessions/search content scan
+let _contentSearchRequestRevision = 0;
 let _serverTimeDelta = 0;       // ms offset: client clock - server clock (for clock-skew compensation)
 let _serverTz = '';              // server timezone offset string (e.g. "+0800", "+0000", "-0500")
 
@@ -2773,11 +2815,22 @@ function filterSessions(){
   renderSessionListFromCache();
   // Debounced content search via API for message text
   const q = ($('sessionSearch').value || '').trim();
+  const requestRevision = (_contentSearchRequestRevision + 1) | 0;
+  _contentSearchRequestRevision = requestRevision;
+  const spaceLoadKey = typeof _activeSpaceLoadKey === 'function' ? _activeSpaceLoadKey() : '';
+  const isCurrentSearch = () => {
+    if (requestRevision !== _contentSearchRequestRevision) return false;
+    if (spaceLoadKey && typeof isActiveSpaceLoadKey === 'function' && !isActiveSpaceLoadKey(spaceLoadKey)) return false;
+    return String(($('sessionSearch').value || '').trim()) === q;
+  };
   clearTimeout(_searchDebounceTimer);
   if (!q) { _contentSearchResults = []; return; }
   _searchDebounceTimer = setTimeout(async () => {
     try {
       const data = await api(_spaceScopedApiPath(`/api/sessions/search?q=${encodeURIComponent(q)}&content=1&depth=5`));
+      // A delayed search must never inject prior-Space or prior-query rows
+      // into the current sidebar after the user has navigated elsewhere.
+      if (!isCurrentSearch()) return;
       const titleIds = new Set(_allSessions.filter(s => _sessionListSearchText(s).includes(q.toLowerCase())).map(s=>s.session_id));
       _contentSearchResults = (data.sessions||[]).filter(s => s.match_type === 'content' && !titleIds.has(s.session_id));
       renderSessionListFromCache();

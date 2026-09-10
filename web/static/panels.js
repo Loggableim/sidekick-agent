@@ -4623,26 +4623,39 @@ function renderWorkspaceDropdownInto(dd, workspaces, currentWs){
         e.stopPropagation();
         const slug = typeof _activeSpace !== 'undefined' ? _activeSpace : '';
         if (!slug) return;
+        const spaceLoadKey = typeof _activeSpaceLoadKey === 'function' ? _activeSpaceLoadKey() : '';
+        const isStillActiveSpace = () => (
+          _activeSpace === slug
+          && (!spaceLoadKey || typeof isActiveSpaceLoadKey !== 'function' || isActiveSpaceLoadKey(spaceLoadKey))
+        );
         const currentDefault = window._activeSpaceConfig?.project_dir || '';
         const newDefault = (currentDefault === w.path) ? '' : w.path;
         const currentConfig = window._activeSpaceConfig || {};
-        await api('/api/space/config', {
-          method: 'POST',
-          body: JSON.stringify({ slug, project_dir: newDefault, ...(currentConfig.model ? { model: currentConfig.model } : {}) })
-        });
-        if (!window._activeSpaceConfig) window._activeSpaceConfig = {};
-        window._activeSpaceConfig.project_dir = newDefault;
-        // Re-render if dropdown is open
-        const dd = document.getElementById('composerWsDropdown');
-        if (dd && dd.classList.contains('open')) {
-          try {
-            const data = await api('/api/workspaces');
-            if (data && data.workspaces) {
-              renderWorkspaceDropdownInto(dd, data.workspaces, currentWs);
-            }
-          } catch(e) {}
+        try {
+          await api('/api/space/config', {
+            method: 'POST',
+            body: JSON.stringify({ slug, project_dir: newDefault, ...(currentConfig.model ? { model: currentConfig.model } : {}) })
+          });
+          if (!isStillActiveSpace()) return;
+          if (!window._activeSpaceConfig) window._activeSpaceConfig = {};
+          window._activeSpaceConfig.project_dir = newDefault;
+          // Re-render if dropdown is open.
+          const dd = document.getElementById('composerWsDropdown');
+          if (dd && dd.classList.contains('open')) {
+            try {
+              const data = await api('/api/workspaces');
+              if (!isStillActiveSpace()) return;
+              if (data && data.workspaces) {
+                renderWorkspaceDropdownInto(dd, data.workspaces, currentWs);
+              }
+            } catch(e) {}
+          }
+          showToast(newDefault ? '📁 Pfad als Space-Standard gesetzt' : 'Space-Standard-Pfad entfernt');
+        } catch (e) {
+          if (isStillActiveSpace() && typeof showToast === 'function') {
+            showToast('Space-Standard-Pfad konnte nicht gespeichert werden', 3500);
+          }
         }
-        showToast(newDefault ? '📁 Pfad als Space-Standard gesetzt' : 'Space-Standard-Pfad entfernt');
       };
       opt.insertBefore(pinBtn, opt.firstChild);
       listContainer.appendChild(opt);
@@ -5142,9 +5155,18 @@ async function promptWorkspacePath(){
   if(!S.session){
     const ws=(typeof S._profileDefaultWorkspace==='string'&&S._profileDefaultWorkspace)||'';
     if(!ws)return;
+    const creationEpoch=Number(window.__sidekickSessionNavigationEpoch||0);
+    const creationSpaceLoadKey=typeof _activeSpaceLoadKey==='function'?_activeSpaceLoadKey():'';
+    const canApplyCreatedSession=()=>!S.session
+      && Number(window.__sidekickSessionNavigationEpoch||0)===creationEpoch
+      && (!creationSpaceLoadKey||typeof isActiveSpaceLoadKey!=='function'||isActiveSpaceLoadKey(creationSpaceLoadKey));
     try{
       const r=await api('/api/session/new',{method:'POST',body:JSON.stringify({workspace:ws})});
-      if(r&&r.session){S.session=r.session;S.messages=[];if(typeof syncTopbar==='function')syncTopbar();if(typeof renderMessages==='function')renderMessages();if(typeof renderSessionList==='function')await renderSessionList();}
+      if(!canApplyCreatedSession())return;
+      if(r&&r.session&&canApplyCreatedSession()){S.session=r.session;S.messages=[];if(typeof syncTopbar==='function')syncTopbar();if(typeof renderMessages==='function')renderMessages();if(typeof renderSessionList==='function')await renderSessionList();}
+      if(!r||!r.session||!S.session||S.session.session_id!==r.session.session_id
+        ||Number(window.__sidekickSessionNavigationEpoch||0)!==creationEpoch
+        ||(creationSpaceLoadKey&&typeof isActiveSpaceLoadKey==='function'&&!isActiveSpaceLoadKey(creationSpaceLoadKey)))return;
     }catch(e){showToast(t('workspace_switch_failed')+e.message);return;}
     if(!S.session)return;
   }
@@ -5178,9 +5200,18 @@ async function switchToWorkspace(path,name){
   if(!S.session){
     const ws=path||(typeof S._profileDefaultWorkspace==='string'&&S._profileDefaultWorkspace)||'';
     if(!ws){showToast(t('no_workspace'));return;}
+    const creationEpoch=Number(window.__sidekickSessionNavigationEpoch||0);
+    const creationSpaceLoadKey=typeof _activeSpaceLoadKey==='function'?_activeSpaceLoadKey():'';
+    const canApplyCreatedSession=()=>!S.session
+      && Number(window.__sidekickSessionNavigationEpoch||0)===creationEpoch
+      && (!creationSpaceLoadKey||typeof isActiveSpaceLoadKey!=='function'||isActiveSpaceLoadKey(creationSpaceLoadKey));
     try{
       const r=await api('/api/session/new',{method:'POST',body:JSON.stringify({workspace:ws})});
-      if(r&&r.session){S.session=r.session;S.messages=[];if(typeof syncTopbar==='function')syncTopbar();if(typeof renderMessages==='function')renderMessages();if(typeof renderSessionList==='function')await renderSessionList();}
+      if(!canApplyCreatedSession())return;
+      if(r&&r.session&&canApplyCreatedSession()){S.session=r.session;S.messages=[];if(typeof syncTopbar==='function')syncTopbar();if(typeof renderMessages==='function')renderMessages();if(typeof renderSessionList==='function')await renderSessionList();}
+      if(!r||!r.session||!S.session||S.session.session_id!==r.session.session_id
+        ||Number(window.__sidekickSessionNavigationEpoch||0)!==creationEpoch
+        ||(creationSpaceLoadKey&&typeof isActiveSpaceLoadKey==='function'&&!isActiveSpaceLoadKey(creationSpaceLoadKey)))return;
     }catch(e){if(typeof setStatus==='function')setStatus(t('switch_failed')+e.message);return;}
     if(!S.session)return;
   }
@@ -5201,9 +5232,17 @@ async function switchToWorkspace(path,name){
   }
   try{
     closeWsDropdown();
+    const session=S.session;
+    const sid=session.session_id;
+    const navigationEpoch=Number(window.__sidekickSessionNavigationEpoch||0);
+    const spaceLoadKey=typeof _activeSpaceLoadKey==='function'?_activeSpaceLoadKey():'';
+    const isStillTarget=()=>S.session&&S.session.session_id===sid
+      && Number(window.__sidekickSessionNavigationEpoch||0)===navigationEpoch
+      && (!spaceLoadKey||typeof isActiveSpaceLoadKey!=='function'||isActiveSpaceLoadKey(spaceLoadKey));
     await api('/api/session/update',{method:'POST',body:JSON.stringify({
-      session_id:S.session.session_id, workspace:path, model:S.session.model, model_provider:S.session.model_provider||null
+      session_id:sid, workspace:path, model:session.model, model_provider:session.model_provider||null
     })});
+    if(!isStillTarget())return;
     S.session.workspace=path;
     // Explicit workspace switch = user overriding any pending profile-switch default.
     // Clear the one-shot flag so a subsequent newSession() inherits this choice instead.
@@ -9504,6 +9543,14 @@ async function _restoreCheckpoint(workspace,checkpoint,message){
 async function openFileInWorkspace(filePath) {
   if (!filePath || !S.session) return;
   const sid = S.session.session_id;
+  const navigationEpoch = Number(window.__sidekickSessionNavigationEpoch || 0);
+  const spaceLoadKey = typeof _activeSpaceLoadKey === 'function' ? _activeSpaceLoadKey() : '';
+  const isStillCurrent = () => (
+    !!S.session
+    && S.session.session_id === sid
+    && Number(window.__sidekickSessionNavigationEpoch || 0) === navigationEpoch
+    && (!spaceLoadKey || typeof isActiveSpaceLoadKey !== 'function' || isActiveSpaceLoadKey(spaceLoadKey))
+  );
 
   // 1. Ensure workspace panel is open in browse mode (shows file tree)
   if (typeof _setWorkspacePanelMode === 'function') {
@@ -9522,6 +9569,7 @@ async function openFileInWorkspace(filePath) {
     try {
       await loadDir('.');
     } catch (_) { return; }
+    if (!isStillCurrent()) return;
   }
 
   // 4. Parse path: split into directory parts + filename
@@ -9533,6 +9581,7 @@ async function openFileInWorkspace(filePath) {
   //    For each directory in the chain, mark expanded and fetch children.
   let accumulated = '';
   for (const segment of dirChain) {
+    if (!isStillCurrent()) return;
     accumulated += (accumulated ? '/' : '') + segment;
 
     if (S._expandedDirs) S._expandedDirs.add(accumulated);
@@ -9541,13 +9590,16 @@ async function openFileInWorkspace(filePath) {
     if (!S._dirCache || !S._dirCache[accumulated]) {
       try {
         const data = await api(`/api/list?session_id=${encodeURIComponent(sid)}&path=${encodeURIComponent(accumulated)}`);
+        if (!isStillCurrent()) return;
         if (S._dirCache) S._dirCache[accumulated] = data.entries || [];
       } catch (_) {
+        if (!isStillCurrent()) return;
         if (S._dirCache) S._dirCache[accumulated] = [];
       }
     }
   }
 
+  if (!isStillCurrent()) return;
   // 6. Re-render the file tree (shows expanded directories + children)
   if (typeof renderFileTree === 'function') renderFileTree();
 
@@ -9559,12 +9611,14 @@ async function openFileInWorkspace(filePath) {
   try {
     if (typeof openFile === 'function') {
       await openFile(filePath);
+      if (!isStillCurrent()) return;
       openOk = true;
     }
   } catch (_) { /* open failed — file may not exist */ }
 
   // 9. Highlight + scroll to the file in the tree (best-effort)
   requestAnimationFrame(() => {
+    if (!isStillCurrent()) return;
     const fileItems = document.querySelectorAll('.file-item');
     let found = null;
     for (const item of fileItems) {

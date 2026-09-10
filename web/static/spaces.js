@@ -42,10 +42,24 @@ if (_urlActiveSpace) {
 let _spacesCache = [];
 let _spacesLoadPromise = null;
 let _spacesLoadedAt = 0;
+// Every local mutation invalidates outstanding list requests. Without this,
+// a response that began before create/delete could erase the just-mutated
+// cache and reset the active Space after the user had already moved on.
+let _spacesCacheRevision = 0;
+let _spacesRequestRevision = 0;
 const SPACES_CACHE_TTL_MS = 5000;
 window._sidekickSpaceSwitchRev = Number(window._sidekickSpaceSwitchRev || 0);
 let _spacesPanelRenderRev = 0;
 let _spaceSessionsAbortController = null;
+
+function _invalidateSpacesCache() {
+  _spacesCacheRevision = (_spacesCacheRevision + 1) | 0;
+  // Release callers from a request whose response is now known to be stale.
+  // The response still self-disqualifies through its captured revision.
+  _spacesRequestRevision = (_spacesRequestRevision + 1) | 0;
+  _spacesLoadPromise = null;
+  _spacesLoadedAt = 0;
+}
 
 // â”€â”€ Workspace color palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const SPACE_COLORS = [
@@ -226,16 +240,31 @@ async function loadSpaces(options = {}) {
   }
   if (!force && _spacesLoadPromise) return _spacesLoadPromise;
 
+  const cacheRevision = _spacesCacheRevision;
+  const activeSpaceAtRequest = _activeSpace;
+  const spaceSwitchRevAtRequest = _spaceSwitchRev();
+  const requestRevision = (_spacesRequestRevision + 1) | 0;
+  _spacesRequestRevision = requestRevision;
   _spacesLoadPromise = (async () => {
     try {
       const data = await _withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces');
+      // A newer request, create, or delete owns the cache now. Keep the
+      // current state rather than allowing this stale response to rewind it.
+      if (requestRevision !== _spacesRequestRevision || cacheRevision !== _spacesCacheRevision) {
+        return _spacesCache;
+      }
       _spacesCache = data.spaces || [];
       _spacesLoadedAt = Date.now();
       if (data.default_space) {
         DEFAULT_SPACE_SLUG = String(data.default_space || 'nova').toLowerCase() || 'nova';
         window.DEFAULT_SPACE_SLUG = DEFAULT_SPACE_SLUG;
       }
-      if (_spacesCache.length && !_spacesCache.some(s => s && s.slug === _activeSpace)) {
+      if (
+        _spacesCache.length
+        && _activeSpace === activeSpaceAtRequest
+        && _spaceSwitchRev() === spaceSwitchRevAtRequest
+        && !_spacesCache.some(s => s && s.slug === _activeSpace)
+      ) {
         const preferred = _spacesCache.find(s => s && s.slug === DEFAULT_SPACE_SLUG) || _spacesCache[0];
         if (preferred && preferred.slug) {
           _activeSpace = preferred.slug;
@@ -248,7 +277,7 @@ async function loadSpaces(options = {}) {
       console.warn('loadSpaces', e);
       return _spacesCache;
     } finally {
-      _spacesLoadPromise = null;
+      if (requestRevision === _spacesRequestRevision) _spacesLoadPromise = null;
     }
   })();
   return _spacesLoadPromise;
@@ -696,6 +725,7 @@ async function createSpace(slug, name, color, emoji, options = {}) {
     const body = { slug, name: name || slug };
     if (color) body.color = color;
     if (emoji) body.emoji = emoji;
+    if (options.projectDir) body.project_dir = String(options.projectDir).trim();
     if (options.novaInstance) body.nova_instance = true;
     if (options.novaCharacter) body.nova_character = options.novaCharacter;
     const result = await api('/api/space/create', {
@@ -704,6 +734,7 @@ async function createSpace(slug, name, color, emoji, options = {}) {
     });
     if (result && result.space) {
       _spacesCache.push(result.space);
+      _invalidateSpacesCache();
       await selectSpace(slug);
       // Refresh the sidebar space selector so the new space appears immediately
       _refreshSidebarSelector();
@@ -720,18 +751,17 @@ async function createSpace(slug, name, color, emoji, options = {}) {
 async function deleteSpace(slug) {
   if (!slug || _isProtectedSpaceSlug(slug)) return { error: 'Cannot delete default space' };
   try {
-    const wasActive = _activeSpace === slug;
-    if (wasActive) {
-      _activeSpace = DEFAULT_SPACE_SLUG;
-      try { localStorage.setItem('sidekick-active-workspace', DEFAULT_SPACE_SLUG); } catch (_) {}
-    }
     await api('/api/space/delete', {
       method: 'POST',
       body: JSON.stringify({ slug }),
       headers: {'X-Sidekick-Workspace': DEFAULT_SPACE_SLUG},
     });
     _spacesCache = _spacesCache.filter(s => s.slug !== slug);
-    if (wasActive) {
+    _invalidateSpacesCache();
+    // A delayed delete must only navigate away when the deleted Space is
+    // still active. The user may have intentionally selected another Space
+    // while the server operation was running.
+    if (_activeSpace === slug) {
       await selectSpace(DEFAULT_SPACE_SLUG);
     }
     _refreshSidebarSelector();
@@ -926,9 +956,12 @@ function renderSpacesPanel() {
         const delBtn = document.createElement('button');
         delBtn.className = 'spaces-btn spaces-btn-danger';
         delBtn.textContent = 'Delete Space';
-        delBtn.onclick = () => {
+        delBtn.onclick = async () => {
           if (confirm('Delete space "' + (active.name || active.slug) + '" and all its data?')) {
-            deleteSpace(active.slug);
+            const result = await deleteSpace(active.slug);
+            if (result && result.error && typeof showToast === 'function') {
+              showToast('Space delete failed: ' + result.error, 3500);
+            }
           }
         };
         configSection.appendChild(delBtn);
@@ -1147,7 +1180,7 @@ async function saveActiveSpaceDetails() {
       method: 'POST',
       body: JSON.stringify({ slug: space.slug, emoji: emoji.trim(), color, description: description.trim(), project_dir: project_dir.trim() }),
     });
-    await loadSpaces();
+    await loadSpaces({force:true});
     renderSpacesPanel();
     updateTitlebarSpace();
     if (typeof showToast === 'function') showToast('Space saved');
@@ -1346,19 +1379,12 @@ async function showCreateSpaceDialog() {
     nameInput.style.borderColor = '';
     createBtn.disabled = true;
     createBtn.textContent = 'Creating...';
-    createSpace(slug, name, selectedColor, emoji, { novaInstance, novaCharacter }).then(result => {
+    createSpace(slug, name, selectedColor, emoji, { novaInstance, novaCharacter, projectDir }).then(result => {
       if (result.error) {
         alert('Error: ' + result.error);
         createBtn.disabled = false;
         createBtn.textContent = 'Create Space';
         return;
-      }
-      // If project_dir was provided, save it
-      if (projectDir) {
-        api('/api/space/config', {
-          method: 'POST',
-          body: JSON.stringify({ slug, project_dir: projectDir }),
-        }).catch(e => console.warn('Failed to save project_dir:', e));
       }
       renderSpacesPanel();
       close();

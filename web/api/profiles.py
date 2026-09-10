@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import threading
+from contextvars import ContextVar, Token
 from pathlib import Path
 
 from web.api._home import get_webui_home
@@ -33,10 +34,16 @@ _active_profile = 'default'
 _profile_lock = threading.Lock()
 _loaded_profile_env_keys: set[str] = set()
 
-# Thread-local profile context: set per-request by server.py, cleared after.
-# Enables per-client profile isolation (issue #798) — each HTTP request thread
-# reads its own profile from the sidekick_profile cookie instead of the
-# process-global _active_profile.
+# Request profile context is set from the per-client profile cookie.  It must
+# be a ContextVar rather than thread-local storage: native FastAPI handlers
+# can yield and synchronous handlers run in worker threads, both of which make
+# thread-local request state leak or disappear.
+_request_profile: ContextVar[str | None] = ContextVar(
+    "sidekick_request_profile", default=None
+)
+
+# Keep this thread-local only for the cron re-entrancy depth and compatibility
+# with a few legacy callers that directly seed ``_tls.profile``.
 _tls = threading.local()
 
 _SKILL_HOME_MODULES = ("tools.skills_tool", "tools.skill_manager_tool")
@@ -220,31 +227,41 @@ def get_active_profile_name() -> str:
     """Return the currently active profile name.
 
     Priority:
-      1. Thread-local (set per-request from sidekick_profile cookie) — issue #798
+      1. Request ContextVar (set from sidekick_profile cookie) — issue #798
       2. Process-level default (_active_profile)
     """
+    request_name = _request_profile.get()
+    if request_name is not None:
+        return request_name
+    # Retain this fallback for legacy call sites and tests that predate the
+    # ContextVar migration. New request handling always uses the ContextVar.
     tls_name = getattr(_tls, 'profile', None)
     if tls_name is not None:
         return tls_name
     return _active_profile
 
 
-def set_request_profile(name: str) -> None:
-    """Set the per-request profile context for this thread.
+def set_request_profile(name: str | None) -> Token[str | None]:
+    """Set the per-request profile context and return its reset token.
 
-    Called by server.py at the start of each request when a sidekick_profile
-    cookie is present.  Always paired with clear_request_profile() in a
-    finally block so the thread-local is released after the request.
+    Called by the WebUI request adapters at request start.  The returned token
+    lets async middleware restore its parent context even when requests run
+    concurrently on one event-loop thread.
     """
-    _tls.profile = name
+    return _request_profile.set(name)
 
 
-def clear_request_profile() -> None:
-    """Clear the per-request profile context for this thread.
+def clear_request_profile(token: Token[str | None] | None = None) -> None:
+    """Clear or restore the per-request profile context.
 
-    Called by server.py in the finally block of do_GET / do_POST.
-    Safe to call even if set_request_profile() was never called.
+    A token restores the exact parent context used by async FastAPI middleware.
+    Token-less cleanup remains supported for the legacy bridge, which owns a
+    dedicated request thread.
     """
+    if token is not None:
+        _request_profile.reset(token)
+    else:
+        _request_profile.set(None)
     _tls.profile = None
 
 

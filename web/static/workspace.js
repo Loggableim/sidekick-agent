@@ -158,6 +158,7 @@ async function api(path,opts={}){
 
 // Persist/restore expanded directory state per workspace in localStorage
 let _loadDirRev = 0;
+let _gitBadgeRequestRev = 0;
 const _LOAD_DIR_TIMEOUT_MS = 8000;
 const _MAX_EXPANDED_DIR_PREFETCH = 16;
 
@@ -173,8 +174,11 @@ async function _workspaceApiWithTimeout(path, timeoutMs) {
 
 window._workspaceApiWithTimeout = window._workspaceApiWithTimeout || _apiWithTimeout;
 
-function _isCurrentLoadDir(loadRev, sessionId) {
-  return loadRev === _loadDirRev && S.session && S.session.session_id === sessionId;
+function _isCurrentLoadDir(loadRev, sessionId, workspace) {
+  return loadRev === _loadDirRev
+    && S.session
+    && S.session.session_id === sessionId
+    && (workspace === undefined || S.session.workspace === workspace);
 }
 
 function _wsExpandKey(){
@@ -228,6 +232,7 @@ async function loadDir(path){
   }
   const loadRev = ++_loadDirRev;
   const sessionId = S.session.session_id;
+  const workspace = S.session.workspace;
   try{
     if(!requestedPath||requestedPath==='.'){
       S._dirCache={};
@@ -235,7 +240,7 @@ async function loadDir(path){
     }
     S.currentDir=requestedPath;
     const data=await _workspaceApiWithTimeout(`/api/list?session_id=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(requestedPath)}`, _LOAD_DIR_TIMEOUT_MS);
-    if(!_isCurrentLoadDir(loadRev, sessionId)) return;
+    if(!_isCurrentLoadDir(loadRev, sessionId, workspace)) return;
     S.entries=data.entries||[];renderBreadcrumb();renderFileTree();
     // Pre-fetch contents of restored expanded dirs so they render without a second click
     // (parallelized — avoids serial waterfall when multiple dirs are expanded)
@@ -248,7 +253,7 @@ async function loadDir(path){
             .then(dc=>({dirPath,entries:dc.entries||[]}))
             .catch(()=>({dirPath,entries:[]}))
         ));
-        if(!_isCurrentLoadDir(loadRev, sessionId)) return;
+        if(!_isCurrentLoadDir(loadRev, sessionId, workspace)) return;
         for(const {dirPath,entries} of results) S._dirCache[dirPath]=entries;
       }
       if(expanded.size>0)renderFileTree();
@@ -263,6 +268,9 @@ async function loadDir(path){
     // Fetch git info for workspace root (non-blocking)
     if(!requestedPath||requestedPath==='.') _refreshGitBadge();
   }catch(e){
+    // A failed older request must not blank the directory that a newer path
+    // load (or a workspace switch on the same session) has already rendered.
+    if (!_isCurrentLoadDir(loadRev, sessionId, workspace)) return;
     const currentSessionId = S.session && S.session.session_id;
     const msg = String((e && e.message) || '');
     if (
@@ -292,8 +300,18 @@ window.flushPendingWorkspaceTreeRefresh = flushPendingWorkspaceTreeRefresh;
 async function _refreshGitBadge(){
   const badges=[$('gitBadge'),$('composerGitBadge')].filter(Boolean);
   if(!badges.length||!S.session)return;
+  const sessionId = S.session.session_id;
+  const workspace = S.session.workspace;
+  const requestRev = ++_gitBadgeRequestRev;
+  const isCurrent = () => (
+    requestRev === _gitBadgeRequestRev
+    && S.session
+    && S.session.session_id === sessionId
+    && S.session.workspace === workspace
+  );
   try{
-    const data=await api(`/api/git-info?session_id=${encodeURIComponent(S.session.session_id)}`);
+    const data=await api(`/api/git-info?session_id=${encodeURIComponent(sessionId)}`);
+    if(!isCurrent()) return;
     if(data.git&&data.git.is_git){
       const g=data.git;
       let text=g.branch||'git';
@@ -311,7 +329,10 @@ async function _refreshGitBadge(){
         badge.textContent='';
       });
     }
-  }catch(e){badges.forEach(badge=>{badge.style.display='none';});}
+  }catch(e){
+    if(!isCurrent()) return;
+    badges.forEach(badge=>{badge.style.display='none';});
+  }
 }
 
 function navigateUp(){
