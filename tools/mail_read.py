@@ -119,7 +119,7 @@ def _handler(args: dict, **kw) -> str:
 registry.register(
     name="mail_read",
     toolset="mail",
-    schema=SCHEMA,
+    schema={"name": "mail_read", "description": "Read emails from an IMAP inbox.", "parameters": SCHEMA},
     handler=_handler,
     emoji="📨",
 )

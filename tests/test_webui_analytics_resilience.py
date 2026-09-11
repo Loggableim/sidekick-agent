@@ -54,4 +54,4 @@ def test_usage_analytics_short_circuits_oversized_state_db(monkeypatch, tmp_path
         headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
     )
     assert response.status_code == 200
-    assert response.json()["degraded_reason"] == "session_db_unavailable"
+    assert response.json()["degraded_reason"] == "state_db_too_large"

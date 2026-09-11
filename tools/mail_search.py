@@ -110,7 +110,7 @@ def _handler(args: dict, **kw) -> str:
 registry.register(
     name="mail_search",
     toolset="mail",
-    schema=SCHEMA,
+    schema={"name": "mail_search", "description": "Search emails by subject or sender in an IMAP folder.", "parameters": SCHEMA},
     handler=_handler,
     emoji="🔍",
 )

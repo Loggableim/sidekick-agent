@@ -17,8 +17,9 @@
 
   function shouldAttachWorkspaceHeader(urlObj) {
     try {
-      var path = String((urlObj && urlObj.pathname) || '');
-      return path.startsWith('/api/');
+      var apiRoot = new URL('api/', document.baseURI || location.href);
+      return urlObj.origin === location.origin &&
+        urlObj.origin === apiRoot.origin && urlObj.pathname.startsWith(apiRoot.pathname);
     } catch (_) {
       return false;
     }
@@ -50,7 +51,8 @@
   }
 
   function eventSourceUrl(path) {
-    var url = new URL(String(path || '').replace(/^\//, ''), document.baseURI || location.href);
+    var url = new URL(String(path || '').replace(/^\/api\//, 'api/'), document.baseURI || location.href);
+    if (!shouldAttachWorkspaceHeader(url)) return url.href;
     try {
       var token = dashboardSessionToken();
       if (token) url.searchParams.set('token', token);

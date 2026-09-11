@@ -5615,7 +5615,7 @@ async def get_usage_analytics(days: int = 30):
     from runtime._compat.shim_state import SessionDB
     from runtime.insights import InsightsEngine
 
-    def _degraded_payload() -> dict[str, object]:
+    def _degraded_payload(reason: str = "session_db_unavailable") -> dict[str, object]:
         return {
             "daily": [],
             "by_model": [],
@@ -5631,7 +5631,7 @@ async def get_usage_analytics(days: int = 30):
             },
             "period_days": days,
             "degraded": True,
-            "degraded_reason": "session_db_unavailable",
+            "degraded_reason": reason,
             "skills": {
                 "summary": {
                     "total_skill_loads": 0,
@@ -5650,7 +5650,7 @@ async def get_usage_analytics(days: int = 30):
         # turn a read-only dashboard refresh into a long SQLite scan.
         if state_path.stat().st_size > 1_073_741_824:
             _log.warning("usage analytics degraded (state_db_too_large)")
-            return _degraded_payload()
+            return _degraded_payload("state_db_too_large")
     except OSError:
         pass
     try:
