@@ -10,6 +10,97 @@ import web.api.oauth as oauth
 from runtime import google_oauth
 
 
+@pytest.mark.parametrize("creds,expected", [
+    (None, "not_connected"),
+    (google_oauth.GoogleCredentials("access-secret", "refresh-secret", 0), "connected"),
+    (google_oauth.GoogleCredentials("access-secret", "", 0), "expired"),
+])
+def test_google_provider_status_never_falls_through_to_config_yaml(monkeypatch, creds, expected):
+    from web.api import providers
+    monkeypatch.setattr(providers, "get_config", lambda: {})
+    monkeypatch.setattr(providers, "_PROVIDER_DISPLAY", {"google-gemini-cli": "Gemini CLI"})
+    monkeypatch.setattr(providers, "_PROVIDER_MODELS", {})
+    monkeypatch.setattr(providers, "_OAUTH_PROVIDERS", {"google-gemini-cli"})
+    monkeypatch.setattr(providers, "_provider_has_key", lambda _: False)
+    monkeypatch.setattr(google_oauth, "load_credentials", lambda: creds)
+    result = providers.get_providers()["providers"][0]
+    assert result["key_source"] == "oauth"
+    assert result["auth_state"] == expected
+    assert result["auth_error"] is None if expected == "connected" else result["auth_error"]
+    assert "access-secret" not in str(result)
+    assert "refresh-secret" not in str(result)
+
+
+@pytest.mark.parametrize("outcome", ["available", "denied", "empty"])
+def test_google_quota_is_numeric_and_reports_safe_failure_reason(monkeypatch, outcome):
+    from runtime import google_code_assist
+    from web.api import providers
+    creds = google_oauth.GoogleCredentials("access-secret", "refresh-secret", 0, managed_project_id="managed")
+    monkeypatch.setattr(google_oauth, "load_credentials", lambda: creds)
+    monkeypatch.setattr(google_oauth, "get_valid_access_token", lambda: "access-secret")
+
+    def retrieve(token, *, project_id):
+        assert token == "access-secret"
+        assert project_id == "managed"
+        if outcome == "denied":
+            raise google_code_assist.CodeAssistError(
+                "SUBSCRIPTION_REQUIRED access-secret", code="code_assist_http_403",
+            )
+        return [] if outcome == "empty" else [google_code_assist.QuotaBucket("gemini", remaining_fraction=0.75)]
+
+    monkeypatch.setattr(google_code_assist, "retrieve_user_quota", retrieve)
+    result = providers.get_provider_quota("google-gemini-cli")
+    if outcome == "available":
+        assert result["account_limits"]["windows"][0]["remaining_percent"] == 75
+    else:
+        assert result["status"] == "unavailable"
+        assert result["error_code"] == ("subscription_required" if outcome == "denied" else "quota_unavailable")
+    assert "access-secret" not in str(result)
+    assert "refresh-secret" not in str(result)
+
+
+def test_google_card_renders_oauth_and_quota_details():
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node.js required")
+    script = r"""
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+class Element {
+  constructor(){this.children=[];this.dataset={};this.style={};this.events={};}
+  appendChild(child){this.children.push(child);return child;}
+  setAttribute(){}
+  addEventListener(type,fn){this.events[type]=fn;}
+  replaceChildren(...children){this.children=children;}
+}
+const source=fs.readFileSync('web/static/panels.js','utf8');
+const start=source.indexOf('function _buildProviderCard(p)');
+const end=source.indexOf('\nfunction ',start+1);
+let payload={status:'available',account_limits:{windows:[{remaining_percent:75}]}};
+let rendered;
+const context={document:{createElement:()=>new Element()},esc:x=>x,
+  _providerText:(key,fallback)=>key==='providers_status_configured'?'API key configured':fallback,
+  api:async()=>payload,_buildProviderQuotaCard:q=>{rendered=q;return new Element();}};
+context.window=context;
+vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+const card=context._buildProviderCard({id:'google-gemini-cli',display_name:'Gemini CLI',is_oauth:true,has_key:true,key_source:'oauth',auth_state:'connected',models:[]});
+assert.match(card.children[0].innerHTML,/Google OAuth verbunden/);
+assert.doesNotMatch(card.children[0].innerHTML,/API key configured/);
+const body=card.children[1];
+assert.match(body.children[0].textContent,/Kein API-Schlüssel/);
+const actions=body.children.find(x=>x.className==='provider-card-actions');
+const quota=actions.children.find(x=>x.textContent==='Quota prüfen');
+(async()=>{
+  await quota.events.click();assert.equal(rendered,payload);assert.equal(quota.disabled,false);
+  payload={status:'unavailable',message:'Google verweigert Zugriff'};
+  await quota.events.click();assert.equal(rendered,payload);
+})().catch(e=>{console.error(e);process.exitCode=1});
+"""
+    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_google_start_is_non_blocking_and_profile_scoped(monkeypatch, tmp_path):
     monkeypatch.setattr(oauth, "_get_active_profile_home", lambda: tmp_path)
     def publish_url(flow_id, *_args):

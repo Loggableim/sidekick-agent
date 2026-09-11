@@ -881,6 +881,7 @@ def _fetch_account_usage_with_profile_context(provider: str) -> Any:
 
 def _provider_account_usage_status(provider: str, display_name: str) -> dict[str, Any]:
     if provider == "google-gemini-cli":
+        creds = None
         try:
             from runtime.google_oauth import get_valid_access_token, load_credentials
             from runtime.google_code_assist import retrieve_user_quota
@@ -888,17 +889,31 @@ def _provider_account_usage_status(provider: str, display_name: str) -> dict[str
             if not creds:
                 raise RuntimeError("not connected")
             token = get_valid_access_token()
-            buckets = retrieve_user_quota(token, project_id=creds.project_id)
-            windows = [{"label": b.model_id or "Gemini", "remaining_percent": f"{b.remaining_fraction * 100:.0f}%", "detail": b.reset_time_iso or "daily quota"} for b in buckets]
+            buckets = retrieve_user_quota(token, project_id=creds.project_id or creds.managed_project_id)
+            if not buckets:
+                raise RuntimeError("quota_empty")
+            windows = [{"label": b.model_id or "Gemini", "remaining_percent": max(0, min(100, b.remaining_fraction * 100)), "reset_at": b.reset_time_iso or None} for b in buckets]
             return {"ok": True, "provider": provider, "display_name": display_name, "supported": True,
                     "status": "available", "label": "Gemini Code Assist quota", "quota": None,
                     "account_limits": {"plan": "Google Gemini / Code Assist", "windows": windows,
                                        "details": [f"Account: {creds.email}" if creds.email else "Google account"]},
                     "message": "Google Gemini quota loaded."}
         except Exception as exc:
+            code = getattr(exc, "code", "")
+            message = "Google-Kontingent derzeit nicht abrufbar. Bitte später erneut prüfen."
+            reason = "quota_unavailable"
+            if "SUBSCRIPTION_REQUIRED" in str(exc):
+                reason = "subscription_required"
+                message = "Google lehnt die Quota-Abfrage ab: Für dieses Konto wird keine gültige Code-Assist-Lizenz erkannt (HTTP 403). Die Google-Anmeldung allein bestätigt keinen Kontingentzugriff."
+            elif code == "code_assist_http_403":
+                reason = "access_denied"
+                message = "Google verweigert den Kontingentzugriff (HTTP 403). Konto- und Projektberechtigungen prüfen."
+            elif code in {"google_oauth_not_logged_in", "google_oauth_invalid_grant"} or not creds:
+                reason = "authentication_required"
+                message = "Bitte das Google-Konto erneut über die WebUI verbinden."
             return {"ok": False, "provider": provider, "display_name": display_name, "supported": True,
                     "status": "unavailable", "quota": None, "account_limits": None,
-                    "message": "Google Gemini quota is unavailable. Reconnect Google or check project access."}
+                    "error_code": reason, "message": message}
     snapshot = _fetch_account_usage_with_profile_context(provider)
     account_limits = _serialize_account_usage_snapshot(snapshot)
     if account_limits and account_limits.get("available"):
@@ -1255,7 +1270,7 @@ def get_providers() -> dict[str, Any]:
                     status = None
                     has_key = bool(creds and creds.access_token)
                     oauth_email = str(getattr(creds, "email", "") or "")
-                    if has_key and creds.access_token_expired():
+                    if has_key and creds.access_token_expired() and not creds.refresh_token:
                         auth_error = "Google token expired; sign in again."
                         auth_state = "expired"
                     elif has_key:
@@ -1265,17 +1280,18 @@ def get_providers() -> dict[str, Any]:
                 else:
                     from cli.auth import get_auth_status as _gas
                     status = _gas(pid)
-                if isinstance(status, dict) and status.get("logged_in"):
-                    has_key = True
-                    key_source = status.get("key_source", "oauth")
-                elif has_key:
-                    # _provider_has_key() found a token in config.yaml — respect it
-                    # rather than hiding a working credential from the Settings UI.
-                    key_source = "config_yaml"
-                    auth_error = status.get("error") if isinstance(status, dict) else None
-                else:
-                    has_key = False
-                    auth_error = status.get("error") if isinstance(status, dict) else None
+                if pid != "google-gemini-cli":
+                    if isinstance(status, dict) and status.get("logged_in"):
+                        has_key = True
+                        key_source = status.get("key_source", "oauth")
+                    elif has_key:
+                        # _provider_has_key() found a token in config.yaml — respect it
+                        # rather than hiding a working credential from the Settings UI.
+                        key_source = "config_yaml"
+                        auth_error = status.get("error") if isinstance(status, dict) else None
+                    else:
+                        has_key = False
+                        auth_error = status.get("error") if isinstance(status, dict) else None
             except Exception:
                 # Import failed or auth check errored — don't override a known-good
                 # key just because the sidekick_cli auth module is unavailable.

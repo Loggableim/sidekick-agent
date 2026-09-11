@@ -8408,7 +8408,9 @@ function _buildProviderCard(p){
   const modelCount=Number.isFinite(p.models_total)
     ? p.models_total
     : (Array.isArray(p.models) ? p.models.length : 0);
-  const sourceLabel=p.key_source==='oauth'
+  const sourceLabel=isOauth && p.id==='google-gemini-cli'
+    ? (p.auth_state==='expired' ? 'Google-Anmeldung abgelaufen' : p.has_key ? 'Google OAuth verbunden' : 'Google nicht verbunden')
+    : p.key_source==='oauth'
     ? _providerText('providers_status_oauth', 'OAuth')
     : p.key_source==='config_yaml'
       ? _providerText('providers_status_configured', 'Configured')
@@ -8427,7 +8429,7 @@ function _buildProviderCard(p){
       <div class="provider-card-name">${esc(p.display_name)}</div>
       <div class="provider-card-meta">${esc(metaText)}</div>
     </div>
-    ${p.has_key?`<span class="provider-card-badge">${esc(_providerText('providers_status_configured', 'Configured'))}</span>`:''}
+    ${p.has_key?`<span class="provider-card-badge">${esc(isOauth ? sourceLabel : _providerText('providers_status_configured', 'Configured'))}</span>`:''}
     <svg class="provider-card-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16"><path d="M6 9l6 6 6-6"/></svg>
   `;
   card.appendChild(header);
@@ -8438,7 +8440,9 @@ function _buildProviderCard(p){
   if(isOauth){
     const hint=document.createElement('div');
     hint.className='provider-card-hint';
-    if(p.key_source==='config_yaml'){
+    if(p.id==='google-gemini-cli'){
+      hint.textContent=p.auth_error || (p.has_key ? 'Über Google OAuth verbunden. Kein API-Schlüssel erforderlich.' : 'Nicht verbunden. Starte die Google-Anmeldung direkt hier in der WebUI.');
+    } else if(p.key_source==='config_yaml'){
       hint.textContent=_providerText('providers_oauth_config_yaml_hint', 'Token configured via config.yaml. To update, edit the providers section in your config.yaml or run sidekick auth.');
     } else if(p.id==='google-gemini-cli' && !p.has_key){
       hint.textContent='Nicht verbunden. Starte die Google-Anmeldung direkt hier in der WebUI.';
@@ -8460,14 +8464,23 @@ function _buildProviderCard(p){
         account.textContent='Google-Konto: '+p.oauth_email; body.appendChild(account);
       }
       const quotaHint=document.createElement('div'); quotaHint.className='provider-card-hint';
-      quotaHint.textContent='Google AI Pro/Ultra: Kontingent wird mit Gemini CLI und Code Assist geteilt.';
+      quotaHint.textContent='Das verfügbare Kontingent hängt von deinem Google-Konto und dessen Gemini-CLI-/Code-Assist-Zugriff ab.';
       body.appendChild(quotaHint);
       const btn=document.createElement('button'); btn.className='sm-btn';
       btn.textContent=p.has_key?'Re-authenticate with Google':'Mit Google anmelden';
       btn.addEventListener('click',()=>window.startGoogleGeminiOAuth&&window.startGoogleGeminiOAuth(btn));
       actions.appendChild(btn); body.appendChild(actions);
       const quotaBtn=document.createElement('button'); quotaBtn.className='sm-btn'; quotaBtn.textContent='Quota prüfen';
-      quotaBtn.addEventListener('click',async()=>{quotaBtn.disabled=true; quotaBtn.textContent='Quota lädt …'; try{const q=await api('/api/provider/quota?provider=google-gemini-cli'); quotaBtn.textContent=q.status==='available'?'Quota geladen':'Quota nicht verfügbar';}catch(e){quotaBtn.textContent='Quota nicht verfügbar';} finally{quotaBtn.disabled=false;}});
+      const quotaResult=document.createElement('div'); quotaResult.setAttribute('aria-live','polite');
+      body.appendChild(quotaResult);
+      quotaBtn.addEventListener('click',async()=>{
+        quotaBtn.disabled=true; quotaBtn.textContent='Quota lädt …';
+        try{
+          const q=await api('/api/provider/quota?provider=google-gemini-cli');
+          quotaResult.replaceChildren(_buildProviderQuotaCard(q));
+        }catch(e){quotaResult.textContent='Kontingent konnte nicht abgerufen werden. Bitte erneut versuchen.';}
+        finally{quotaBtn.disabled=false; quotaBtn.textContent='Quota erneut prüfen';}
+      });
       actions.appendChild(quotaBtn);
       if(p.has_key){
         const disconnect=document.createElement('button'); disconnect.className='sm-btn'; disconnect.textContent='Verbindung trennen';
@@ -10398,12 +10411,11 @@ window.startGoogleGeminiOAuth = async function(button){
       const s=await api('/api/oauth/google/status?flow_id='+encodeURIComponent(flowId));
       if(s.status==='pending'){ setTimeout(poll,2000); return; }
       button.disabled=false;
-      if(s.status==='success'){button.textContent='Google verbunden'; showToast&&showToast('Google Gemini verbunden');}
+      if(s.status==='success'){button.textContent='Google verbunden'; showToast&&showToast('Google Gemini verbunden'); await loadProvidersPanel();}
       else {button.textContent=old; showToast&&showToast(s.error||'Google-Anmeldung fehlgeschlagen');}
     };
     setTimeout(poll,1000);
   }catch(e){button.disabled=false;button.textContent=old;showToast&&showToast(e.message||'Google-Anmeldung fehlgeschlagen');}
 };
-
 
 
