@@ -170,7 +170,7 @@ def _handler(args: dict, **kw) -> str:
 registry.register(
     name="mail_folders",
     toolset="mail",
-    schema=SCHEMA,
+    schema={"name": "mail_folders", "description": "List folders for an inbox or summarize configured inboxes.", "parameters": SCHEMA},
     handler=_handler,
     emoji="📁",
 )

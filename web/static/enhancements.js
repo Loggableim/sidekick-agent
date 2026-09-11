@@ -243,7 +243,7 @@
 
   // ─── FEATURE: #19 TOKEN COUNTER IN FOOTER ────────────────────
   function addTokenCounter() {
-    const footer = document.querySelector('.sidebar-footer, .app-titlebar-sub, .app-titlebar-spacer');
+    const footer = document.querySelector('.sidebar-footer') || document.querySelector('.app-titlebar-spacer');
     if (!footer) return;
 
     const counter = EL('span', {
@@ -257,15 +257,18 @@
 
     async function updateTokens() {
       try {
-        const base = document.baseURI || location.href;
-        const prefix = base.includes('/session/') ? base.substring(0, base.indexOf('/session/') + 1) : '/';
-        const resp = await fetch(`${prefix}api/analytics/usage?days=1`);
+        const url = new URL('api/analytics/usage?days=1', document.baseURI || location.href);
+        const resp = await fetch(url.href);
+        if (!resp.ok) throw new Error('Analytics unavailable');
         const data = await resp.json();
+        if (data?.degraded || !data?.totals) throw new Error('Analytics unavailable');
         if (data?.totals) {
           const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : n;
           counter.innerHTML = `<span style="color:var(--success,#4ade80)">▲${fmt(data.totals.total_output || 0)}</span> <span style="color:var(--muted,#666)">/</span> <span style="color:var(--accent,#B8860B)">▼${fmt(data.totals.total_input || 0)}</span> <span style="color:var(--muted,#555)">tok</span>`;
         }
-      } catch {}
+      } catch {
+        counter.textContent = 'Tokenstatistik nicht verfügbar';
+      }
     }
     updateTokens();
     setInterval(updateTokens, 60000);

@@ -1873,8 +1873,7 @@ def test_workspace_api_wrapper_sends_dashboard_session_token():
     assert "X-Sidekick-Session-Token" in api_auth_js
     assert "__SIDEKICK_FETCH_AUTH_INSTALLED__" in api_auth_js
     assert "{ defaultJson: false }" in api_auth_js
-    assert "__SIDEKICK_SESSION_TOKEN__" in workspace_js
-    assert "X-Sidekick-Session-Token" in workspace_js
+    assert "_headersWithWorkspace(fetchOpts.headers" in workspace_js
     assert "hasDashboardToken" in workspace_js
     assert "onLoginPage" in workspace_js
 

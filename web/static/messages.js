@@ -1103,21 +1103,6 @@ function _renderPlanBanner(){
   }
 }
 
-function _eventSourceUrl(path){
-  const url=new URL(path,document.baseURI||location.href);
-  try{
-    const token=(typeof _dashboardSessionToken==='function')?_dashboardSessionToken():'';
-    if(token) url.searchParams.set('token',token);
-  }catch(_){}
-  try{
-    if(!url.searchParams.get('workspace')&&typeof _activeWorkspaceSlug==='function'){
-      const slug=_activeWorkspaceSlug();
-      if(slug) url.searchParams.set('workspace',slug);
-    }
-  }catch(_){}
-  return url.href;
-}
-
 function attachLiveStream(activeSid, streamId, uploaded=[], options={}){
   if(!activeSid||!streamId) return;
   const reconnecting=!!options.reconnecting;
