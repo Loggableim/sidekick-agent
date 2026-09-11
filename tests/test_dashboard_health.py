@@ -752,6 +752,53 @@ def test_models_endpoint_returns_catalog_json_not_spa(monkeypatch, tmp_path):
     assert payload["groups"][0]["models"][0]["id"] == "deepseek-v4-flash"
 
 
+def test_native_fastapi_routes_apply_and_clear_cookie_profile_context(monkeypatch, tmp_path):
+    """Native routes must not fall back to another browser's active profile."""
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+    from web.api import profiles
+
+    monkeypatch.setattr(profiles, "_active_profile", "default")
+    seen: list[tuple[str, str]] = []
+
+    class _Space:
+        def to_dict(self):
+            profile = profiles.get_active_profile_name()
+            seen.append(("spaces", profile))
+            return {"slug": "nova", "profile": profile}
+
+    monkeypatch.setattr("web.api.space_engine.get_all_workspaces", lambda: [_Space()])
+
+    def catalog():
+        profile = profiles.get_active_profile_name()
+        seen.append(("models", profile))
+        return {
+            "active_provider": profile,
+            "default_model": "model-for-" + profile,
+            "configured_model_badges": {},
+            "groups": [],
+        }
+
+    monkeypatch.setattr("web.api.config.get_available_models", catalog)
+    client = TestClient(web_server.app)
+    headers = {web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN}
+    alice_headers = {**headers, "Cookie": "sidekick_profile=alice"}
+
+    spaces = client.get("/api/spaces", headers=alice_headers)
+    models = client.get("/api/models", headers=alice_headers)
+    default_models = client.get("/api/models", headers=headers)
+
+    assert spaces.status_code == 200
+    assert spaces.json()["spaces"] == [{"slug": "nova", "profile": "alice"}]
+    assert models.status_code == 200
+    assert models.json()["active_provider"] == "alice"
+    assert default_models.status_code == 200
+    assert default_models.json()["active_provider"] == "default"
+    assert seen == [("spaces", "alice"), ("models", "alice"), ("models", "default")]
+    assert profiles.get_active_profile_name() == "default"
+
+
 def test_live_models_endpoint_returns_json_for_matching_provider(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
 

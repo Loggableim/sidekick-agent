@@ -194,6 +194,7 @@ class _RouteExecution:
             "DELETE": handle_delete,
         }
         workspace_context_attempted = False
+        profile_token = None
         try:
             # Swarm GET/SSE skips the legacy workspace/bootstrap path, but its
             # project trust resolver is still profile-aware.  Setting only
@@ -201,7 +202,7 @@ class _RouteExecution:
             # state nor changes the process-wide active profile.
             cookie_profile = get_profile_cookie(self.handler)
             if cookie_profile:
-                set_request_profile(cookie_profile)
+                profile_token = set_request_profile(cookie_profile)
             if not pure_swarm_get:
                 # Preserve normal route cleanup even if setup raises midway.
                 workspace_context_attempted = True
@@ -233,7 +234,7 @@ class _RouteExecution:
                 except Exception:
                     pass
         finally:
-            clear_request_profile()
+            clear_request_profile(profile_token)
             if workspace_context_attempted:
                 _teardown_workspace_context()
             if not self.handler.headers_ready.is_set():

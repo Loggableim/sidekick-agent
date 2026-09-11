@@ -570,12 +570,18 @@ async function cmdNew(){
 async function _runManualCompression(focusTopic){
   if(!S.session){showToast(t('no_active_session'));return;}
   let visibleCount=0;
+  const sid=S.session.session_id;
+  const navigationEpoch=Number(window.__sidekickSessionNavigationEpoch||0);
+  const spaceLoadKey=typeof _activeSpaceLoadKey==='function'?_activeSpaceLoadKey():'';
+  const isCurrentCompressionTarget=()=>S.session&&S.session.session_id===sid
+    &&Number(window.__sidekickSessionNavigationEpoch||0)===navigationEpoch
+    &&(!spaceLoadKey||typeof isActiveSpaceLoadKey!=='function'||isActiveSpaceLoadKey(spaceLoadKey));
   try{
-    const sid=S.session.session_id;
     // Preflight: verify the viewed session still exists before compressing.
     // This avoids a confusing "not found" toast when the UI is stale.
     try{
       const live=await api(`/api/session?session_id=${encodeURIComponent(sid)}`);
+      if(!isCurrentCompressionTarget())return;
       if(!live||!live.session||live.session.session_id!==sid){
         throw new Error('session no longer available');
       }
@@ -584,6 +590,7 @@ async function _runManualCompression(focusTopic){
       S.toolCalls=live.session.tool_calls||[];
       if(typeof _messagesTruncated!=='undefined') _messagesTruncated=false;
     }catch(preflightErr){
+      if(!isCurrentCompressionTarget())return;
       if(typeof clearCompressionUi==='function') clearCompressionUi();
       if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
       if(typeof setBusy==='function') setBusy(false);
@@ -622,10 +629,12 @@ async function _runManualCompression(focusTopic){
     if(typeof setComposerStatus==='function') setComposerStatus(t('compressing'));
     renderMessages();
     const data=await api('/api/session/compress',{method:'POST',body:JSON.stringify(body)});
+    if(!isCurrentCompressionTarget())return;
     if(data&&data.session){
       const currentSid=S.session&&S.session.session_id;
       if(data.session.session_id&&data.session.session_id!==currentSid){
         await loadSession(data.session.session_id);
+        if(!isCurrentCompressionTarget())return;
       }else{
         S.session=data.session;
         S.messages=data.session.messages||[];
@@ -636,6 +645,7 @@ async function _runManualCompression(focusTopic){
         syncTopbar();
         renderMessages();
         await renderSessionList();
+        if(!isCurrentCompressionTarget())return;
         updateQueueBadge(S.session.session_id);
       }
     }
@@ -664,6 +674,7 @@ async function _runManualCompression(focusTopic){
     renderMessages();
     if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
   }catch(e){
+    if(!isCurrentCompressionTarget())return;
     if(typeof setCompressionUi==='function'){
       const currentSid=S.session&&S.session.session_id;
       setCompressionUi({
@@ -684,7 +695,7 @@ async function _runManualCompression(focusTopic){
     showToast('Compression failed: '+e.message);
     return;
   }
-  if(typeof setBusy==='function') setBusy(false);
+  if(isCurrentCompressionTarget()&&typeof setBusy==='function') setBusy(false);
 }
 
 async function cmdCompress(args){
@@ -2826,12 +2837,18 @@ async function cmdNew(){
 async function _runManualCompression(focusTopic){
   if(!S.session){showToast(t('no_active_session'));return;}
   let visibleCount=0;
+  const sid=S.session.session_id;
+  const navigationEpoch=Number(window.__sidekickSessionNavigationEpoch||0);
+  const spaceLoadKey=typeof _activeSpaceLoadKey==='function'?_activeSpaceLoadKey():'';
+  const isCurrentCompressionTarget=()=>S.session&&S.session.session_id===sid
+    &&Number(window.__sidekickSessionNavigationEpoch||0)===navigationEpoch
+    &&(!spaceLoadKey||typeof isActiveSpaceLoadKey!=='function'||isActiveSpaceLoadKey(spaceLoadKey));
   try{
-    const sid=S.session.session_id;
     // Preflight: verify the viewed session still exists before compressing.
     // This avoids a confusing "not found" toast when the UI is stale.
     try{
       const live=await api(`/api/session?session_id=${encodeURIComponent(sid)}`);
+      if(!isCurrentCompressionTarget())return;
       if(!live||!live.session||live.session.session_id!==sid){
         throw new Error('session no longer available');
       }
@@ -2840,6 +2857,7 @@ async function _runManualCompression(focusTopic){
       S.toolCalls=live.session.tool_calls||[];
       if(typeof _messagesTruncated!=='undefined') _messagesTruncated=false;
     }catch(preflightErr){
+      if(!isCurrentCompressionTarget())return;
       if(typeof clearCompressionUi==='function') clearCompressionUi();
       if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
       if(typeof setBusy==='function') setBusy(false);
@@ -2878,10 +2896,12 @@ async function _runManualCompression(focusTopic){
     if(typeof setComposerStatus==='function') setComposerStatus(t('compressing'));
     renderMessages();
     const data=await api('/api/session/compress',{method:'POST',body:JSON.stringify(body)});
+    if(!isCurrentCompressionTarget())return;
     if(data&&data.session){
       const currentSid=S.session&&S.session.session_id;
       if(data.session.session_id&&data.session.session_id!==currentSid){
         await loadSession(data.session.session_id);
+        if(!isCurrentCompressionTarget())return;
       }else{
         S.session=data.session;
         S.messages=data.session.messages||[];
@@ -2892,6 +2912,7 @@ async function _runManualCompression(focusTopic){
         syncTopbar();
         renderMessages();
         await renderSessionList();
+        if(!isCurrentCompressionTarget())return;
         updateQueueBadge(S.session.session_id);
       }
     }
@@ -2920,6 +2941,7 @@ async function _runManualCompression(focusTopic){
     renderMessages();
     if(typeof _setCompressionSessionLock==='function') _setCompressionSessionLock(null);
   }catch(e){
+    if(!isCurrentCompressionTarget())return;
     if(typeof setCompressionUi==='function'){
       const currentSid=S.session&&S.session.session_id;
       setCompressionUi({
@@ -2940,7 +2962,7 @@ async function _runManualCompression(focusTopic){
     showToast('Compression failed: '+e.message);
     return;
   }
-  if(typeof setBusy==='function') setBusy(false);
+  if(isCurrentCompressionTarget()&&typeof setBusy==='function') setBusy(false);
 }
 
 async function cmdCompress(args){

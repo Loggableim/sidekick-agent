@@ -1322,6 +1322,24 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def profile_context_middleware(request: Request, call_next):
+    """Scope native FastAPI routes to the profile selected by this browser.
+
+    Legacy routes perform this setup inside their bridge thread.  Native routes
+    bypass that bridge, so without this middleware a profile switch could list
+    the process-wide default profile's Spaces, sessions, and models.
+    """
+    from web.api.helpers import get_profile_cookie
+    from web.api.profiles import clear_request_profile, set_request_profile
+
+    token = set_request_profile(get_profile_cookie(request))
+    try:
+        return await call_next(request)
+    finally:
+        clear_request_profile(token)
+
+
 def _nova_management_payload(space, trusted_project_root: Path | None = None) -> dict:
     """Serialize governance without creating config, a Space, or a workspace."""
     from web.api.space_engine import (

@@ -415,8 +415,8 @@ function _browserSetButtonsDisabled(disabled, state) {
   const hasSession = !!((state && state.session_id) || _browserCurrentSessionId());
   const busy = !!(state && state.busy);
   const buttons = {
-    browserPermissionBtn: hasSession,
-    browserAgentStopBtn: hasSession && _browserPermissionMode !== 'none',
+    browserPermissionBtn: hasSession && !disabled,
+    browserAgentStopBtn: hasSession && !disabled && _browserPermissionMode !== 'none',
     browserBtnBack: attached && !busy && !!state.can_go_back,
     browserBtnForward: attached && !busy && !!state.can_go_forward,
     browserBtnReload: attached && !busy,
@@ -4184,7 +4184,7 @@ async function _browserFetchState(sessionId) {
   const rev = ++_browserRequestRev;
   try {
     const data = await api('/api/browser/state?session_id=' + encodeURIComponent(sid));
-    if (_browserCurrentSessionId() !== sid) return null;
+    if (_browserCurrentSessionId() !== sid || rev !== _browserRequestRev) return null;
     const state = data && (data.state || data);
     if (state && state.session_id === sid) {
       _browserRender(state);
@@ -4193,12 +4193,17 @@ async function _browserFetchState(sessionId) {
       return state;
     }
   } catch (e) {
-    if (_browserCurrentSessionId() !== sid) return null;
+    if (_browserCurrentSessionId() !== sid || rev !== _browserRequestRev) return null;
     const text = e && e.error ? e.error : (e && e.message ? e.message : 'Failed to load browser state');
     _browserSetPill('error', 'Error');
     _browserSetStatusUrl(text);
-    _browserSetActionSummary('');
-    _browserSetSessionControlsReady(sid, text);
+    _browserSetActionSummary('Unable to load the browser runtime. Retrying…');
+    _browserSetEmptyVisible(true, {
+      title: 'Browser unavailable',
+      text: 'Could not load the browser runtime. Retrying…',
+    });
+    _browserSetButtonsDisabled(true, null);
+    return false;
   }
   return null;
   })();
@@ -4309,7 +4314,7 @@ async function browserSyncToCurrentSession(opts = {}) {
     if (state && visible) {
       _browserStartStream(sessionId);
     } else if (visible) {
-      if (_browserCurrentSessionId() === sessionId) {
+      if (state !== false && _browserCurrentSessionId() === sessionId) {
         _browserSetSessionControlsReady(sessionId, ((_browserEl('browserUrlInput') || {}).value || 'about:blank'));
       }
       _browserScheduleSyncRetry();
@@ -5029,6 +5034,8 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 // ── State ──────────────────────────────────────
 let _websearchHistoryOpen = true;
 let _websearchSplitOpen = false;
+let _websearchQuickRequestRev = 0;
+let _websearchQuickAbortController = null;
 
 function websearchIsMobileWidth() {
   return window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
@@ -5153,6 +5160,13 @@ async function websearchQuickSearch(event) {
   const input = document.getElementById('websearchQuery');
   const query = input ? String(input.value || '').trim() : '';
   if (!query) return false;
+  const requestRev = ++_websearchQuickRequestRev;
+  if (_websearchQuickAbortController) {
+    try { _websearchQuickAbortController.abort(); } catch (_) {}
+  }
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  _websearchQuickAbortController = controller;
+  const isCurrentRequest = () => requestRev === _websearchQuickRequestRev;
 
   // Hide chips when searching
   const chips = _websearchChipContainer();
@@ -5174,6 +5188,7 @@ async function websearchQuickSearch(event) {
     const data = await api('/api/agents/research/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
+      ...(controller ? {signal: controller.signal} : {}),
       body: JSON.stringify({
         message: [
           'You are a web search assistant. Return ONLY valid JSON. No markdown, no code fences, no commentary.',
@@ -5205,6 +5220,7 @@ async function websearchQuickSearch(event) {
         session_title: 'Quick Search: ' + query,
       }),
     });
+    if (!isCurrentRequest()) return false;
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
@@ -5256,12 +5272,17 @@ async function websearchQuickSearch(event) {
     }
 
   } catch (e) {
+    if (!isCurrentRequest() || (controller && controller.signal.aborted)) return false;
     const errText = e && (e.error || e.message) ? (e.error || e.message) : 'Search failed';
     if (meta) meta.textContent = 'Error';
     if (results) results.innerHTML = '<div class="websearch-empty-text is-error">⚠️ ' + _websearchEscape(errText) + '</div>';
+  } finally {
+    if (isCurrentRequest()) {
+      if (_websearchQuickAbortController === controller) _websearchQuickAbortController = null;
+      if (goBtn) goBtn.disabled = false;
+    }
   }
 
-  if (goBtn) goBtn.disabled = false;
   return false;
 }
 
