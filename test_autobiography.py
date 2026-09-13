@@ -45,6 +45,20 @@ class AutobiographyTests(unittest.TestCase):
         self.assertEqual(len(reflections), 1)
         self.assertEqual(reflections[0]["title"], "Daily")
 
+    def test_rapid_events_get_unique_ids(self):
+        """Events recorded within the same coarse clock tick (Windows time.time()
+        granularity) must not collide on the TEXT PRIMARY KEY."""
+        from unittest.mock import patch
+        import autobiography
+
+        with patch.object(autobiography.time, "time", return_value=1789333884.419382):
+            ids = [
+                self.store.record_event("action", f"Event {i}", "summary", "why", ["Nova"], 0.5, {}, {}, None, [], [])
+                for i in range(5)
+            ]
+        self.assertEqual(len(set(ids)), 5)
+        self.assertEqual(len(self.store.recent(limit=10)), 5)
+
 
 if __name__ == "__main__":
     unittest.main()
