@@ -105,7 +105,7 @@ class ACESTests(unittest.TestCase):
 
         config = self.make_config()
         client = ACESLLMClient(config)
-        with patch("aces_llm._sidekick_home", return_value=root), \
+        with patch("nova_runtime.sidekick_home", return_value=root), \
              patch.dict(os.environ, {}, clear=True), \
              patch.object(ACESLLMClient, "_post_chat", return_value="cloud text") as post_chat:
             result = client._complete("prompt", prefer_cloud=False)
