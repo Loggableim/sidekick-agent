@@ -58,6 +58,10 @@ class AgendaStore:
             existing["why"] = why
             existing["priority"] = max(float(existing.get("priority", 0.0)), priority)
             existing["tier"] = tier
+            # A re-proposed intent is a fresh governance decision: revive a
+            # previously blocked item so it can be selected again instead of
+            # wedging the agenda as an invisible zombie.
+            existing["status"] = "open"
             self._save()
             return dict(existing)
         item = {
