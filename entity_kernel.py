@@ -195,8 +195,8 @@ class EntityKernel:
         if action in {"telegram_message", "hub_speak"}:
             gate = NotificationGate(self.space_dir / "nova_data" / "notification_state.json")
             event = {"action": action, "success": True, "emotion": {}, "open_threads": len(intent.get("open_threads", [])), "will": {}}
-            allowed, reason = gate.should_notify(event)
-            return {"ok": False, "action": action, "message": "Notification delivery is not configured.", "notification_gate": {"allowed": allowed, "reason": reason}}
+            allowed, reason, significance = gate.should_notify(event)
+            return {"ok": False, "action": action, "message": "Notification delivery is not configured.", "notification_gate": {"allowed": allowed, "reason": reason, "significance": significance}}
         return {"ok": False, "action": action, "message": "Unknown action blocked by dispatcher."}
 
     def _run_aces_cycle(self, intent: dict[str, Any]) -> dict[str, Any]:

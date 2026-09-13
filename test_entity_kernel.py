@@ -89,6 +89,22 @@ class EntityKernelTests(unittest.TestCase):
         self.assertFalse(result["executed"])
         self.assertIn("reason", result)
 
+    def test_allowed_notify_action_records_gate_decision(self):
+        """A policy-allowed notify intent reaches the notification gate; the
+        kernel must handle the gate's (allowed, reason, significance) tuple
+        without crashing and must not mark the intent done."""
+        kernel = EntityKernel(space_dir=self.root, state_provider=self.fixture_state)
+        decision = kernel.decide(now_iso="2026-07-05T12:00:00")
+        decision["intent"]["action"] = "telegram_message"
+        decision["intent"]["tier"] = "notify"
+        decision["intent"]["why"] = "gate test"
+        decision["policy"] = kernel.policy.check(decision["intent"], now=datetime(2026, 7, 5, 12, 0, 0), history=[])
+        result = kernel.act(decision)
+        self.assertFalse(result["executed"])
+        self.assertIn("notification_gate", result["result"])
+        self.assertIn("allowed", result["result"]["notification_gate"])
+        self.assertIn("reason", result["result"]["notification_gate"])
+
     def test_allowed_internal_action_records_autobiography_event(self):
         kernel = EntityKernel(space_dir=self.root, state_provider=self.fixture_state)
         decision = kernel.decide(now_iso="2026-07-05T12:00:00")
