@@ -905,12 +905,22 @@ class Session:
         # their .bak get restored automatically.
         try:
             if self.path.exists():
-                existing_text = self.path.read_text(encoding='utf-8')
-                try:
-                    existing = json.loads(existing_text)
-                    existing_msg_count = len(existing.get('messages') or [])
-                except (json.JSONDecodeError, ValueError):
-                    existing_msg_count = -1  # corrupt → always back up
+                # #1558 guard, cheap variant: read the existing message count
+                # from the session index instead of parsing the whole file.
+                # For a runaway session (observed 3 GB) the full read_text +
+                # json.loads took minutes while holding the per-session lock,
+                # blocking every concurrent chat start on that session
+                # (observed 70 s session_lock_wait). The index is updated on
+                # every save, so its count matches the file on disk; fall
+                # back to the full read only when the index has no entry.
+                existing_msg_count = _lookup_index_message_count(self.session_id)
+                if existing_msg_count is None:
+                    existing_text = self.path.read_text(encoding='utf-8')
+                    try:
+                        existing = json.loads(existing_text)
+                        existing_msg_count = len(existing.get('messages') or [])
+                    except (json.JSONDecodeError, ValueError):
+                        existing_msg_count = -1  # corrupt → always back up
                 incoming_msg_count = len(self.messages or [])
                 if existing_msg_count > incoming_msg_count:
                     bak_path = self.path.with_suffix('.json.bak')
@@ -926,8 +936,14 @@ class Session:
                         bak_tmp = bak_path.with_suffix(
                             f'.bak.tmp.{os.getpid()}.{threading.current_thread().ident}'
                         )
-                        with open(bak_tmp, 'w', encoding='utf-8') as bf:
-                            bf.write(existing_text)
+                        # Copy via streaming chunks: existing_text may be
+                        # gigabytes; read_text would double the memory.
+                        with open(self.path, 'rb') as src, open(bak_tmp, 'wb') as bf:
+                            while True:
+                                chunk = src.read(4 * 1024 * 1024)
+                                if not chunk:
+                                    break
+                                bf.write(chunk)
                             bf.flush()
                             os.fsync(bf.fileno())
                         os.replace(bak_tmp, bak_path)
