@@ -1290,6 +1290,43 @@ def pre_turn(*, workspace_slug: str | None, user_text: str | None = None) -> dic
     }
 
 
+def _bounded_background_tick_payload(
+    tick: dict[str, Any],
+    soak: dict[str, Any],
+) -> dict[str, Any]:
+    """Return bounded event-payload copies of the tick and soak snapshots.
+
+    ``entity_tick.decision.state`` is the full cognitive snapshot (substrate
+    microdrifts, continuity history, emotion state — ~150 KB per tick) and
+    ``soak.samples`` is up to 400 sample rows (~89 KB). Persisting both into
+    every background_tick event grew events.json to 20 MB (97% tick payloads),
+    and because every ``_update_event`` call rewrites the whole file, each chat
+    turn paid ~140 MB of read+write I/O. No consumer reads these snapshots back
+    from the persisted events (the cron stdout is wakeAgent:false-silent and
+    ``nova_presence`` reads ``soak_v2.json`` directly), so the event carries a
+    bounded summary while ``background_tick()``'s return value keeps the full
+    payload for callers.
+    """
+    bounded_tick: dict[str, Any] = dict(tick) if isinstance(tick, dict) else {}
+    decision = bounded_tick.get("decision")
+    if isinstance(decision, dict):
+        bounded_tick["decision"] = {
+            key: value for key, value in decision.items() if key != "state"
+        }
+        state = decision.get("state")
+        if isinstance(state, dict):
+            bounded_tick["decision"]["state_summary"] = {
+                "keys": sorted(str(key) for key in state.keys())[:32],
+                "bytes": len(json.dumps(state, ensure_ascii=False)),
+            }
+    bounded_soak: dict[str, Any] = dict(soak) if isinstance(soak, dict) else {}
+    samples = bounded_soak.get("samples")
+    if isinstance(samples, list):
+        bounded_soak["sample_count"] = len(samples)
+        bounded_soak.pop("samples", None)
+    return {"entity_tick": bounded_tick, "soak": bounded_soak}
+
+
 def background_tick() -> dict[str, Any]:
     event = _append_event(_new_event("background_tick"))
     try:
@@ -1309,7 +1346,15 @@ def background_tick() -> dict[str, Any]:
         from nova.outcome_evaluator import OutcomeEvaluator
         rewards = OutcomeEvaluator(kernel.bio).evaluate_pending()
         soak = kernel.sample_soak()
-        _update_event(event, step="entity_tick_done", entity_tick=tick, reflection=reflection, rewards=rewards, soak=soak)
+        bounded = _bounded_background_tick_payload(tick, soak)
+        _update_event(
+            event,
+            step="entity_tick_done",
+            entity_tick=bounded["entity_tick"],
+            reflection=reflection,
+            rewards=rewards,
+            soak=bounded["soak"],
+        )
         _update_event(event, step="substrate_done", status="completed", completed_at=_now())
         return {"ok": True, "event_id": event["event_id"], "entity_tick": tick, "reflection": reflection, "rewards": rewards, "soak": soak}
     except Exception as exc:
