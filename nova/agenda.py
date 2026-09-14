@@ -74,8 +74,12 @@ class AgendaStore:
             existing["payload"] = payload or existing.get("payload") or {}
             existing["expected_outcome"] = expected_outcome or existing.get("expected_outcome") or {}
             existing["evidence_refs"] = list(dict.fromkeys([*(existing.get("evidence_refs") or []), *(evidence_refs or [])]))
-            if existing.get("status") == "blocked" and (existing.get("last_result") or {}).get("status") == "failed":
-                existing["status"] = "open"
+            # A re-proposed intent is a fresh governance decision: revive a
+            # previously blocked item so it can be selected again instead of
+            # wedging the agenda as an invisible zombie. (The old condition
+            # only revived when last_result.status == "failed" - a blocked
+            # intent without one stayed invisible forever.)
+            existing["status"] = "open"
             self._save()
             return dict(existing)
         item = {
