@@ -1409,6 +1409,8 @@ def get_existing_space_read_only(slug: str) -> Space | None:
 def get_or_create_space(slug: str, name: str = "") -> Space:
     """Return existing space or create a new one with default agent."""
     slug = _normalize_space_slug(slug)
+    if not _is_valid_space_slug(slug):
+        raise SpaceError(f"invalid space slug: {slug!r}")
     existing = get_space(slug)
     if existing:
         existing.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -1445,6 +1447,8 @@ def create_space(
 ) -> Space:
     """Create a brand-new space. Raises SpaceExists if slug taken."""
     slug = _normalize_space_slug(slug)
+    if not _is_valid_space_slug(slug):
+        raise SpaceError(f"invalid space slug: {slug!r}")
     if get_space(slug):
         raise SpaceExists(f"space {slug!r} already exists")
     space = Space(slug, name or slug)
