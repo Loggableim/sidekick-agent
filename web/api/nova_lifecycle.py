@@ -750,7 +750,6 @@ def _run_post_response_pipeline(
         "--tags", "webui,post_turn",
         "--topic", topic,
         "--summary", summary,
-        "--digest",
         *( ["--skip-resonanz"] if not memory_enabled else [] ),
         timeout=180,
     )
