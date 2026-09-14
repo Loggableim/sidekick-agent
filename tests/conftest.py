@@ -53,3 +53,27 @@ def symlink_capable(tmp_path):
             link.unlink()
         target.unlink()
 
+
+_LAUNCHER_ENV_VARS = (
+    # Sidekick-Launcher.ps1 (Set-SidekickEnv) exports these for the running
+    # WebUI. Agent terminals inherit them, so pytest runs from inside a
+    # Sidekick session carry live runtime overrides that defeat the
+    # SIDEKICK_HOME-based isolation these tests rely on. Clear them for every
+    # test unless a test explicitly sets its own value.
+    "SIDEKICK_WEBUI_STATE_DIR",
+    "SIDEKICK_STATE_DIR",
+    "SIDEKICK_WEBUI_AGENT_DIR",
+    "SIDEKICK_WEBUI_PYTHON",
+    "SIDEKICK_WEBUI_PORT",
+    "SIDEKICK_WEBUI_HOST",
+    "SIDEKICK_WEBUI_TLS_CERT",
+    "SIDEKICK_WEBUI_TLS_KEY",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_launcher_env_overrides(monkeypatch):
+    """Isolate tests from the running WebUI's launcher environment."""
+    for name in _LAUNCHER_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
