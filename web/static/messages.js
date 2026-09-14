@@ -1575,7 +1575,12 @@ let _latestGoalStatus=null;
     if(window._showThinking===false){removeThinking();return;}
     const text=(parsed&&parsed.thinkingText)||'';
     if(text||(parsed&&parsed.inThinking)){
-      if(typeof updateThinking==='function') updateThinking(text||'Thinking…');
+      // Only pass real thinking text — the empty case keeps the dots
+      // indicator (the literal 'Thinking…' placeholder used to be rendered
+      // as if it were reasoning content).
+      if(typeof updateThinking==='function'){
+        if(String(text||'').trim()) updateThinking(text);
+      }
       else appendThinking();
       return;
     }
@@ -1845,8 +1850,13 @@ let _latestGoalStatus=null;
       // finalizeThinkingCard(). The old rAF-only path caused a race where
       // the thinking row was still a spinner when finalized.
       if(window._showThinking!==false){
-        if(typeof updateThinking==='function') updateThinking(liveReasoningText||'Thinking…');
-        else appendThinking(liveReasoningText);
+        // Only push real reasoning text — the empty case keeps the dots
+        // indicator (passing the literal 'Thinking…' here used to render
+        // that placeholder as if it were reasoning content).
+        if(typeof updateThinking==='function'){
+          if(String(liveReasoningText||'').trim()) updateThinking(liveReasoningText);
+        }
+        else if(String(liveReasoningText||'').trim()) appendThinking(liveReasoningText);
       }
       _scheduleRender();
     });

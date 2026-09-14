@@ -9831,12 +9831,101 @@ function renderKatexBlocks(){
   });
 }
 
-function _thinkingMarkup(text=''){
+function _thinkingMarkup(text='', live=false){
   const clean=_sanitizeThinkingDisplayText(text);
-  const openClass=isSimplifiedToolCalling()?'':' open';
+  // Live thinking streams OPEN by default (livestream feel); settled cards
+  // keep the existing mode default (collapsed in simplified tool-calling).
+  const openClass=live?' open':(isSimplifiedToolCalling()?'':' open');
   return (clean&&String(clean).trim())
     ? `<div class="reasoning-accordion${openClass}"><div class="reasoning-accordion-header" onclick="toggleReasoningAccordion(this)"><span>\u{1F9E0}</span><span class="reasoning-accordion-label">${t('reasoning_thought')}</span><span class="chevron">${li('chevron-right',12)}</span></div><div class="reasoning-accordion-body"><pre>${esc(String(clean).trim())}</pre></div></div>`
-    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">Thinking�</span><div class="thinking-indicator-tools"></div></div>`;
+    : `<div class="thinking-indicator"><div class="thinking-indicator-dots"><div class="thinking-dot"></div><div class="thinking-dot"></div><div class="thinking-dot"></div></div><span class="thinking-indicator-label">${esc(t('thinking'))}…</span><div class="thinking-indicator-tools"></div></div>`;
+}
+
+// ── Live thinking card controls (stop / steer / nudges) ────────────────────
+// While a reasoning stream is live, the thinking card carries a small action
+// row: a char counter, a Steer button (opens an inline input with preset
+// nudges) and a Stop button (cancel + keep partial result). The row is added
+// by appendThinking() and removed again by finalizeThinkingCard() so settled
+// cards stay clean.
+const _THINKING_NUDGES={
+  wrap:'Enough reasoning — stop thinking and give your final answer now.',
+  shorter:'Keep the reasoning brief and answer concisely.',
+  verify:'Before answering, verify your key assumptions.',
+};
+function _fmtThinkingCount(n){
+  const num=Number(n)||0;
+  if(num<1000) return String(num);
+  if(num<1000000) return (num/1000).toFixed(1).replace(/\.0$/,'')+'k';
+  return (num/1000000).toFixed(1).replace(/\.0$/,'')+'M';
+}
+function _ensureThinkingLiveActions(row){
+  if(!row) return null;
+  let actions=row.querySelector('.thinking-live-actions');
+  if(actions) return actions;
+  actions=document.createElement('div');
+  actions.className='thinking-live-actions';
+  actions.innerHTML=
+    '<span class="thinking-live-count" aria-hidden="true"></span>'+
+    '<button type="button" class="thinking-action-btn" data-thinking-act="steer" title="'+escAttr(t('thinking_steer_title'))+'" onclick="_toggleThinkingSteer(this)">'+li('message-square',12)+'</button>'+
+    '<button type="button" class="thinking-action-btn thinking-action-stop" data-thinking-act="stop" title="'+escAttr(t('thinking_stop_title'))+'" onclick="_thinkingCardStop(this)">'+li('square',10)+'</button>';
+  row.appendChild(actions);
+  return actions;
+}
+function _updateThinkingLiveCount(row,text){
+  if(!row) return;
+  const count=row.querySelector('.thinking-live-actions .thinking-live-count');
+  if(count) count.textContent=_fmtThinkingCount(String(text||'').length)+' '+t('thinking_chars');
+}
+async function _thinkingCardStop(){
+  if(typeof cancelStream!=='function') return;
+  await cancelStream();
+  if(typeof showToast==='function') showToast(t('stream_stopped'),2000);
+}
+function _toggleThinkingSteer(btn){
+  const row=btn&&btn.closest?btn.closest('[data-thinking-active="1"]'):null;
+  if(!row) return;
+  const actions=row.querySelector('.thinking-live-actions')||row;
+  const existing=actions.querySelector('.thinking-steer-box');
+  if(existing){existing.remove();return;}
+  const box=document.createElement('div');
+  box.className='thinking-steer-box';
+  const nudges=Object.keys(_THINKING_NUDGES).map(k=>
+    '<button type="button" class="thinking-nudge-chip" data-nudge="'+escAttr(k)+'" onclick="_thinkingNudge(this)">'+esc(t('thinking_nudge_'+k))+'</button>'
+  ).join('');
+  box.innerHTML=
+    '<div class="thinking-steer-row"><input type="text" class="thinking-steer-input" placeholder="'+escAttr(t('thinking_steer_placeholder'))+'" /><button type="button" class="thinking-steer-send">'+esc(t('thinking_steer_send'))+'</button></div>'+
+    '<div class="thinking-steer-nudges">'+nudges+'</div>';
+  actions.appendChild(box);
+  const input=box.querySelector('.thinking-steer-input');
+  const send=()=>{
+    const val=String(input&&input.value||'').trim();
+    if(!val) return;
+    _sendThinkingSteer(val);
+    box.remove();
+  };
+  if(input){
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter'){e.preventDefault();send();}
+      else if(e.key==='Escape'){box.remove();}
+    });
+  }
+  const sendBtn=box.querySelector('.thinking-steer-send');
+  if(sendBtn) sendBtn.addEventListener('click',send);
+  if(input) input.focus();
+}
+function _thinkingNudge(chip){
+  const key=chip&&chip.getAttribute?chip.getAttribute('data-nudge'):'';
+  const text=_THINKING_NUDGES[key];
+  if(!text) return;
+  _sendThinkingSteer(text);
+  const box=chip&&chip.closest?chip.closest('.thinking-steer-box'):null;
+  if(box) box.remove();
+}
+function _sendThinkingSteer(text){
+  const msg=String(text||'').trim();
+  if(!msg) return;
+  if(typeof _trySteer==='function'){_trySteer(msg,true);return;}
+  if(typeof showToast==='function') showToast(t('busy_steer_fallback'),2500);
 }
 
 // ── Thinking-indicator delayed labels ──
@@ -9892,6 +9981,8 @@ function finalizeThinkingCard(){
     }
     row.removeAttribute('id');
     row.removeAttribute('data-thinking-active');
+    const actions=row.querySelector('.thinking-live-actions');
+    if(actions) actions.remove();
     return;
   }
   const turn=$('liveAssistantTurn');
@@ -9907,7 +9998,11 @@ function finalizeThinkingCard(){
       if(summary) summary.setAttribute('aria-expanded','false');
     }
     const active=group.querySelector('.agent-activity-thinking[data-thinking-active="1"]');
-    if(active) active.removeAttribute('data-thinking-active');
+    if(active){
+      active.removeAttribute('data-thinking-active');
+      const actions=active.querySelector('.thinking-live-actions');
+      if(actions) actions.remove();
+    }
     _syncToolCallGroupSummary(group);
   }
 }
@@ -9946,10 +10041,27 @@ function appendThinking(text=''){
       if(anchor) anchor.insertAdjacentElement('afterend', row);
       else blocks.appendChild(row);
     }
-    row.className=(text&&String(text).trim())?'assistant-segment reasoning-accordion-row':'assistant-segment';
-    row.innerHTML=_thinkingMarkup(text);
+    const hasText=String(text||'').trim();
+    row.className=hasText?'assistant-segment reasoning-accordion-row':'assistant-segment';
+    // In-place morph: keep the existing accordion DOM when only the text
+    // grows, so the user's manual open/collapse state survives re-renders.
+    const existingAcc=row.querySelector('.reasoning-accordion');
+    const existingInd=row.querySelector('.thinking-indicator');
+    if(hasText&&existingAcc){
+      const pre=existingAcc.querySelector('.reasoning-accordion-body pre');
+      if(pre) pre.textContent=_sanitizeThinkingDisplayText(text);
+    }else if(hasText&&existingInd){
+      // First reasoning delta — morph the dots indicator into the accordion.
+      row.innerHTML=_thinkingMarkup(text,true);
+    }else if(hasText){
+      row.innerHTML=_thinkingMarkup(text,true);
+    }else if(!existingInd){
+      row.innerHTML=_thinkingMarkup('',true);
+    }
+    _ensureThinkingLiveActions(row);
+    _updateThinkingLiveCount(row,text);
     // Start delayed labels when no thinking text yet (indicator mode)
-    if(!String(text||'').trim()){
+    if(!hasText){
       _thinkingTimers.label=setTimeout(()=>{
         const lbl=row&&row.querySelector('.thinking-indicator-label');
         if(lbl) lbl.classList.add('visible');
@@ -9987,7 +10099,27 @@ function appendThinking(text=''){
     row.setAttribute('data-thinking-active','1');
     body.insertBefore(row, body.firstChild);
   }
-  row.innerHTML=_thinkingMarkup(text);
+  // Livestream: auto-expand the activity group while reasoning streams so the
+  // user can watch the thinking live. Explicit user intent wins — if they
+  // collapsed the group themselves (_liveActivityUserExpanded===false), leave
+  // it closed. finalizeThinkingCard() re-collapses at the end of the turn
+  // unless the user manually expanded.
+  if(_liveActivityUserExpanded!==false&&group.classList.contains('tool-call-group-collapsed')){
+    group.classList.remove('tool-call-group-collapsed');
+    const summary=group.querySelector('.tool-call-group-summary');
+    if(summary) summary.setAttribute('aria-expanded','true');
+  }
+  // In-place morph (same contract as the classic path above).
+  const existingAcc=row.querySelector('.reasoning-accordion');
+  const existingInd=row.querySelector('.thinking-indicator');
+  if(existingAcc){
+    const pre=existingAcc.querySelector('.reasoning-accordion-body pre');
+    if(pre) pre.textContent=_sanitizeThinkingDisplayText(text);
+  }else{
+    row.innerHTML=_thinkingMarkup(text,true);
+  }
+  _ensureThinkingLiveActions(row);
+  _updateThinkingLiveCount(row,text);
   _syncToolCallGroupSummary(group);
   scrollIfPinned();
   if(_scrollPinned){
@@ -10030,7 +10162,7 @@ function addStreamCursor(){
   const cursor=document.createElement('span');
   cursor.className='stream-cursor';
   cursor.setAttribute('aria-hidden','true');
-  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">Thinking�</span>';
+  cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">'+esc(t('thinking'))+'…</span>';
   body.appendChild(cursor);
 }
 function removeStreamCursor(){
