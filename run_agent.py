@@ -7417,6 +7417,12 @@ class AIAgent:
                         pass
                 self._record_streamed_assistant_text(tail)
         self._current_streamed_assistant_text = ""
+        # Per-model-response reset: the post-response reasoning fallback in
+        # _build_assistant_message fires only when THIS response streamed
+        # no reasoning deltas (provider returned reasoning solely in the
+        # final message, or inline <think> blocks that the scrubber
+        # stripped from the visible stream).
+        self._reasoning_streamed_this_turn = False
 
     def _record_streamed_assistant_text(self, text: str) -> None:
         """Accumulate visible assistant text emitted through stream callbacks."""
@@ -7512,6 +7518,11 @@ class AIAgent:
 
     def _fire_reasoning_delta(self, text: str) -> None:
         """Fire reasoning callback if registered."""
+        if text:
+            # Track that reasoning reached the display live during this
+            # model response — _build_assistant_message uses the flag to
+            # decide whether the post-response fallback should fire.
+            self._reasoning_streamed_this_turn = True
         cb = self.reasoning_callback
         if cb is not None:
             try:
@@ -9509,6 +9520,23 @@ class AIAgent:
             opts = self._lmstudio_reasoning_options_cached()
             # "off-only" (or absent) means no real reasoning capability.
             return any(opt and opt != "off" for opt in opts)
+        # Ollama Cloud: the chat-completions transport has a dedicated
+        # ollama-cloud reasoning branch (effort mapping incl. xhigh→max,
+        # cli.models.ollama_cloud_model_reasoning_efforts). Without this
+        # gate that branch was dead code — supports_reasoning stayed
+        # False — so thinking models routed via ollama.com never received
+        # the reasoning payload and streamed no reasoning deltas (the
+        # WebUI showed only the static "Thinking…" indicator).
+        if (
+            (self.provider or "").strip().lower() in {"ollama-cloud", "ollama_cloud"}
+            or base_url_host_matches(self._base_url_lower, "ollama.com")
+        ):
+            try:
+                from cli.models import ollama_cloud_model_reasoning_efforts
+
+                return bool(ollama_cloud_model_reasoning_efforts(self.model))
+            except Exception:
+                return True
         if "openrouter" not in self._base_url_lower:
             return False
         if "api.mistral.ai" in self._base_url_lower:
