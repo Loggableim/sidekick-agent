@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import time
 import urllib.request
@@ -60,8 +61,41 @@ class Check:
     detail: Any = None
 
 
+_SESSION_TOKEN_RE = re.compile(
+    r"window\.__SIDEKICK_SESSION_TOKEN__\s*=\s*\"([^\"]+)\""
+)
+_session_token_cache: dict[str, str] = {}
+
+
+def _dashboard_session_token(base_url: str, timeout: float = 5.0) -> str:
+    """Fetch the SPA shell once and extract its injected session token.
+
+    The dashboard middleware requires the ephemeral ``X-Sidekick-Session-Token``
+    on API calls; the token is only distributed inside the served index.html.
+    """
+    cached = _session_token_cache.get(base_url)
+    if cached:
+        return cached
+    with urllib.request.urlopen(base_url.rstrip("/") + "/", timeout=timeout) as response:
+        html = response.read().decode("utf-8")
+    match = _SESSION_TOKEN_RE.search(html)
+    token = match.group(1) if match else ""
+    _session_token_cache[base_url] = token
+    return token
+
+
+def _auth_headers(base_url: str) -> dict[str, str]:
+    try:
+        token = _dashboard_session_token(base_url)
+    except Exception:
+        return {}
+    return {"X-Sidekick-Session-Token": token} if token else {}
+
+
 def _get_json(url: str, timeout: float = 5.0) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=timeout) as response:
+    headers = _auth_headers(url.split("/api/")[0]) if "/api/" in url else {}
+    request = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         data = response.read().decode("utf-8")
     return json.loads(data)
 
@@ -73,6 +107,8 @@ def _post_json(
     headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     request_headers = {"Content-Type": "application/json"}
+    if "/api/" in url:
+        request_headers.update(_auth_headers(url.split("/api/")[0]))
     if headers:
         request_headers.update(headers)
     request = urllib.request.Request(
@@ -1726,23 +1762,12 @@ def run_smoke(
                         {"actual_ms": timings["load_ms"], "max_ms": max_load_ms},
                     )
                 )
-
             finally:
-                if page is not None and not cdp_url:
-                    try:
-                        page.close()
-                    except Exception:
-                        pass
-                if context is not None and not cdp_url:
-                    try:
-                        context.close()
-                    except Exception:
-                        pass
-                if browser is not None and not cdp_url:
-                    try:
-                        browser.close()
-                    except Exception:
-                        pass
+                # Deliberately no page/context/browser closes here: the outer
+                # finally closes the browser after all checks ran. Closing the
+                # browser here killed the page mid-run and made every later
+                # page.evaluate raise TargetClosedError.
+                pass
             current_approval_mode = page.evaluate(
                 "() => String(window._approvalMode || '').trim().toLowerCase()"
             )
@@ -1768,11 +1793,13 @@ def run_smoke(
             _check_approval_slash_command_cycle(checks, page)
             _check_persistent_goal_reconciles_server_state(checks, page)
             _check_goal_reload_resume_autostarts(checks, browser, base_url, workspace)
-            _check_unique(checks, page, "browser_status_badge", '[data-testid="browser-status-badge"]')
-            _check_unique(checks, page, "browser_actions_button", '[data-testid="browser-actions-button"]')
+            # The status cluster was relocated into the composer strip
+            # (relocateHeaderControlsToComposer); the redundant titlebar browser
+            # badge was deliberately removed (test_webui_repo_status). Assert
+            # the current-design controls instead of the stale titlebar ones.
             _check_unique(checks, page, "composer_browser_drawer_button", '[data-testid="composer-browser-drawer-button"]')
-            _check_unique(checks, page, "browser_drawer_webui_smoke_button", '[data-testid="browser-drawer-webui-smoke-button"]')
-            _check_unique(checks, page, "workflow_browser_webui_smoke_action", '[data-testid="workflow-browser-webui-smoke-action"]')
+            _check_unique(checks, page, "composer_status_strip_cluster", "#composerStatusStripCluster")
+            _check_unique(checks, page, "workflow_status_menu", "#workflowStatusMenu")
             _check_browser_drawer_navigation(checks, page, f"{base_url}/api/runtime/fingerprint")
             _check_browser_drawer_visual_isolation(checks, page)
             _check_browser_permission_cycle_restore(checks, page)
@@ -1811,24 +1838,14 @@ def run_smoke(
                     {"count": legacy_titlebar_collision},
                 )
             )
-            page.locator('[data-testid="browser-actions-button"]').click(timeout=3000)
-            page.wait_for_timeout(100)
-
-            page.locator('[data-testid="browser-actions-button"]').click(timeout=3000)
+            # The workflow pill is the only header menu trigger in the current
+            # design (test_browser_titlebar_workflow_pill_is_the_only_menu_trigger);
+            # open it and assert the workflow palette renders.
+            page.evaluate("() => { if (typeof browserSetDrawerOpen === 'function') browserSetDrawerOpen(false); }")
             page.wait_for_timeout(150)
-            _check_unique(checks, page, "browser_header_drawer_action", '[data-testid="browser-header-drawer-action"]')
-            _check_unique(
-                checks,
-                page,
-                "browser_header_permission_action",
-                '[data-testid="browser-header-permission-action"]',
-            )
-            _check_unique(
-                checks,
-                page,
-                "browser_header_webui_smoke_action",
-                '[data-testid="browser-header-webui-smoke-action"]',
-            )
+            page.locator("#workflowStatusBadge").click(timeout=3000)
+            page.wait_for_timeout(150)
+            _check_unique(checks, page, "workflow_status_menu_open", "#workflowStatusMenu")
             page.keyboard.press("Escape")
             page.wait_for_timeout(100)
 
