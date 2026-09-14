@@ -461,6 +461,37 @@ def test_shared_sessions_preserve_webui_only_metadata(monkeypatch, tmp_path):
     assert saved["custom_note"] == "keep me"
 
 
+def test_list_sessions_skips_runaway_oversized_files(monkeypatch, tmp_path):
+    """Regression: list_sessions parsed every session file in full. A single
+    runaway session (observed 3 GB on a live install) made json.load take
+    minutes, hanging legacy consumers and the smoke suite (15s timeout).
+    Files above the size bound must be skipped with a warning instead."""
+    monkeypatch.delenv("SIDEKICK_WEBUI_STATE_DIR", raising=False)
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    import shared.sessions as sessions_mod
+
+    sess_dir = sessions_dir()
+
+    # A normal session that must still be listed.
+    normal = new_session(title="Normal Session")
+
+    # A runaway file just above the bound: valid JSON head, huge padding body.
+    runaway = sess_dir / "runaway.json"
+    with open(runaway, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({
+            "session_id": "runaway",
+            "title": "Runaway",
+            "messages": [{"role": "user", "content": "x" * (sessions_mod._MAX_LIST_SESSION_BYTES + 1024)}],
+        }, ensure_ascii=False))
+
+    monkeypatch.setattr(list_sessions, "_migrated", True, raising=False)
+    rows = list_sessions()
+
+    ids = {row["session_id"] for row in rows}
+    assert normal.session_id in ids
+    assert "runaway" not in ids, "oversized session file must be skipped, not parsed"
+
+
 def test_web_server_session_endpoints(monkeypatch, tmp_path):
     monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
     client, headers = _webui_client()
