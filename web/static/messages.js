@@ -897,10 +897,13 @@ function _renderGoalBanner(){
       return;
     }
   }
-  // Session-scoping: nur anzeigen wenn Goal in dieser Session gesetzt wurde
+  // Session-scoping: nur anzeigen wenn Goal in dieser Session gesetzt wurde.
+  // Strict matching: ohne bekannte aktive Session (leerer Zustand, Boot vor
+  // session/get, frischer Chat) niemals anzeigen — sonst leakt das Goal der
+  // letzten Session in Chats, in denen es nicht gilt.
   const activeSession=_goalActiveSession();
   const activeSid=activeSession&&activeSession.session_id;
-  if(gs.session_id&&activeSid&&gs.session_id!==activeSid){
+  if(!activeSid||!gs.session_id||gs.session_id!==activeSid){
     banner.style.display='none';
     if(!_goalSyncApplying&&Date.now()-_goalLastSyncAt>1500)_scheduleGoalStateSync(120);
     return;
@@ -2051,8 +2054,11 @@ source.addEventListener('goal',e=>{
         _latestGoalStatus={message:msg,decision:d.decision||null,state:goalState||null};
         setComposerStatus(msg);
         showToast(msg.split('\n')[0],2600);
-        // Update goal banner from decision payload
-        if(d.decision&&d.decision.status){
+        // Update goal banner from decision payload.
+        // Strict session-scoping: only apply when the event carries the
+        // session_id of the currently viewed session — never stamp a
+        // background stream's goal onto the session being viewed.
+        if(d.session_id&&d.session_id===activeSid&&d.decision&&d.decision.status){
           _updateGoalState({
             goal:window._goalState&&window._goalState.goal||'',
             status:d.decision.status,
@@ -2251,9 +2257,11 @@ if(_latestGoalStatus&&_latestGoalStatus.message){
             _goalStatus:true,
             _transient:true,
           });
-          // Update goal banner from latest goal status
+          // Update goal banner from latest goal status.
+          // Strict session-scoping: only apply when the completed stream
+          // belongs to the session currently being viewed.
           const _gs=_latestGoalStatus;
-          if(_gs.decision&&_gs.decision.status){
+          if(completedSid===activeSid&&_gs.decision&&_gs.decision.status){
             _updateGoalState({
               goal:window._goalState&&window._goalState.goal||'',
               status:_gs.decision.status,
