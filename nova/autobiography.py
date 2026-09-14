@@ -7,6 +7,7 @@ import argparse
 import json
 import sqlite3
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -100,7 +101,12 @@ class AutobiographyStore:
     def record_event(self, event_type: str, title: str, summary: str, why: str, actors: list[str],
                      importance: float, emotion_snapshot: dict[str, Any], need_snapshot: dict[str, Any],
                      intent_id: str | None, memory_refs: list[str], tags: list[str]) -> str:
-        event_id = f"bio-{int(time.time() * 1000000)}"
+        # time.time() has coarse granularity on Windows (~15.6ms); two events
+        # recorded in the same tick would collide on the TEXT PRIMARY KEY and
+        # the second INSERT fails with UNIQUE constraint failed - losing the
+        # event. The uuid suffix keeps ids unique without relying on clock
+        # resolution.
+        event_id = f"bio-{int(time.time() * 1000000)}-{uuid.uuid4().hex[:8]}"
         timestamp = datetime.now().isoformat()
         conn = self._connect()
         try:
@@ -130,7 +136,13 @@ class AutobiographyStore:
 
     def record_entity_event(self, event: EntityEvent | dict[str, Any]) -> str:
         data = event.to_dict() if isinstance(event, EntityEvent) else dict(event)
-        event_id = str(data.get("event_id") or data.get("id") or f"event-{int(time.time() * 1000000)}")
+        # Same coarse-clock collision risk as record_event: a generated id
+        # without a uuid suffix collides when two events land in one tick.
+        event_id = str(
+            data.get("event_id")
+            or data.get("id")
+            or f"event-{int(time.time() * 1000000)}-{uuid.uuid4().hex[:8]}"
+        )
         correlation_id = str(data.get("correlation_id") or event_id)
         conn = self._connect()
         try:
@@ -177,7 +189,11 @@ class AutobiographyStore:
 
     def record_outcome(self, outcome: Outcome | dict[str, Any]) -> str:
         data = outcome.to_dict() if isinstance(outcome, Outcome) else dict(outcome)
-        outcome_id = str(data.get("outcome_id") or data.get("id") or f"outcome-{int(time.time() * 1000000)}")
+        outcome_id = str(
+            data.get("outcome_id")
+            or data.get("id")
+            or f"outcome-{int(time.time() * 1000000)}-{uuid.uuid4().hex[:8]}"
+        )
         reward = data.get("reward")
         conn = self._connect()
         try:
