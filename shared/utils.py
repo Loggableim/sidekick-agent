@@ -78,6 +78,7 @@ def atomic_json_write(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     prev_mode = _preserve_file_mode(path)
+    tmp_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -88,16 +89,17 @@ def atomic_json_write(
             suffix=".tmp",
             delete=False,
         ) as f:
+            tmp_name = f.name
             json.dump(data, f, ensure_ascii=False, indent=indent, **dump_kwargs)
             f.flush()
             os.fsync(f.fileno())
-            tmp_name = f.name
         atomic_replace(tmp_name, path)
     except Exception:
-        try:
-            os.unlink(tmp_name)
-        except Exception:
-            pass
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except Exception:
+                pass
         raise
     finally:
         if prev_mode is not None:
@@ -108,6 +110,7 @@ def atomic_yaml_write(path: Union[str, Path], data: Any, *, default_flow_style: 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     prev_mode = _preserve_file_mode(path)
+    tmp_name: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -118,19 +121,20 @@ def atomic_yaml_write(path: Union[str, Path], data: Any, *, default_flow_style: 
             suffix=".tmp",
             delete=False,
         ) as f:
+            tmp_name = f.name
             yaml.safe_dump(data, f, default_flow_style=default_flow_style, allow_unicode=True, sort_keys=False)
             if extra_content:
                 f.write("\n")
                 f.write(extra_content)
             f.flush()
             os.fsync(f.fileno())
-            tmp_name = f.name
         atomic_replace(tmp_name, path)
     except Exception:
-        try:
-            os.unlink(tmp_name)
-        except Exception:
-            pass
+        if tmp_name is not None:
+            try:
+                os.unlink(tmp_name)
+            except Exception:
+                pass
         raise
     finally:
         if prev_mode is not None:
