@@ -4395,6 +4395,7 @@ _SETTINGS_DEFAULTS = {
     "api_redact_enabled": True,  # redact sensitive data (API keys, secrets) from API responses
     "sidebar_density": "compact",  # compact | detailed
     "auto_title_refresh_every": "0",  # adaptive title refresh: 0=off, 5/10/20=every N exchanges
+    "auto_title_model": "auto",  # title generation model: auto | provider:model | @provider:model
     "busy_input_mode": "queue",  # behavior when sending while agent is running: queue | interrupt | steer
     "composer_mode": "action",  # action | plan
     "game_mode_enabled": False,  # block local GPU-backed model/image work so VRAM stays free
