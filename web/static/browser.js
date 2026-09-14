@@ -994,7 +994,9 @@ function browserGetAgentContext() {
   const reasoningMode = textOf('reasoningModeValue', '');
   const goalState = (typeof window !== 'undefined' && window._goalState && typeof window._goalState === 'object') ? window._goalState : null;
   const goalSession = String((goalState && goalState.session_id) || '');
-  const goalMatchesSession = !!goalState && (!goalSession || !state.session_id || goalSession === state.session_id);
+  // Strict session-scoping: a goal without a known owning session must never
+  // be reported as active for a different session (leak across chats).
+  const goalMatchesSession = !!goalState && !!goalSession && (!state.session_id || goalSession === state.session_id);
   const activeGoal = goalMatchesSession ? {
     available: true,
     present: !!String(goalState.goal || '').trim(),
@@ -3015,7 +3017,9 @@ function _browserActiveGoalForCurrentSession(sessionId) {
   if (contextGoal && String(contextGoal.goal || '').trim()) return contextGoal;
   const localGoalState = (typeof window !== 'undefined' && window._goalState && typeof window._goalState === 'object') ? window._goalState : null;
   const localGoalSession = String((localGoalState && localGoalState.session_id) || '');
-  const localGoalMatchesSession = !!localGoalState && (!localGoalSession || !sid || localGoalSession === sid);
+  // Strict session-scoping: a goal without a known owning session must never
+  // be reported as active for a different session (leak across chats).
+  const localGoalMatchesSession = !!localGoalState && !!localGoalSession && !!sid && localGoalSession === sid;
   return localGoalMatchesSession ? localGoalState : null;
 }
 

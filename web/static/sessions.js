@@ -633,6 +633,10 @@ async function newSession(flash, options={}){
   // conversation is still streaming in the background.
   S.busy=false;
   S.activeStreamId=null;
+  // Goal state is session-scoped: a brand-new chat must not inherit the
+  // previous chat's goal banner. Clear it; _syncGoalStateFromServer will
+  // re-populate it if this session actually has its own goal.
+  if(typeof _clearGoalState==='function')_clearGoalState();
   updateSendBtn();
   setStatus('');
   setComposerStatus('');
