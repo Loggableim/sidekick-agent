@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -928,6 +929,48 @@ def test_migration_tick_imports_legacy_state_without_secrets(monkeypatch, tmp_pa
     assert "_nova_mail_creds.json" in marker["skipped"]
     assert not (paths.space / "_nova_mail_creds.json").exists()
     assert paths.personality.exists()
+
+
+def test_write_json_does_not_leak_tmp_file_when_target_is_locked(monkeypatch, tmp_path):
+    """Regression: _write_json left orphaned tmp files behind when the final
+    tmp.replace(path) failed with PermissionError (e.g. target held open by a
+    reader with an exclusive handle on Windows). Real-world evidence: 15
+    orphaned events.json.<uuid>.tmp files totalling ~1.8 GB in .lifecycle/
+    between 2026-07-29 and 2026-08-15."""
+    if sys.platform != "win32":
+        pytest.skip("exclusive-handle replace blocking is a Windows behaviour")
+    import ctypes
+
+    import web.api.nova_lifecycle as lifecycle
+
+    target = tmp_path / "events.json"
+    target.write_text('{"old": true}', encoding="utf-8")
+
+    # Hold an exclusive handle on the target (share mode 0) like a concurrent
+    # reader would, so tmp.replace(target) raises PermissionError on Windows.
+    GENERIC_READ = 0x80000000
+    OPEN_EXISTING = 3
+    INVALID_HANDLE_VALUE = -1
+    handle = ctypes.windll.kernel32.CreateFileW(
+        str(target), GENERIC_READ, 0, None, OPEN_EXISTING, 0, None
+    )
+    assert handle != INVALID_HANDLE_VALUE, "could not open exclusive test handle"
+    try:
+        monkeypatch.setattr(lifecycle.time, "sleep", lambda _s: None)
+
+        with pytest.raises(PermissionError):
+            lifecycle._write_json(target, {"new": "payload"})
+
+        # The tmp payload must not survive the failed publish as an orphan.
+        orphans = [p for p in tmp_path.iterdir() if p.name != target.name]
+        assert orphans == [], f"orphaned tmp files: {[p.name for p in orphans]}"
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+    # After the lock is released the retry path must succeed and publish.
+    lifecycle._write_json(target, {"new": "payload"})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"new": "payload"}
+    assert [p.name for p in tmp_path.iterdir()] == ["events.json"]
 
 
 def test_dashboard_nova_api_endpoints_require_token_and_filter_visibility(monkeypatch, tmp_path):

@@ -262,15 +262,26 @@ def _write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    for attempt in range(5):
+    try:
+        for attempt in range(5):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+    finally:
+        # The tmp copy must never outlive this call: on Windows a permanently
+        # locked destination (another process holding the file open) re-raises
+        # after 5 attempts and previously leaked the fully written tmp file
+        # (observed ~1.8 GB of orphaned events.json.*.tmp in a Nova space).
+        # On success the tmp path no longer exists (it was renamed), so the
+        # unlink is a no-op there.
         try:
-            tmp.replace(path)
-            return
-        except PermissionError:
-            if attempt == 4:
-                raise
-            time.sleep(0.05 * (attempt + 1))
-    tmp.replace(path)
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _append_jsonl(path: Path, data: dict[str, Any]) -> None:
