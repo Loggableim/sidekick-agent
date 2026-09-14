@@ -47,6 +47,12 @@ OUTPUT_DIR = CRON_DIR / "output"
 ONESHOT_GRACE_SECONDS = 120
 _STALE_TMP_AGE_SECONDS = 3600
 
+# Retention for per-job output files. save_job_output writes one timestamped
+# .md per run and nothing pruned them: a live install accumulated 119,857
+# files over three months (one job dir at 21,661), which degrades NTFS
+# directory performance. Keep the newest N files per job.
+_JOB_OUTPUT_RETENTION = 200
+
 
 def _normalize_skill_list(skill: Optional[str] = None, skills: Optional[Any] = None) -> List[str]:
     """Normalize legacy/single-skill and multi-skill inputs into a unique ordered list."""
@@ -995,11 +1001,39 @@ def save_job_output(job_id: str, output: str):
     job_output_dir = OUTPUT_DIR / job_id
     job_output_dir.mkdir(parents=True, exist_ok=True)
     _secure_dir(job_output_dir)
-    
+
     timestamp = _sidekick_now().strftime("%Y-%m-%d_%H-%M-%S")
     output_file = job_output_dir / f"{timestamp}.md"
 
-    return _write_unique_job_output(output_file, output)
+    written = _write_unique_job_output(output_file, output)
+    _prune_job_output_dir(job_output_dir)
+    return written
+
+
+def _prune_job_output_dir(job_output_dir: Path) -> None:
+    """Delete the oldest output files beyond _JOB_OUTPUT_RETENTION.
+
+    Best-effort: a locked or vanished file must never fail the job's save.
+    """
+    try:
+        files = [p for p in job_output_dir.iterdir() if p.is_file()]
+        if len(files) <= _JOB_OUTPUT_RETENTION:
+            return
+        files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        removed = 0
+        for stale in files[_JOB_OUTPUT_RETENTION:]:
+            try:
+                stale.unlink()
+                removed += 1
+            except OSError:
+                continue
+        if removed:
+            logger.info(
+                "Pruned %d old output files for job dir %s (retention %d)",
+                removed, job_output_dir.name, _JOB_OUTPUT_RETENTION,
+            )
+    except OSError:
+        logger.debug("Job output pruning skipped for %s", job_output_dir, exc_info=True)
 
 
 def _write_unique_job_output(path: Path, output: str) -> Path:
