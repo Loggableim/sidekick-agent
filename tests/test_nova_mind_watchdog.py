@@ -1,6 +1,8 @@
 from pathlib import Path
 import json
 
+import pytest
+
 from nova.mind_watchdog import check_and_recover
 
 
@@ -67,3 +69,51 @@ def test_missing_target(tmp_path):
     (tmp_path / "spaces" / "nova" / "nova_mind.py").unlink()
     result = check_and_recover(home=tmp_path, lease_owned=True, now=100, pid_alive=lambda pid, target: False)
     assert result.status == "missing_target"
+
+
+def test_atomic_json_cleans_up_tmp_when_destination_locked(tmp_path):
+    """Regression: _atomic_json left the tmp file behind when os.replace
+    failed with PermissionError (destination held open by another process
+    on Windows). The watchdog writes state on every crash/restart event,
+    so each write under a locked destination leaked a full copy."""
+    import sys
+
+    from nova.mind_watchdog import _atomic_json
+
+    if sys.platform != "win32":
+        pytest.skip("exclusive-handle replace blocking is a Windows behaviour")
+    import ctypes
+
+    target = tmp_path / "nova-mind-watchdog.json"
+    target.write_text('{"old": 1}', encoding="utf-8")
+
+    GENERIC_READ = 0x80000000
+    OPEN_EXISTING = 3
+    INVALID_HANDLE_VALUE = -1
+    handle = ctypes.windll.kernel32.CreateFileW(
+        str(target), GENERIC_READ, 0, None, OPEN_EXISTING, 0, None
+    )
+    assert handle != INVALID_HANDLE_VALUE, "could not open exclusive test handle"
+    try:
+        with pytest.raises(PermissionError):
+            _atomic_json(target, {"crash_timestamps": [1, 2, 3], "status": "restarted"})
+
+        leftovers = [p for p in tmp_path.iterdir() if p.name != target.name]
+        assert leftovers == [], f"tmp leak after failed replace: {[p.name for p in leftovers]}"
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+    # After the lock is released the next write must succeed and publish.
+    _atomic_json(target, {"crash_timestamps": [1], "status": "restarted"})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"crash_timestamps": [1], "status": "restarted"}
+    assert [p.name for p in tmp_path.iterdir()] == ["nova-mind-watchdog.json"]
+
+
+def test_atomic_json_success_leaves_no_tmp_behind(tmp_path):
+    from nova.mind_watchdog import _atomic_json
+
+    target = tmp_path / "state.json"
+    _atomic_json(target, {"ok": True})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"ok": True}
+    assert [p.name for p in tmp_path.iterdir()] == ["state.json"]

@@ -33,7 +33,19 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + ".tmp")
     temp.write_text(json.dumps(payload, separators=(",", ":"), sort_keys=True), encoding="utf-8")
-    os.replace(temp, path)
+    try:
+        os.replace(temp, path)
+    finally:
+        # The tmp copy must never outlive this call: on Windows a permanently
+        # locked destination (another process holding the file open) makes
+        # os.replace raise PermissionError and previously leaked the fully
+        # written tmp file on every watchdog state write.
+        # On success the tmp path no longer exists (it was renamed), so the
+        # unlink is a no-op there.
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _read_json(path: Path) -> dict[str, Any]:
