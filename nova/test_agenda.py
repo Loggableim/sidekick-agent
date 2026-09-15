@@ -36,10 +36,23 @@ class AgendaTests(unittest.TestCase):
         self.assertEqual(archive[0]["status"], "done")
 
     def test_best_intent_prefers_priority_and_open_status(self):
-        low = self.store.upsert_intent("rest", "Dream", "sleep pressure", "dream", 0.3)
-        high = self.store.upsert_intent("continuity", "Prioritize thread", "open thread", "prioritize_thread", 0.9)
+        high = self.store.upsert_intent("connection", "Contact Cid", "urgent", "telegram_message", 0.9)
+        low = self.store.upsert_intent("archive", "Old task", "low prio", "telegram_message", 0.3)
         self.store.mark_result(low["id"], "blocked", {"reason": "policy"})
         self.assertEqual(self.store.best_intent()["id"], high["id"])
+
+    def test_reupsert_revives_blocked_intent(self):
+        """A policy-blocked intent must become selectable again once the same
+        (need, action) pair is re-proposed; otherwise it becomes a permanent
+        zombie that wedges the agenda."""
+        intent = self.store.upsert_intent("connection", "Contact Cid", "reason one", "telegram_message", 0.6)
+        self.store.mark_result(intent["id"], "blocked", {"reason": "quiet hours"})
+        revived = self.store.upsert_intent("connection", "Contact Cid again", "reason two", "telegram_message", 0.9)
+        self.assertEqual(revived["id"], intent["id"])
+        self.assertEqual(revived["status"], "open")
+        best = self.store.best_intent()
+        self.assertIsNotNone(best)
+        self.assertEqual(best["id"], intent["id"])
 
 
 if __name__ == "__main__":
