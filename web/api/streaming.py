@@ -2310,6 +2310,18 @@ def _run_agent_streaming(
             )
         except Exception:
             logger.debug("Failed to append worker_started turn journal event", exc_info=True)
+    # Stamp the channel with this worker thread so _cleanup_stale_streams can
+    # reap the entry if the thread dies without reaching its finally block
+    # (killed process, hang in a C-level call). Without this, the cleanup
+    # never matched anything and STREAMS grew unbounded - which also blocked
+    # WebUI updates ("N active chat streams is running").
+    with STREAMS_LOCK:
+        channel = STREAMS.get(stream_id)
+        if channel is not None:
+            try:
+                channel._thread = threading.current_thread()
+            except Exception:
+                pass
     s = None
     _rt = {}
     old_cwd = None

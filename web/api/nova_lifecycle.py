@@ -1364,6 +1364,17 @@ def _bounded_background_tick_payload(
 def background_tick() -> dict[str, Any]:
     event = _append_event(_new_event("background_tick"))
     try:
+        # Reap STREAMS entries whose worker thread died without reaching its
+        # finally block (killed process, hang in a C-level call). Without
+        # this, leaked entries accumulate and block WebUI updates
+        # ("N active chat streams is running").
+        try:
+            from web.api.config import _cleanup_stale_streams
+            removed = _cleanup_stale_streams()
+            if removed:
+                logger.info("Reaped %d stale chat stream entries", removed)
+        except Exception:
+            logger.debug("Stale stream cleanup skipped", exc_info=True)
         substrate = get_nova_space_root() / "substrate_state.json"
         substrate.parent.mkdir(parents=True, exist_ok=True)
         data = _read_json(substrate, {})
