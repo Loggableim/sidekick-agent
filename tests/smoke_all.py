@@ -224,6 +224,10 @@ test_code(
     """import json, os, tempfile
 with tempfile.TemporaryDirectory(prefix='sidekick-session-compat-') as tmp:
     os.environ['SIDEKICK_HOME'] = tmp
+    # The launcher exports SIDEKICK_WEBUI_STATE_DIR for the running WebUI and
+    # agent terminals inherit it; web_state_dir() prefers it over SIDEKICK_HOME,
+    # which would point this probe at the live session directory.
+    os.environ.pop('SIDEKICK_WEBUI_STATE_DIR', None)
     from shared.sessions import list_sessions, load_session, sessions_dir, update_session
     list_sessions._migrated = True
     sess_dir = sessions_dir()
