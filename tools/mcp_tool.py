@@ -113,6 +113,12 @@ logger = logging.getLogger(__name__)
 _mcp_stderr_log_fh: Optional[Any] = None
 _mcp_stderr_log_lock = threading.Lock()
 
+# Size bound for the shared MCP stderr log. Chatty servers emit periodic
+# DEBUG lines (observed 50k "list tools request" lines, 2.75 MB); the
+# append-mode handle never rotated, so the file grew without bound.
+_MAX_MCP_STDERR_BYTES = 8 * 1024 * 1024
+_MCP_STDERR_KEEP_BYTES = 2 * 1024 * 1024
+
 
 def _get_mcp_stderr_log() -> Any:
     """Return a shared append-mode file handle for MCP subprocess stderr.
@@ -121,6 +127,12 @@ def _get_mcp_stderr_log() -> Any:
     real OS-level file descriptor (``fileno()``) because asyncio's subprocess
     machinery wires the child's stderr directly to that fd.  Falls back to
     ``/dev/null`` if opening the log file fails.
+
+    The file is size-bounded: chatty servers emit periodic DEBUG lines
+    (observed: 50k "list tools request" lines, 2.75 MB and growing), and the
+    append-mode handle never rotated the file. When the file exceeds
+    ``_MAX_MCP_STDERR_BYTES`` at open time, keep only the newest
+    ``_MCP_STDERR_KEEP_BYTES`` so recent debug context survives.
     """
     global _mcp_stderr_log_fh
     with _mcp_stderr_log_lock:
@@ -131,6 +143,25 @@ def _get_mcp_stderr_log() -> Any:
             log_dir = get_sidekick_home() / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_path = log_dir / "mcp-stderr.log"
+            try:
+                if log_path.exists() and log_path.stat().st_size > _MAX_MCP_STDERR_BYTES:
+                    with log_path.open("rb") as src:
+                        src.seek(-_MCP_STDERR_KEEP_BYTES, os.SEEK_END)
+                        tail = src.read(_MCP_STDERR_KEEP_BYTES)
+                    # Start the tail at a line boundary so the kept context
+                    # stays readable.
+                    newline = tail.find(b"\n")
+                    if newline >= 0:
+                        tail = tail[newline + 1:]
+                    tmp = log_path.with_name(log_path.name + ".trim.tmp")
+                    tmp.write_bytes(tail)
+                    os.replace(tmp, log_path)
+                    logger.info(
+                        "Trimmed mcp-stderr.log to %d bytes (was %d)",
+                        len(tail), _MAX_MCP_STDERR_BYTES,
+                    )
+            except OSError:
+                pass
             # Line-buffered so server output lands on disk promptly; errors=
             # "replace" tolerates garbled binary output from misbehaving
             # servers.
