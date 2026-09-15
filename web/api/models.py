@@ -98,6 +98,11 @@ def _session_index_file() -> Path:
 
 _STALE_TMP_AGE_SECONDS = 3600  # 1 hour
 
+# Upper bound for the legacy session mirror (see _sync_legacy_session_copy).
+# Consistent with the list_sessions bound: a runaway session is unusable in
+# legacy consumers anyway, and mirroring it in full triples disk usage.
+_MAX_LEGACY_SYNC_BYTES = 64 * 1024 * 1024
+
 # Serializes index writers so concurrent Session.save() calls cannot race on
 # stale baselines while still allowing LOCK to be released before disk I/O.
 _INDEX_WRITE_LOCK = threading.RLock()
@@ -776,6 +781,17 @@ class Session:
         except Exception:
             current_path = self.path
         if str(legacy_path) == str(current_path):
+            return
+        # Bound the legacy mirror: the copy exists for backward compatibility
+        # with old WebUI versions, which cannot usefully open a huge session
+        # anyway. A runaway session (observed 3 GB, tripled across the
+        # primary, workspace-scoped, and legacy dirs) would otherwise be
+        # written in full on every save - ~9 GB of I/O per message.
+        if len(payload.encode("utf-8")) > _MAX_LEGACY_SYNC_BYTES:
+            logger.warning(
+                "Skipping legacy session copy for %s: payload exceeds %d bytes",
+                self.session_id, _MAX_LEGACY_SYNC_BYTES,
+            )
             return
         tmp = legacy_path.with_suffix(f'.tmp.{os.getpid()}.{threading.current_thread().ident}')
         try:
