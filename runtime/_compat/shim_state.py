@@ -473,6 +473,151 @@ class SessionDB:
         values.append(session_id)
         self._conn.execute(f"UPDATE sessions SET {set_clause} WHERE {pk_col} = ?", values)  # noqa: S608 - set_clause/pk_col are built from hardcoded schema branches.
 
+    def ensure_session(
+        self,
+        session_id: str,
+        *,
+        source: str = "webui",
+        model: str = "",
+        **extra: Any,
+    ) -> dict[str, Any] | None:
+        """Idempotently guarantee a session row exists (web.api.state_sync contract).
+
+        ``create_session`` already uses ``INSERT OR IGNORE``, so calling it for
+        an existing row is a no-op that returns the stored row.
+        """
+        if not session_id:
+            return None
+        existing = self.get_session(session_id)
+        if existing is not None:
+            return existing
+        try:
+            return self.create_session(
+                session_id=session_id,
+                source=source,
+                model=model,
+                **extra,
+            )
+        except Exception:
+            # Lost a create race or the FK repair dropped the parent link —
+            # surface whatever row exists now, else None.
+            return self.get_session(session_id)
+
+    def update_token_counts(
+        self,
+        session_id: str,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        estimated_cost_usd: float | None = None,
+        actual_cost_usd: float | None = None,
+        cost_status: str | None = None,
+        cost_source: str | None = None,
+        billing_provider: str | None = None,
+        billing_base_url: str | None = None,
+        billing_mode: str | None = None,
+        pricing_version: str | None = None,
+        model: str | None = None,
+        api_call_count: int = 0,
+        absolute: bool = False,
+    ) -> None:
+        """Persist token/cost accounting for one session.
+
+        Two production call sites depend on this method:
+
+        - ``run_agent.py`` calls it after every successful API call with
+          ``absolute=False`` (additive per-call deltas, ``api_call_count=1``).
+        - ``web/api/state_sync.py`` calls it with ``absolute=True`` to mirror
+          the WebUI session's accumulated totals.
+
+        This method was silently missing from the compat shim, so every call
+        raised ``AttributeError`` that the callers swallow at debug level —
+        state.db kept ``input_tokens``/``output_tokens`` at 0 for every
+        session, starving the WebUI titlebar token counter and
+        ``/api/analytics/usage`` (``/insights``).  Columns missing from the
+        underlying schema are skipped, so the method works against both the
+        minimal shim schema and the full production schema.
+        """
+        import time
+
+        if not session_id:
+            return
+        columns = self._table_columns("sessions")
+        pk_col = self._session_pk_column()
+        if self.resolve_session_id(session_id) is None:
+            # UPDATE on a missing row affects 0 rows silently; create the row
+            # first so per-call deltas are not lost.
+            self.ensure_session(session_id=session_id, source="agent", model=model or "")
+
+        sets: list[str] = []
+        values: list[Any] = []
+
+        def _add(col: str, value: Any, *, additive: bool) -> None:
+            if col not in columns or value is None:
+                return
+            if additive:
+                sets.append(f"{col} = COALESCE({col}, 0) + ?")
+                values.append(value)
+            else:
+                sets.append(f"{col} = ?")
+                values.append(value)
+
+        for col, delta in (
+            ("input_tokens", input_tokens),
+            ("output_tokens", output_tokens),
+            ("cache_read_tokens", cache_read_tokens),
+            ("cache_write_tokens", cache_write_tokens),
+            ("reasoning_tokens", reasoning_tokens),
+        ):
+            if not delta:
+                continue
+            _add(col, int(delta), additive=not absolute)
+        # api_call_count is always additive — callers pass per-call counts.
+        if api_call_count:
+            _add("api_call_count", int(api_call_count), additive=True)
+        for col, value in (
+            ("estimated_cost_usd", estimated_cost_usd),
+            ("actual_cost_usd", actual_cost_usd),
+        ):
+            if value is None:
+                continue
+            _add(col, float(value), additive=not absolute)
+        # Metadata columns are last-value-wins.
+        for col, value in (
+            ("cost_status", cost_status),
+            ("cost_source", cost_source),
+            ("billing_provider", billing_provider),
+            ("billing_base_url", billing_base_url),
+            ("billing_mode", billing_mode),
+            ("pricing_version", pricing_version),
+            ("model", model),
+        ):
+            if value is None or value == "":
+                continue
+            _add(col, value, additive=False)
+        if "updated_at" in columns:
+            sets.append("updated_at = ?")
+            values.append(time.time())
+        if not sets:
+            return
+        values.append(session_id)
+        self._conn.execute(
+            f"UPDATE sessions SET {', '.join(sets)} WHERE {pk_col} = ?",  # noqa: S608 - sets/pk_col are built from hardcoded schema branches.
+            values,
+        )
+
+    def _execute_write(self, fn: Any) -> None:
+        """Run a caller-supplied write callback with the raw connection.
+
+        ``web.api.state_sync`` uses this for bespoke updates (e.g. message
+        counts).  The shim connection runs in autocommit
+        (``isolation_level=None``), so no extra transaction handling is needed.
+        """
+        fn(self._conn)
+
     def end_session(self, session_id: str, status: str = "ended") -> None:
         import time
 
