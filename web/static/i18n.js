@@ -240,7 +240,7 @@ const LOCALES = {
     busy_steer_fallback: 'Steer unavailable — queued for next turn',
     busy_interrupt_confirm: 'Interrupted — sending new message',
     settings_label_busy_input_mode: 'Busy input mode',
-    settings_desc_busy_input_mode: 'Controls what happens when you send a message while the agent is running. Queue waits; Interrupt cancels and starts fresh; Steer injects a correction mid-turn without interrupting (falls back to queue when agent or stream unavailable).',
+    settings_desc_busy_input_mode: 'Controls what happens when you send a message while the agent is running. Queue waits; Interrupt cancels and starts fresh; Steer injects a correction mid-turn without interrupting (falls back to queue when agent or stream unavailable). Ctrl/Cmd+Enter always interrupts and sends immediately, regardless of this setting.',
     settings_busy_input_mode_queue: 'Queue follow-up',
     settings_busy_input_mode_interrupt: 'Interrupt current turn',
     settings_busy_input_mode_steer: 'Steer (mid-turn correction)',

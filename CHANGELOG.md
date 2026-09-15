@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- **Ctrl/Cmd+Enter in the WebUI composer now interrupts the running turn and sends immediately** instead of following the busy input mode. When the agent is busy, Ctrl/Cmd+Enter cancels the current turn (queue + cancel + drain re-send) and starts a fresh turn with the new message; plain Enter and the Send button keep following the configured busy input mode (queue/steer/interrupt). Explicit user intent beats the preference for this one send.
+
 ### Fixed
 - **Nova's router-primary provider pool now keeps `gpt:oss-20b` as the configured slot but reports and selects `deepseek-v4-flash` in Game Mode** so the router health view matches the live remote-safe runtime.
 - **GPU Game Mode watchdog now retries transient Windows `jobs.json` replace failures** so the cron pausing path no longer dies on `PermissionError` when another process briefly holds the file.
