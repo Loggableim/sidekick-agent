@@ -1271,8 +1271,12 @@ $('msg').addEventListener('keydown',e=>{
       // Legacy mode: plain Enter sends (unless Shift held for newline)
       if(!e.shiftKey){e.preventDefault();send();}
     } else {
-      // Multiline mode (default): Ctrl/Cmd+Enter sends, plain Enter = newline
-      if(e.ctrlKey||e.metaKey){e.preventDefault();send();}
+      // Multiline mode (default): Ctrl/Cmd+Enter sends, plain Enter = newline.
+      // Ctrl/Cmd+Enter additionally acts as an interrupt override: when the
+      // agent is busy, the message is sent immediately instead of being
+      // queued — the current turn is cancelled and the new message starts a
+      // fresh turn (send({interrupt:true}) handles the busy routing).
+      if(e.ctrlKey||e.metaKey){e.preventDefault();send({interrupt:true});}
     }
   }
 });

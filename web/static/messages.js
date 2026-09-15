@@ -96,7 +96,12 @@ function _currentComposerModelState(){
 
 let _isSendingChat=false;
 
-async function send(){
+async function send(opts){
+  // opts.interrupt (from Ctrl/Cmd+Enter): when the agent is busy, send the
+  // message immediately instead of queueing it — the current turn is
+  // cancelled and the new message starts a fresh turn. Explicit user intent
+  // beats the busy_input_mode preference for this one send.
+  const _forceInterrupt=!!(opts&&opts.interrupt);
   if(_isSendingChat){
     if(typeof showToast==='function') showToast('Send in progress, please wait.',2500,'warning');
     return;
@@ -150,7 +155,10 @@ async function send(){
           }
         }
       }
-      const busyMode=window._busyInputMode||'queue';
+      // Ctrl/Cmd+Enter interrupt override: _forceInterrupt routes the busy
+      // send through the interrupt path regardless of busy_input_mode, so
+      // the current turn is cancelled and the message starts immediately.
+      const busyMode=_forceInterrupt?'interrupt':(window._busyInputMode||'queue');
       if(busyMode==='steer'&&S.activeStreamId&&typeof _trySteer==='function'){
         // Real steer: clear the input first so the user gets immediate
         // feedback, then ship the steer payload via /api/chat/steer.
