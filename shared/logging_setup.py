@@ -19,8 +19,24 @@ class SidekickRotatingFileHandler(RotatingFileHandler):
             # Windows can refuse log renames while another Sidekick process
             # still has the file open. Keep logging to the current file instead
             # of printing noisy logging-internal tracebacks to the terminal.
-            if self.stream is None:
-                self.stream = self._open()
+            # But bound the growth: with a long-running process holding the
+            # log open, the rename can fail on EVERY rollover attempt, and
+            # the "keep logging" fallback previously let the file grow
+            # unbounded (observed agent.log at 138.8 MB with a 5 MB limit -
+            # 27x over, because the WebUI holds the handle around the clock).
+            # Truncate the current file instead: log history is ephemeral,
+            # an unbounded file is worse than losing it.
+            try:
+                if self.stream is not None:
+                    self.stream.close()
+                    self.stream = None
+                with open(self.baseFilename, "w", encoding="utf-8"):
+                    pass  # truncate in place
+            except OSError:
+                pass
+            finally:
+                if self.stream is None:
+                    self.stream = self._open()
 
 
 def get_logs_dir() -> Path:
