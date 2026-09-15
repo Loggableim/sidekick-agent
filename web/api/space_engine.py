@@ -241,6 +241,43 @@ def space_root_fingerprint(root: str | Path) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def validate_project_dir(raw: object) -> str:
+    """Validate a project_dir value for space config writes.
+
+    The dashboard's space create/update endpoints used to persist any string
+    unchecked, so a typo'd or hostile value (a deleted temp path, a system
+    directory) silently poisoned the space config - every later request then
+    logged 'project_dir ... does not exist' and the space's project binding
+    was dead. Enforce the same baseline rules the workspace resolver applies
+    to every workspace path:
+
+      1. the path must exist and be a directory,
+      2. it must not be a known OS/system directory.
+
+    Returns the resolved absolute path string; raises SpaceGovernanceError
+    on violation. Empty/None stays legal (an unset project_dir is valid).
+    """
+    if raw in (None, ""):
+        return ""
+    candidate = Path(str(raw)).expanduser().resolve()
+    if not candidate.is_dir():
+        raise SpaceGovernanceError(
+            f"project_dir does not exist or is not a directory: {candidate}"
+        )
+    try:
+        from web.api.workspace import _is_blocked_workspace_path
+        if _is_blocked_workspace_path(candidate, raw):
+            raise SpaceGovernanceError(
+                f"project_dir points to a system directory: {candidate}"
+            )
+    except SpaceGovernanceError:
+        raise
+    except Exception:
+        # Trust resolver unavailable - fall back to existence-only validation.
+        pass
+    return str(candidate)
+
+
 def nova_enrollment_readiness(
     space: "Space",
     *,
