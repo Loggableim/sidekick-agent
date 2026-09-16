@@ -6428,8 +6428,17 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, "slug is required")
         if not re.match(r'^[a-z0-9][a-z0-9_-]*$', slug):
             return bad(handler, "Invalid slug. Use a-z, 0-9, _, -")
-        from web.api.space_engine import SpaceExists, create_workspace
+        from web.api.space_engine import (
+            SpaceExists,
+            SpaceGovernanceError,
+            create_workspace,
+            validate_project_dir,
+        )
         try:
+            try:
+                project_dir = validate_project_dir(project_dir)
+            except SpaceGovernanceError as exc:
+                return bad(handler, str(exc), status=400)
             ws = create_workspace(
                 slug,
                 name,
@@ -6475,6 +6484,7 @@ def handle_post(handler, parsed) -> bool:
             SpaceGovernanceError,
             get_workspace,
             update_space_config,
+            validate_project_dir,
         )
         ws = get_workspace(slug)
         if not ws:
@@ -6484,6 +6494,11 @@ def handle_post(handler, parsed) -> bool:
         for key in ("model", "reasoning_effort", "personality", "description", "project_dir", "color", "gmail", "discord", "emoji", "nova"):
             if key in body:
                 patch_data[key] = body[key]
+        if "project_dir" in patch_data:
+            try:
+                patch_data["project_dir"] = validate_project_dir(patch_data["project_dir"])
+            except SpaceGovernanceError as exc:
+                return bad(handler, str(exc), status=400)
         if patch_data:
             try:
                 update_space_config(

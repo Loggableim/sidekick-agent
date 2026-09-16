@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from web.api.nova_paths import get_nova_space_root
+from web.api.nova_paths import get_nova_space_root, get_nova_state_snapshot_path
 from nova.entity_kernel import EntityKernel
 from nova.entity_state import EntityStateStore
 from nova.memory_quality import assess_memory_quality
@@ -1266,14 +1266,48 @@ def migration_tick() -> dict[str, Any]:
     return marker
 
 
+def _session_start_context() -> str:
+    """Render the session-start snapshot for pre_turn.
+
+    Primary path: the space's own ``session_start.py`` (user-customizable).
+    Fallback: the repo-bundled ``nova/state_snapshot.py``. The space script
+    imports space-local ``runtime_utf8``/``state_snapshot`` helpers that were
+    migrated into the repo's ``nova/`` package (721c440) and removed from the
+    space, so on migrated spaces the subprocess fails with ModuleNotFoundError
+    and the cognitive context silently lost its session-start snapshot. The
+    bundled module is the canonical implementation and works standalone.
+    """
+    status = _run_local_script("session_start.py", "compact", timeout=60)
+    if status.get("ok"):
+        return str(status.get("stdout") or "").strip()
+    try:
+        snapshot_path = get_nova_state_snapshot_path()
+        if not snapshot_path.exists():
+            return ""
+        proc = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(snapshot_path.parent)!r}); "
+             "from nova.state_snapshot import collect_and_render; "
+             "print(collect_and_render('compact', mutate=True))"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return proc.stdout.strip()
+        logger.debug("Bundled state_snapshot fallback failed: %s", proc.stderr[-300:])
+    except Exception:
+        logger.debug("Bundled state_snapshot fallback failed", exc_info=True)
+    return ""
+
+
 def pre_turn(*, workspace_slug: str | None, user_text: str | None = None) -> dict[str, Any]:
     migration_tick()
     repaired = repair_incomplete_events()
     state = load_personality_state()
-    session_context = ""
-    status = _run_local_script("session_start.py", "compact", timeout=60)
-    if status.get("ok"):
-        session_context = str(status.get("stdout") or "").strip()
+    session_context = _session_start_context()
     entity_context = entity_prompt_context(user_text)
     context = (
         f"{session_context}\n\n"
@@ -1330,6 +1364,17 @@ def _bounded_background_tick_payload(
 def background_tick() -> dict[str, Any]:
     event = _append_event(_new_event("background_tick"))
     try:
+        # Reap STREAMS entries whose worker thread died without reaching its
+        # finally block (killed process, hang in a C-level call). Without
+        # this, leaked entries accumulate and block WebUI updates
+        # ("N active chat streams is running").
+        try:
+            from web.api.config import _cleanup_stale_streams
+            removed = _cleanup_stale_streams()
+            if removed:
+                logger.info("Reaped %d stale chat stream entries", removed)
+        except Exception:
+            logger.debug("Stale stream cleanup skipped", exc_info=True)
         substrate = get_nova_space_root() / "substrate_state.json"
         substrate.parent.mkdir(parents=True, exist_ok=True)
         data = _read_json(substrate, {})

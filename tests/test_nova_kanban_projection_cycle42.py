@@ -12,11 +12,16 @@ def test_presence_get_never_projects_or_writes_kanban_for_three_spaces(monkeypat
     from web.api import space_engine, swarm
 
     spaces_root = tmp_path / "spaces"
+    # Patch SPACES_ROOT and SIDEKICK_HOME BEFORE any Space() construction:
+    # Space().save_config() resolves the config path from the live
+    # SPACES_ROOT, so writing configs first would overwrite the production
+    # space.yaml files (observed: all three live spaces carried this test's
+    # tmp project_dir after a suite run).
+    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path))
     for slug in ("nova", "finanzjunkie", "aquarium-zentrum"):
         root = spaces_root / slug; root.mkdir(parents=True)
         space_engine.Space(slug, slug).save_config({"name": slug, "project_dir": str(root)}, mint_space_id=True)
-    monkeypatch.setattr(space_engine, "SPACES_ROOT", spaces_root)
-    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path))
     monkeypatch.setattr(web_server, "_start_nova_space_supervision_ticker", lambda: (_ for _ in ()).throw(AssertionError("GET started Nova")))
     monkeypatch.setattr(swarm, "project_swarm_run_to_kanban", lambda *args: (_ for _ in ()).throw(AssertionError("Presence projected Kanban")))
     before = {str(path.relative_to(tmp_path)): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}

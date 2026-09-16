@@ -113,6 +113,12 @@ logger = logging.getLogger(__name__)
 _mcp_stderr_log_fh: Optional[Any] = None
 _mcp_stderr_log_lock = threading.Lock()
 
+# Size bound for the shared MCP stderr log. Chatty servers emit periodic
+# DEBUG lines (observed 50k "list tools request" lines, 2.75 MB); the
+# append-mode handle never rotated, so the file grew without bound.
+_MAX_MCP_STDERR_BYTES = 8 * 1024 * 1024
+_MCP_STDERR_KEEP_BYTES = 2 * 1024 * 1024
+
 
 def _get_mcp_stderr_log() -> Any:
     """Return a shared append-mode file handle for MCP subprocess stderr.
@@ -121,6 +127,12 @@ def _get_mcp_stderr_log() -> Any:
     real OS-level file descriptor (``fileno()``) because asyncio's subprocess
     machinery wires the child's stderr directly to that fd.  Falls back to
     ``/dev/null`` if opening the log file fails.
+
+    The file is size-bounded: chatty servers emit periodic DEBUG lines
+    (observed: 50k "list tools request" lines, 2.75 MB and growing), and the
+    append-mode handle never rotated the file. When the file exceeds
+    ``_MAX_MCP_STDERR_BYTES`` at open time, keep only the newest
+    ``_MCP_STDERR_KEEP_BYTES`` so recent debug context survives.
     """
     global _mcp_stderr_log_fh
     with _mcp_stderr_log_lock:
@@ -131,6 +143,25 @@ def _get_mcp_stderr_log() -> Any:
             log_dir = get_sidekick_home() / "logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_path = log_dir / "mcp-stderr.log"
+            try:
+                if log_path.exists() and log_path.stat().st_size > _MAX_MCP_STDERR_BYTES:
+                    with log_path.open("rb") as src:
+                        src.seek(-_MCP_STDERR_KEEP_BYTES, os.SEEK_END)
+                        tail = src.read(_MCP_STDERR_KEEP_BYTES)
+                    # Start the tail at a line boundary so the kept context
+                    # stays readable.
+                    newline = tail.find(b"\n")
+                    if newline >= 0:
+                        tail = tail[newline + 1:]
+                    tmp = log_path.with_name(log_path.name + ".trim.tmp")
+                    tmp.write_bytes(tail)
+                    os.replace(tmp, log_path)
+                    logger.info(
+                        "Trimmed mcp-stderr.log to %d bytes (was %d)",
+                        len(tail), _MAX_MCP_STDERR_BYTES,
+                    )
+            except OSError:
+                pass
             # Line-buffered so server output lands on disk promptly; errors=
             # "replace" tolerates garbled binary output from misbehaving
             # servers.
@@ -1529,6 +1560,21 @@ class MCPServerTask:
                 # should not permanently kill the server.
                 # (Ported from Kilo Code's MCP resilience fix.)
                 if not self._ready.is_set():
+                    # A permanent HTTP 4xx client error (except 401/408/429)
+                    # will fail identically on every retry - give up
+                    # immediately instead of burning the backoff cycle
+                    # (observed: expired GitHub Copilot credential, 400 on
+                    # every attempt, ~9 s of futile retries per cycle).
+                    if _is_permanent_connect_error(exc):
+                        logger.warning(
+                            "MCP server '%s' initial connection failed with a "
+                            "permanent client error, not retrying: %s",
+                            self.name, exc,
+                        )
+                        self._error = exc
+                        self._ready.set()
+                        return
+
                     initial_retries += 1
                     if initial_retries > _MAX_INITIAL_CONNECT_RETRIES:
                         logger.warning(
@@ -1689,6 +1735,36 @@ def _reset_server_error(server_name: str) -> None:
 # Cached tuple of auth-related exception types. Lazy so this module
 # imports cleanly when the MCP SDK OAuth module is missing.
 _AUTH_ERROR_TYPES: tuple = ()
+
+
+def _is_permanent_connect_error(exc: BaseException) -> bool:
+    """Return True if ``exc`` is an HTTP 4xx client error (except 408/429/401).
+
+    Retrying a permanent client error is pointless: the request will fail
+    identically (observed: an expired GitHub Copilot MCP credential produced
+    400 Bad Request on every attempt, and the initial-connect loop burned
+    ~9 s of retries plus 4 warning lines on every reconnect cycle). The
+    exception may be wrapped in an anyio TaskGroup ExceptionGroup, so groups
+    are unwrapped recursively. 401 is excluded (auth recovery handles it),
+    as are 408/429 (genuinely transient).
+    """
+    try:
+        import httpx
+    except ImportError:
+        return False
+
+    # Unwrap ExceptionGroups (anyio TaskGroup surfaces "unhandled errors in
+    # a TaskGroup (1 sub-exception)" groups).
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, httpx.HTTPStatusError):
+            status = getattr(current.response, "status_code", 0) or 0
+            if 400 <= status < 500 and status not in {401, 408, 429}:
+                return True
+        elif isinstance(current, BaseExceptionGroup):
+            stack.extend(current.exceptions)
+    return False
 
 
 def _get_auth_error_types() -> tuple:

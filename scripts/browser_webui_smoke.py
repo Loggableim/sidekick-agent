@@ -615,6 +615,24 @@ def _check_goal_reload_resume_autostarts(checks: list[Check], browser, base_url:
             pass
         if cleanup_sid:
             cleanup_detail: dict[str, Any] = {}
+            # The goal check set an active goal for this session via /api/goal.
+            # Session deletion does not remove the goal row from the space's
+            # goals.db, so an uncleared goal leaks as an orphaned active goal
+            # (observed 2026-09-14: 81 stale active "Smoke reload continuation"
+            # goals in the live nova goals.db). Clear it before deleting.
+            try:
+                cleanup_detail["goal_clear"] = _post_json(
+                    f"{base_url}/api/goal",
+                    {
+                        "session_id": cleanup_sid,
+                        "args": "clear",
+                        "workspace": session_workspace,
+                        "profile": "default",
+                    },
+                    timeout=15.0,
+                )
+            except Exception as cleanup_exc:
+                cleanup_detail["goal_clear_error"] = repr(cleanup_exc)
             if cleanup_stream_id:
                 try:
                     cleanup_detail["cancel"] = _get_json(

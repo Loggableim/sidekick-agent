@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_SESSION_TITLE = "New chat"
 LEGACY_DEFAULT_SESSION_TITLES = frozenset({"Untitled", "New Chat", DEFAULT_SESSION_TITLE})
 
+# Upper bound for files parsed by list_sessions(). A runaway session (observed
+# 3 GB on a live install) turns the listing into a multi-minute hang.
+_MAX_LIST_SESSION_BYTES = 64 * 1024 * 1024
+
 
 def is_default_session_title(title: str | None) -> bool:
     clean = str(title or "").strip()
@@ -197,6 +201,17 @@ def list_sessions() -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for path in sorted(sessions_dir().glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
+            # Skip runaway session files: a single unbounded session (observed
+            # 3 GB) makes json.load take minutes, hanging every legacy
+            # consumer of this listing. The WebUI session list uses the
+            # state.db index and is unaffected; such sessions are unusable
+            # in the UI anyway until compressed or trimmed.
+            if path.stat().st_size > _MAX_LIST_SESSION_BYTES:
+                logger.warning(
+                    "Skipping oversized session file in list_sessions (%s: %d bytes)",
+                    path.name, path.stat().st_size,
+                )
+                continue
             with open(path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
             session = _session_from_payload(data)

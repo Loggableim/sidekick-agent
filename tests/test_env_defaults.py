@@ -22,7 +22,24 @@ def test_runtime_provider_handles_unset_provider_env(monkeypatch):
 
 
 def test_default_github_mcp_skips_without_pat(monkeypatch):
+    """A github MCP entry whose PAT placeholder cannot be resolved is
+    skipped instead of being launched with an empty credential."""
     monkeypatch.delenv("GITHUB_PERSONAL_ACCESS_TOKEN", raising=False)
+    import cli.config as cli_config
+    monkeypatch.setattr(
+        cli_config,
+        "load_config",
+        lambda: {
+            "mcp_servers": {
+                "github": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-github"],
+                    "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"},
+                }
+            }
+        },
+    )
+    monkeypatch.setattr("cli.env_loader.load_sidekick_dotenv", lambda: None)
 
     from tools.mcp_tool import _load_mcp_config
 

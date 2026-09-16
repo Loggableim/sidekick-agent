@@ -241,6 +241,43 @@ def space_root_fingerprint(root: str | Path) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def validate_project_dir(raw: object) -> str:
+    """Validate a project_dir value for space config writes.
+
+    The dashboard's space create/update endpoints used to persist any string
+    unchecked, so a typo'd or hostile value (a deleted temp path, a system
+    directory) silently poisoned the space config - every later request then
+    logged 'project_dir ... does not exist' and the space's project binding
+    was dead. Enforce the same baseline rules the workspace resolver applies
+    to every workspace path:
+
+      1. the path must exist and be a directory,
+      2. it must not be a known OS/system directory.
+
+    Returns the resolved absolute path string; raises SpaceGovernanceError
+    on violation. Empty/None stays legal (an unset project_dir is valid).
+    """
+    if raw in (None, ""):
+        return ""
+    candidate = Path(str(raw)).expanduser().resolve()
+    if not candidate.is_dir():
+        raise SpaceGovernanceError(
+            f"project_dir does not exist or is not a directory: {candidate}"
+        )
+    try:
+        from web.api.workspace import _is_blocked_workspace_path
+        if _is_blocked_workspace_path(candidate, raw):
+            raise SpaceGovernanceError(
+                f"project_dir points to a system directory: {candidate}"
+            )
+    except SpaceGovernanceError:
+        raise
+    except Exception:
+        # Trust resolver unavailable - fall back to existence-only validation.
+        pass
+    return str(candidate)
+
+
 def nova_enrollment_readiness(
     space: "Space",
     *,
@@ -1409,6 +1446,8 @@ def get_existing_space_read_only(slug: str) -> Space | None:
 def get_or_create_space(slug: str, name: str = "") -> Space:
     """Return existing space or create a new one with default agent."""
     slug = _normalize_space_slug(slug)
+    if not _is_valid_space_slug(slug):
+        raise SpaceError(f"invalid space slug: {slug!r}")
     existing = get_space(slug)
     if existing:
         existing.memory_dir.mkdir(parents=True, exist_ok=True)
@@ -1445,6 +1484,8 @@ def create_space(
 ) -> Space:
     """Create a brand-new space. Raises SpaceExists if slug taken."""
     slug = _normalize_space_slug(slug)
+    if not _is_valid_space_slug(slug):
+        raise SpaceError(f"invalid space slug: {slug!r}")
     if get_space(slug):
         raise SpaceExists(f"space {slug!r} already exists")
     space = Space(slug, name or slug)
