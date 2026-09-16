@@ -227,9 +227,22 @@ function Stop-UntrackedDashboardOnPort {
     param([int]$TargetPort)
     $pids = Read-Pids
     $trackedDashboard = if ($pids.ContainsKey("dashboard")) { [int]$pids["dashboard"] } else { 0 }
+    # The dashboard re-execs (venv python -> uv python), so the port is owned by
+    # a CHILD of the tracked pid while the pid file holds the wrapper. Treat the
+    # whole tracked process tree as tracked — otherwise every launcher run kills
+    # the healthy listener as "untracked" and churns restarts (observed
+    # 2026-09-16: 4 dashboard restarts in 27 minutes).
+    $trackedFamily = @{}
+    if ($trackedDashboard -gt 0 -and (Test-ProcessAlive $trackedDashboard)) {
+        $trackedFamily[$trackedDashboard] = $true
+        try {
+            Get-CimInstance Win32_Process -Filter "ParentProcessId=$trackedDashboard" -ErrorAction SilentlyContinue |
+                ForEach-Object { $trackedFamily[[int]$_.ProcessId] = $true }
+        } catch { }
+    }
     foreach ($portProcId in Get-PortPids $TargetPort) {
         if ($portProcId -le 0) { continue }
-        if ($trackedDashboard -gt 0 -and $portProcId -eq $trackedDashboard -and (Test-ProcessAlive $trackedDashboard)) {
+        if ($trackedFamily.ContainsKey([int]$portProcId)) {
             continue
         }
         Write-Line "Stopping untracked dashboard on port $TargetPort (PID $portProcId)..." Yellow
