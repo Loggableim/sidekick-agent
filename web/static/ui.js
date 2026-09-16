@@ -10185,7 +10185,7 @@ function _revealLiveThinking(trigger) {
     }
 }
 
-{
+(function(){
   const turn=document.getElementById('liveAssistantTurn');
   if(!turn) return;
   const liveSegments=turn.querySelectorAll('[data-live-assistant="1"]');
@@ -10198,7 +10198,7 @@ function _revealLiveThinking(trigger) {
   cursor.setAttribute('aria-hidden','true');
   cursor.innerHTML='<span class="stream-cursor-dot"></span><span class="stream-cursor-text">'+esc(t('thinking'))+'…</span>';
   body.appendChild(cursor);
-}
+})();
 function removeStreamCursor(){
   document.querySelectorAll('.stream-cursor').forEach(function(el){el.remove();});
 }
