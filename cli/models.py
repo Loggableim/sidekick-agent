@@ -2429,6 +2429,7 @@ _OLLAMA_CLOUD_CACHE_TTL = 3600
 OLLAMA_CLOUD_CURATED_MODELS: list[str] = [
     "deepseek-v4-flash",
     "deepseek-v4-pro",
+    "deepseek-v4.1-flash",
     "gemma4",
     "gemma4:31b",
     "glm-5",
