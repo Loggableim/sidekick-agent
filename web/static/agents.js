@@ -1,5 +1,5 @@
 /**
- * Agents Tab — Multi-Agent System UI for Sidekick
+ * Agents Tab - Multi-Agent System UI for Sidekick
  *
  * Supports:
  * - Splash screen (first-run setup with template selection)

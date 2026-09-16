@@ -6108,7 +6108,13 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
 .mode-btn:hover:not(.active){color:var(--text);}
 
 @keyframes streamCursorBlink{0%,100%{opacity:1}50%{opacity:0}}
-.stream-cursor{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;margin-left:4px;border-radius:999px;background:rgba(255,215,0,.12);color:var(--accent);font-size:11px;line-height:1.2;vertical-align:middle;white-space:nowrap;border:1px solid rgba(255,215,0,.22);} .stream-cursor-dot{width:8px;height:8px;border-radius:999px;background:var(--accent);animation:streamCursorBlink .8s step-end infinite;display:inline-block;flex:0 0 auto;} .stream-cursor-text{font-size:11px;font-weight:600;letter-spacing:.02em;}
+.stream-cursor{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;margin-left:4px;border-radius:999px;background:rgba(255,215,0,.12);color:var(--accent);font-size:11px;line-height:1.2;vertical-align:middle;white-space:nowrap;border:1px solid rgba(255,215,0,.22);} .stream-cursor-dot{width:8px;height:8px;border-radius:999px;background:var(--accent);animation:streamCursorBlink .8s step-end infinite;display:inline-block;flex:0 0 auto;} .stream-cursor-text{font-size:11px;font-weight:600;line-height:1.2;vertical-align:middle;}
+/* Make stream cursor clickable when it reveals live reasoning */
+.stream-cursor.clickable{cursor:pointer;}
+.stream-cursor.clickable:hover{background-color:#f0f0f0;}
+
+/* Highlight active thinking cursor */
+.agent-activity-thinking[data-thinking-active="1"] .stream-cursor{background-color:#e6f7ff;}
 
 .reasoning-accordion{margin:4px 0;border-radius:8px;background:var(--code-bg);overflow:hidden;border:1px solid var(--border2);}
 .reasoning-accordion-header{display:flex;align-items:center;gap:6px;padding:5px 10px;cursor:pointer;user-select:none;font-size:11px;color:var(--muted);background:var(--hover-bg);transition:background .15s;}
