@@ -124,6 +124,38 @@ def _webui_browser_context() -> tuple[str, str, str]:
     return session_id, base_url, token
 
 
+_DASHBOARD_TOKEN_RE = re.compile(r"window\.__SIDEKICK_SESSION_TOKEN__\s*=\s*\"([^\"]+)\"")
+_dashboard_token_cache: dict[str, str] = {}
+
+
+def _webui_dashboard_session_token(base_url: str, timeout: float = 5.0) -> str:
+    """Extract the ephemeral dashboard session token from the served SPA shell.
+
+    The WebUI auth middleware requires ``X-Sidekick-Session-Token`` on every
+    ``/api/*`` request. The token is only distributed inside the served
+    index.html (``window.__SIDEKICK_SESSION_TOKEN__``), so fetch it once per
+    base_url and cache it. Returns "" when unavailable — callers then proceed
+    without the header, preserving legacy behaviour.
+    """
+    cached = _dashboard_token_cache.get(base_url)
+    if cached:
+        return cached
+    try:
+        response = requests.get(base_url.rstrip("/") + "/", timeout=timeout)
+        match = _DASHBOARD_TOKEN_RE.search(response.text or "")
+    except Exception:
+        return ""
+    token = match.group(1) if match else ""
+    if token:
+        _dashboard_token_cache[base_url] = token
+    return token
+
+
+def _webui_browser_auth_headers(base_url: str) -> dict[str, str]:
+    token = _webui_dashboard_session_token(base_url)
+    return {"X-Sidekick-Session-Token": token} if token else {}
+
+
 def _webui_browser_enabled(*, require_control: bool) -> bool:
     session_id, base_url, _token = _webui_browser_context()
     return bool(session_id and base_url)
@@ -140,6 +172,7 @@ def _webui_browser_agent_context_hint(
         response = requests.get(
             f"{base_url}/api/browser/agent-context",
             params={"session_id": session_id},
+            headers=_webui_browser_auth_headers(base_url),
             timeout=8,
         )
         data = response.json()
@@ -203,14 +236,17 @@ def _webui_browser_error_text(data: Any, *, base_url: str, session_id: str) -> s
 def _webui_browser_post(action: str, payload: Optional[dict] = None, *, require_control: bool = True) -> Optional[str]:
     if not _webui_browser_enabled(require_control=require_control):
         return None
-    session_id, base_url, token = _webui_browser_context()
+    session_id, base_url, _unused_token = _webui_browser_context()
     body = {"session_id": session_id, "action": action}
-    if token:
-        body["permission_token"] = token
     if payload:
         body.update(payload)
     try:
-        response = requests.post(f"{base_url}/api/browser/agent-control", json=body, timeout=max(_get_command_timeout(), 30))
+        response = requests.post(
+            f"{base_url}/api/browser/agent-control",
+            json=body,
+            headers=_webui_browser_auth_headers(base_url),
+            timeout=max(_get_command_timeout(), 30),
+        )
         data = response.json()
     except Exception as exc:
         return f"WebUI browser bridge failed: {exc}"
@@ -222,17 +258,20 @@ def _webui_browser_post(action: str, payload: Optional[dict] = None, *, require_
 def _webui_browser_action_post(payload: Optional[dict] = None, *, require_control: bool = True) -> Optional[str]:
     if not _webui_browser_enabled(require_control=require_control):
         return None
-    session_id, base_url, token = _webui_browser_context()
+    session_id, base_url, _unused_token = _webui_browser_context()
     payload = dict(payload or {})
     body = {
         "session_id": session_id,
         "action": str(payload.get("action") or payload.get("name") or payload.get("type") or "action_v1"),
     }
-    if token:
-        body["permission_token"] = token
     body.update(payload)
     try:
-        response = requests.post(f"{base_url}/api/browser/agent-control", json=body, timeout=max(_get_command_timeout(), 30))
+        response = requests.post(
+            f"{base_url}/api/browser/agent-control",
+            json=body,
+            headers=_webui_browser_auth_headers(base_url),
+            timeout=max(_get_command_timeout(), 30),
+        )
         data = response.json()
     except Exception as exc:
         return f"WebUI browser bridge failed: {exc}"

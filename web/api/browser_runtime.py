@@ -920,7 +920,7 @@ class BrowserSession:
             return None
         try:
             locator = self._page.locator(selector).first
-            box = await locator.bounding_box()
+            box = await locator.bounding_box(timeout=5000)
             label = ""
             try:
                 label = await locator.evaluate(
@@ -1394,9 +1394,9 @@ class BrowserSession:
             self._notify()
             try:
                 if selector and tag in {"input", "textarea", "contenteditable"}:
-                    await self._page.locator(selector).fill(str(text or ""))
+                    await self._page.locator(selector).fill(str(text or ""), timeout=5000)
                 elif selector:
-                    await self._page.locator(selector).click()
+                    await self._page.locator(selector).click(timeout=5000)
                     try:
                         await self._page.keyboard.press("Control+A")
                     except Exception:
@@ -1440,7 +1440,7 @@ class BrowserSession:
             self._update_snapshot(status="running", busy=True, last_action="click", last_action_detail=self._action_payload("click", {"selector": selector, "button": button}), error="")
             self._notify()
             try:
-                await self._page.locator(selector).click(button=button)
+                await self._page.locator(selector).click(button=button, timeout=5000)
             except Exception as exc:
                 self._update_snapshot(status="error", busy=False, error=str(exc))
                 self._notify()
