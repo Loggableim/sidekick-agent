@@ -753,7 +753,14 @@ async function loadSession(sid, options){
   // Clicking the already-open session in the sidebar is a no-op. Reloading it
   // tears down active pane state and can reset the long-session scroll window
   // to the top even though the user did not navigate anywhere.
-  if(currentSid===sid && currentHasMessages && _loadingSessionId !== sid && !_conversationPaneShowsLoading()) {
+  // BUT this no-op must never fire while a load for a DIFFERENT session is
+  // still in flight: after a Space switch _allSessions is cleared, so the
+  // optimistic S.session swap is skipped and the old transcript stays visible
+  // for ~350ms. A click back onto the current session in that window would
+  // otherwise be swallowed here while the other load overwrites the view
+  // (user asked for A, got B — reported as "switched chat does not load").
+  const otherLoadInFlight = !!(_loadingSessionId && _loadingSessionId !== sid);
+  if(currentSid===sid && currentHasMessages && !otherLoadInFlight && !_conversationPaneShowsLoading()) {
     try {
       syncTopbar();
       renderMessages({preserveScroll:true});
