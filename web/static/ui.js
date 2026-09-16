@@ -10151,7 +10151,41 @@ function removeThinking(){
   if(turn&&blocks&&!blocks.children.length) turn.remove();
 }
 
-function addStreamCursor(){
+function addStreamCursor() {
+    // Make the cursor clickable to reveal live reasoning
+    const cursor = document.createElement('div');
+    cursor.className = 'stream-cursor clickable';
+    cursor.setAttribute('role', 'button');
+    cursor.setAttribute('aria-label', 'Show live reasoning');
+    cursor.onclick = () => _revealLiveThinking(cursor);
+    cursor.appendChild(document.createTextNode('Thinking…'));
+    return cursor;
+}
+// Helper to open the live reasoning accordion
+function _revealLiveThinking(trigger) {
+    // Find the active thinking row
+    const activeRow = document.querySelector('.agent-activity-thinking[data-thinking-active="1"]');
+    if (!activeRow) return;
+    // Expand the accordion if collapsed
+    const accordion = activeRow.querySelector('.reasoning-accordion');
+    if (accordion && !accordion.classList.contains('open')) {
+        accordion.classList.add('open');
+    }
+    // Ensure the activity group is expanded
+    const activityGroup = activeRow.closest('.activity-group');
+    if (activityGroup && !activityGroup.classList.contains('expanded')) {
+        activityGroup.classList.add('expanded');
+    }
+    // Set global flags to show thinking if needed
+    window._showThinking = true;
+    window._liveActivityUserExpanded = true;
+    // Trigger a re-render of the reasoning content if available
+    if (window._liveReasoningText) {
+        window._updateThinking(window._liveReasoningText);
+    }
+}
+
+{
   const turn=document.getElementById('liveAssistantTurn');
   if(!turn) return;
   const liveSegments=turn.querySelectorAll('[data-live-assistant="1"]');
