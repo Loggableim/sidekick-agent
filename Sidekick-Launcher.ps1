@@ -5,7 +5,8 @@ param(
     [switch]$NoGateway,
     [switch]$NoBrowser,
     [switch]$NoPause,
-    [switch]$ForceRestart
+    [switch]$ForceRestart,
+    [switch]$AppMode
 )
 
 $ErrorActionPreference = "Stop"
@@ -431,8 +432,46 @@ function Start-All {
     $url = "http://127.0.0.1:$Port"
     Write-Line "Dashboard ready: $url" Green
     if (-not $NoBrowser) {
-        Write-Line "Opening browser after successful health check..." DarkCyan
-        Start-Process $url
+        if ($AppMode) {
+            Write-Line "Opening Sidekick in app mode (Edge --app)..." DarkCyan
+            $edgeCandidates = @(
+                (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
+                (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe"),
+                (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe")
+            )
+            $appBrowser = $edgeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if ($appBrowser) {
+                # ?sidekick_app=1 activates the WebUI app-mode layout (own titlebar
+                # with window controls, no duplicated browser chrome).
+                # WebAppWindowControlsOverlay makes the app window report
+                # display-mode: standalone, which triggers the WebUI app-mode
+                # layout (verified 2026-09-16: standalone=true, overlayApi=true).
+                # Dedicated user-data-dir keeps the user's normal browser profile
+                # untouched; --app-user-model-id gives the taskbar its own identity.
+                $appUrl = "$url/?sidekick_app=1"
+                $appProfile = Join-Path $HomeDir "browser-profile"
+                if (-not (Test-Path -LiteralPath $appProfile)) {
+                    New-Item -ItemType Directory -Path $appProfile -Force | Out-Null
+                }
+                Start-Process -FilePath $appBrowser -ArgumentList @(
+                    "--app=$appUrl",
+                    "--user-data-dir=$appProfile",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--disable-session-crashed-bubble",
+                    "--hide-crash-restore-bubble",
+                    "--enable-features=WebAppWindowControlsOverlay",
+                    "--app-user-model-id=Sidekick.WebUI",
+                    "--window-size=1280,900"
+                )
+            } else {
+                Write-Line "No Edge/Chrome found - falling back to default browser." Yellow
+                Start-Process $url
+            }
+        } else {
+            Write-Line "Opening browser after successful health check..." DarkCyan
+            Start-Process $url
+        }
     }
     Write-Line "Launcher log: $LauncherLog" DarkGray
     Write-Line "Dashboard log: $(Join-Path $LogDir 'dashboard.out.log')" DarkGray
