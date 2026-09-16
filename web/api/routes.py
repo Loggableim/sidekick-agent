@@ -1095,6 +1095,7 @@ from web.api.helpers import (
     _sanitize_error,
     redact_session_data,
     _redact_text,
+    _accepts_gzip,
 )
 from web.api.agent_health import build_agent_health_payload
 from web.api.request_diagnostics import RequestDiagnostics
@@ -4320,6 +4321,9 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/system/health":
         j(handler, build_system_health_payload())
         return True
+
+    if parsed.path == "/api/events":
+        return _handle_events_sse(handler, parsed)
 
     if parsed.path == "/api/models":
         return j(handler, get_available_models())
@@ -8793,10 +8797,26 @@ def _serve_static(handler, parsed):
     qs = parse_qs(parsed.query or "")
     versioned = bool((qs.get("v") or qs.get("version") or [""])[0].strip())
     cache_control = "public, max-age=31536000, immutable" if versioned and ext not in {".html", ".htm"} else "no-store"
+    raw = static_file.read_bytes()
+    # Gzip-compress text assets (JS/CSS/SVG/JSON) when the client accepts it.
+    # ui.js alone is ~450KB; gzip level 5 shrinks it ~75%. Compressed bytes
+    # are still cached long-term by the browser via the versioned cache header.
+    content_encoding = None
+    if (
+        ext.lstrip(".") in {"js", "css", "svg", "json", "txt", "html", "htm"}
+        and len(raw) > 1024
+        and _accepts_gzip(handler)
+    ):
+        import gzip as _gzip
+        raw = _gzip.compress(raw, compresslevel=5)
+        content_encoding = "gzip"
     handler.send_response(200)
     handler.send_header("Content-Type", ct_header)
     handler.send_header("Cache-Control", cache_control)
-    raw = static_file.read_bytes()
+    if content_encoding:
+        handler.send_header("Content-Encoding", content_encoding)
+        # Vary so caches don't serve gzipped bytes to non-gzip clients.
+        handler.send_header("Vary", "Accept-Encoding")
     handler.send_header("Content-Length", str(len(raw)))
     handler.end_headers()
     handler.wfile.write(raw)
@@ -8904,6 +8924,71 @@ def _handle_list_dir(handler, parsed):
         return bad(handler, _sanitize_error(e), 404)
     except ValueError as e:
         return bad(handler, _sanitize_error(e))
+
+
+def _handle_events_sse(handler, parsed):
+    """Multiplexed status SSE stream — replaces per-panel HTTP polling.
+
+    One long-lived EventSource connection that pushes system health,
+    agent health, and dashboard status snapshots on their natural
+    intervals, instead of the frontend running a separate HTTP poll
+    timer per panel (system 5s, agent 30s, dashboard 60s, cast 15s).
+    The client still polls nothing; the server pushes. A heartbeat
+    comment keeps proxies from closing the idle connection.
+    """
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
+    handler.send_header("Cache-Control", "no-cache")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.send_header("Connection", "keep-alive")
+    handler.end_headers()
+
+    def _push(event, data):
+        _sse(handler, event, data)
+
+    # Initial snapshot so the UI renders immediately without waiting a tick.
+    try:
+        _push("system_health", build_system_health_payload())
+    except Exception:
+        pass
+    try:
+        _push("agent_health", build_agent_health_payload())
+    except Exception:
+        pass
+
+    # Snapshot cadence mirrors the old poll intervals.
+    _SYSTEM_TICK = 5.0
+    _AGENT_TICK = 30.0
+    _HEARTBEAT = 15.0
+    next_system = time.monotonic() + _SYSTEM_TICK
+    next_agent = time.monotonic() + _AGENT_TICK
+    next_beat = time.monotonic() + _HEARTBEAT
+    try:
+        while True:
+            now = time.monotonic()
+            if now >= next_system:
+                try:
+                    _push("system_health", build_system_health_payload())
+                except Exception:
+                    pass
+                next_system = time.monotonic() + _SYSTEM_TICK
+            if now >= next_agent:
+                try:
+                    _push("agent_health", build_agent_health_payload())
+                except Exception:
+                    pass
+                next_agent = time.monotonic() + _AGENT_TICK
+            if now >= next_beat:
+                try:
+                    handler.wfile.write(b": keepalive\n\n")
+                    handler.wfile.flush()
+                except _CLIENT_DISCONNECT_ERRORS:
+                    break
+                next_beat = time.monotonic() + _HEARTBEAT
+            time.sleep(1.0)
+    except _CLIENT_DISCONNECT_ERRORS:
+        pass
+    return True
 
 
 def _handle_sse_stream(handler, parsed):
