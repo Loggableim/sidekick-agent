@@ -16267,7 +16267,7 @@ def _start_cron_ticker(stop_event: threading.Event, adapters=None, loop=None, in
         # real work only fires once per config interval.
         if tick_count % CURATOR_EVERY == 0:
             try:
-                from agent.curator import maybe_run_curator
+                from runtime.curator import maybe_run_curator
                 maybe_run_curator(
                     idle_for_seconds=float("inf"),
                     on_summary=lambda msg: logger.info("curator: %s", msg),

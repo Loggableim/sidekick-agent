@@ -608,10 +608,20 @@
       <div class="panel-head">
         <span data-i18n="tab_skills">Skills</span>
         <div class="panel-head-actions">
+          <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="loadSkills(true)" data-tooltip="Refresh" data-i18n-title="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></button>
           <button class="panel-head-btn has-tooltip has-tooltip--bottom" onclick="openSkillCreate()" data-tooltip="New skill" data-i18n-title="new_skill" aria-label="New skill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
         </div>
       </div>
       <div class="skills-search sidebar-search"><svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg><input id="skillsSearch" placeholder="Search skills..." data-i18n-placeholder="search_skills" oninput="filterSkills()"></div>
+      <div class="skills-toolbar">
+        <select id="skillsSort" class="skills-sort-select" onchange="filterSkills()" data-i18n-title="skills_sort" aria-label="Sort skills">
+          <option value="name" data-i18n="skills_sort_name">Name</option>
+          <option value="recent" data-i18n="skills_sort_recent">Recently used</option>
+          <option value="most" data-i18n="skills_sort_most">Most used</option>
+          <option value="created" data-i18n="skills_sort_created">Newest</option>
+        </select>
+        <label class="skills-filter-toggle has-tooltip has-tooltip--bottom" data-tooltip="Show disabled" data-i18n-title="skills_show_disabled"><input type="checkbox" id="skillsShowDisabled" onchange="toggleSkillsShowDisabled()"> <span data-i18n="skills_disabled_short">Disabled</span></label>
+      </div>
       <div class="skills-list" id="skillsList"><div style="padding:12px;color:var(--muted);font-size:12px" data-i18n="loading">Loading...</div></div>
     </div>
     <!-- Agents panel (Multi-Agent System) -->

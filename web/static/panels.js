@@ -3477,6 +3477,27 @@ function _renderInsights(d, box, wikiStatus) {
     </div>
   </div>`;
 
+  // ── Skills usage (Main grid, below models/tokens) ──
+  let skillsHtml = '';
+  const sk = d.skills || {};
+  const skSummary = sk.summary || {};
+  const skTop = Array.isArray(sk.top_skills) ? sk.top_skills : [];
+  if (skTop.length) {
+    const maxSkCount = Math.max(...skTop.map(s => Number(s.total_count || 0)), 1);
+    skillsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_skills') || 'Skill usage')}
+      <span style="font-weight:400;font-size:10px;color:var(--muted)">${fmtNum(skSummary.distinct_skills_used || 0)} ${esc(t('insights_skills_distinct') || 'distinct')} · ${fmtNum(skSummary.total_skill_actions || 0)} ${esc(t('insights_skills_actions') || 'actions')}</span></div>
+      <div class="insights-bars">` +
+      skTop.slice(0, 10).map(s => {
+        const count = Number(s.total_count || 0);
+        const pct = (count / maxSkCount * 100).toFixed(0);
+        const title = `${s.skill} · ${s.view_count} ${t('insights_skills_loads') || 'loads'} · ${s.manage_count} ${t('insights_skills_edits') || 'edits'}`;
+        return `<div class="insights-bar-row" title="${esc(title)}"><span class="insights-bar-label" style="width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.skill)}</span><div class="insights-bar-track"><div class="insights-bar-fill" style="width:${pct}%"></div></div><span class="insights-bar-value">${fmtNum(count)}</span></div>`;
+      }).join('') +
+      `</div></div>`;
+  } else {
+    skillsHtml = `<div class="insights-card"><div class="insights-card-title">${esc(t('insights_skills') || 'Skill usage')}</div><div class="insights-empty">${esc(t('insights_no_usage_data'))}</div></div>`;
+  }
+
   // ── Data Quality + Warnings (Inspector) ──
   const warningsHtml = Array.isArray(d.warnings) && d.warnings.length
     ? d.warnings.map(w => `<div class="insights-warning-box" style="margin-bottom:8px">⚠ ${esc(w)}</div>`).join('')
@@ -3576,6 +3597,7 @@ function _renderInsights(d, box, wikiStatus) {
         ${modelsHtml}
         ${tokenCards}
       </div>
+      ${skillsHtml}
       ${activityHtml ? `<div class="insights-main-grid">${activityHtml}</div>` : ''}
     </div>
     ${inspectorHtml}
@@ -3603,18 +3625,21 @@ async function clearConversation() {
 }
 
 // ── Skills panel ──
-async function loadSkills() {
-  if (_skillsData) { renderSkills(_skillsData); return; }
+async function loadSkills(force) {
+  if (_skillsData && !force) { renderSkills(_skillsData); return; }
   const box = $('skillsList');
+  const showDisabled = !!($('skillsShowDisabled') || {}).checked;
+  if (box && !_skillsData) box.innerHTML = `<div style="padding:12px;color:var(--muted);font-size:12px">${esc(t('loading'))}</div>`;
   try {
-    const data = await api('/api/skills');
+    const url = showDisabled ? '/api/skills?include_disabled=1' : '/api/skills';
+    const data = await api(url);
     _skillsData = data.skills || [];
     // Prune collapsed state to only keep categories present in fresh data,
     // avoiding stale keys when categories are renamed or removed server-side.
     const liveCats = new Set(_skillsData.map(s => s.category || '(general)'));
     for (const c of _collapsedCats) { if (!liveCats.has(c)) _collapsedCats.delete(c); }
     renderSkills(_skillsData);
-  } catch(e) { box.innerHTML = `<div style="padding:12px;color:var(--accent);font-size:12px">Error: ${esc(e.message)}</div>`; }
+  } catch(e) { if (box) box.innerHTML = `<div style="padding:12px;color:var(--accent);font-size:12px">Error: ${esc(e.message)}</div>`; }
 }
 
 let _collapsedCats = new Set(); // persisted collapsed state across re-renders
@@ -3634,13 +3659,91 @@ function _toggleCatCollapse(cat) {
   });
 }
 
+// ── Skill usage helpers ──
+function _skillUsage(s) { return (s && s.usage) || null; }
+
+function _skillLastActivity(s) {
+  const u = _skillUsage(s);
+  if (!u) return 0;
+  const ts = u.last_used_at || u.last_viewed_at || u.created_at;
+  if (!ts) return 0;
+  const t = Date.parse(ts);
+  return isNaN(t) ? 0 : t;
+}
+
+function _fmtRelative(ts) {
+  if (!ts) return '';
+  const parsed = Date.parse(ts);
+  if (isNaN(parsed)) return '';
+  const secs = Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+  if (secs < 60) return t('skills_ago_now') || 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+  return `${Math.floor(secs / 86400)}d`;
+}
+
+function _skillUsageBadge(s) {
+  const u = _skillUsage(s);
+  if (!u) return '';
+  const total = (u.use_count || 0) + (u.view_count || 0);
+  const parts = [];
+  if (total) parts.push(`${total}\u00d7`);
+  const rel = _fmtRelative(u.last_used_at || u.last_viewed_at);
+  if (rel) parts.push(rel);
+  if (!parts.length) return '';
+  const title = `${u.use_count || 0} ${t('skills_use_count') || 'uses'} \u00b7 ${u.view_count || 0} ${t('skills_view_count') || 'views'}${u.patch_count ? ` \u00b7 ${u.patch_count} ${t('skills_patch_count') || 'edits'}` : ''}`;
+  return `<span class="skill-usage-badge" title="${esc(title)}">${esc(parts.join(' \u00b7 '))}</span>`;
+}
+
+function _skillStateBadge(s) {
+  const u = _skillUsage(s);
+  const badges = [];
+  if (u && u.pinned) badges.push(`<span class="skill-badge skill-badge-pinned" title="${esc(t('skills_pinned_title') || 'Pinned — protected from curator')}">\u2605</span>`);
+  if (u && u.state === 'stale') badges.push(`<span class="skill-badge skill-badge-stale" title="${esc(t('skills_stale_title') || 'Stale — unused for a while')}">${esc(t('skills_stale') || 'stale')}</span>`);
+  if (s && s.disabled) badges.push(`<span class="skill-badge skill-badge-disabled" title="${esc(t('skills_disabled_title') || 'Disabled in config')}">${esc(t('skills_disabled') || 'off')}</span>`);
+  if (s && s.setup_needed) {
+    const missing = (s.missing_env || []).join(', ');
+    badges.push(`<span class="skill-badge skill-badge-setup" title="${esc((t('skills_setup_needed_title') || 'Setup needed') + (missing ? ': ' + missing : ''))}">\u26a0 ${esc(t('skills_setup') || 'setup')}</span>`);
+  }
+  return badges.join('');
+}
+
+function _skillMatchesQuery(s, query) {
+  if (!query) return true;
+  return (s.name||'').toLowerCase().includes(query) ||
+    (s.description||'').toLowerCase().includes(query) ||
+    (s.category||'').toLowerCase().includes(query);
+}
+
+function _sortSkills(items, mode) {
+  const arr = [...items];
+  if (mode === 'recent') {
+    arr.sort((a,b) => _skillLastActivity(b) - _skillLastActivity(a) || a.name.localeCompare(b.name));
+  } else if (mode === 'most') {
+    arr.sort((a,b) => {
+      const ua = _skillUsage(a) || {}, ub = _skillUsage(b) || {};
+      const ca = (ua.use_count||0) + (ua.view_count||0);
+      const cb = (ub.use_count||0) + (ub.view_count||0);
+      return cb - ca || a.name.localeCompare(b.name);
+    });
+  } else if (mode === 'created') {
+    arr.sort((a,b) => {
+      const ua = _skillUsage(a) || {}, ub = _skillUsage(b) || {};
+      return (Date.parse(ub.created_at||0)||0) - (Date.parse(ua.created_at||0)||0) || a.name.localeCompare(b.name);
+    });
+  } else {
+    arr.sort((a,b) => a.name.localeCompare(b.name));
+  }
+  return arr;
+}
+
 function renderSkills(skills) {
   const query = ($('skillsSearch').value || '').toLowerCase();
-  const filtered = query ? skills.filter(s =>
-    (s.name||'').toLowerCase().includes(query) ||
-    (s.description||'').toLowerCase().includes(query) ||
-    (s.category||'').toLowerCase().includes(query)
-  ) : skills;
+  const sortMode = ($('skillsSort') || {}).value || 'name';
+  const showDisabled = !!($('skillsShowDisabled') || {}).checked;
+  const filtered = skills.filter(s =>
+    _skillMatchesQuery(s, query) && (showDisabled || !s.disabled)
+  );
   // Group by category
   const cats = {};
   for (const s of filtered) {
@@ -3661,11 +3764,14 @@ function renderSkills(skills) {
     hdr.innerHTML = `<span class="cat-chevron" style="display:inline-flex;transition:transform .15s;${collapsed ? '' : 'transform:rotate(90deg)'}">${li('chevron-right',12)}</span> ${esc(cat)} <span style="opacity:.5">(${items.length})</span>`;
     hdr.onclick = () => _toggleCatCollapse(cat);
     sec.appendChild(hdr);
-    for (const skill of items.sort((a,b) => a.name.localeCompare(b.name))) {
+    for (const skill of _sortSkills(items, sortMode)) {
       const el = document.createElement('div');
-      el.className = 'skill-item';
+      el.className = 'skill-item' + (skill.disabled ? ' skill-item-disabled' : '');
       el.style.display = collapsed ? 'none' : '';
-      el.innerHTML = `<span class="skill-name">${esc(skill.name)}</span><span class="skill-desc">${esc(skill.description||'')}</span>`;
+      el.dataset.skillName = skill.name;
+      el.innerHTML = `<span class="skill-name">${esc(skill.name)}</span>` +
+        `<span class="skill-desc">${esc(skill.description||'')}</span>` +
+        `<span class="skill-item-meta">${_skillStateBadge(skill)}${_skillUsageBadge(skill)}</span>`;
       el.onclick = () => openSkill(skill.name, el);
       sec.appendChild(el);
     }
@@ -3675,6 +3781,45 @@ function renderSkills(skills) {
 
 function filterSkills() {
   if (_skillsData) renderSkills(_skillsData);
+}
+
+// The disabled filter changes the server query (disabled skills are filtered
+// server-side by default), so toggling it must refetch rather than re-render.
+async function toggleSkillsShowDisabled() {
+  _skillsData = null;
+  await loadSkills(true);
+}
+
+// ── Skill pin / disable actions (P1-5, P1-13) ──
+async function toggleSkillPin(name, pinned) {
+  try {
+    await api('/api/skills/pin', {method:'POST', body: JSON.stringify({name, pinned})});
+    showToast(pinned ? (t('skill_pinned') || 'Skill pinned') : (t('skill_unpinned') || 'Skill unpinned'));
+    _skillsData = null;
+    _cronSkillsCache = null;
+    await loadSkills(true);
+    if (_currentSkillDetail && _currentSkillDetail.name === name) {
+      await openSkill(name, null);
+    }
+  } catch(e) { setStatus((t('error_prefix') || 'Error: ') + e.message); }
+}
+
+async function toggleSkillDisabled(name, disabled) {
+  try {
+    await api('/api/skills/disable', {method:'POST', body: JSON.stringify({name, disabled})});
+    showToast(disabled ? (t('skill_disabled_toast') || 'Skill disabled') : (t('skill_enabled_toast') || 'Skill enabled'));
+    _skillsData = null;
+    _cronSkillsCache = null;
+    await loadSkills(true);
+    if (_currentSkillDetail && _currentSkillDetail.name === name) {
+      await openSkill(name, null);
+    }
+  } catch(e) { setStatus((t('error_prefix') || 'Error: ') + e.message); }
+}
+
+function _findSkillMeta(name) {
+  if (!_skillsData) return null;
+  return _skillsData.find(s => s.name === name) || null;
 }
 
 // Currently selected skill detail — kept across panel switches so re-entering
@@ -3699,11 +3844,57 @@ function _renderSkillDetail(name, content, linkedFiles) {
   const delBtn = $('btnDeleteSkillDetail');
   if (title) title.textContent = name;
   const { frontmatter, body: markdownBody } = _stripYamlFrontmatter(content);
+  const meta = _findSkillMeta(name);
   let html = '';
+
+  // ── Action row: pin / disable / chat (P1-5, P1-13, P1-21) ──
+  const u = meta ? _skillUsage(meta) : null;
+  const isPinned = !!(u && u.pinned);
+  const isDisabled = !!(meta && meta.disabled);
+  const actionBtns = [];
+  if (meta) {
+    actionBtns.push(`<button class="skill-action-btn${isPinned ? ' active' : ''}" onclick="toggleSkillPin('${esc(name)}', ${isPinned ? 'false' : 'true'})" title="${esc(t('skills_pin_toggle') || 'Pin / unpin')}">${isPinned ? '\u2605' : '\u2606'} ${esc(isPinned ? (t('skills_unpin') || 'Unpin') : (t('skills_pin') || 'Pin'))}</button>`);
+    actionBtns.push(`<button class="skill-action-btn${isDisabled ? ' active' : ''}" onclick="toggleSkillDisabled('${esc(name)}', ${isDisabled ? 'false' : 'true'})" title="${esc(t('skills_disable_toggle') || 'Enable / disable')}">${isDisabled ? '\u25cb' : '\u25cf'} ${esc(isDisabled ? (t('skills_enable') || 'Enable') : (t('skills_disable') || 'Disable'))}</button>`);
+  }
+  actionBtns.push(`<button class="skill-action-btn" onclick="useSkillInChat('${esc(name)}')" title="${esc(t('skills_use_in_chat_title') || 'Send /skillname to the active chat')}">\u25b6 ${esc(t('skills_use_in_chat') || 'Use in chat')}</button>`);
+  html += `<div class="skill-action-row">${actionBtns.join('')}</div>`;
+
+  // ── Usage + readiness summary (P1-1, P1-4) ──
+  const infoRows = [];
+  if (u) {
+    const total = (u.use_count || 0) + (u.view_count || 0);
+    infoRows.push(`<div class="skill-info-row"><span class="skill-info-label">${esc(t('skills_usage') || 'Usage')}</span><span class="skill-info-value">${total}\u00d7 (${u.use_count || 0} ${esc(t('skills_use_count') || 'uses')}, ${u.view_count || 0} ${esc(t('skills_view_count') || 'views')}${u.patch_count ? `, ${u.patch_count} ${esc(t('skills_patch_count') || 'edits')}` : ''})</span></div>`);
+    const rel = _fmtRelative(u.last_used_at || u.last_viewed_at);
+    if (rel) infoRows.push(`<div class="skill-info-row"><span class="skill-info-label">${esc(t('skills_last_used') || 'Last used')}</span><span class="skill-info-value">${esc(rel)}</span></div>`);
+    if (u.state && u.state !== 'active') infoRows.push(`<div class="skill-info-row"><span class="skill-info-label">${esc(t('skills_state') || 'State')}</span><span class="skill-info-value">${esc(u.state)}</span></div>`);
+  }
+  if (meta && meta.setup_needed) {
+    const missing = (meta.missing_env || []).join(', ');
+    infoRows.push(`<div class="skill-info-row skill-info-warn"><span class="skill-info-label">${esc(t('skills_setup_needed_title') || 'Setup needed')}</span><span class="skill-info-value">${esc(missing || '\u2014')}</span></div>`);
+  }
+  if (infoRows.length) html += `<div class="skill-info-box">${infoRows.join('')}</div>`;
+
   if (frontmatter) {
     html += `<details class="skill-frontmatter"><summary>${esc(t('skill_metadata'))}</summary><pre><code>${esc(frontmatter)}</code></pre></details>`;
   }
   html += renderMd(markdownBody || '(no content)');
+
+  // ── Tags + related skills as clickable chips (P1-3) ──
+  const detailTags = Array.isArray(_currentSkillDetail && _currentSkillDetail.tags) ? _currentSkillDetail.tags : [];
+  const detailRelated = Array.isArray(_currentSkillDetail && _currentSkillDetail.related_skills) ? _currentSkillDetail.related_skills : [];
+  if (detailTags.length || detailRelated.length) {
+    html += `<div class="skill-chips-section">`;
+    if (detailTags.length) {
+      html += `<div class="skill-chips-row"><span class="skill-chips-label">${esc(t('skills_tags') || 'Tags')}</span>` +
+        detailTags.map(tag => `<a class="skill-chip" href="#" data-skill-tag="${esc(tag)}">${esc(tag)}</a>`).join('') + `</div>`;
+    }
+    if (detailRelated.length) {
+      html += `<div class="skill-chips-row"><span class="skill-chips-label">${esc(t('skills_related') || 'Related')}</span>` +
+        detailRelated.map(rel => `<a class="skill-chip skill-chip-related" href="#" data-skill-related="${esc(rel)}">${esc(rel)}</a>`).join('') + `</div>`;
+    }
+    html += `</div>`;
+  }
+
   const lf = linkedFiles || {};
   const categories = Object.entries(lf).filter(([,files]) => files && files.length > 0);
   if (categories.length) {
@@ -3721,10 +3912,33 @@ function _renderSkillDetail(name, content, linkedFiles) {
   body.querySelectorAll('.skill-linked-file').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); openSkillFile(a.dataset.skillName, a.dataset.skillFile); });
   });
+  body.querySelectorAll('.skill-chip[data-skill-related]').forEach(a => {
+    a.addEventListener('click', e => { e.preventDefault(); openSkill(a.dataset.skillRelated, null); });
+  });
+  body.querySelectorAll('.skill-chip[data-skill-tag]').forEach(a => {
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      const search = $('skillsSearch');
+      if (search) { search.value = a.dataset.skillTag; filterSkills(); }
+    });
+  });
   body.style.display = '';
   if (empty) empty.style.display = 'none';
   _skillMode = 'read';
   _setSkillHeaderButtons('read');
+}
+
+// Send `/skillname` into the active chat composer (P1-21).
+function useSkillInChat(name) {
+  const slug = String(name || '').trim().toLowerCase().replace(/\s+/g, '-');
+  if (!slug) return;
+  if (typeof switchPanel === 'function') switchPanel('chat');
+  const msg = $('msg');
+  if (msg) {
+    msg.value = `/${slug} `;
+    msg.focus();
+    if (typeof refreshSlashCommandDropdown === 'function') refreshSlashCommandDropdown();
+  }
 }
 
 function _setSkillHeaderButtons(mode) {
@@ -3747,7 +3961,13 @@ async function openSkill(name, el) {
   _editingSkillName = null;
   try {
     const data = await api(`/api/skills/content?name=${encodeURIComponent(name)}`);
-    _currentSkillDetail = { name, content: data.content || '', linked_files: data.linked_files || {} };
+    _currentSkillDetail = {
+      name,
+      content: data.content || '',
+      linked_files: data.linked_files || {},
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      related_skills: Array.isArray(data.related_skills) ? data.related_skills : [],
+    };
     _renderSkillDetail(name, data.content || '', data.linked_files || {});
   } catch(e) { setStatus(t('skill_load_failed') + e.message); }
 }

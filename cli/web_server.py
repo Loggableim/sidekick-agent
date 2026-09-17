@@ -75,6 +75,7 @@ from cli.config import (
     redact_key,
 )
 from gateway.status import get_running_pid, read_runtime_status
+from shared.sessions import is_default_session_title
 from web.api.workspace import (
     load_workspaces,
     get_last_workspace,
@@ -2446,7 +2447,7 @@ def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
         sessions.append(row)
     sessions.sort(key=lambda s: (bool(s.get("pinned", False)), s.get("last_message_at") or s.get("updated_at") or 0), reverse=True)
     sessions = [s for s in sessions if not (
-        s.get("title", "Untitled") == "Untitled"
+        is_default_session_title(s.get("title"))
         and s.get("message_count", 0) == 0
         and not s.get("active_stream_id")
         and not s.get("has_pending_user_message")
@@ -5537,15 +5538,25 @@ class SkillToggle(BaseModel):
 
 
 @app.get("/api/skills")
-async def get_skills():
-    from tools.skills_tool import _find_all_skills
-    from cli.skills_config import get_disabled_skills
-    config = load_config()
-    disabled = get_disabled_skills(config)
-    skills = _find_all_skills(skip_disabled=True)
-    for s in skills:
-        s["enabled"] = s["name"] not in disabled
-    return skills
+async def get_skills(include_disabled: int = 0):
+    """List skills for the WebUI panel.
+
+    Returns ``{"skills": [...]}`` — the shape every frontend consumer expects
+    (panels.js, commands.js). The previous flat-list return silently produced
+    an empty panel because ``data.skills`` was undefined on an array.
+
+    Each entry carries ``usage`` (view/use/patch counts, pin, lifecycle state)
+    and ``setup_needed`` so the panel can render badges without extra calls.
+    Delegates to the shared implementation in ``web.api.routes`` so the native
+    route and the legacy bridge agree on the payload.
+    """
+    from web.api.routes import _active_skills_dir, _skills_list_from_dir
+
+    data = _skills_list_from_dir(_active_skills_dir())
+    skills = data.get("skills", [])
+    if not include_disabled:
+        skills = [s for s in skills if not s.get("disabled")]
+    return {"skills": skills}
 
 
 @app.put("/api/skills/toggle")
@@ -5558,6 +5569,12 @@ async def toggle_skill(body: SkillToggle):
     else:
         disabled.add(body.name)
     save_disabled_skills(config, disabled)
+    try:
+        from web.api.routes import _invalidate_skills_list_cache
+
+        _invalidate_skills_list_cache()
+    except Exception:
+        pass
     return {"ok": True, "name": body.name, "enabled": body.enabled}
 
 

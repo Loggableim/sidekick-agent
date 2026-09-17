@@ -37,6 +37,14 @@ from web.api.nova_paths import get_nova_state_snapshot_path
 
 logger = logging.getLogger(__name__)
 
+# ── Skills listing cache ─────────────────────────────────────────────────────
+# The skills panel is opened repeatedly and each scan reads every SKILL.md
+# (4 KB each) plus the usage sidecar. A short TTL keeps the panel snappy while
+# staying fresh enough for interactive edits. Invalidate explicitly after any
+# write via _invalidate_skills_list_cache().
+_SKILLS_LIST_CACHE: dict[tuple[str, str], tuple[float, dict]] = {}
+_SKILLS_LIST_CACHE_TTL = 30.0  # seconds
+
 _NOVA_ROUTE_STATUS_CACHE: dict[str, object] = {
     "module": None,
     "path": None,
@@ -436,7 +444,33 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
     This mirrors ``tools.skills_tool.skills_list`` closely, but keeps the local
     scan root explicit so per-client WebUI profile switches do not race on or
     leak through the skills tool's module-global ``SKILLS_DIR``.
+
+    Results are cached for ``_SKILLS_LIST_CACHE_TTL`` seconds keyed by
+    (skills_dir, category). The scan reads every SKILL.md (4 KB each) on every
+    request otherwise — with 100+ skills that is a measurable per-request cost
+    for a panel that is opened repeatedly. Invalidate with
+    ``_invalidate_skills_list_cache()`` after any write (save/delete/toggle).
     """
+    import time as _time
+
+    cache_key = (str(skills_dir), category or "")
+    now = _time.monotonic()
+    cached = _SKILLS_LIST_CACHE.get(cache_key)
+    if cached is not None and (now - cached[0]) < _SKILLS_LIST_CACHE_TTL:
+        return cached[1]
+
+    result = _skills_list_from_dir_uncached(skills_dir, category=category)
+    _SKILLS_LIST_CACHE[cache_key] = (now, result)
+    return result
+
+
+def _invalidate_skills_list_cache() -> None:
+    """Drop all cached skill listings. Call after any skill write."""
+    _SKILLS_LIST_CACHE.clear()
+
+
+def _skills_list_from_dir_uncached(skills_dir: Path, category: str | None = None) -> dict:
+    """Uncached skill scan — see ``_skills_list_from_dir``."""
     from runtime.skill_utils import iter_skill_index_files
     from tools.skills_tool import (
         MAX_DESCRIPTION_LENGTH,
@@ -472,8 +506,9 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
                 if not skill_matches_platform(frontmatter):
                     continue
                 name = frontmatter.get("name", skill_dir.name)[:64]
-                if name in seen_names or name in disabled:
+                if name in seen_names:
                     continue
+                is_disabled = name in disabled
                 description = frontmatter.get("description", "")
                 if not description:
                     for line in body.strip().split("\n"):
@@ -484,13 +519,55 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
                 if len(description) > MAX_DESCRIPTION_LENGTH:
                     description = description[: MAX_DESCRIPTION_LENGTH - 3] + "..."
                 seen_names.add(name)
-                all_skills.append(
-                    {
-                        "name": name,
-                        "description": description,
-                        "category": _skill_category_from_path(skill_md, search_dirs),
+                entry = {
+                    "name": name,
+                    "description": description,
+                    "category": _skill_category_from_path(skill_md, search_dirs),
+                    "disabled": is_disabled,
+                }
+                # Usage telemetry (view/use/patch counts, pin, lifecycle state)
+                # — best-effort; a broken sidecar must not break the listing.
+                try:
+                    from tools.skill_usage import get_record
+
+                    rec = get_record(name) or {}
+                    entry["usage"] = {
+                        "view_count": int(rec.get("view_count") or 0),
+                        "use_count": int(rec.get("use_count") or 0),
+                        "patch_count": int(rec.get("patch_count") or 0),
+                        "last_used_at": rec.get("last_used_at"),
+                        "last_viewed_at": rec.get("last_viewed_at"),
+                        "created_at": rec.get("created_at"),
+                        "pinned": bool(rec.get("pinned")),
+                        "state": rec.get("state") or "active",
                     }
-                )
+                except Exception:
+                    entry["usage"] = None
+                # Readiness: does the skill need setup (missing env vars)?
+                # Only the frontmatter is inspected here — no env capture, no
+                # side effects. Full readiness is resolved by /api/skills/content.
+                try:
+                    from tools.skills_tool import (
+                        _collect_prerequisite_values,
+                        _get_required_environment_variables,
+                        _is_env_var_persisted,
+                    )
+
+                    legacy_env_vars, _ = _collect_prerequisite_values(frontmatter)
+                    required_env_vars = _get_required_environment_variables(
+                        frontmatter, legacy_env_vars
+                    )
+                    missing = [
+                        e["name"]
+                        for e in required_env_vars
+                        if not e.get("optional") and not _is_env_var_persisted(e["name"])
+                    ]
+                    entry["setup_needed"] = bool(missing)
+                    entry["missing_env"] = missing
+                except Exception:
+                    entry["setup_needed"] = False
+                    entry["missing_env"] = []
+                all_skills.append(entry)
             except (UnicodeDecodeError, PermissionError) as e:
                 logger.debug("Failed to read skill file %s: %s", skill_md, e)
             except Exception as e:
@@ -2860,6 +2937,15 @@ def _empty_insights_payload(days: int, data_source: str, warnings: list[str] | N
         ],
         "activity_by_day": [{"day": dow_labels[i], "sessions": 0} for i in range(7)],
         "activity_by_hour": [{"hour": h, "sessions": 0} for h in range(24)],
+        "skills": {
+            "summary": {
+                "total_skill_loads": 0,
+                "total_skill_edits": 0,
+                "total_skill_actions": 0,
+                "distinct_skills_used": 0,
+            },
+            "top_skills": [],
+        },
     }
     if warnings:
         payload["warnings"] = warnings
@@ -3092,6 +3178,139 @@ def _build_insights_from_state_db(days: int) -> dict | None:
         "daily_tokens": daily_series,
         "activity_by_day": dow_data,
         "activity_by_hour": hod_data,
+        "skills": _build_skills_insights(cutoff_ts),
+    }
+
+
+def _build_skills_insights(cutoff_ts: float) -> dict:
+    """Build the skills usage block for the insights payload.
+
+    Uses the same tool-call extraction as ``runtime/insights.py``
+    (``skill_view`` / ``skill_manage`` calls in assistant messages) so the
+    WebUI panel and the CLI insights report agree on the numbers.
+
+    Returns ``{"summary": {...}, "top_skills": [...]}``. Never raises — a
+    failure yields an empty block so the rest of the payload survives.
+    """
+    empty = {
+        "summary": {
+            "total_skill_loads": 0,
+            "total_skill_edits": 0,
+            "total_skill_actions": 0,
+            "distinct_skills_used": 0,
+        },
+        "top_skills": [],
+    }
+
+    try:
+        from runtime._compat.shim_state import SessionDB
+
+        db = SessionDB()
+    except Exception:
+        return empty
+
+    skill_counts: dict[str, dict] = {}
+    try:
+        cursor = db._conn.execute(
+            """SELECT m.tool_calls, m.timestamp
+               FROM messages m
+               JOIN sessions s ON s.id = m.session_id
+               WHERE s.started_at >= ?
+                 AND m.role = 'assistant' AND m.tool_calls IS NOT NULL""",
+            (cutoff_ts,),
+        )
+        rows = cursor.fetchall()
+    except Exception:
+        try:
+            db.close()
+        except Exception:
+            pass
+        return empty
+
+    for row in rows:
+        try:
+            calls = row["tool_calls"]
+            if isinstance(calls, str):
+                calls = json.loads(calls)
+            if not isinstance(calls, list):
+                continue
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        timestamp = row["timestamp"]
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            func = call.get("function", {})
+            tool_name = func.get("name")
+            if tool_name not in {"skill_view", "skill_manage"}:
+                continue
+            args = func.get("arguments")
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if not isinstance(args, dict):
+                continue
+            skill_name = args.get("name")
+            if not isinstance(skill_name, str) or not skill_name.strip():
+                continue
+
+            entry = skill_counts.setdefault(
+                skill_name,
+                {"skill": skill_name, "view_count": 0, "manage_count": 0, "last_used_at": None},
+            )
+            if tool_name == "skill_view":
+                entry["view_count"] += 1
+            else:
+                entry["manage_count"] += 1
+            if timestamp is not None and (
+                entry["last_used_at"] is None or timestamp > entry["last_used_at"]
+            ):
+                entry["last_used_at"] = timestamp
+
+    try:
+        db.close()
+    except Exception:
+        pass
+
+    total_loads = sum(e["view_count"] for e in skill_counts.values())
+    total_edits = sum(e["manage_count"] for e in skill_counts.values())
+    total_actions = total_loads + total_edits
+
+    top_skills = []
+    for entry in skill_counts.values():
+        total_count = entry["view_count"] + entry["manage_count"]
+        top_skills.append(
+            {
+                "skill": entry["skill"],
+                "view_count": entry["view_count"],
+                "manage_count": entry["manage_count"],
+                "total_count": total_count,
+                "percentage": (total_count / total_actions * 100) if total_actions else 0,
+                "last_used_at": entry["last_used_at"],
+            }
+        )
+    top_skills.sort(
+        key=lambda s: (
+            s["total_count"],
+            s["view_count"],
+            s["manage_count"],
+            s["last_used_at"] or 0,
+            s["skill"],
+        ),
+        reverse=True,
+    )
+
+    return {
+        "summary": {
+            "total_skill_loads": total_loads,
+            "total_skill_edits": total_edits,
+            "total_skill_actions": total_actions,
+            "distinct_skills_used": len(skill_counts),
+        },
+        "top_skills": top_skills,
     }
 
 
@@ -3230,6 +3449,7 @@ def _build_insights_from_index(days: int) -> dict:
         "daily_tokens": daily_series,
         "activity_by_day": dow_data,
         "activity_by_hour": hod_data,
+        "skills": _build_skills_insights(cutoff_ts),
     }
     if not total_sessions:
         payload["warnings"] = ["No session data found in _index.json for this period."]
@@ -5417,8 +5637,12 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/skills":
         qs = parse_qs(parsed.query)
         category = qs.get("category", [None])[0]
+        include_disabled = qs.get("include_disabled", ["0"])[0] in ("1", "true", "yes")
         data = _skills_list_from_dir(_active_skills_dir(), category=category)
-        return j(handler, {"skills": data.get("skills", [])})
+        skills = data.get("skills", [])
+        if not include_disabled:
+            skills = [s for s in skills if not s.get("disabled")]
+        return j(handler, {"skills": skills})
 
     if parsed.path == "/api/skills/content":
         qs = parse_qs(parsed.query)
@@ -7551,6 +7775,12 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/skills/delete":
         return _handle_skill_delete(handler, body)
+
+    if parsed.path == "/api/skills/pin":
+        return _handle_skill_pin(handler, body)
+
+    if parsed.path == "/api/skills/disable":
+        return _handle_skill_disable(handler, body)
 
     # â”€â”€ Memory (POST) â”€â”€
     if parsed.path == "/api/memory/write":
@@ -13681,6 +13911,7 @@ def _handle_skill_save(handler, body):
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_file = skill_dir / "SKILL.md"
     skill_file.write_text(body["content"], encoding="utf-8")
+    _invalidate_skills_list_cache()
     return j(handler, {"ok": True, "name": skill_name, "path": str(skill_file)})
 
 
@@ -13700,7 +13931,93 @@ def _handle_skill_delete(handler, body):
         return bad(handler, "Skill not found", 404)
     skill_dir = matches[0].parent
     shutil.rmtree(str(skill_dir))
+    # Drop the usage sidecar entry too — otherwise the curator keeps reporting
+    # a skill that no longer exists on disk.
+    try:
+        from tools.skill_usage import forget
+
+        forget(skill_name)
+    except Exception:
+        logger.debug("skill_usage.forget failed for %s", skill_name, exc_info=True)
+    _invalidate_skills_list_cache()
     return j(handler, {"ok": True, "name": body["name"]})
+
+
+def _handle_skill_pin(handler, body):
+    """Pin/unpin a skill so the curator never auto-transitions it."""
+    try:
+        require(body, "name")
+    except ValueError as e:
+        return bad(handler, str(e))
+    skill_name = str(body["name"]).strip()
+    if not skill_name:
+        return bad(handler, "Invalid skill name")
+    pinned = bool(body.get("pinned", True))
+    try:
+        from tools import skill_usage
+
+        if not skill_usage.is_agent_created(skill_name):
+            return bad(
+                handler,
+                f"'{skill_name}' is bundled or hub-installed — only agent-created "
+                "skills participate in curation",
+                400,
+            )
+        skill_usage.set_pinned(skill_name, pinned)
+    except Exception as exc:
+        logger.exception("Skill pin failed")
+        return error_response(handler, exc, status=500)
+    _invalidate_skills_list_cache()
+    return j(handler, {"ok": True, "name": skill_name, "pinned": pinned})
+
+
+def _handle_skill_disable(handler, body):
+    """Enable/disable a skill via config.yaml ``skills.disabled``.
+
+    Disabled skills are filtered out of the listing and refused by
+    ``skill_view``. The config write uses the same YAML round-trip as the
+    rest of the WebUI (comments are not preserved — see config.py).
+    """
+    try:
+        require(body, "name")
+    except ValueError as e:
+        return bad(handler, str(e))
+    skill_name = str(body["name"]).strip()
+    if not skill_name:
+        return bad(handler, "Invalid skill name")
+    disabled = bool(body.get("disabled", True))
+    try:
+        from web.api.config import _get_config_path, _load_yaml_config_file, _save_yaml_config_file
+
+        config_path = _get_config_path()
+        config_data = _load_yaml_config_file(config_path)
+        skills_cfg = config_data.get("skills")
+        if not isinstance(skills_cfg, dict):
+            skills_cfg = {}
+        current = skills_cfg.get("disabled")
+        if not isinstance(current, list):
+            current = []
+        names = [str(n) for n in current if str(n) != skill_name]
+        if disabled:
+            names.append(skill_name)
+        if names:
+            skills_cfg["disabled"] = names
+        else:
+            skills_cfg.pop("disabled", None)
+        config_data["skills"] = skills_cfg
+        _save_yaml_config_file(config_path, config_data)
+        # Reload the in-process config cache so the next request sees the change.
+        try:
+            from web.api.config import reload_config
+
+            reload_config()
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.exception("Skill disable toggle failed")
+        return error_response(handler, exc, status=500)
+    _invalidate_skills_list_cache()
+    return j(handler, {"ok": True, "name": skill_name, "disabled": disabled})
 
 
 def _handle_memory_write(handler, body):

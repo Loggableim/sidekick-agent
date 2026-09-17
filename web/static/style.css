@@ -1609,6 +1609,37 @@ html:not(.window-controls-overlay):not(.has-custom-window-controls) .window-cont
   .skill-item.active{background:var(--accent-bg);color:var(--accent-text);}
   .skill-name{font-weight:500;flex-shrink:0;}
   .skill-desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:11px;opacity:.7;}
+  /* Skills toolbar (sort + disabled filter) */
+  .skills-toolbar{display:flex;align-items:center;gap:8px;padding:0 8px 6px;}
+  .skills-sort-select{flex:1;margin-bottom:0;font-size:11px;padding:5px 24px 5px 8px;}
+  .skills-filter-toggle{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap;}
+  .skills-filter-toggle input{cursor:pointer;margin:0;}
+  .skills-filter-toggle:hover{color:var(--text);}
+  /* Skill item meta (badges + usage) */
+  .skill-item-meta{display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:auto;}
+  .skill-usage-badge{font-size:10px;color:var(--muted);opacity:.65;white-space:nowrap;}
+  .skill-badge{font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600;line-height:1.5;white-space:nowrap;}
+  .skill-badge-pinned{color:#FFC107;background:rgba(255,193,7,.14);}
+  .skill-badge-stale{color:#FF9800;background:rgba(255,152,0,.14);}
+  .skill-badge-disabled{color:var(--muted);background:var(--hover-bg);}
+  .skill-badge-setup{color:#FF7043;background:rgba(255,112,67,.14);}
+  .skill-item-disabled{opacity:.55;}
+  /* Skill detail: action row + info box + chips */
+  .skill-action-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
+  .skill-action-btn{background:var(--surface);border:1px solid var(--border2);border-radius:8px;color:var(--muted);font-size:11px;padding:5px 10px;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:4px;}
+  .skill-action-btn:hover{color:var(--text);border-color:var(--accent-bg-strong);}
+  .skill-action-btn.active{color:var(--accent-text);background:var(--accent-bg);border-color:var(--accent-bg-strong);}
+  .skill-info-box{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:16px;}
+  .skill-info-row{display:flex;justify-content:space-between;gap:12px;font-size:11px;padding:2px 0;}
+  .skill-info-label{color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-size:10px;font-weight:600;}
+  .skill-info-value{color:var(--text);text-align:right;}
+  .skill-info-warn .skill-info-value{color:#FF7043;}
+  .skill-chips-section{margin-top:16px;border-top:1px solid var(--border);padding-top:12px;}
+  .skill-chips-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px;}
+  .skill-chips-label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-right:4px;}
+  .skill-chip{font-size:11px;padding:2px 9px;border-radius:12px;background:var(--hover-bg);color:var(--text);text-decoration:none;border:1px solid var(--border2);transition:all .12s;}
+  .skill-chip:hover{background:var(--accent-bg);color:var(--accent-text);border-color:var(--accent-bg-strong);}
+  .skill-chip-related{background:var(--accent-bg);color:var(--accent-text);border-color:var(--accent-bg-strong);}
   /* Memory panel */
   .memory-panel{flex:1;overflow-y:auto;padding:12px;}
   .memory-section{margin-bottom:16px;}
