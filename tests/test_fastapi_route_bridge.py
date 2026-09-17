@@ -1174,3 +1174,52 @@ def test_three_space_readiness_does_not_mutate_governance_files(tmp_path):
     after = [space.config_path.read_bytes() for space in spaces]
     assert all(result["enrolled"] is False for result in results)
     assert before == after
+
+
+def test_skills_fingerprint_endpoint_reports_count_and_detects_changes(tmp_path, monkeypatch):
+    """The skills auto-reload poll target must be stat-only and change-sensitive.
+
+    ``/api/skills/fingerprint`` feeds the WebUI panel's 15s auto-reload poll.
+    It must (a) return a stable fingerprint for an unchanged tree, (b) change
+    when a SKILL.md is touched, and (c) never raise on a missing directory.
+    """
+    import os
+    import time as _time
+
+    from cli import web_server
+    from web.api import routes
+
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "alpha").mkdir(parents=True)
+    (skills_dir / "alpha" / "SKILL.md").write_text(
+        "---\nname: alpha\ndescription: test\n---\n\n# Alpha\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(routes, "_active_skills_dir", lambda: skills_dir)
+    monkeypatch.setattr(routes, "_active_skill_search_dirs", lambda _d: [skills_dir])
+    routes._invalidate_skills_list_cache()
+
+    client = TestClient(web_server.app)
+    headers = _headers(web_server)
+
+    first = client.get("/api/skills/fingerprint", headers=headers)
+    assert first.status_code == 200
+    body = first.json()
+    assert body["count"] == 1
+    assert body["fingerprint"]
+
+    # Unchanged tree -> identical fingerprint (no false-positive reloads).
+    second = client.get("/api/skills/fingerprint", headers=headers)
+    assert second.json()["fingerprint"] == body["fingerprint"]
+
+    # Touch the file -> fingerprint must change so the panel reloads.
+    future = _time.time() + 5
+    os.utime(skills_dir / "alpha" / "SKILL.md", (future, future))
+    third = client.get("/api/skills/fingerprint", headers=headers)
+    assert third.json()["fingerprint"] != body["fingerprint"]
+
+    # Missing directory -> empty fingerprint, still HTTP 200 (never raises).
+    monkeypatch.setattr(routes, "_active_skills_dir", lambda: tmp_path / "missing")
+    monkeypatch.setattr(routes, "_active_skill_search_dirs", lambda _d: [tmp_path / "missing"])
+    empty = client.get("/api/skills/fingerprint", headers=headers)
+    assert empty.status_code == 200
+    assert empty.json()["count"] == 0

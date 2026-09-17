@@ -296,6 +296,10 @@ async function switchPanel(name, opts = {}) {
       GMAIL.pollInterval = null;
     }
   }
+  // Stop the skills auto-reload poll when leaving the skills panel
+  if (prevPanel === 'skills' && nextPanel !== 'skills') {
+    if (typeof _stopSkillsAutoReload === 'function') _stopSkillsAutoReload();
+  }
   _currentPanel = nextPanel;
   if (opts.fromRailClick && typeof closeMobileSidebar === 'function'
       && typeof _isDesktopWidth === 'function' && !_isDesktopWidth()) {
@@ -428,7 +432,7 @@ async function switchPanel(name, opts = {}) {
   if (nextPanel === 'tasks') await loadCrons();
   if (nextPanel === 'kanban') await loadKanban();
   if (nextPanel === 'swarm' && typeof loadSwarm === 'function') await loadSwarm();
-  if (nextPanel === 'skills') await loadSkills();
+  if (nextPanel === 'skills') { await loadSkills(); if (typeof _startSkillsAutoReload === 'function') _startSkillsAutoReload(); }
   if (nextPanel === 'memory') await loadMemory();
   if (nextPanel === 'workspaces') { if (typeof renderSpacesPanel === 'function') renderSpacesPanel(); else await loadWorkspacesPanel(); }
   if (nextPanel === 'profiles') await loadProfilesPanel();
@@ -3639,7 +3643,47 @@ async function loadSkills(force) {
     const liveCats = new Set(_skillsData.map(s => s.category || '(general)'));
     for (const c of _collapsedCats) { if (!liveCats.has(c)) _collapsedCats.delete(c); }
     renderSkills(_skillsData);
+    // Baseline the auto-reload fingerprint so the next poll only fires on
+    // changes that happen AFTER this render (agent edits, external writes).
+    _skillsFingerprint = null;
+    _refreshSkillsFingerprint();
   } catch(e) { if (box) box.innerHTML = `<div style="padding:12px;color:var(--accent);font-size:12px">Error: ${esc(e.message)}</div>`; }
+}
+
+// ── Skills auto-reload ──
+// The agent (or another process) can create/edit/delete skills on disk while
+// the panel is open. A stat-only fingerprint poll (no file reads server-side)
+// detects that and reloads the list without the user hitting Refresh.
+let _skillsFingerprint = null;   // last seen "count:newest_mtime" string
+let _skillsPollTimer = null;
+
+async function _refreshSkillsFingerprint() {
+  try {
+    const fp = await api('/api/skills/fingerprint');
+    const value = (fp && fp.fingerprint) || '';
+    if (!value) return;                       // no info — keep current state
+    if (_skillsFingerprint === null) { _skillsFingerprint = value; return; }
+    if (value !== _skillsFingerprint) {
+      _skillsFingerprint = value;
+      await loadSkills(true);                 // force reload, re-baselines
+    }
+  } catch (_) { /* poll failures are silent — never disturb the panel */ }
+}
+
+function _startSkillsAutoReload() {
+  if (_skillsPollTimer) return;
+  _skillsPollTimer = setInterval(() => {
+    if (_currentPanel !== 'skills') { _stopSkillsAutoReload(); return; }
+    if (document.hidden) return;              // don't poll hidden tabs
+    _refreshSkillsFingerprint();
+  }, 15000);
+}
+
+function _stopSkillsAutoReload() {
+  if (_skillsPollTimer) {
+    clearInterval(_skillsPollTimer);
+    _skillsPollTimer = null;
+  }
 }
 
 let _collapsedCats = new Set(); // persisted collapsed state across re-renders

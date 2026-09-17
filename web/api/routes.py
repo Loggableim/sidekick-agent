@@ -469,6 +469,41 @@ def _invalidate_skills_list_cache() -> None:
     _SKILLS_LIST_CACHE.clear()
 
 
+def _skills_fingerprint() -> dict:
+    """Cheap change-detector for the skills tree.
+
+    Stats every SKILL.md (no file reads) and returns the newest mtime plus
+    the file count. The WebUI skills panel polls this to auto-reload when an
+    agent or another process edits skills on disk. Never raises — a broken
+    scan degrades to an empty fingerprint, which callers treat as "no info".
+    """
+    skills_dir = _active_skills_dir()
+    try:
+        from runtime.skill_utils import iter_skill_index_files
+
+        newest = 0.0
+        count = 0
+        for scan_dir in _active_skill_search_dirs(skills_dir):
+            if not scan_dir.exists():
+                continue
+            for skill_md in iter_skill_index_files(scan_dir, "SKILL.md"):
+                try:
+                    mtime = skill_md.stat().st_mtime
+                except OSError:
+                    continue
+                count += 1
+                if mtime > newest:
+                    newest = mtime
+        return {
+            "fingerprint": f"{count}:{newest:.3f}",
+            "count": count,
+            "newest_mtime": newest,
+        }
+    except Exception:
+        logger.debug("skills fingerprint failed", exc_info=True)
+        return {"fingerprint": "", "count": 0, "newest_mtime": 0.0}
+
+
 def _skills_list_from_dir_uncached(skills_dir: Path, category: str | None = None) -> dict:
     """Uncached skill scan — see ``_skills_list_from_dir``."""
     from runtime.skill_utils import iter_skill_index_files
@@ -5643,6 +5678,11 @@ def handle_get(handler, parsed) -> bool:
         if not include_disabled:
             skills = [s for s in skills if not s.get("disabled")]
         return j(handler, {"skills": skills})
+
+    if parsed.path == "/api/skills/fingerprint":
+        # Cheap poll target for the panel's auto-reload: stat-only, no file
+        # reads, no listing cache involvement.
+        return j(handler, _skills_fingerprint())
 
     if parsed.path == "/api/skills/content":
         qs = parse_qs(parsed.query)
