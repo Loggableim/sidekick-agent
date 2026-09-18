@@ -1916,12 +1916,12 @@ async function _syncGameModeStateFromServer() {
     if(s.default_workspace) S._profileDefaultWorkspace=s.default_workspace;
     window._sessionJumpButtonsEnabled=!!s.session_jump_buttons;
     const appearance=_normalizeAppearance(s.theme,s.skin);
-    localStorage.setItem('sidekick-theme',appearance.theme);
+    _safeBootStorageSet('sidekick-theme', appearance.theme);
     _applyTheme(appearance.theme);
-    localStorage.setItem('sidekick-skin',appearance.skin);
+    _safeBootStorageSet('sidekick-skin', appearance.skin);
     _applySkin(appearance.skin);
     const fontSize=(s.font_size||localStorage.getItem('sidekick-font-size')||'default');
-    localStorage.setItem('sidekick-font-size',fontSize);
+    _safeBootStorageSet('sidekick-font-size', fontSize);
     _applyFontSize(fontSize);
     if(typeof setLocale==='function'){
       const _lang=typeof resolvePreferredLocale==='function'
