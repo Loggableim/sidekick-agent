@@ -6297,6 +6297,36 @@ def _normalise_prefix(raw: Optional[str]) -> str:
     return p
 
 
+def _index_etag(html: str) -> str:
+    """Weak validator for the rendered shell document.
+
+    The shell is content-negotiated (gzip vs. identity) but byte-identical
+    once decoded, so a weak ETag over the rendered HTML is the correct
+    validator. It covers every input that changes the document: the session
+    token (per server start), the WebUI version token (per build) and the
+    forwarded prefix.
+    """
+    digest = hashlib.sha256(html.encode("utf-8")).hexdigest()[:32]
+    return f'W/"{digest}"'
+
+
+def _etag_matches(if_none_match: str, etag: str) -> bool:
+    """RFC 7232 weak comparison of an ``If-None-Match`` header value."""
+    if not if_none_match:
+        return False
+
+    def _strip(value: str) -> str:
+        value = value.strip()
+        return value[2:] if value.startswith("W/") else value
+
+    target = _strip(etag)
+    for candidate in if_none_match.split(","):
+        candidate = candidate.strip()
+        if candidate == "*" or _strip(candidate) == target:
+            return True
+    return False
+
+
 def mount_spa(application: FastAPI):
     """Mount the built SPA. Falls back to index.html for client-side routing.
 
@@ -6351,7 +6381,24 @@ def mount_spa(application: FastAPI):
             html = html.replace('href="/ds-assets/', f'href="{prefix}/ds-assets/')
             html = html.replace('src="/ds-assets/', f'src="{prefix}/ds-assets/')
         html = html.replace("</head>", f"{token_script}</head>", 1)
-        headers = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+        etag = _index_etag(html)
+        # ``no-cache`` (not ``no-store``): the browser may keep the shell but
+        # MUST revalidate it before every use, so a stale shell can never be
+        # served — while an unchanged shell costs only a 304 instead of the
+        # ~274 KB body. ``private`` keeps shared/proxy caches out of it: the
+        # document carries the per-process session token. The ETag changes
+        # whenever the document does (session token, version token, prefix).
+        headers = {
+            "Cache-Control": "private, no-cache, must-revalidate",
+            "ETag": etag,
+        }
+        # Weak comparison is correct here: the gzip and identity encodings
+        # decode to the same bytes.
+        if request is not None and _etag_matches(
+            request.headers.get("if-none-match", ""), etag
+        ):
+            headers["Vary"] = "Accept-Encoding"
+            return Response(status_code=304, headers=headers)
         # Compress the shell like the other static assets (serve_spa). The
         # document is ~274 KB raw and ~47 KB gzipped, and it is re-fetched on
         # every reload because it must not be cached.

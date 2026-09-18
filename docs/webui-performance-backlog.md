@@ -55,9 +55,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** 274.246 B → 48.228 B (−82,4 %); `content-encoding: gzip` + `vary: Accept-Encoding` gesetzt; dekomprimierter Body byte-identisch (`diff` leer). Browser-Smoke `load_within_budget` 1015 ms → 407 ms. `_serve_index` bekam einen optionalen `request`-Parameter, damit der bestehende Call-Site in `serve_spa` ihn durchreicht.
 
 ## 2. index.html mit ETag/304 statt `no-store` · S · Risiko: niedrig
-- [ ] `_serve_index` sendet `Cache-Control: no-store, no-cache, must-revalidate` (web_server.py:6332); kein ETag. Jeder Reload lädt 274 KB neu.
+- [x] `_serve_index` sendet `Cache-Control: no-store, no-cache, must-revalidate` (web_server.py:6332); kein ETag. Jeder Reload lädt 274 KB neu. → **PR #63**
 - **Fix:** ETag aus gerendertem HTML (Hash) + `If-None-Match` → 304.
 - **Akzeptanz:** Zweiter GET mit `If-None-Match` liefert 304 ohne Body.
+- **Ergebnis:** Schwacher ETag (`W/"<sha256[:32]>"`) über das gerenderte HTML + RFC-7232-Vergleich (`If-None-Match`, auch Listen/`*`/Strong-Form). `Cache-Control` von `no-store` → `private, no-cache, must-revalidate` (sonst würde der Browser nie revalidieren). curl: 48.229 B/283 ms → 304/0 B/25 ms; echter Chromium: Reload überträgt 201 B statt 48.507 B. Test: `tests/test_paths.py::test_web_server_root_revalidates_with_etag`.
 
 ## 3. index.html + Version-Token in-memory cachen (mtime-keyed) · S · Risiko: niedrig
 - [ ] `_index_path.read_text` + replace pro Request (web_server.py:6311); `_webui_version_token()` macht bei `-dirty` ein `rglob` über WEB_DIST pro Request (web_server.py:1003-1020). Aktuell ist der Token `-dirty` → rglob aktiv.
