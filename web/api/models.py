@@ -1559,7 +1559,10 @@ def _diag_stage(diag, name: str) -> None:
 # ── all_sessions() with TTL cache ──────────────────────────────────────────────
 _SESSION_LIST_CACHE = {}  # session_dir -> result
 _SESSION_LIST_CACHE_AT = {}
-_SESSION_LIST_CACHE_TTL = 2.0  # seconds: prevent request pileup on 5s-poll + slow I/O
+# The sidebar polls every 5s; a 2s TTL meant almost every poll rebuilt the
+# list from disk. 4s covers a poll interval while staying well below the
+# point where a new session would feel missing (backlog item 28).
+_SESSION_LIST_CACHE_TTL = 4.0  # seconds: prevent request pileup on 5s-poll + slow I/O
 _SESSION_INDEX_PRUNE_AT = {}
 _SESSION_INDEX_PRUNE_TTL = 60.0  # seconds: avoid Path.exists() per sidebar row on every uncached list
 

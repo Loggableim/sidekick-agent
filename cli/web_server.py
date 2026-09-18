@@ -3223,7 +3223,10 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
                     s.get("ended_at") is None
                     and (now - s.get("last_active", s.get("started_at", s.get("updated_at", 0)))) < 300
                 )
-            return {"sessions": page, "total": total, "archived_count": archived_count, "limit": limit, "offset": offset}
+            return _sessions_json_response(
+                request,
+                {"sessions": page, "total": total, "archived_count": archived_count, "limit": limit, "offset": offset},
+            )
 
         from runtime._compat.shim_state import SessionDB
         db = SessionDB()
@@ -3271,13 +3274,16 @@ async def get_sessions(request: Request, limit: int = 200, offset: int = 0):
                     s.get("ended_at") is None
                     and (now - s.get("last_active", s.get("started_at", 0))) < 300
                 )
-            return {
-                "sessions": sessions,
-                "total": total,
-                "limit": limit,
-                "offset": offset,
-                "cli_pending": bool(defer_cli),
-            }
+            return _sessions_json_response(
+                request,
+                {
+                    "sessions": sessions,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "cli_pending": bool(defer_cli),
+                },
+            )
         finally:
             db.close()
     except Exception as exc:
@@ -6374,6 +6380,39 @@ def _etag_matches(if_none_match: str, etag: str) -> bool:
         if candidate == "*" or _strip(candidate) == target:
             return True
     return False
+
+
+def _payload_etag(payload: Any) -> str:
+    """Weak ETag over a JSON-serialisable payload (backlog item 28).
+
+    Hashes the canonical JSON (sorted keys), so the value is stable across
+    processes and restarts rather than depending on an object id or a clock.
+    """
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+    return f'W/"{digest}"'
+
+
+def _sessions_json_response(request: Request, payload: dict) -> Response:
+    """JSON response for /api/sessions with an ETag and 304 handling.
+
+    The sidebar polls this endpoint every 5s with a large payload, so an
+    unchanged list should cost a 304 instead of the full body.
+    """
+    etag = _payload_etag(payload)
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "no-store",
+        # The native route never set these (the legacy route did); adding them
+        # here keeps the API surface consistent.
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "same-origin",
+    }
+    if _etag_matches(request.headers.get("if-none-match", ""), etag):
+        return Response(status_code=304, headers=headers)
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    return Response(content=body, media_type="application/json", headers=headers)
 
 
 # ---------------------------------------------------------------------------

@@ -187,9 +187,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** `_dedupeInFlight(key, factory)` in sessions.js: Promise-Map pro Key, identische Promise für alle überlappenden Aufrufer, Freigabe bei Settle (nur wenn der Eintrag noch der eigene ist — ein späterer Aufruf wird nicht gelöscht), synchrone Throws werden zu einer Rejection statt zu einem hängenden Eintrag. Angewendet auf den **ctx-Poll** (`ctx:<sid>`, mit `typeof`-Guard weil ui.js vor sessions.js lädt) und den **Streaming-Poll** (`session-list`). Browser-Verifikation (Playwright, Requests über Resource-Timing gezählt): **5 parallele Aufrufe mit gleichem Key → 1 Netzwerk-Request**, alle Aufrufer bekommen dieselbe Promise-Instanz, Eintrag nach Abschluss freigegeben, verschiedene Keys unabhängig (2 Requests), Rejection propagiert und gibt frei. Tests: `tests/test_in_flight_dedupe.py` (5).
 
 ## 28. /api/sessions-Cache TTL erhöhen + ETag · S · Risiko: niedrig
-- [ ] `_SESSION_LIST_CACHE_TTL = 2.0` (web/api/models.py:1562) bei 5-s-Poll.
+- [x] `_SESSION_LIST_CACHE_TTL = 2.0` (web/api/models.py:1562) bei 5-s-Poll.
 - **Fix:** TTL 3–5 s; ETag/304 für unveränderte Listen.
 - **Akzeptanz:** Poll-Kosten sinken; keine sichtbare Verzögerung bei Session-Änderungen.
+- **Ergebnis:** TTL 2,0 → **4,0 s** (deckt den 5-s-Poll ab). ETag/304 auf `/api/sessions`: `_payload_etag()` (SHA-256 über kanonisches JSON mit sortierten Keys — stabil über Prozesse/Neustarts, nicht zeitbasiert) + `_etag_matches()` (RFC 7232, Weak/Strong/Liste/`*`). **Wichtig:** Der erste Patch landete in `web/api/routes.py`, aber `/api/sessions` hat eine **native FastAPI-Route** in `cli/web_server.py` — die Legacy-Route wird nie erreicht; Patch dorthin verschoben und den routes.py-Patch zurückgenommen. Messung (TestClient, echtes Profil): **2.653.294 B → 304 mit 0 B**, ETag stabil über identische Requests, stale ETag → voller Body. Zusätzlich die Security-Header (`nosniff`, `DENY`, `same-origin`) auf der nativen Route ergänzt — sie fehlten dort schon vorher (per `git stash` gegen Baseline verifiziert), die Legacy-Route setzte sie. Tests: `tests/test_sessions_etag.py` (5).
 
 ## 30. Agent-Health-Poll gaten · S · Risiko: niedrig
 - [ ] `pollAgentHealth` prüft nur `visibilityState`, nicht Panel-Sichtbarkeit (ui.js:6063); System-Health prüft beides (ui.js:5969).
