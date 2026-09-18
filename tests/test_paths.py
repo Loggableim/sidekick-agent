@@ -582,3 +582,46 @@ def test_web_server_root_revalidates_with_etag(monkeypatch, tmp_path):
     changed = client.get("/", headers={"If-None-Match": 'W/"stale"'})
     assert changed.status_code == 200
     assert changed.content
+
+
+def test_web_server_root_does_not_re_read_index_per_request(monkeypatch, tmp_path):
+    """Warm shell requests must not touch the disk (render + token cache)."""
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from cli import web_server
+
+    client, _headers = _webui_client()
+    client.get("/")  # warm the caches
+
+    reads = []
+    original = Path.read_text
+
+    def counting_read(self, *args, **kwargs):
+        reads.append(str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", counting_read)
+    for _ in range(5):
+        assert client.get("/").status_code == 200
+
+    assert not [path for path in reads if path.endswith("index.html")], reads
+
+
+def test_web_server_root_render_cache_invalidates_on_index_change(monkeypatch, tmp_path):
+    """An edited index.html must be re-rendered, not served from cache."""
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from cli import web_server
+
+    client, _headers = _webui_client()
+    first = client.get("/")
+    assert first.status_code == 200
+
+    index_path = web_server.WEB_DIST / "index.html"
+    original = index_path.read_text(encoding="utf-8")
+    try:
+        index_path.write_text(
+            original + "\n<!-- render-cache-probe -->\n", encoding="utf-8"
+        )
+        refreshed = client.get("/")
+        assert "render-cache-probe" in refreshed.text
+    finally:
+        index_path.write_text(original, encoding="utf-8")
