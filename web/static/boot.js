@@ -1373,9 +1373,9 @@ document.addEventListener('keydown',async e=>{
       return;
     }
     // Close settings panel if active
-    if(_currentPanel==='settings'){_closeSettingsPanel();return;}
+    if(_currentPanel==='settings'&&typeof _closeSettingsPanel==='function'){_closeSettingsPanel();return;}
     // Close workspace dropdown
-    closeWsDropdown();
+    if(typeof closeWsDropdown==='function') closeWsDropdown();
     // Clear session search
     const ss=$('sessionSearch');
     if(ss&&ss.value){ss.value='';filterSessions();}
@@ -2001,7 +2001,12 @@ async function _syncGameModeStateFromServer() {
     if (_bootEarlySessionId) _setConversationRestorePlaceholder('Restoring conversation...');
   } catch (_) {}
   const _profileReady = _bootTimeout(api('/api/profile/active'),20000,'active profile');
-  const _workspaceReady = _bootTimeout(loadWorkspaceList(),10000,'workspace list').catch((e)=>{
+  const _workspaceReady = _bootTimeout(Promise.resolve(
+    (typeof __sidekickLoadPanels === 'function' ? __sidekickLoadPanels() : Promise.resolve())
+  ).then(() => {
+    if (typeof loadWorkspaceList !== 'function') throw new Error('loadWorkspaceList unavailable after panels.js load');
+    return loadWorkspaceList();
+  }),10000,'workspace list').catch((e)=>{
     console.warn('[boot] workspace list unavailable, continuing', e);
   });
   const _spaceConfigReady = _bootTimeout(_loadActiveSpaceConfig(),8000,'space config').catch((e)=>{
@@ -2049,7 +2054,12 @@ async function _syncGameModeStateFromServer() {
   // Any path that creates a new session still awaits _spaceConfigReady below.
   void _workspaceReady;
   void _spaceConfigReady;
-  void _bootTimeout(loadOnboardingWizard(),8000,'onboarding').catch((e)=>{
+  void _bootTimeout(Promise.resolve(
+    (typeof __sidekickLoadPanelScripts === 'function' ? __sidekickLoadPanelScripts('onboarding') : Promise.resolve())
+  ).then(() => {
+    if (typeof loadOnboardingWizard !== 'function') throw new Error('loadOnboardingWizard unavailable after onboarding.js load');
+    return loadOnboardingWizard();
+  }),8000,'onboarding').catch((e)=>{
     if(window && window.localStorage && window.localStorage.getItem('sidekick-debug-boot')==='1'){
       console.debug('[boot] onboarding unavailable, continuing', e);
     }

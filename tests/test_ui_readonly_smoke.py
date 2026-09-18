@@ -27,7 +27,7 @@ def test_nova_readonly_ui_surfaces_are_present_and_redacted():
 
     # Current-chat isolation, SSE stream and bounded/redacted rendering.
     assert "session_id=" in messages and "parent_session_id" in messages
-    assert "/api/subagents/events/stream?session_id=" in messages
+    assert "_eventSourceUrl('api/subagents/events/stream?session_id='" in messages
     assert "function _subagentRedact" in messages
     assert "slice(0, maxLength)" in messages
     assert "Subagent history offline; read-only cache shown." in messages

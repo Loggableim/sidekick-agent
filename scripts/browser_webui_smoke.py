@@ -1546,6 +1546,40 @@ def _titlebar_space_slugs(page) -> list[str]:
         return []
 
 
+def _dismiss_update_dialog(page) -> bool:
+    """Close the service-worker 'Update available' dialog if it is open.
+
+    After a fresh WebUI deploy the SW enters the installed+waiting state and
+    the shell pops a modal confirm dialog (backlog item 20). Its fixed
+    overlay (#appDialogOverlay, z-index 1100) intercepts every pointer
+    event, so the smoke must dismiss it instead of racing it (observed
+    2026-09-18: overlay blocked the #workflowStatusBadge click right after
+    PR #49 deployed). Only auto-cancels the update prompt — any other open
+    dialog is left alone so real UI states still fail loudly.
+    """
+    try:
+        return bool(
+            page.evaluate(
+                """
+                () => {
+                    const overlay = document.getElementById('appDialogOverlay');
+                    if (!overlay || overlay.style.display === 'none') return false;
+                    const title = document.getElementById('appDialogTitle');
+                    if (!title || !/update/i.test(String(title.textContent || ''))) return false;
+                    const cancel = document.getElementById('appDialogCancel');
+                    if (cancel && cancel.style.display !== 'none' && !cancel.disabled) {
+                        cancel.click();
+                        return true;
+                    }
+                    return false;
+                }
+                """
+            )
+        )
+    except Exception:
+        return False
+
+
 def _open_titlebar_space_menu(page, timeout: int = 5000) -> bool:
     selector = '[data-testid="titlebar-space-option"]'
     try:
@@ -1762,7 +1796,12 @@ def run_smoke(
                 # even when the app shell is already present. Commit the navigation
                 # first, then let the explicit selector waits prove readiness.
                 page.goto(page_url, wait_until="commit", timeout=30000)
-                page.wait_for_selector('[data-testid="titlebar-space-button"]', timeout=10000)
+                # Boot is gated by backend calls that can take >10s under file
+                # contention (observed 2026-09-19: profile 9s, workspaces 27s,
+                # spaces >40s during session-save PermissionErrors), so the
+                # titlebar renders at ~11s on this machine. 10s timed out by a
+                # hair; 30s matches the goto budget and the other waits here.
+                page.wait_for_selector('[data-testid="titlebar-space-button"]', timeout=30000)
                 timings["load_ms"] = round((time.time() - started) * 1000)
                 try:
                     page.wait_for_selector('[data-testid="session-list-item"]', timeout=20000)
@@ -1858,7 +1897,14 @@ def run_smoke(
             )
             # The workflow pill is the only header menu trigger in the current
             # design (test_browser_titlebar_workflow_pill_is_the_only_menu_trigger);
-            # open it and assert the workflow palette renders.
+            # open it and assert the workflow palette renders. The space dropdown
+            # opened by the space checks above stays open (no outside click
+            # happens) and its fixed z-9999 panel can overlap the badge, so its
+            # emoji span intercepts the click (observed 2026-09-18: "tdd-emoji
+            # intercepts pointer events" when the badge label grew wide enough
+            # to reach the dropdown). Close it before clicking the pill.
+            page.evaluate("() => { if (typeof closeSpaceDropdowns === 'function') closeSpaceDropdowns(); }")
+            _dismiss_update_dialog(page)
             page.evaluate("() => { if (typeof browserSetDrawerOpen === 'function') browserSetDrawerOpen(false); }")
             page.wait_for_timeout(150)
             page.locator("#workflowStatusBadge").click(timeout=3000)
@@ -1869,8 +1915,14 @@ def run_smoke(
 
             if switch_workspace and switch_workspace != workspace:
                 page.goto(page_url, wait_until="commit", timeout=30000)
-                page.wait_for_selector('[data-testid="titlebar-space-button"]', timeout=10000)
+                # Boot is gated by backend calls that can take >10s under file
+                # contention (observed 2026-09-19: profile 9s, workspaces 27s,
+                # spaces >40s during session-save PermissionErrors), so the
+                # titlebar renders at ~11s on this machine. 10s timed out by a
+                # hair; 30s matches the goto budget and the other waits here.
+                page.wait_for_selector('[data-testid="titlebar-space-button"]', timeout=30000)
                 page.wait_for_timeout(500)
+                _dismiss_update_dialog(page)
                 _open_titlebar_space_menu(page)
                 switch_selector = (
                     f'[data-testid="titlebar-space-option"]'

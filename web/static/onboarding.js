@@ -530,7 +530,10 @@ async function _finishOnboarding(){
   ONBOARDING.active=false;
   $('onboardingOverlay').style.display='none';
   showToast(t('onboarding_complete'));
-  await loadWorkspaceList();
+  if (typeof loadWorkspaceList !== 'function' && typeof __sidekickLoadPanels === 'function') {
+    await __sidekickLoadPanels();
+  }
+  if (typeof loadWorkspaceList === 'function') await loadWorkspaceList();
   if(typeof renderSessionList==='function') await renderSessionList();
   if(!S.session && typeof newSession==='function'){
     await newSession(true);

@@ -3687,9 +3687,15 @@ def test_boot_uses_realistic_metadata_timeouts():
 
     assert "_bootTimeout(api('/api/settings'),20000,'settings')" in boot_js
     assert "_bootTimeout(api('/api/profile/active'),20000,'active profile')" in boot_js
-    assert "_bootTimeout(loadWorkspaceList(),10000,'workspace list')" in boot_js
+    # panels.js is lazy-loaded (panels-loader.js), so boot must load it before
+    # calling loadWorkspaceList() — an unguarded call crashes the whole boot.
+    assert "typeof __sidekickLoadPanels === 'function' ? __sidekickLoadPanels() : Promise.resolve()" in boot_js
+    assert "if (typeof loadWorkspaceList !== 'function') throw new Error('loadWorkspaceList unavailable after panels.js load')" in boot_js
+    assert "return loadWorkspaceList();" in boot_js
     assert "_bootTimeout(_loadActiveSpaceConfig(),8000,'space config')" in boot_js
-    assert "_bootTimeout(loadOnboardingWizard(),8000,'onboarding')" in boot_js
+    # onboarding.js is lazy-loaded (feature-loader.js) — same guard required.
+    assert "typeof __sidekickLoadPanelScripts === 'function' ? __sidekickLoadPanelScripts('onboarding') : Promise.resolve()" in boot_js
+    assert "if (typeof loadOnboardingWizard !== 'function') throw new Error('loadOnboardingWizard unavailable after onboarding.js load')" in boot_js
     assert "if (saved && !_bootMissingSession &&" in boot_js
     assert "suppressMissingSessionMessage ? {logError:false} : undefined" in sessions_js
     assert "_withSpaceTimeout(api('/api/spaces'), 20000, 'load spaces')" in spaces_js
