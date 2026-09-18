@@ -485,10 +485,41 @@ def _ensure_workspace_dir(path: Path) -> bool:
 
 
 
+_WORKSPACE_RESOLVE_CACHE: dict = {"key": None, "path": None}
+
+
+def _workspace_resolve_key(raw: str | Path | None) -> tuple:
+    """Inputs that can change the resolved default workspace."""
+    return (
+        str(raw) if raw not in (None, "") else None,
+        os.getenv("SIDEKICK_WEBUI_DEFAULT_WORKSPACE") or None,
+        str(HOME),
+        str(STATE_DIR),
+    )
+
+
 def resolve_default_workspace(raw: str | Path | None = None) -> Path:
-    """Return the first usable workspace path, creating it when possible."""
+    """Return the first usable workspace path, creating it when possible.
+
+    Memoised on the inputs that select the candidate list. The cached path is
+    re-validated with a single ``is_dir()`` check, so a workspace deleted
+    outside the process still falls back to a fresh resolution. This matters
+    because ``load_settings`` (called on every API request via
+    ``is_auth_enabled``) resolves the workspace as part of its cache key.
+    """
+    cache_key = _workspace_resolve_key(raw)
+    cached = _WORKSPACE_RESOLVE_CACHE["path"]
+    if _WORKSPACE_RESOLVE_CACHE["key"] == cache_key and cached is not None:
+        try:
+            if cached.is_dir():
+                return cached
+        except OSError:
+            pass
+
     for candidate in _workspace_candidates(raw):
         if _ensure_workspace_dir(candidate):
+            _WORKSPACE_RESOLVE_CACHE["key"] = cache_key
+            _WORKSPACE_RESOLVE_CACHE["path"] = candidate
             return candidate
     raise RuntimeError(
         "Could not create or access any usable workspace directory. "
@@ -4461,8 +4492,42 @@ def _normalize_appearance(theme, skin) -> tuple[str, str]:
     return next_theme, next_skin
 
 
+_SETTINGS_CACHE: dict = {"key": None, "settings": None}
+
+
+def _settings_cache_key() -> tuple | None:
+    """Identity of the settings inputs: file mtime/size plus the workspace root.
+
+    ``load_settings`` merges the on-disk file with defaults, the resolved
+    default workspace and the effective default model. The file stat covers the
+    stored values; the workspace root covers ``resolve_default_workspace``.
+    """
+    try:
+        stat = SETTINGS_FILE.stat()
+        file_key = (int(stat.st_mtime_ns), stat.st_size)
+    except OSError:
+        file_key = None
+    try:
+        workspace_key = str(resolve_default_workspace())
+    except Exception:
+        workspace_key = None
+    return (file_key, workspace_key)
+
+
 def load_settings() -> dict:
-    """Load settings from disk, merging with defaults for any missing keys."""
+    """Load settings from disk, merging with defaults for any missing keys.
+
+    Cached by (settings.json mtime/size, resolved default workspace): the
+    function is called on every API request via ``is_auth_enabled()`` and a
+    warm call must not re-read the file. ``save_settings`` refreshes the cache
+    in place, so a settings change is visible immediately.
+    """
+    cache_key = _settings_cache_key()
+    if cache_key is not None and _SETTINGS_CACHE["key"] == cache_key:
+        cached = _SETTINGS_CACHE["settings"]
+        if cached is not None:
+            return dict(cached)
+
     settings = dict(_SETTINGS_DEFAULTS)
     settings["default_workspace"] = str(resolve_default_workspace())
     stored = None
@@ -4491,6 +4556,9 @@ def load_settings() -> dict:
         stored.get("skin") if isinstance(stored, dict) else settings.get("skin"),
     )
     settings["default_model"] = get_effective_default_model()
+    if cache_key is not None:
+        _SETTINGS_CACHE["key"] = cache_key
+        _SETTINGS_CACHE["settings"] = dict(settings)
     return settings
 
 
@@ -4592,6 +4660,10 @@ def save_settings(settings: dict) -> dict:
     if "default_workspace" in current:
         DEFAULT_WORKSPACE = resolve_default_workspace(current["default_workspace"])
     current["default_model"] = get_effective_default_model()
+    # Refresh the read cache in place so the change is visible immediately
+    # (the mtime key would catch it too, but this avoids a re-read).
+    _SETTINGS_CACHE["key"] = _settings_cache_key()
+    _SETTINGS_CACHE["settings"] = dict(current)
     return current
 
 

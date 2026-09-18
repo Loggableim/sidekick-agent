@@ -24,8 +24,24 @@ PASSWORD_ENV_VARS = ("SIDEKICK_WEBUI_PASSWORD",)
 SESSION_TTL_ENV_VARS = ("SIDEKICK_WEBUI_SESSION_TTL",)
 
 
+_STATE_DIR_RESOLVE_CACHE: dict = {"raw": None, "path": None}
+
+
 def _state_dir() -> Path:
-    return Path(_cfg.STATE_DIR).expanduser().resolve()
+    """Resolve the active state dir, memoised on the raw ``STATE_DIR`` value.
+
+    ``Path.resolve()`` is a ``realpath`` syscall (~0.5 ms on Windows) and this
+    runs on every ``is_auth_enabled()`` call, i.e. on every API request.
+    """
+    raw = str(_cfg.STATE_DIR)
+    if _STATE_DIR_RESOLVE_CACHE["raw"] == raw:
+        cached = _STATE_DIR_RESOLVE_CACHE["path"]
+        if cached is not None:
+            return cached
+    path = Path(_cfg.STATE_DIR).expanduser().resolve()
+    _STATE_DIR_RESOLVE_CACHE["raw"] = raw
+    _STATE_DIR_RESOLVE_CACHE["path"] = path
+    return path
 
 
 def _get_password_env_value() -> str:
