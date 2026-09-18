@@ -79,6 +79,23 @@ jobs:
         run: |
           python tests/smoke_all.py
 
+  js-parse:
+    name: webui js parse check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: node --check every web/static/*.js
+        run: python scripts/check_webui_js.py
+
   package:
     name: package integrity
     runs-on: ubuntu-latest

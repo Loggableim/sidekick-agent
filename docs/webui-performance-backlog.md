@@ -96,9 +96,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** `grep -c "function _startGlobalApprovalPoll" web/static/messages.js` = 1; Boot startet genau einen Poll.
 
 ## 39. CI-Gate: `node --check` über alle web/static/*.js · S · Risiko: niedrig
-- [ ] Kein `node --check` in tests/, scripts/ oder CI; ein SyntaxError killt die ganze UI (Skill `webui-js-parse-failure-triage`).
+- [x] Kein `node --check` in tests/, scripts/ oder CI; ein SyntaxError killt die ganze UI (Skill `webui-js-parse-failure-triage`). → **PR #72**
 - **Fix:** Kleines Script (z. B. `scripts/check_webui_js.py`) + Einbindung in `.github/workflows/ci.yml`.
 - **Akzeptanz:** CI schlägt bei absichtlich eingebautem SyntaxError fehl; lokal Exit 0.
+- **Ergebnis:** `scripts/check_webui_js.py` prüft alle `web/static/*.js` per `node --check` (Exit 1 + Node-Fehlerausgabe bei Fehlschlag), neuer CI-Job `js-parse` (ubuntu, Node 20, 5 min Timeout). Verifiziert: lokal **23 Dateien OK** (Exit 0); mit absichtlich eingebautem SyntaxError in `icons.js` → **1 von 23 schlägt fehl** (Exit 1, Node-Syntaxfehler ausgegeben), nach Revert wieder grün. Tests: `tests/test_webui_js_parse_gate.py` (4, inkl. CI-Verdrahtung).
 
 ---
 
