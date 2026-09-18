@@ -3210,7 +3210,10 @@ let _globalApprovalKnown = new Set();  // session_ids with known pending
 
 function _startGlobalApprovalPoll() {
   if (_globalApprovalTimer) return;
-  _globalApprovalTimer = setInterval(_pollGlobalApprovals, 3000);
+  // 3s was needlessly chatty for a cross-session badge: the poll only feeds
+  // sidebar badges and toasts, so a slower cadence is fine while the tab is
+  // visible, and a hidden tab skips the request entirely (see below).
+  _globalApprovalTimer = setInterval(_pollGlobalApprovals, 8000);
   _pollGlobalApprovals();  // immediate first poll
 }
 
@@ -3221,7 +3224,17 @@ function _stopGlobalApprovalPoll() {
   }
 }
 
+// A background tab must not keep polling: the badges/toasts are invisible
+// there. Returning to the tab polls once immediately so the state is fresh
+// without waiting for the next interval tick.
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && _globalApprovalTimer) _pollGlobalApprovals();
+  });
+}
+
 async function _pollGlobalApprovals() {
+  if (typeof document !== 'undefined' && document.hidden) return;
   try {
     const data = await api("/api/approval/pending-all");
     if (!data || !data.sessions) return;
