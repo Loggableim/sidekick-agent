@@ -85,9 +85,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** Hint im DOM; CDN-Assets starten früher (Performance-Panel).
 
 ## 21. Approval-Poll: Visibility-Gate + Intervall · S · Risiko: niedrig
-- [ ] `_pollGlobalApprovals` läuft alle 3 s ohne `document.hidden`-Check (web/static/messages.js:3261, 3274).
+- [x] `_pollGlobalApprovals` läuft alle 3 s ohne `document.hidden`-Check (web/static/messages.js:3261, 3274). → **PR #70**
 - **Fix:** `if(document.hidden) return;` + Intervall 3 s → 5–10 s; sofortiger Poll bei `visibilitychange`.
 - **Akzeptanz:** Im Hintergrund-Tab keine `/api/approval/pending-all`-Requests (Netzwerk-Panel).
+- **Ergebnis:** Gate `if(document.hidden) return;` am Anfang von `_pollGlobalApprovals`, Intervall 3 s → **8 s**, `visibilitychange`-Handler pollt beim Zurückkehren sofort (nur wenn der Poll aktiv ist). Browser-Verifikation (Playwright, `document.hidden` überschrieben, `api()`-Aufrufe gezählt): hidden → **0 Calls**, visible → **1 Call**, registriertes Intervall **8000 ms**. Tests: `tests/test_approval_poll_gate.py` (3).
 
 ## 22. Doppelten `_startGlobalApprovalPoll` entfernen · S · Risiko: niedrig
 - [ ] Zwei Definitionen: messages.js:2875 (tot) und 3261 (aktiv); doppeltes `_stop` (2912/3267). Die zweite Definition gewinnt.
