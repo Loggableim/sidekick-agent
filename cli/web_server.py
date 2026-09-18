@@ -6384,7 +6384,23 @@ def mount_spa(application: FastAPI):
                             "Service-Worker-Allowed": "/",
                         },
                     )
-                return FileResponse(file_path)
+                # Legacy WebUI assets carry a content/version query parameter.
+                # Cache those immutable files aggressively so Zen/Firefox does
+                # not re-download several megabytes on every reload or route
+                # transition. Keep unversioned responses revalidating while
+                # developing and never cache the HTML shell above.
+                versioned = bool(
+                    request.query_params.get("v")
+                    or request.query_params.get("version")
+                )
+                headers = {
+                    "Cache-Control": (
+                        "public, max-age=31536000, immutable"
+                        if versioned
+                        else "no-cache"
+                    )
+                }
+                return FileResponse(file_path, headers=headers)
         return _serve_index(prefix)
 
 
