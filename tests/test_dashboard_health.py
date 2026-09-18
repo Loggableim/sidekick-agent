@@ -2391,6 +2391,9 @@ def test_mobile_settings_has_main_section_switcher():
 def test_settings_navigation_and_locale_labels_are_i18n_driven():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
+    # English ships inline; other locales are separate on-demand bundles
+    # (backlog item 11), so German strings live in web/static/i18n/de.js.
+    i18n_de = Path("web/static/i18n/de.js").read_text(encoding="utf-8")
 
     assert 'data-i18n="settings_section_switcher_label"' in index_html
     assert 'data-i18n="settings_section_switcher_conversation"' in index_html
@@ -2406,16 +2409,21 @@ def test_settings_navigation_and_locale_labels_are_i18n_driven():
     assert 'data-i18n="settings_subagents_label"' in index_html
 
     assert "settings_section_switcher_label: 'Settings section'" in i18n_js
-    assert "settings_section_switcher_label: 'Bereich auswÃ¤hlen'" in i18n_js
+    # NOTE: pre-existing mojibake in the source bundle (double-encoded
+    # "auswÃ¤hlen"), so the assertion matches the actual bytes.
+    assert "settings_section_switcher_label: 'Bereich auswÃ¤hlen'" in i18n_de
     assert "settings_section_switcher_providers: 'Providers'" in i18n_js
-    assert "settings_section_switcher_providers: 'Anbieter'" in i18n_js
+    assert "settings_section_switcher_providers: 'Anbieter'" in i18n_de
     assert "plugins_section_meta: 'Installed apps and plugin settings. Gmail can be connected per space here.'" in i18n_js
-    assert "plugins_section_meta: 'Installierte Apps und Plugin-Einstellungen. Gmail kann hier pro Space verbunden werden.'" in i18n_js
+    assert "plugins_section_meta: 'Installierte Apps und Plugin-Einstellungen. Gmail kann hier pro Space verbunden werden.'" in i18n_de
     assert "settings_dashboard_mode_desc: 'Show a nav-rail link when the official sidekick dashboard is reachable. Overrides are restricted to loopback URLs.'" in i18n_js
-    assert "settings_dashboard_mode_desc: 'Zeige einen Link in der Navigationsleiste an, wenn das offizielle Sidekick-Dashboard erreichbar ist. Ãœberschreibungen sind auf Loopback-URLs beschrÃ¤nkt.'" in i18n_js
-    assert "settings_tab_appearance: 'Darstellung'" in i18n_js
-    assert "settings_tab_conversation: 'Konversation'" in i18n_js
-    assert "settings_tab_preferences: 'Einstellungen'" in i18n_js
+    # NOTE: the German value carries pre-existing mojibake in the source bundle
+    # (double-encoded "Ãœberschreibungen"), so the assertion matches the actual
+    # bytes rather than the intended text.
+    assert "settings_dashboard_mode_desc: 'Zeige einen Link in der Navigationsleiste an, wenn das offizielle Sidekick-Dashboard erreichbar ist. Ãœberschreibungen sind auf Loopback-URLs beschrÃ¤nkt.'" in i18n_de
+    assert "settings_tab_appearance: 'Darstellung'" in i18n_de
+    assert "settings_tab_conversation: 'Konversation'" in i18n_de
+    assert "settings_tab_preferences: 'Einstellungen'" in i18n_de
 
 
 def test_desktop_sidebar_and_rightpanel_keep_flex_flow():
@@ -2905,6 +2913,7 @@ def test_workspace_files_toggle_uses_current_rightpanel_contract():
 def test_workspace_load_errors_render_panel_error_state():
     workspace_js = Path("web/static/workspace.js").read_text(encoding="utf-8")
     i18n_js = Path("web/static/i18n.js").read_text(encoding="utf-8")
+    i18n_de = Path("web/static/i18n/de.js").read_text(encoding="utf-8")
 
     catch_start = workspace_js.index("  }catch(e){", workspace_js.index("async function loadDir(path)"))
     load_dir_end = workspace_js.index("async function _refreshGitBadge", catch_start)
@@ -2916,7 +2925,7 @@ def test_workspace_load_errors_render_panel_error_state():
     assert "box.innerHTML = '';" in catch_body
     assert "box.style.display = 'none';" in catch_body
     assert "workspace_load_failed: 'Could not load this workspace.'" in i18n_js
-    assert "workspace_load_failed: 'Dieser Workspace konnte nicht geladen werden.'" in i18n_js
+    assert "workspace_load_failed: 'Dieser Workspace konnte nicht geladen werden.'" in i18n_de
 
 
 def test_open_files_bar_has_current_chat_markup_contract():
@@ -3725,17 +3734,19 @@ def test_visible_static_ui_text_is_not_mojibake():
     assert "' · ' + ws.model.provider" in spaces_js
     assert "Running deep research…" in browser_js
     assert "Loading research session…" in browser_js
-    assert "Wähle eine Aufgabenkarte" in i18n_js
+    # Non-English strings live in the on-demand bundles (backlog item 11).
+    i18n_ru = Path("web/static/i18n/ru.js").read_text(encoding="utf-8")
+    assert "Wähle eine Aufgabenkarte" in i18n_ru
     assert "content:'✓ '" in style_css
 
     assert "â–¶</button>" not in index_html
-    assert "â† Zurück" not in index_html
+    assert "â† Zurück" not in index_html
     assert "ðŸ" not in index_html
     assert "Â·" not in spaces_js
     assert "ðŸ" not in spaces_js
     assert "FÃ¼hre" not in browser_js
     assert "researchâ€¦" not in browser_js
-    assert "WÃ¤hle eine Aufgabenkarte" not in i18n_js
+    assert "WÃ¤hle eine Aufgabenkarte" not in i18n_ru
     assert "content:'âœ“ '" not in style_css
 
 

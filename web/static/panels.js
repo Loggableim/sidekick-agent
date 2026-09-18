@@ -6471,7 +6471,9 @@ async function loadSettingsPanel(){
       : (settings.language || localStorage.getItem('sidekick-lang') || 'en');
     // Keep settings modal and current page strings in sync with the resolved locale.
     if(typeof setLocale==='function'){
-      setLocale(resolvedLanguage);
+      // Non-English bundles are fetched on demand (backlog item 11).
+      if(typeof setLocaleAsync==='function') await setLocaleAsync(resolvedLanguage);
+      else setLocale(resolvedLanguage);
       if(typeof applyLocaleToDOM==='function') applyLocaleToDOM();
     }
     // Populate model dropdown from /api/models + live model fetch (#872)
@@ -9033,7 +9035,11 @@ function _applySavedSettingsUi(saved, body, opts){
   window._sessionEndlessScrollEnabled=!!body.session_endless_scroll;
   window._botName=body.bot_name||'Nova';
   if(typeof applyBotName==='function') applyBotName();
-  if(typeof setLocale==='function') setLocale(language);
+  if(typeof setLocale==='function'){
+    // Non-English bundles are fetched on demand (backlog item 11).
+    if(typeof setLocaleAsync==='function') setLocaleAsync(language);
+    else setLocale(language);
+  }
   if(typeof applyLocaleToDOM==='function') applyLocaleToDOM();
   if(typeof startGatewaySSE==='function'){
     if(showCliSessions) startGatewaySSE();

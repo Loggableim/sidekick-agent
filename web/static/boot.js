@@ -1927,7 +1927,9 @@ async function _syncGameModeStateFromServer() {
       const _lang=typeof resolvePreferredLocale==='function'
         ? resolvePreferredLocale(s.language, localStorage.getItem('sidekick-lang'))
         : (s.language || localStorage.getItem('sidekick-lang') || 'en');
-      setLocale(_lang);
+      // Non-English bundles are fetched on demand (backlog item 11).
+      if(typeof setLocaleAsync==='function') await setLocaleAsync(_lang);
+      else setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
     await _syncGameModeStateFromServer();
@@ -1961,7 +1963,8 @@ async function _syncGameModeStateFromServer() {
       const _lang=typeof resolvePreferredLocale==='function'
         ? resolvePreferredLocale(null, localStorage.getItem('sidekick-lang'))
         : (localStorage.getItem('sidekick-lang') || 'en');
-      setLocale(_lang);
+      if(typeof setLocaleAsync==='function') setLocaleAsync(_lang);
+      else setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
     applyBotName();
