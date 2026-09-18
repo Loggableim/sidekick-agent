@@ -457,6 +457,9 @@ async function switchPanel(name, opts = {}) {
   }
   _syncLogsAutoRefresh();
   if (typeof _syncSystemHealthMonitorVisibility === 'function') _syncSystemHealthMonitorVisibility();
+  // The agent-health poll is gated on the insights panel being visible
+  // (backlog item 30), so a panel switch must re-evaluate it.
+  if (typeof _syncAgentHealthMonitorVisibility === 'function') _syncAgentHealthMonitorVisibility();
   if (nextPanel === 'settings') {
     switchSettingsSection(_currentSettingsSection);
     loadSettingsPanel();

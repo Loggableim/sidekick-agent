@@ -6112,8 +6112,25 @@ function dismissAgentHealthAlert(){
   _setAgentHealthDismissed(true);
   _hideAgentHealthAlert();
 }
+// ── Agent health gate (backlog item 30) ──────────────────────────────────────
+// The heartbeat feeds a global alert banner, so it cannot be gated on a single
+// panel. It polls while the tab is visible AND either the health surface is on
+// screen (insights panel) or an alert is currently showing. With neither, the
+// banner would be invisible anyway, so the poll is skipped.
+function _agentHealthPanelIsVisible(){
+  return !!document.querySelector('main.main.showing-insights') && !!$('systemHealthPanel');
+}
+function _agentHealthAlertIsActive(){
+  const banner=$('agentHealthBanner');
+  return !!(banner && !banner.hidden && banner.classList.contains('visible'));
+}
+function _agentHealthShouldPoll(){
+  return document.visibilityState === 'visible'
+    && (_agentHealthPanelIsVisible() || _agentHealthAlertIsActive());
+}
+
 async function pollAgentHealth(){
-  if(document.visibilityState !== 'visible') return;
+  if(!_agentHealthShouldPoll()) return;
   try{
     const payload=await api('/api/health/agent');
     if(payload.alive === true){
@@ -6137,7 +6154,7 @@ async function pollAgentHealth(){
   }
 }
 function startAgentHealthMonitor(){
-  if(document.visibilityState !== 'visible') return;
+  if(!_agentHealthShouldPoll()) return;
   if(_agentHealthTimer) return;
   void pollAgentHealth();
   _agentHealthTimer=setInterval(pollAgentHealth, AGENT_HEALTH_INTERVAL_MS);
@@ -6146,7 +6163,7 @@ function stopAgentHealthMonitor(){
   if(_agentHealthTimer){clearInterval(_agentHealthTimer);_agentHealthTimer=null;}
 }
 function _syncAgentHealthMonitorVisibility(){
-  if(document.visibilityState === 'visible') startAgentHealthMonitor();
+  if(_agentHealthShouldPoll()) startAgentHealthMonitor();
   else stopAgentHealthMonitor();
 }
 document.addEventListener('visibilitychange',_syncAgentHealthMonitorVisibility);
