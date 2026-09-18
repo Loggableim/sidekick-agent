@@ -1000,7 +1000,55 @@ app.router.on_startup.append(_start_nova_space_supervision_ticker)
 app.router.on_startup.append(_release_game_mode_resources_on_startup)
 
 
+# ---------------------------------------------------------------------------
+# Shell render cache.
+#
+# ``_serve_index`` used to re-read index.html and re-scan WEB_DIST for the
+# version token on every request (~20 ms of event-loop blocking per request,
+# measured on the 118-file shell tree). Both results only change when a file on
+# disk changes, so they are cached and keyed by the mtimes they depend on:
+#   * the version token by the newest mtime in WEB_DIST,
+#   * the rendered HTML by (path, mtime, size, prefix, token).
+# ---------------------------------------------------------------------------
+_VERSION_TOKEN_CACHE: dict[str, Any] = {"key": None, "token": None}
+_INDEX_RENDER_CACHE: dict[tuple, str] = {}
+_INDEX_RENDER_CACHE_MAX = 8
+
+
+def _webui_newest_mtime() -> int:
+    """Newest file mtime under WEB_DIST, via a cheap scandir walk.
+
+    ``Path.rglob`` + ``stat`` costs ~17 ms per call on the shell tree; this
+    walk costs ~0.8 ms and yields the same value.
+    """
+    newest = 0
+    stack = [WEB_DIST]
+    while stack:
+        directory = stack.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                        elif entry.is_file(follow_symlinks=False):
+                            mtime = int(entry.stat(follow_symlinks=False).st_mtime)
+                            if mtime > newest:
+                                newest = mtime
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return newest
+
+
 def _webui_version_token() -> str:
+    """Cache-busting token for the shell assets.
+
+    The ``-dirty`` suffix carries the newest mtime in WEB_DIST so a local
+    hotfix busts the browser cache. The result is cached under that mtime, so
+    a warm request performs no directory scan at all.
+    """
     try:
         from web.api.updates import WEBUI_VERSION
 
@@ -1009,15 +1057,16 @@ def _webui_version_token() -> str:
         token = str(__version__)
 
     if token.endswith("-dirty"):
-        try:
-            newest_mtime = max(
-                int(path.stat().st_mtime)
-                for path in WEB_DIST.rglob("*")
-                if path.is_file()
-            )
+        newest_mtime = _webui_newest_mtime()
+        if newest_mtime:
+            cache_key = f"{token}:{newest_mtime:x}"
+            if _VERSION_TOKEN_CACHE["key"] == cache_key:
+                return _VERSION_TOKEN_CACHE["token"]
             token = f"{token}-{newest_mtime:x}"
-        except Exception:
-            pass
+            quoted = urllib.parse.quote(token, safe="")
+            _VERSION_TOKEN_CACHE["key"] = cache_key
+            _VERSION_TOKEN_CACHE["token"] = quoted
+            return quoted
     return urllib.parse.quote(token, safe="")
 
 # ---------------------------------------------------------------------------
@@ -6362,25 +6411,47 @@ def mount_spa(application: FastAPI):
         the rendered HTML is gzip-compressed for clients that accept it (the
         shell is ~274 KB uncompressed, ~47 KB gzipped).
         """
-        html = _index_path.read_text(encoding="utf-8").replace(
-            "__WEBUI_VERSION__", _webui_version_token()
-        )
-        chat_js = "true" if _DASHBOARD_EMBEDDED_CHAT_ENABLED else "false"
-        token_script = (
-            f'<script>window.__SIDEKICK_SESSION_TOKEN__="{_SESSION_TOKEN}";'
-            f"window.__SIDEKICK_DASHBOARD_EMBEDDED_CHAT__={chat_js};"
-            f'window.__SIDEKICK_BASE_PATH__="{prefix}";</script>'
-        )
-        if prefix:
-            # Rewrite absolute asset URLs baked into the Vite build so the
-            # browser fetches them through the same proxy prefix.
-            html = html.replace('href="/assets/', f'href="{prefix}/assets/')
-            html = html.replace('src="/assets/', f'src="{prefix}/assets/')
-            html = html.replace('href="/favicon.ico"', f'href="{prefix}/favicon.ico"')
-            html = html.replace('href="/fonts/', f'href="{prefix}/fonts/')
-            html = html.replace('href="/ds-assets/', f'href="{prefix}/ds-assets/')
-            html = html.replace('src="/ds-assets/', f'src="{prefix}/ds-assets/')
-        html = html.replace("</head>", f"{token_script}</head>", 1)
+        token = _webui_version_token()
+        # The rendered document only changes when index.html changes on disk or
+        # when one of the injected values changes (version token, prefix). The
+        # session token and the embedded-chat flag are per-process constants.
+        try:
+            stat = _index_path.stat()
+            cache_key = (
+                str(_index_path),
+                int(stat.st_mtime_ns),
+                stat.st_size,
+                prefix,
+                token,
+            )
+        except OSError:
+            cache_key = None
+
+        html = _INDEX_RENDER_CACHE.get(cache_key) if cache_key else None
+        if html is None:
+            html = _index_path.read_text(encoding="utf-8").replace(
+                "__WEBUI_VERSION__", token
+            )
+            chat_js = "true" if _DASHBOARD_EMBEDDED_CHAT_ENABLED else "false"
+            token_script = (
+                f'<script>window.__SIDEKICK_SESSION_TOKEN__="{_SESSION_TOKEN}";'
+                f"window.__SIDEKICK_DASHBOARD_EMBEDDED_CHAT__={chat_js};"
+                f'window.__SIDEKICK_BASE_PATH__="{prefix}";</script>'
+            )
+            if prefix:
+                # Rewrite absolute asset URLs baked into the Vite build so the
+                # browser fetches them through the same proxy prefix.
+                html = html.replace('href="/assets/', f'href="{prefix}/assets/')
+                html = html.replace('src="/assets/', f'src="{prefix}/assets/')
+                html = html.replace('href="/favicon.ico"', f'href="{prefix}/favicon.ico"')
+                html = html.replace('href="/fonts/', f'href="{prefix}/fonts/')
+                html = html.replace('href="/ds-assets/', f'href="{prefix}/ds-assets/')
+                html = html.replace('src="/ds-assets/', f'src="{prefix}/ds-assets/')
+            html = html.replace("</head>", f"{token_script}</head>", 1)
+            if cache_key:
+                if len(_INDEX_RENDER_CACHE) >= _INDEX_RENDER_CACHE_MAX:
+                    _INDEX_RENDER_CACHE.clear()
+                _INDEX_RENDER_CACHE[cache_key] = html
         etag = _index_etag(html)
         # ``no-cache`` (not ``no-store``): the browser may keep the shell but
         # MUST revalidate it before every use, so a stale shell can never be
@@ -6399,7 +6470,7 @@ def mount_spa(application: FastAPI):
         ):
             headers["Vary"] = "Accept-Encoding"
             return Response(status_code=304, headers=headers)
-        # Compress the shell like the other static assets (serve_spa). The
+
         # document is ~274 KB raw and ~47 KB gzipped, and it is re-fetched on
         # every reload because it must not be cached.
         if request is not None and "gzip" in request.headers.get(
