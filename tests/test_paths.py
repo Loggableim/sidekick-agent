@@ -560,3 +560,25 @@ def test_web_server_root_serves_html(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert "<title>Sidekick</title>" in response.text
+
+
+def test_web_server_root_revalidates_with_etag(monkeypatch, tmp_path):
+    """The shell must revalidate: unchanged reloads answer 304 without a body."""
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    client, _headers = _webui_client()
+
+    first = client.get("/")
+    assert first.status_code == 200
+    etag = first.headers.get("etag")
+    assert etag
+    # ``no-store`` would prevent the browser from ever sending If-None-Match.
+    assert "no-store" not in first.headers.get("cache-control", "")
+
+    revalidated = client.get("/", headers={"If-None-Match": etag})
+    assert revalidated.status_code == 304
+    assert revalidated.content == b""
+    assert revalidated.headers.get("etag") == etag
+
+    changed = client.get("/", headers={"If-None-Match": 'W/"stale"'})
+    assert changed.status_code == 200
+    assert changed.content
