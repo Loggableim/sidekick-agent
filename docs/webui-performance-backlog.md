@@ -67,9 +67,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** Zwei Caches: Version-Token (keyed auf `WEBUI_VERSION` + newest-mtime) und gerenderte HTML (keyed auf `(path, mtime_ns, size, prefix, token)`, LRU-Cap 8). Zusätzlich `rglob`+`stat` (~17 ms) durch `os.scandir`-Walk (~0,8 ms) ersetzt. Messung über 30 warme Requests bei dirty tree: `read_text(index.html)` 30 → **0**, `rglob` 30 → **0**, warm GET / 28,10 ms → **8,95 ms** (−68 %). Tests: `test_web_server_root_does_not_re_read_index_per_request`, `test_web_server_root_render_cache_invalidates_on_index_change`.
 
 ## 4. Gzip-Ergebnisse cachen statt pro Request komprimieren · S–M · Risiko: niedrig
-- [ ] `gzip.compress(file_path.read_bytes(), 5)` pro Request (web_server.py:6414). Gemessen: 87 ms Event-Loop-Blocking für alle Shell-Assets pro Kalt-Load.
+- [x] `gzip.compress(file_path.read_bytes(), 5)` pro Request (web_server.py:6414). Gemessen: 87 ms Event-Loop-Blocking für alle Shell-Assets pro Kalt-Load. → **PR #66**
 - **Fix:** Cache keyed `(path, mtime, size)`; oder Precompress beim Start (siehe Item 10).
 - **Akzeptanz:** Zweiter Request desselben Assets komprimiert nicht erneut (Messung).
+- **Ergebnis:** `_gzip_cached(path, stat)` mit Cache keyed `(path, mtime_ns, size)`, Cap 128 Einträge / 32 MB. Messung (20 Shell-Assets): reine `gzip.compress`-Kosten 80,8 ms pro Durchlauf; warm-Pass 190,4 ms → **105,1 ms**; Cache hält 20 Einträge / 891 KB. Editierte Datei wird rekomprimiert (mtime-Invalidierung verifiziert). Test: `test_static_asset_gzip_is_cached_and_invalidated`.
 
 ## 5. `load_settings()` cachen (mtime-check) · S · Risiko: niedrig
 - [x] Läuft via `check_auth → is_auth_enabled → get_password_hash → load_settings` bei **jedem** API-Request (web/api/auth.py:417, web/api/config.py:4464). Gemessen: 2,1 ms Disk-Read pro `is_auth_enabled()`. → **PR #67**

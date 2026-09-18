@@ -625,3 +625,38 @@ def test_web_server_root_render_cache_invalidates_on_index_change(monkeypatch, t
         assert "render-cache-probe" in refreshed.text
     finally:
         index_path.write_text(original, encoding="utf-8")
+
+
+def test_static_asset_gzip_is_cached_and_invalidated(monkeypatch, tmp_path):
+    """Repeat asset loads must reuse the gzip result; edits must recompress."""
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+    from cli import web_server
+
+    client, _headers = _webui_client()
+    headers = {"Accept-Encoding": "gzip"}
+    asset = web_server.WEB_DIST / "icons.js"
+    original = asset.read_bytes()
+
+    try:
+        first = client.get("/static/icons.js", headers=headers)
+        assert first.status_code == 200
+        assert first.headers.get("content-encoding") == "gzip"
+        assert first.content == original
+
+        stat = asset.stat()
+        key = (str(asset), int(stat.st_mtime_ns), stat.st_size)
+        assert key in web_server._GZIP_CACHE, "gzip result was not cached"
+
+        # A second load must hit the cache, not recompress.
+        second = client.get("/static/icons.js", headers=headers)
+        assert second.content == original
+
+        # An edited file must invalidate the cached entry.
+        import time as _time
+
+        _time.sleep(1.1)
+        asset.write_bytes(original + b"\n// gzip-cache-probe\n")
+        edited = client.get("/static/icons.js", headers=headers)
+        assert b"gzip-cache-probe" in edited.content
+    finally:
+        asset.write_bytes(original)

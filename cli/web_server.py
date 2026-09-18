@@ -6376,6 +6376,45 @@ def _etag_matches(if_none_match: str, etag: str) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# Gzip result cache for the legacy static assets.
+#
+# ``serve_spa`` re-compressed every JS/CSS/JSON asset on every request
+# (``gzip.compress(file.read_bytes(), 5)``). A cold shell load pulls ~20
+# assets, and the compression cost blocks the event loop. Results are cached
+# keyed by (path, mtime_ns, size), so an edited file re-compresses and an
+# unchanged one is served straight from memory.
+# ---------------------------------------------------------------------------
+_GZIP_CACHE: dict[tuple, bytes] = {}
+_GZIP_CACHE_MAX_ENTRIES = 128
+_GZIP_CACHE_MAX_BYTES = 32 * 1024 * 1024
+_GZIP_CACHE_BYTES = 0
+
+
+def _gzip_cached(file_path: Path, stat_result: os.stat_result) -> bytes:
+    """Return the gzip-compressed body for ``file_path``, cached by mtime/size."""
+    global _GZIP_CACHE_BYTES
+
+    key = (str(file_path), int(stat_result.st_mtime_ns), stat_result.st_size)
+    cached = _GZIP_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    import gzip
+
+    raw = gzip.compress(file_path.read_bytes(), compresslevel=5)
+    if len(raw) <= _GZIP_CACHE_MAX_BYTES:
+        if (
+            len(_GZIP_CACHE) >= _GZIP_CACHE_MAX_ENTRIES
+            or _GZIP_CACHE_BYTES + len(raw) > _GZIP_CACHE_MAX_BYTES
+        ):
+            _GZIP_CACHE.clear()
+            _GZIP_CACHE_BYTES = 0
+        _GZIP_CACHE[key] = raw
+        _GZIP_CACHE_BYTES += len(raw)
+    return raw
+
+
 def mount_spa(application: FastAPI):
     """Mount the built SPA. Falls back to index.html for client-side routing.
 
@@ -6561,14 +6600,14 @@ def mount_spa(application: FastAPI):
                 # Compress the large legacy JS/CSS payloads in the active
                 # FastAPI static path. Do this only for text assets; the
                 # handler never serves SSE, so streaming responses are not
-                # buffered or delayed by compression.
+                # buffered or delayed by compression. Results are cached by
+                # (path, mtime, size) so repeat loads skip the compression.
                 content_type = mimetypes.guess_type(str(file_path))[0] or ""
                 accepts_gzip = "gzip" in request.headers.get("accept-encoding", "").lower()
                 if accepts_gzip and file_path.suffix.lower() in {
                     ".js", ".css", ".json", ".svg", ".txt"
                 }:
-                    import gzip
-                    raw = gzip.compress(file_path.read_bytes(), compresslevel=5)
+                    raw = _gzip_cached(file_path, file_path.stat())
                     headers["Content-Encoding"] = "gzip"
                     headers["Vary"] = "Accept-Encoding"
                     return Response(content=raw, media_type=content_type or None, headers=headers)
