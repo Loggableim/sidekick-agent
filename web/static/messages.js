@@ -3661,7 +3661,10 @@ function startSubagentPolling(sid) {
   _subagentPollSessionId = sid;
   if (typeof EventSource === 'function') {
     try {
-      const stream = new EventSource('/api/subagents/events/stream?session_id=' + encodeURIComponent(sid));
+      // Keep this stream on the mounted API origin and include the dashboard
+      // session cookie. Zen/Firefox otherwise reports a 401 and then retries
+      // a bare root-relative URL indefinitely after a space/session switch.
+      const stream = new EventSource(_eventSourceUrl('api/subagents/events/stream?session_id=' + encodeURIComponent(sid)), {withCredentials: true});
       _subagentEventSource = stream;
       _subagentStreamSessionId = sid;
       const refreshFromStream = () => {

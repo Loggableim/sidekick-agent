@@ -38,6 +38,7 @@ from web.api.compression_anchor import visible_messages_for_anchor
 from web.api.metering import meter
 from web.api.nova_paths import get_nova_session_start_path
 from web.api.turn_journal import append_turn_journal_event_for_stream
+from shared.sessions import is_default_session_title
 
 # Global lock for os.environ writes. Per-session locks (_agent_lock) prevent
 # concurrent runs of the SAME session, but two DIFFERENT sessions can still
@@ -987,6 +988,25 @@ def _is_provisional_title(current_title: str, messages) -> bool:
     return current == candidate or candidate.startswith(current)
 
 
+def _should_generate_background_title(session) -> bool:
+    """Return True when a session still carries an auto/placeholder title.
+
+    Uses the canonical ``is_default_session_title`` helper so the current
+    default ("New chat") and legacy defaults ("Untitled", "New Chat") are all
+    recognised.  A stale hardcoded comparison here silently disabled
+    auto-titling for every new session after the default title changed.
+    """
+    title = str(getattr(session, 'title', '') or '')
+    messages = getattr(session, 'messages', None) or []
+    looks_default = is_default_session_title(title)
+    looks_provisional = _is_provisional_title(title, messages)
+    invalid_existing = _looks_invalid_generated_title(title)
+    return (
+        (looks_default or looks_provisional or invalid_existing)
+        and (not getattr(session, 'llm_title_generated', False) or invalid_existing)
+    )
+
+
 def _title_prompts(user_text: str, assistant_text: str) -> tuple[str, list[str]]:
     qa = f"User question:\n{user_text[:500]}\n\nAssistant answer:\n{assistant_text[:500]}"
     prompts = [
@@ -1198,18 +1218,28 @@ def generate_title_raw_via_aux(
                 {"role": "user", "content": qa},
             ]
             budgets = [base_max_tokens]
+            # When both a provider and its endpoint are supplied (agent-model
+            # fallback path), pass the endpoint via ``required_base_url`` so the
+            # provider identity — and therefore its credential resolution — is
+            # preserved.  Passing ``base_url`` directly relabels the provider as
+            # "custom", which drops the API key lookup and yields HTTP 401.
+            _endpoint_kwargs = (
+                {"required_base_url": base_url}
+                if provider and base_url
+                else {"base_url": base_url or None}
+            )
             try:
                 for budget_idx, max_tokens in enumerate(budgets):
                     resp = call_llm(
                         task='title_generation',
                         provider=provider or None,
                         model=model or None,
-                        base_url=base_url or None,
                         messages=messages,
                         max_tokens=max_tokens,
                         temperature=0.2,
                         timeout=_timeout,
                         extra_body=reasoning_extra,
+                        **_endpoint_kwargs,
                     )
                     raw, empty_status = _extract_title_response(resp, aux=True)
                     if raw:
@@ -1521,7 +1551,7 @@ def _run_background_title_update(session_id: str, user_text: str, assistant_text
         current = str(s.title or '').strip()
         still_auto = (
             current == placeholder_title
-            or current in ('Untitled', 'New Chat', '')
+            or is_default_session_title(current)
             or _is_provisional_title(current, s.messages)
             or _invalid_existing
         )
@@ -1561,7 +1591,7 @@ def _run_background_title_update(session_id: str, user_text: str, assistant_text
                     invalid_existing_now = _looks_invalid_generated_title(s.title)
                     still_auto = (
                         effective_title == placeholder_title
-                        or effective_title in ('Untitled', 'New Chat', '')
+                        or is_default_session_title(effective_title)
                         or _is_provisional_title(effective_title, s.messages)
                         or invalid_existing_now
                     )
@@ -1606,7 +1636,7 @@ def _run_background_title_refresh(session_id: str, user_text: str, assistant_tex
         if effective != current_title:
             _put_title_status(put_event, session_id, 'skipped', 'manual_title', effective)
             return
-        if not effective or effective in ('Untitled', 'New Chat'):
+        if is_default_session_title(effective):
             return
         aux_title_configured = _aux_title_configured()
         if agent and not aux_title_configured:
@@ -1654,7 +1684,7 @@ def _maybe_schedule_title_refresh(session, put_event, agent):
     if refresh_interval <= 0:
         return
     current_title = str(session.title or '').strip()
-    if not current_title or current_title in ('Untitled', 'New Chat'):
+    if is_default_session_title(current_title):
         return
     if not getattr(session, 'llm_title_generated', False):
         return
@@ -3877,15 +3907,9 @@ def _run_agent_streaming(
                     if isinstance(_m, dict) and not _m.get('timestamp') and not _m.get('_ts'):
                         _m['timestamp'] = int(_now)
                 # Only auto-generate title when still default; preserves user renames
-                if s.title == 'Untitled' or s.title == 'New Chat' or not s.title:
+                if is_default_session_title(s.title):
                     s.title = title_from(s.messages, s.title)
-                _looks_default = (s.title == 'Untitled' or s.title == 'New Chat' or not s.title)
-                _looks_provisional = _is_provisional_title(s.title, s.messages)
-                _invalid_existing_title = _looks_invalid_generated_title(s.title)
-                _should_bg_title = (
-                    (_looks_default or _looks_provisional or _invalid_existing_title)
-                    and (not getattr(s, 'llm_title_generated', False) or _invalid_existing_title)
-                )
+                _should_bg_title = _should_generate_background_title(s)
                 _u0 = ''
                 _a0 = ''
                 if _should_bg_title:

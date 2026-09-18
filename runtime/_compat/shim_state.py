@@ -442,6 +442,22 @@ class SessionDB:
             raise ValueError("title is empty")
         self.update_title(session_id, sanitized)
 
+    def get_session_title(self, session_id: str) -> str | None:
+        """Return the stored title for *session_id*, or None when absent.
+
+        Callers (``runtime/title_generator.py``, the CLI, the gateway) use this
+        to decide whether a session still needs an auto-generated title.  The
+        method was missing from this shim, so every call raised AttributeError
+        and surfaced as "Session DB compression split failed" warnings.
+        """
+        if not session_id:
+            return None
+        row = self.get_session(session_id)
+        if row is None:
+            return None
+        title = str(row.get("title") or "").strip()
+        return title or None
+
     def update_title(self, session_id: str, title: str) -> None:
         import time
 

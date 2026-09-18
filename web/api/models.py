@@ -1775,6 +1775,33 @@ def _generate_title_via_ollama(messages) -> str | None:
         title = data["choices"][0]["message"]["content"].strip().strip('"\'')
         return title[:80] if title else None
     except Exception:
+        # Local Ollama is not always running (e.g. a cloud-only setup, or the
+        # GPU is reserved for something else).  Fall back to the auxiliary
+        # cloud route so /api/chat sessions still get a real title instead of
+        # the truncated first user message.
+        return _generate_title_via_aux_fallback(messages)
+
+
+def _generate_title_via_aux_fallback(messages) -> str | None:
+    """Generate a title through the auxiliary LLM route (cloud).
+
+    Used when the local Ollama endpoint is unavailable.  Returns None on any
+    error so callers keep their existing heuristic fallback.
+    """
+    try:
+        from web.api.streaming import (
+            _first_exchange_snippets,
+            _sanitize_generated_title,
+            generate_title_raw_via_aux,
+        )
+
+        user_msg, asst_msg = _first_exchange_snippets(messages)
+        if not user_msg:
+            return None
+        raw_title, _status = generate_title_raw_via_aux(user_msg, asst_msg)
+        title = _sanitize_generated_title(raw_title or "")
+        return title[:80] if title else None
+    except Exception:
         return None
 
 
