@@ -876,58 +876,14 @@ function _terminalErrorContext(tc) {
  * Show the docked terminal pane in the split layout.
  * When docked, the existing floating composer terminal is closed.
  */
-function openSplitTerminal(){
-  const pane=$('terminalPane');
-  const chatLayout=$('chatSplitLayout');
-  if(!pane)return;
-  // Close floating terminal if open
-  if(TERMINAL_UI.open)closeComposerTerminal();
-  pane.hidden=false;
-  // Hand the xterm surface over to the split pane
-  const mainSurface=$('mainTermSurface');
-  const existingSurface=$('terminalSurface');
-  if(mainSurface&&existingSurface&&existingSurface.parentNode!==mainSurface){
-    // Move the xterm terminal surface into the split pane body
-    mainSurface.appendChild(existingSurface);
-  }
-  void _ensureXterm().then(() => {
-    if(TERMINAL_UI.fitAddon)TERMINAL_UI.fitAddon.fit();
-  }).catch(err => {
-    console.warn('openSplitTerminal failed', err);
-  });
-}
 
 /**
  * Hide the split terminal pane and return the xterm surface to the floating panel.
  */
-function closeTerminalPane(){
-  const pane=$('terminalPane');
-  if(!pane)return;
-  pane.hidden=true;
-  if(TERMINAL_UI.term){
-    TERMINAL_UI.term.reset();
-  }
-  // Return xterm surface to floating terminal for reuse
-  const mainSurface=$('mainTermSurface');
-  const surface=$('terminalSurface');
-  const floatingInner=$('composerTerminalPanel')&&$('composerTerminalPanel').querySelector('.composer-terminal-viewport');
-  if(surface&&floatingInner&&surface.parentNode!==floatingInner){
-    floatingInner.appendChild(surface);
-  }
-}
 
 /**
  * Toggle the split terminal pane visibility.
  */
-function toggleSplitTerminal(){
-  const pane=$('terminalPane');
-  if(!pane)return;
-  if(pane.hidden!==false){
-    void openSplitTerminal();
-  }else{
-    closeTerminalPane();
-  }
-}
 
 
 // ════════════════════════════════════════════════════════════════

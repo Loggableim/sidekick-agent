@@ -28,7 +28,9 @@ def test_swarm_panel_is_reachable_from_both_navigation_surfaces_and_shell_cache(
     feature_loader = Path("web/static/feature-loader.js").read_text(encoding="utf-8")
     assert "swarm.js" in feature_loader
     assert "swarm: ['swarm.js']" in feature_loader
-    assert "'./static/swarm.css' + VQ" in service_worker
+    # swarm.css is no longer pre-cached (backlog item 20 trimmed the precache
+    # to the boot chain); it loads with the panel and is cached on first fetch.
+    assert "'./static/swarm.css' + VQ" not in service_worker
 
 
 def test_swarm_client_uses_explicit_project_paths_and_stops_its_stream_on_panel_exit():

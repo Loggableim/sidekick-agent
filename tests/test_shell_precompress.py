@@ -6,21 +6,30 @@ first request per asset is a cache hit.
 """
 from __future__ import annotations
 
+import re
 import time
 
 from cli import web_server
 
 
-def test_precompress_list_matches_the_service_worker_shell() -> None:
-    """The precompressed set must cover the assets sw.js pre-caches."""
+def test_precompress_list_covers_the_service_worker_shell() -> None:
+    """Everything the SW pre-caches must also be pre-compressed.
+
+    The reverse is not required: the precompress list may be broader (it warms
+    panel CSS too, which the SW fetches on demand since backlog item 20).
+    """
     sw_source = (web_server.WEB_DIST / "sw.js").read_text(encoding="utf-8")
 
-    missing = [
-        name
-        for name in web_server._PRECOMPRESS_ASSETS
-        if f"./static/{name}'" not in sw_source and f"./static/{name}\"" not in sw_source
-    ]
-    assert not missing, f"precompressed assets missing from sw.js SHELL_ASSETS: {missing}"
+    shell_start = sw_source.index("const SHELL_ASSETS = [")
+    shell_end = sw_source.index("];", shell_start)
+    shell_block = sw_source[shell_start:shell_end]
+    shell_assets = set(re.findall(r"'\./static/([^']+)'", shell_block))
+
+    # Binary assets (PNG/SVG icons) are already compressed and are served
+    # without gzip, so they are not in the precompress list by design.
+    text_assets = {name for name in shell_assets if name.endswith((".js", ".css", ".json"))}
+    missing = sorted(name for name in text_assets if name not in web_server._PRECOMPRESS_ASSETS)
+    assert not missing, f"SW pre-caches assets that are not pre-compressed: {missing}"
 
 
 def test_precompress_warms_the_cache_and_removes_the_cost() -> None:

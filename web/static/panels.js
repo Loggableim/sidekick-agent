@@ -1945,16 +1945,6 @@ async function unblockKanbanTask(taskId){
   } catch(e) { showToast(t('kanban_unavailable') + ': ' + (e.message || e), 'error'); }
 }
 
-function closeKanbanTaskDetail(){
-  _kanbanCurrentTaskId = null;
-  const preview = $('kanbanTaskPreview');
-  if (preview) {
-    preview.style.display = 'none';
-    preview.innerHTML = '';
-  }
-  const board = $('kanbanBoard');
-  if (board) board.querySelectorAll('.kanban-card').forEach(card => card.classList.remove('selected'));
-}
 
 function _kanbanFormatTimestamp(value){
   if (value === undefined || value === null || value === '') return '';

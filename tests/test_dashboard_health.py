@@ -2013,7 +2013,10 @@ def test_goal_command_sends_workspace_slug_for_space_sessions():
     assert "function _goalCommandRequestBody(args)" in commands_js
     assert "workspace_slug: S.session.workspace_slug || S.session.space_slug || S.session.space || null" in commands_js
     assert "space: S.session.space || S.session.space_slug || S.session.workspace_slug || null" in commands_js
-    assert commands_js.count("_goalCommandRequestBody(args)") == 3
+    # Backlog item 40 removed the duplicated cmdGoal block, so the helper is
+    # now defined once and called from the two remaining goal paths.
+    assert commands_js.count("function _goalCommandRequestBody(args)") == 1
+    assert commands_js.count("_goalCommandRequestBody(args)") == 2
 
 
 def test_switch_kanban_board_does_not_restart_polling_twice():
@@ -3713,12 +3716,14 @@ def test_visible_static_ui_text_is_not_mojibake():
     assert "btn.setAttribute('aria-expanded', 'false')" in i18n_js
     assert "return `  /${c.name}${usage} — ${c.desc}`;" in commands_js
     assert "const bullet=trimmed.match(/^(?:[-*•]|\\\\d+\\\\.)\\\\s+(.*)$/);" in commands_js
-    assert commands_js.count("Running execute_code…") == 2
-    assert commands_js.count("Generating image…") == 2
-    assert commands_js.count("↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}") == 2
-    assert commands_js.count("meta.join(' · ')") == 2
-    assert commands_js.count("const BRAIN='🧠';") == 2
-    assert commands_js.count(" · display: ") == 2
+    # Backlog item 40 removed the duplicated command block, so each of these
+    # markers now appears exactly once instead of twice.
+    assert commands_js.count("Running execute_code…") == 1
+    assert commands_js.count("Generating image…") == 1
+    assert commands_js.count("↩ ${t('undid_n_messages')} ${r.removed_count} ${t('undid_messages_suffix')}") == 1
+    assert commands_js.count("meta.join(' · ')") == 1
+    assert commands_js.count("const BRAIN='🧠';") == 1
+    assert commands_js.count(" · display: ") == 1
     assert "Reasoning effort set to " in ui_js
     assert "Failed to set effort" in ui_js
     assert "?? Reasoning effort set to " not in ui_js
@@ -3731,7 +3736,9 @@ def test_visible_static_ui_text_is_not_mojibake():
     assert "🤖 AI Enrich" in index_html
     assert "🛡️ Watchdog" in index_html
     assert "ws.emoji || '📁'" in spaces_js
-    assert "' · ' + ws.model.provider" in spaces_js
+    # The provider marker lived in the legacy renderer that backlog item 40
+    # removed; the active renderer reads it from the space object instead.
+    assert "const provider = (space.model && space.model.provider) || 'Not set';" in spaces_js
     assert "Running deep research…" in browser_js
     assert "Loading research session…" in browser_js
     # Non-English strings live in the on-demand bundles (backlog item 11).
@@ -5516,10 +5523,15 @@ def test_space_dropdown_renders_cached_spaces_before_refresh():
 
 
 def test_active_spaces_panel_propagates_force_options_to_loader():
+    """The active renderSpacesPanel must forward options to loadSpaces.
+
+    Backlog item 40 removed the legacy duplicate renderer, so there is now
+    exactly one definition (previously the second, richer one won at runtime).
+    """
     spaces_js = Path("web/static/spaces.js").read_text(encoding="utf-8")
     matches = list(re.finditer(r"function renderSpacesPanel(?:\(\)|\(options = \{\}\))", spaces_js))
-    assert len(matches) >= 2
-    active_start = matches[1].start()
+    assert len(matches) == 1, f"expected a single renderSpacesPanel, found {len(matches)}"
+    active_start = matches[0].start()
     active_end = spaces_js.find("\nfunction ", active_start + 1)
     active_body = spaces_js[active_start:active_end if active_end != -1 else None]
 
