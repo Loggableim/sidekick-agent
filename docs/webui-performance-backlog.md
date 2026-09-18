@@ -81,9 +81,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** `is_auth_enabled()` warm < 1 ms bei gesetztem Env-Passwort.
 
 ## 15. `<link rel="preconnect">` für cdn.jsdelivr.net · S · Risiko: niedrig
-- [ ] 0 preconnect/dns-prefetch in index.html; 9 CDN-Refs (Prism, xterm, KaTeX).
+- [x] 0 preconnect/dns-prefetch in index.html; 9 CDN-Refs (Prism, xterm, KaTeX). → **PR #69**
 - **Fix:** `<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>` + ggf. `dns-prefetch`.
 - **Akzeptanz:** Hint im DOM; CDN-Assets starten früher (Performance-Panel).
+- **Ergebnis:** Beide Hints im `<head>` **vor** den CDN-Tags eingefügt (verifiziert per Playwright: `document.querySelectorAll('link[rel="preconnect"],link[rel="dns-prefetch"]')` liefert beide Einträge mit `crossorigin=anonymous`). Der Timing-Effekt war in dieser Umgebung **nicht belastbar messbar** (Chromium-Connection-Reuse + variable Last; A/B-Läufe schwankten zwischen −200 ms und +900 ms) — als Hint ist die Änderung dennoch korrekt und risikofrei. Test: `test_index_preconnects_to_the_cdn_before_the_cdn_tags` (prüft Präsenz **und** Reihenfolge vor dem ersten CDN-Asset).
 
 ## 21. Approval-Poll: Visibility-Gate + Intervall · S · Risiko: niedrig
 - [ ] `_pollGlobalApprovals` läuft alle 3 s ohne `document.hidden`-Check (web/static/messages.js:3261, 3274).
