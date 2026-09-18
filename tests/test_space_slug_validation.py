@@ -64,3 +64,26 @@ def test_get_or_create_space_still_accepts_valid_slugs(isolated_spaces):
 
     assert space.root == spaces_root / "valid-slug_2"
     assert (spaces_root / "valid-slug_2" / "space.yaml").exists()
+
+
+def test_fs_scan_skips_invalid_slug_dirs(isolated_spaces):
+    """Directories whose names are not valid slugs must not be advertised as spaces.
+
+    Bug (verified live 2026-09-19): ``_scan_fs_for_spaces()`` turned every
+    directory under ``spaces/`` into a Space without validating the slug, so
+    ``_bewusstsein_archived_20260605`` (archive) and ``_bridge``
+    (inter-space infrastructure) appeared in the UI space list while every
+    per-space API call for them raised ``SpaceError: invalid space slug``
+    -> HTTP 400 -> console errors on every page load (browser_webui_smoke
+    ``no_console_errors_or_warnings`` failure, run-9121 2026-09-19 00:51).
+    """
+    space_engine, spaces_root = isolated_spaces
+    (spaces_root / "_bridge").mkdir(parents=True)
+    (spaces_root / "_bewusstsein_archived_20260605").mkdir()
+    (spaces_root / "nova").mkdir()
+
+    slugs = [s.slug for s in space_engine.get_all_spaces()]
+
+    assert "nova" in slugs
+    assert "_bridge" not in slugs
+    assert "_bewusstsein_archived_20260605" not in slugs

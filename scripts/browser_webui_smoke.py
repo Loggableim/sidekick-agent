@@ -294,7 +294,7 @@ def _check_approval_slash_command_cycle(checks: list[Check], page) -> None:
                 const getApiMode = async () => {
                     const resp = await fetch('/api/approval', {cache: 'no-store'});
                     const data = await resp.json().catch(() => ({}));
-                    if (!resp.ok) throw new Error(data.error || resp.statusText || 'approval status failed');
+                    if (!resp.ok) throw new Error((data.error && (data.error.message || data.error.code)) || data.error || resp.statusText || 'approval status failed');
                     return String(data.mode || '').trim().toLowerCase();
                 };
                 const waitMode = async (mode) => {
@@ -932,7 +932,7 @@ def _check_browser_permission_cycle_restore(checks: list[Check], page) -> None:
                         body: JSON.stringify(Object.assign({session_id: sid}, body || {}))
                     });
                     const data = await resp.json().catch(() => ({}));
-                    if (!resp.ok) throw new Error(data.error || resp.statusText || 'permission update failed');
+                    if (!resp.ok) throw new Error((data.error && (data.error.message || data.error.code)) || data.error || resp.statusText || 'permission update failed');
                     if (typeof window.browserRenderPermission === 'function') {
                         window.browserRenderPermission(data.permission || {mode: 'none'});
                     }
@@ -1018,7 +1018,7 @@ def _check_browser_agent_control_permission_enforcement(checks: list[Check], pag
                 };
                 const permission = async (body) => {
                     const res = await postJson('/api/browser/permission', body);
-                    if (!res.http_ok) throw new Error((res.data && res.data.error) || 'permission update failed');
+                    if (!res.http_ok) throw new Error((res.data && res.data.error && (res.data.error.message || res.data.error.code)) || (res.data && res.data.error) || 'permission update failed');
                     if (typeof window.browserRenderPermission === 'function') {
                         window.browserRenderPermission((res.data && res.data.permission) || {mode: 'none'});
                     }
@@ -1234,7 +1234,7 @@ def _check_browser_qa_detects_broken_fixture(
                 };
                 const permission = async (body) => {
                     const res = await postJson('/api/browser/permission', body);
-                    if (!res.http_ok) throw new Error((res.data && res.data.error) || 'permission update failed');
+                    if (!res.http_ok) throw new Error((res.data && res.data.error && (res.data.error.message || res.data.error.code)) || (res.data && res.data.error) || 'permission update failed');
                     if (typeof window.browserRenderPermission === 'function') {
                         window.browserRenderPermission((res.data && res.data.permission) || {mode: 'none'});
                     }
@@ -1407,7 +1407,7 @@ def _check_browser_agent_control_fixture_interaction(
                 };
                 const permission = async (body) => {
                     const res = await postJson('/api/browser/permission', body);
-                    if (!res.http_ok) throw new Error((res.data && res.data.error) || 'permission update failed');
+                    if (!res.http_ok) throw new Error((res.data && res.data.error && (res.data.error.message || res.data.error.code)) || (res.data && res.data.error) || 'permission update failed');
                     if (typeof window.browserRenderPermission === 'function') {
                         window.browserRenderPermission((res.data && res.data.permission) || {mode: 'none'});
                     }
@@ -1757,6 +1757,44 @@ def run_smoke(
         created_workspace = str(created_session.get("workspace") or "").strip()
         created_workspace_slug = Path(created_workspace).name.strip().lower() or workspace
         auto_cleanup_session = True
+    else:
+        # A hardcoded/default session id may have been deleted by a previous
+        # run's cleanup (or manually). Verify it exists; otherwise fall back to
+        # a fresh auto-cleaned session. Without this, the UI loads with an
+        # empty session id and every /api/browser/permission POST 400s with
+        # "session_id is required", cascading into all browser-control checks.
+        try:
+            _get_json(
+                f"{base_url}/api/session?session_id={quote(session_id)}&messages=0",
+                timeout=10.0,
+            )
+        except HTTPError as exc:
+            if exc.code != 404:
+                raise
+            created = _post_json(
+                f"{base_url}/api/session/new",
+                {},
+                headers={"X-Hermes-Workspace": workspace},
+            )
+            created_session = created.get("session") or {}
+            fallback_id = str(created_session.get("session_id") or "").strip()
+            if not fallback_id:
+                raise RuntimeError("smoke session id missing after fallback")
+            created_workspace = str(created_session.get("workspace") or "").strip()
+            created_workspace_slug = Path(created_workspace).name.strip().lower() or workspace
+            checks.append(
+                Check(
+                    "smoke_session_fallback",
+                    True,
+                    {
+                        "default_session_id": session_id,
+                        "fallback_session_id": fallback_id,
+                        "reason": f"GET /api/session returned {exc.code}",
+                    },
+                )
+            )
+            session_id = fallback_id
+            auto_cleanup_session = True
 
     page_url = f"{base_url}/session/{session_id}?workspace={workspace}&cb={int(time.time() * 1000)}"
 
@@ -1788,7 +1826,15 @@ def run_smoke(
                 )
                 page.on(
                     "console",
-                    lambda msg: console_messages.append({"type": msg.type, "text": msg.text[:500]}),
+                    lambda msg: console_messages.append(
+                        {
+                            "type": msg.type,
+                            "text": msg.text[:500],
+                            # Chromium reports "Failed to load resource" without the
+                            # URL; the location pinpoints which request 4xx'd.
+                            "location": (msg.location or {}).get("url", ""),
+                        }
+                    ),
                 )
 
                 started = time.time()
@@ -1812,6 +1858,29 @@ def run_smoke(
                         pass
                 timings["session_list_hydration_ms"] = round((time.time() - started) * 1000)
                 page.wait_for_timeout(1000)
+                # browser.js is lazy-loaded since 6286acd (feature-loader.js):
+                # its globals only exist after __sidekickLoadPanelScripts('browser')
+                # resolves. The smoke exercises the browser drawer/control APIs
+                # without ever opening the panel, so pull the scripts explicitly.
+                try:
+                    page.wait_for_function(
+                        "typeof window.__sidekickLoadPanelScripts === 'function'",
+                        timeout=15000,
+                    )
+                    page.evaluate("() => window.__sidekickLoadPanelScripts('browser')")
+                    page.wait_for_function(
+                        "typeof window.browserGetState === 'function' && typeof window.browserToggleDrawer === 'function'",
+                        timeout=15000,
+                    )
+                    checks.append(Check("browser_feature_scripts_loaded", True, {}))
+                except PlaywrightTimeoutError as exc:
+                    checks.append(
+                        Check(
+                            "browser_feature_scripts_loaded",
+                            False,
+                            {"error": repr(exc)},
+                        )
+                    )
                 checks.append(
                     Check(
                         "load_within_budget",
@@ -1887,7 +1956,23 @@ def run_smoke(
                 f'[data-testid="titlebar-space-option"][data-titlebar-space-slug="{workspace}"]',
             )
 
-            legacy_titlebar_collision = _unique_count(page, f'.titlebar-space-dd-item[data-space-slug="{workspace}"]')
+            # The current renderer (since 7f89014, 2026-07) sets BOTH
+            # data-space-slug (needed by the dropdown click delegation in
+            # spaces.js) and data-titlebar-space-slug on every item, so
+            # counting [data-space-slug] items alone false-fails whenever the
+            # dropdown has rendered. A true legacy collision is an item that
+            # has the old attribute but NOT the new one.
+            legacy_titlebar_collision = page.evaluate(
+                """
+                (slug) => Array.from(
+                    document.querySelectorAll('.titlebar-space-dd-item[data-space-slug]')
+                ).filter(
+                    (el) => el.getAttribute('data-space-slug') === slug
+                        && el.getAttribute('data-titlebar-space-slug') !== slug
+                ).length
+                """,
+                workspace,
+            )
             checks.append(
                 Check(
                     "no_titlebar_legacy_space_slug_collision",

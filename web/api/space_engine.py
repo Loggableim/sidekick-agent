@@ -1348,6 +1348,12 @@ def _scan_fs_for_spaces() -> list[Space]:
             slug = _normalize_space_slug(slug)
             if slug in seen_slugs:
                 continue  # new-format wins over old-format
+            if not _is_valid_space_slug(slug):
+                # Infrastructure/archive dirs (e.g. ``_bridge``,
+                # ``_bewusstsein_archived_20260605``) are not spaces: the API
+                # layer rejects their slug, so advertising them only produced
+                # HTTP 400s on every per-space call.
+                continue
             if slug == CONSCIOUSNESS_SOURCE_SPACE_SLUG and _uses_legacy_consciousness_alias():
                 continue
             seen_slugs.add(slug)

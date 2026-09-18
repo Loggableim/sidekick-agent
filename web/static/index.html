@@ -207,10 +207,25 @@
       return _toggleChipDropdown('workflowStatusMenu', 'workflowStatusBadge', 'workflowStatusBadge');
     }
 
+    function browserToggleDrawerFromComposer() {
+      // browserToggleDrawer lives in lazy-loaded browser.js (feature-loader,
+      // backlog item 13): load it first, then toggle. A direct call throws a
+      // silent ReferenceError when the browser panel was never opened
+      // (observed 2026-09-19: composer drawer button dead on fresh load).
+      if (typeof browserToggleDrawer === 'function') return browserToggleDrawer();
+      if (typeof window.__sidekickLoadPanelScripts === 'function') {
+        window.__sidekickLoadPanelScripts('browser').then(function () {
+          if (typeof browserToggleDrawer === 'function') browserToggleDrawer();
+        });
+        return true;
+      }
+      return false;
+    }
+
     function workflowRunHeaderAction(action) {
       if (String(action || '') === 'model') return toggleModelDropdown();
       if (String(action || '') === 'reasoning') return toggleReasoningDropdown();
-      if (String(action || '') === 'browser-toggle') return browserToggleDrawer();
+      if (String(action || '') === 'browser-toggle') return browserToggleDrawerFromComposer();
       return false;
     }
 
@@ -1304,7 +1319,7 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
             </button>
             <div class="composer-divider" aria-hidden="true"></div>
-            <button type="button" class="icon-btn browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawer()" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer">
+            <button type="button" class="icon-btn browser-drawer-toggle-btn" id="btnBrowserDrawerToggle" onclick="browserToggleDrawerFromComposer()" aria-label="Browser drawer" aria-expanded="false" aria-controls="browserDrawer" data-testid="composer-browser-drawer-button">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="3" y="4" width="18" height="16" rx="2"/>
                 <path d="M3 8h18"/>
@@ -1488,7 +1503,7 @@
           <div class="model-dropdown" id="composerModelDropdown"></div>
         </div>
         <div class="upload-bar-wrap" id="uploadBarWrap"><div class="upload-bar" id="uploadBar"></div></div>
-        <div class="browser-chat-context-bar" id="browserChatContextBar" onclick="browserToggleDrawer()" role="button" tabindex="0" aria-label="Open browser drawer"></div>
+        <div class="browser-chat-context-bar" id="browserChatContextBar" onclick="browserToggleDrawerFromComposer()" role="button" tabindex="0" aria-label="Open browser drawer"></div>
       </div>  <!-- /composer-box -->
       <script>
         (function relocateHeaderControlsToComposer(){
@@ -1560,6 +1575,22 @@
           </div>
           <div class="browser-status-detail" id="browserActionSummary" aria-live="polite"></div>
           <div class="browser-action-trace" id="browserActionTrace" aria-label="Browser action trace" aria-live="polite"></div>
+          <div class="browser-qa-card" id="browserQaCard" hidden aria-live="polite">
+            <div class="browser-qa-main">
+              <span class="browser-qa-status" id="browserQaCardStatus">QA</span>
+              <span class="browser-qa-url" id="browserQaCardUrl">No browser QA report yet</span>
+            </div>
+            <div class="browser-qa-metrics" id="browserQaCardMetrics"></div>
+            <div class="browser-qa-actions">
+              <button type="button" class="browser-qa-action-btn" id="browserQaFixBtn" onclick="browserFixFindingsToChat()">Fix</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaRetestBtn" onclick="browserRetestCurrentPageToChat()">Retest</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaReproBtn" onclick="browserQaReproToChat()">Repro</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaCopyBtn" onclick="browserCopyQaReport()">Copy</button>
+              <button type="button" class="browser-qa-action-btn" id="browserQaDetailsBtn" aria-expanded="false" onclick="browserToggleQaDetails()">Details</button>
+              <button type="button" class="browser-qa-action-btn browser-qa-clear-btn" id="browserQaClearBtn" onclick="browserClearQaReports()">Clear</button>
+            </div>
+            <div class="browser-qa-details" id="browserQaDetails" hidden></div>
+          </div>
           <div class="browser-stage-wrap" id="browserStageWrap">
             <div class="browser-stage" id="browserStage" aria-label="Browser viewport" role="application">
               <img id="browserFrameImage" class="browser-frame-image" alt="Browser screenshot" src="" draggable="false">
