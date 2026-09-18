@@ -1,4 +1,23 @@
 (function () {
+  // localStorage is best-effort state.  Zen/Firefox can throw synchronously
+  // when an old profile has exhausted its quota; one preference must never
+  // take down navigation or the chat event loop.  Keep the guard here so
+  // legacy modules with direct setItem calls get the same protection.
+  try {
+    if (!window.__SIDEKICK_SAFE_STORAGE__) {
+      var storageProto = Object.getPrototypeOf(window.localStorage);
+      var originalSetItem = storageProto.setItem;
+      storageProto.setItem = function (key, value) {
+        try { return originalSetItem.call(this, key, value); }
+        catch (err) {
+          try { if (String(key) === 'sidekick-inflight-state') this.removeItem(key); } catch (_) {}
+          return undefined;
+        }
+      };
+      window.__SIDEKICK_SAFE_STORAGE__ = true;
+    }
+  } catch (_) {}
+
   function activeWorkspaceSlug() {
     try {
       if (typeof getActiveSpaceQuery === 'function') {

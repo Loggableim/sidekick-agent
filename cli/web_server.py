@@ -1107,6 +1107,7 @@ _STREAMING_EXACT_PATHS: frozenset[str] = frozenset({
     "/api/gmail/ai/summary/stream",
     "/api/kanban/events/stream",
     "/api/swarm/runs/events/stream",
+    "/api/subagents/events/stream",
 })
 _STREAMING_PREFIXES: tuple[str, ...] = (
     "/api/agents/workspace/stream/",

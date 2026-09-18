@@ -11074,7 +11074,7 @@ function t(key, ...args) {
 function setLocale(lang) {
   const resolved = resolveLocale(lang) || 'en';
   _locale = LOCALES[resolved];
-  localStorage.setItem('sidekick-lang', resolved);
+  try { localStorage.setItem('sidekick-lang', resolved); } catch (_) {}
   document.documentElement.lang = _locale._speech || resolved;
 }
 
