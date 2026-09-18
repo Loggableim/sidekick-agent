@@ -5723,6 +5723,16 @@ async def update_config_raw(body: RawConfigUpdate):
 
 @app.get("/api/analytics/usage")
 async def get_usage_analytics(days: int = 30):
+    # InsightsEngine.generate() runs multi-second SQLite scans over state.db
+    # (438 MB here). Inline execution on the event loop froze the whole
+    # dashboard (observed 2026-09-19: py-spy showed MainThread stuck in
+    # _get_tool_usage while every request timed out, because enhancements.js
+    # polls this endpoint every 60s from every open tab). Offload the
+    # blocking work to a worker thread so the loop stays responsive.
+    return await asyncio.to_thread(_get_usage_analytics_sync, days)
+
+
+def _get_usage_analytics_sync(days: int = 30):
     import sqlite3
     from runtime._compat.shim_state import SessionDB
     from runtime.insights import InsightsEngine
