@@ -10,6 +10,7 @@ random-port HTTP child process that previously proxied unmatched API routes.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import io
 import queue
 import threading
@@ -27,6 +28,69 @@ _END = object()
 _HEADER_WAIT_SECONDS = 20.0
 _RUNTIME_INIT_LOCK = threading.Lock()
 _RUNTIME_STATE_DIR: str | None = None
+
+# Bounded worker pool for the legacy route bridge.
+#
+# Every unmatched API request used to spawn its own daemon thread, so a burst
+# of requests created an unbounded number of threads (each one running the
+# legacy route module). Requests now run on a bounded pool.
+#
+# SSE endpoints are excluded: a stream handler holds its thread for the whole
+# lifetime of the connection (it only returns after ``wfile.finish()``), so
+# putting them on a shared pool would let a handful of open streams starve
+# every normal request. They keep a dedicated thread each.
+_BRIDGE_POOL_MAX_WORKERS = 16
+# Generous queue: the pool absorbs bursts, and 503 only fires when the backlog
+# is far beyond anything a single dashboard produces.
+_BRIDGE_POOL_QUEUE_LIMIT = 256
+_bridge_pool: "concurrent.futures.ThreadPoolExecutor | None" = None
+_bridge_pool_lock = threading.Lock()
+_bridge_pool_pending = 0
+
+# Mirrors ``cli.web_server._STREAMING_EXACT_PATHS`` / ``_STREAMING_PREFIXES``.
+# Duplicated on purpose: ``cli.web_server`` imports this module at import time,
+# so importing it back would be circular. A test asserts the two lists agree.
+_STREAMING_BRIDGE_PATHS: frozenset[str] = frozenset({
+    "/api/chat/stream",
+    "/api/terminal/stream",
+    "/api/sessions/gateway/stream",
+    "/api/approval/stream",
+    "/api/clarify/stream",
+    "/api/browser/events",
+    "/api/nova/events",
+    "/api/gmail/ai/summary/stream",
+    "/api/kanban/events/stream",
+    "/api/swarm/runs/events/stream",
+    "/api/subagents/events/stream",
+})
+_STREAMING_BRIDGE_PREFIXES: tuple[str, ...] = (
+    "/api/agents/workspace/stream/",
+)
+
+
+def _is_streaming_bridge_path(path: str) -> bool:
+    """True for long-lived SSE paths that must not occupy a pool worker."""
+    clean = str(path or "").split("?", 1)[0].rstrip("/")
+    return clean in _STREAMING_BRIDGE_PATHS or any(
+        clean.startswith(prefix) for prefix in _STREAMING_BRIDGE_PREFIXES
+    )
+
+
+def _get_bridge_pool() -> "concurrent.futures.ThreadPoolExecutor":
+    global _bridge_pool
+    if _bridge_pool is None:
+        with _bridge_pool_lock:
+            if _bridge_pool is None:
+                _bridge_pool = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=_BRIDGE_POOL_MAX_WORKERS,
+                    thread_name_prefix="api-bridge",
+                )
+    return _bridge_pool
+
+
+def _bridge_pool_has_capacity() -> bool:
+    """Backpressure check: refuse work when the pool queue is saturated."""
+    return _bridge_pool_pending < _BRIDGE_POOL_QUEUE_LIMIT
 
 
 def _is_pure_swarm_get(method: str, path: str) -> bool:
@@ -162,10 +226,37 @@ class _RouteExecution:
         self.request = request
         self.handler = _RouteHandler(request, body)
         self.completed = threading.Event()
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread: threading.Thread | None = None
+        self._pool_future: concurrent.futures.Future | None = None
 
     def start(self) -> None:
-        self.thread.start()
+        """Run the handler on the bounded pool, or a dedicated thread for SSE.
+
+        SSE handlers hold their worker until the stream ends, so they must not
+        occupy a shared pool slot; they get their own daemon thread as before.
+        """
+        global _bridge_pool_pending
+        if _is_streaming_bridge_path(self.handler.path):
+            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.thread.start()
+            return
+
+        pool = _get_bridge_pool()
+        _bridge_pool_pending += 1
+        try:
+            self._pool_future = pool.submit(self._run)
+        except RuntimeError:
+            # Pool shut down (interpreter teardown): fall back to a thread.
+            _bridge_pool_pending -= 1
+            self.thread = threading.Thread(target=self._run, daemon=True)
+            self.thread.start()
+            return
+
+        def _release(_future: concurrent.futures.Future) -> None:
+            global _bridge_pool_pending
+            _bridge_pool_pending -= 1
+
+        self._pool_future.add_done_callback(_release)
 
     def _run(self) -> None:
         # A Swarm read has its own project-local, read-only initialization
@@ -266,6 +357,15 @@ async def dispatch_route(request: Request) -> Response:
         body = await request.body()
     except ClientDisconnect:
         return Response(content=b"", status_code=499)
+
+    # Backpressure: refuse new non-streaming work when the bounded pool queue
+    # is saturated, instead of growing the queue without bound.
+    if not _is_streaming_bridge_path(request.url.path) and not _bridge_pool_has_capacity():
+        return JSONResponse(
+            {"error": "route bridge overloaded, retry shortly"},
+            status_code=503,
+            headers={"Retry-After": "1"},
+        )
 
     execution = _RouteExecution(request, body)
     execution.start()

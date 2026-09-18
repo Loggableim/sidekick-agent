@@ -119,9 +119,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** `_prune_expired_sessions(force=False)` mit `_PRUNE_INTERVAL_SECONDS = 60`; `force=True` umgeht den Throttle für explizite Aufrufe. Verifiziert: 20 Verifies ohne abgelaufene Einträge → **0 Writes**; mit abgelaufenem Eintrag innerhalb des Fensters → 0 Writes (Eintrag bleibt); nach Ablauf des Fensters → 1 Write + Eintrag entfernt. Tests: `tests/test_session_prune_throttle.py` (3).
 
 ## 8. fastapi_bridge: Thread pro Request → bounded ThreadPoolExecutor · M · Risiko: mittel
-- [ ] `threading.Thread(target=self._run, daemon=True)` pro API-Call (web/api/fastapi_bridge.py:169-170). Unbegrenzt viele Threads bei Last.
+- [x] `threading.Thread(target=self._run, daemon=True)` pro API-Call (web/api/fastapi_bridge.py:169-170). Unbegrenzt viele Threads bei Last.
 - **Fix:** Bounded Executor + Backpressure (429/503 bei Überlast) oder Thread-Reuse.
 - **Akzeptanz:** Lasttest mit 100 parallelen Requests → Thread-Zahl gedeckelt, keine Fehler.
+- **Ergebnis:** Bounded `ThreadPoolExecutor` (16 Worker) für normale Bridge-Requests; **SSE-Pfade behalten dedizierte Threads**, weil ein Stream-Handler seinen Worker bis `wfile.finish()` hält und ein Pool sonst von wenigen offenen Streams ausgehungert würde (SSE-Liste lokal dupliziert, da `cli.web_server` dieses Modul importiert → Zirkularität; ein Test prüft Listen-Gleichheit). Backpressure: 503 + `Retry-After: 1` ab `_BRIDGE_POOL_QUEUE_LIMIT = 256` anstehenden Requests. Lasttest: **100 parallele Bridge-Requests → 16 Threads statt 100**, 100/100 OK, `_bridge_pool_pending` nach dem Lauf 0. Tests: `tests/test_bridge_pool.py` (4).
 
 ## 9. SSE-Chunk-Reads batchen · M · Risiko: mittel
 - [ ] `await asyncio.to_thread(self._chunks.get)` pro Chunk (web/api/fastapi_bridge.py:114); anyio-Default-Limiter = 40 Threads.
