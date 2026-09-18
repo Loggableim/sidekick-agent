@@ -93,9 +93,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** Im Hintergrund-Tab keine `/api/approval/pending-all`-Requests (Netzwerk-Panel).
 
 ## 22. Doppelten `_startGlobalApprovalPoll` entfernen · S · Risiko: niedrig
-- [ ] Zwei Definitionen: messages.js:2875 (tot) und 3261 (aktiv); doppeltes `_stop` (2912/3267). Die zweite Definition gewinnt.
+- [x] Zwei Definitionen: messages.js:2875 (tot) und 3261 (aktiv); doppeltes `_stop` (2912/3267). Die zweite Definition gewinnt. → **PR #71**
 - **Fix:** Toten Block entfernen; sicherstellen, dass nur ein Timer existiert.
 - **Akzeptanz:** `grep -c "function _startGlobalApprovalPoll" web/static/messages.js` = 1; Boot startet genau einen Poll.
+- **Ergebnis:** Toter Block (56 Zeilen) + verwaiste State-Variablen `_globalApprovalPollTimer`/`_globalApprovalSessionsSeen` entfernt (letztere wurde nur noch von `_clearApprovalPendingForSession` referenziert — die Zeile mit entfernt). `grep -c` = **1** für beide Funktionen, 0 verwaiste Referenzen. Browser-Verifikation: 1 Definition, **1 Timer**, 1 Sofort-Poll, Doppelstart erzeugt **keinen** zweiten Timer. Tests: `tests/test_approval_poll_dedupe.py` (3).
 
 ## 39. CI-Gate: `node --check` über alle web/static/*.js · S · Risiko: niedrig
 - [x] Kein `node --check` in tests/, scripts/ oder CI; ein SyntaxError killt die ganze UI (Skill `webui-js-parse-failure-triage`). → **PR #72**
