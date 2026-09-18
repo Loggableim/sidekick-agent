@@ -17,6 +17,16 @@ const ICONS={
 // before the first request completes (#1060).
 let _loadingSessionId = null;
 let _activeSessionLoadAbortController = null;
+
+// Firefox/Zen can reject even tiny writes when the origin quota is exhausted
+// (for example after a large in-flight stream snapshot). Persistence is an
+// enhancement; it must never reject a session switch or crash an async UI
+// handler.
+function _safeSessionStorageSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (_) {
+    try { localStorage.removeItem('sidekick-inflight-state'); } catch (_) {}
+  }
+}
 let _liveStreamRehydrateTimer = null;
 
 function _markExplicitSessionNavigation(skipBootRestore){
@@ -303,7 +313,7 @@ function _flushSessionViewedCounts() {
   }
   _sessionViewedCountsSaveIdle = null;
   try {
-    localStorage.setItem(SESSION_VIEWED_COUNTS_KEY, JSON.stringify(_getSessionViewedCounts()));
+    _safeSessionStorageSet(SESSION_VIEWED_COUNTS_KEY, JSON.stringify(_getSessionViewedCounts()));
   } catch (_){
     // Ignore localStorage write failures.
   }
@@ -342,7 +352,7 @@ function _getSessionCompletionUnread() {
 
 function _saveSessionCompletionUnread() {
   try {
-    localStorage.setItem(SESSION_COMPLETION_UNREAD_KEY, JSON.stringify(_getSessionCompletionUnread()));
+    _safeSessionStorageSet(SESSION_COMPLETION_UNREAD_KEY, JSON.stringify(_getSessionCompletionUnread()));
   } catch (_){
     // Ignore localStorage write failures.
   }
@@ -382,7 +392,7 @@ function _getSessionObservedStreaming() {
 
 function _saveSessionObservedStreaming() {
   try {
-    localStorage.setItem(SESSION_OBSERVED_STREAMING_KEY, JSON.stringify(_getSessionObservedStreaming()));
+    _safeSessionStorageSet(SESSION_OBSERVED_STREAMING_KEY, JSON.stringify(_getSessionObservedStreaming()));
   } catch (_){
     // Ignore localStorage write failures.
   }
@@ -615,7 +625,7 @@ async function newSession(flash, options={}){
   S.session=data.session;S.messages=data.session.messages||[];
   S.lastUsage={...(data.session.last_usage||{})};
   if(flash)S.session._flash=true;
-  localStorage.setItem('sidekick-webui-session',S.session.session_id);
+  _safeSessionStorageSet('sidekick-webui-session', S.session.session_id);
   _setActiveSessionUrl(S.session.session_id);
   _setSessionViewedCount(S.session.session_id, S.session.message_count || 0);
   // Sync chat-header dropdown to the session's model so the UI reflects
@@ -683,7 +693,7 @@ async function sidekickNewChat(){
     _cancelActiveSessionLoad();
     if (_currentSessionIsEmptyIdle()) {
       if (S.session && S.session.session_id) {
-        localStorage.setItem('sidekick-webui-session', S.session.session_id);
+        _safeSessionStorageSet('sidekick-webui-session', S.session.session_id);
         if (typeof _setActiveSessionUrl === 'function') _setActiveSessionUrl(S.session.session_id);
       } else {
         localStorage.removeItem('sidekick-webui-session');
@@ -788,7 +798,7 @@ async function loadSession(sid, options){
         S.busy = !!(optimistic.active_stream_id || optimistic.pending_user_message || optimistic.is_streaming);
         S.activeStreamId = optimistic.active_stream_id || null;
         S.lastUsage = {...(optimistic.last_usage || {})};
-        localStorage.setItem('sidekick-webui-session', sid);
+        _safeSessionStorageSet('sidekick-webui-session', sid);
         _setActiveSessionUrl(sid);
         _showConversationLoadingState(sid);
         if (typeof syncTopbar === 'function') syncTopbar();
@@ -978,7 +988,7 @@ async function loadSession(sid, options){
   if(typeof syncTopbar==='function') syncTopbar();
   _setSessionViewedCount(S.session.session_id, Number(data.session.message_count || 0));
   _clearSessionCompletionUnread(S.session.session_id);
-  localStorage.setItem('sidekick-webui-session',S.session.session_id);
+  _safeSessionStorageSet('sidekick-webui-session', S.session.session_id);
   _setActiveSessionUrl(S.session.session_id);
 
   const activeStreamId=S.session.active_stream_id||null;
@@ -1386,7 +1396,7 @@ function _setHandoffStorageValue(sid, suffix, ts) {
       localStorage.removeItem(key);
       return;
     }
-    localStorage.setItem(key, String(ts));
+    _safeSessionStorageSet(key, String(ts));
   } catch {}
 }
 

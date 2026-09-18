@@ -598,6 +598,7 @@ const LOCALES = {
     kanban_task: 'Task',
     kanban_no_description: 'No description',
     kanban_refresh: 'Refresh',
+    refresh: 'Refresh',
     kanban_status_triage: 'Triage',
     kanban_status_todo: 'Todo',
     kanban_status_ready: 'Ready',
