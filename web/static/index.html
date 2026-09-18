@@ -1525,6 +1525,11 @@
           }
 
           move(document.getElementById('btnBrowserDrawerToggle'));
+          // The approval badge has no composer counterpart (model/reasoning do);
+          // leaving it in the titlebar cluster orphaned it invisible when the
+          // cluster gets hidden below (regression since e96bd8d, caught by the
+          // approval_badge_click_cycle_restore smoke check 2026-09-19).
+          move(document.getElementById('approvalModeBadge'));
           move(document.querySelector('.titlebar-workflow-group'));
           var actionChips = document.getElementById('actionChips');
           if (actionChips && actionChips.parentElement !== strip) {
