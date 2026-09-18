@@ -7452,6 +7452,22 @@ function _renderNovaPresenceCard(payload){
       state:_novaCardState(item&&item.state,'idle'),
     });
   }
+  if(!managed.length){
+    const diagnostics=Array.isArray(payload&&payload.enrollment_diagnostics)?payload.enrollment_diagnostics:[];
+    const diagnosticLabels={
+      audit_invalid:'Enrollment-Nachweis unvollständig · Space-Governance neu eintragen',
+      project_dir_untrusted:'Projektpfad nicht mehr vertrauenswürdig · Workspace in Einstellungen neu speichern',
+      root_fingerprint_mismatch:'Projektroot geändert · Enrollment neu ausführen',
+      revision_mismatch:'Governance-Revision weicht ab · Enrollment neu ausführen',
+      duplicate_binding:'Enrollment doppelt belegt · zweiten Space entfernen',
+    };
+    for(const item of diagnostics.slice(0,6)){
+      const space=_novaCardSpace(item&&item.space);
+      const code=String(item&&item.code||'').trim();
+      if(!space||!diagnosticLabels[code]) continue;
+      managed.push({title:_novaCardSpaceLabel(space),meta:diagnosticLabels[code],state:'failed'});
+    }
+  }
   _novaCardList('novaManagedSpaces',managed,'Noch kein YOLO-Space ist eingeschrieben.');
 
   const rawResults=Array.isArray(payload&&payload.audited_results)?payload.audited_results:[];
