@@ -221,9 +221,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** CI führt Browser-Smoke aus; Fehler blockieren Merge.
 
 ## 49. Perf-Marks im Frontend · S–M · Risiko: niedrig
-- [ ] 0 `performance.mark/measure` im Frontend.
+- [x] 0 `performance.mark/measure` im Frontend.
 - **Fix:** Marks für Boot, Session-Load, Render, SSE-Reconnect; Debug-Panel/Console-Ausgabe.
 - **Akzeptanz:** `performance.getEntriesByType('measure')` liefert Werte; Baseline dokumentiert.
+- **Ergebnis:** `_perfMark`/`_perfMeasure` in ui.js (try/catch-geguarded, `typeof performance.mark!=='function'`-Check — ein fehlendes User-Timing-API darf den instrumentierten Pfad nie brechen), exportiert als `window._perfMark`/`_perfMeasure`. Instrumentiert: **Boot** (`sidekick:boot`, boot.js), **Session-Load** (`sidekick:session-load`, sessions.js, im `finally`), **Render** (`sidekick:render`, ui.js, im `finally` — ein Throw verliert die Messung nicht), **SSE-Connect** (`sidekick:sse-connect`, sessions.js, misst bis zum `open`-Event). Messung (Playwright): `performance.getEntriesByType('measure')` liefert Boot **2386 ms**, Session-Load **1557 ms**, Render **3–41 ms**; Marks `sidekick:boot:start`, `sidekick:render:start`, `sidekick:session-load:start` vorhanden; 0 JS-Fehler. Tests: `tests/test_perf_marks.py` (6).
 
 ## 50. Baseline committen · S · Risiko: niedrig
 - [ ] Keine Performance-Baseline im Repo.

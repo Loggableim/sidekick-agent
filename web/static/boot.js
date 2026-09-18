@@ -1893,6 +1893,7 @@ async function _syncGameModeStateFromServer() {
   // Load send key preference
   let _bootSettings={};
   const _bootSettingsReady = (async()=>{
+  if(typeof _perfMark==='function') _perfMark('sidekick:boot:start');
   try{
     // Game mode status is independent of the settings payload, so start it in
     // parallel instead of awaiting it after the settings work (backlog item 45).
@@ -1979,6 +1980,7 @@ async function _syncGameModeStateFromServer() {
     if(typeof syncGameModeButton==='function')syncGameModeButton();
     if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('sidekick-tts-enabled')==='true');
   }
+  if(typeof _perfMeasure==='function') _perfMeasure('sidekick:boot','sidekick:boot:start');
   })();
   void _bootSettingsReady;
   // Non-blocking update check (fire-and-forget, once per tab session)

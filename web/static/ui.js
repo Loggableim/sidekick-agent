@@ -1,5 +1,25 @@
 var S=window.S||{session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',showHiddenWorkspaceFiles:false,mode:'chat'};
 window.S=S;
+// ── Performance marks (backlog item 49) ──────────────────────────────────────
+// Small wrapper around the User Timing API so boot, session load, render and
+// SSE reconnect timings are measurable from the console or a test:
+//   performance.getEntriesByType('measure')
+// Every call is guarded: an unsupported browser or a thrown error must never
+// break the code path it instruments.
+function _perfMark(name){
+  try{
+    if(typeof performance==='undefined'||typeof performance.mark!=='function') return;
+    performance.mark(name);
+  }catch(_){}
+}
+function _perfMeasure(name,startMark){
+  try{
+    if(typeof performance==='undefined'||typeof performance.measure!=='function') return;
+    performance.measure(name,startMark);
+  }catch(_){}
+}
+window._perfMark=_perfMark;
+window._perfMeasure=_perfMeasure;
 var INFLIGHT=window.INFLIGHT||{};  // keyed by session_id while request in-flight
 window.INFLIGHT=INFLIGHT;
 var SESSION_QUEUES=window.SESSION_QUEUES||{};  // keyed by session_id for queued follow-up turns
@@ -7759,6 +7779,14 @@ window.refreshNovaPresenceCard = refreshNovaPresenceCard;
 
 
 function renderMessages(options){
+  _perfMark('sidekick:render:start');
+  try{
+    return _renderMessagesInner(options);
+  }finally{
+    _perfMeasure('sidekick:render','sidekick:render:start');
+  }
+}
+function _renderMessagesInner(options){
   const preserveScroll=!!(options&&options.preserveScroll);
   const scrollSnapshot=preserveScroll?_captureMessageScrollSnapshot():null;
   const inner=$('msgInner');

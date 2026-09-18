@@ -742,6 +742,14 @@ if (document.readyState === 'loading') {
 }
 
 async function loadSession(sid, options){
+  if(typeof _perfMark==='function') _perfMark('sidekick:session-load:start');
+  try{
+    return await _loadSessionInner(sid, options);
+  }finally{
+    if(typeof _perfMeasure==='function') _perfMeasure('sidekick:session-load','sidekick:session-load:start');
+  }
+}
+async function _loadSessionInner(sid, options){
   options = options || {};
   // The boot path can render the metadata shell immediately and hydrate the
   // transcript in the background. Interactive session switches retain the
@@ -2762,8 +2770,12 @@ async function probeGatewaySSEStatus(){
 function startGatewaySSE(){
   stopGatewaySSE();
   if(!window._showCliSessions) return;
+  if(typeof _perfMark==='function') _perfMark('sidekick:sse-connect:start');
   try{
     _gatewaySSE = new EventSource(_eventSourceUrl('api/sessions/gateway/stream'));
+    _gatewaySSE.addEventListener('open', () => {
+      if(typeof _perfMeasure==='function') _perfMeasure('sidekick:sse-connect','sidekick:sse-connect:start');
+    }, {once:true});
     _gatewaySSE.addEventListener('sessions_changed', (ev) => {
       try{
         const data = JSON.parse(ev.data);
