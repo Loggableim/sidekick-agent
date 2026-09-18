@@ -9116,10 +9116,9 @@ function _loadJsyamlThen(cb){
   if(_jsyamlLoading){ setTimeout(()=>_loadJsyamlThen(cb),100); return; }
   _jsyamlLoading=true;
   const s=document.createElement('script');
-  s.src='https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js';
-  s.crossOrigin='anonymous';
+  s.src='/static/vendor/js-yaml/js-yaml.min.js';
   s.onload=()=>{ _jsyamlLoading=false; cb(); };
-  s.onerror=()=>{ _jsyamlLoading=false; }; // CDN blocked, fall back to raw
+  s.onerror=()=>{ _jsyamlLoading=false; }; // vendor asset missing, fall back to raw
   document.head.appendChild(s);
 }
 
@@ -9708,11 +9707,11 @@ function loadPdfInline(){
     } else if(!_pdfjsLoading){
       _pdfjsLoading=true;
       const s=document.createElement('script');
-      s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.min.mjs';
+      s.src='/static/vendor/pdfjs/pdf.min.mjs';
       s.type='module';
       s.textContent=`
         import * as pdfjsLib from '${s.src}';
-        pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@4.9.155/build/pdf.worker.min.mjs';
+        pdfjsLib.GlobalWorkerOptions.workerSrc='/static/vendor/pdfjs/pdf.worker.min.mjs';
         window._pdfjsLib=pdfjsLib;
         window._pdfjsReady=true;
         window.dispatchEvent(new Event('pdfjs-ready'));
@@ -9766,9 +9765,7 @@ function renderMermaidBlocks(){
     if(!_mermaidLoading){
       _mermaidLoading=true;
       const script=document.createElement('script');
-      script.src='https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js';
-      script.integrity='sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT';
-      script.crossOrigin='anonymous';
+      script.src='/static/vendor/mermaid/mermaid.min.js';
       script.onload=()=>{
         if(typeof mermaid!=='undefined'){
           mermaid.initialize({startOnLoad:false,theme:document.documentElement.classList.contains('dark')?'dark':'default',themeVariables:{
@@ -9816,9 +9813,7 @@ function renderKatexBlocks(){
     if(!_katexLoading){
       _katexLoading=true;
       const script=document.createElement('script');
-      script.src='https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js';
-      script.integrity='sha384-cMkvdD8LoxVzGF/RPUKAcvmm49FQ0oxwDF3BGKtDXcEc+T1b2N+teh/OJfpU0jr6';
-      script.crossOrigin='anonymous';
+      script.src='/static/vendor/katex/katex.min.js';
       script.onload=()=>{
         if(typeof katex!=='undefined'){
           _katexReady=true;

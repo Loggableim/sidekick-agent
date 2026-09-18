@@ -1601,10 +1601,13 @@ function _setResolvedTheme(isDark){
 }
 
 // ── Syntax highlighting theme (3 presets) ──
+// Self-hosted (backlog item 14): the themes live under /static/vendor/prism/,
+// so switching a theme never reaches cdn.jsdelivr.net.
+const _SYNTAX_THEME_BASE = '/static/vendor/prism/';
 const _SYNTAX_THEMES = {
-  'tomorrow-night': 'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css',
-  'one-dark':       'https://cdn.jsdelivr.net/npm/prism-themes@1.9.0/themes/prism-one-dark.min.css',
-  'github-light':   'https://cdn.jsdelivr.net/npm/prism-themes@1.9.0/themes/prism-ghcolors.min.css',
+  'tomorrow-night': _SYNTAX_THEME_BASE + 'prism-tomorrow.min.css',
+  'one-dark':       _SYNTAX_THEME_BASE + 'prism-one-dark.min.css',
+  'github-light':   _SYNTAX_THEME_BASE + 'prism-ghcolors.min.css',
 };
 
 function _applySyntaxTheme(override){
@@ -1619,8 +1622,8 @@ function _applySyntaxTheme(override){
   } else {
     // Fallback: dark → Tomorrow Night, light → default
     want = isDark
-      ? 'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css'
-      : 'https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism.min.css';
+      ? _SYNTAX_THEME_BASE + 'prism-tomorrow.min.css'
+      : _SYNTAX_THEME_BASE + 'prism.min.css';
     delete document.documentElement.dataset.syntaxTheme;
   }
   if(link.href !== want){ link.integrity = ''; link.href = want; }

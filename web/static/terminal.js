@@ -20,20 +20,17 @@ const TERMINAL_UI={
 const TERMINAL_LIBRARY_ASSETS = [
   {
     key: 'Terminal',
-    src: 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js',
-    integrity: 'sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc',
+    src: '/static/vendor/xterm/xterm.js',
     ready: () => typeof window.Terminal === 'function',
   },
   {
     key: 'FitAddon',
-    src: 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js',
-    integrity: 'sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL',
+    src: '/static/vendor/xterm/xterm-addon-fit.js',
     ready: () => !!(window.FitAddon && typeof window.FitAddon.FitAddon === 'function'),
   },
   {
     key: 'WebLinksAddon',
-    src: 'https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js',
-    integrity: 'sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl',
+    src: '/static/vendor/xterm/xterm-addon-web-links.js',
     ready: () => !!(window.WebLinksAddon && typeof window.WebLinksAddon.WebLinksAddon === 'function'),
   },
 ];
@@ -218,11 +215,11 @@ async function _ensureXterm(){
     try{
       await _ensureTerminalLibraries();
     }catch(_){
-      surface.textContent='Terminal library failed to load. Check network access to cdn.jsdelivr.net.';
+      surface.textContent='Terminal library failed to load. Check that /static/vendor/xterm/ is served.';
       return null;
     }
     if(!_xtermReady()){
-      surface.textContent='Terminal library failed to load. Check network access to cdn.jsdelivr.net.';
+      surface.textContent='Terminal library failed to load. Check that /static/vendor/xterm/ is served.';
       return null;
     }
   }

@@ -15,11 +15,6 @@
 <link rel="apple-touch-icon" sizes="512x512" href="/static/apple-touch-icon.png">
 <!-- base href enables subpath mount support; all static paths must stay relative (no leading slash) -->
 <script>(function(){var path=location.pathname,marker='/session/',i=path.indexOf(marker),p;i>=0?p=(path.slice(0,i+1)||'/'):p=(path.endsWith('/')?path:(path.replace(/\/[^\/]*$/,'/')||'/'));document.write('<base href="'+location.origin+p+'">');})()</script>
-<!-- Warm the CDN connection before the Prism/xterm/KaTeX tags below are parsed:
-     the shell loads 9 assets from cdn.jsdelivr.net, and the DNS+TLS handshake
-     otherwise starts only when the first of them is requested. -->
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
 <script>(function(){var themes={light:1,dark:1,system:1},skins={default:1,ares:1,mono:1,slate:1,poseidon:1,sisyphus:1,charizard:1,sienna:1,matrix:1},legacy={slate:['dark','slate'],solarized:['dark','poseidon'],monokai:['dark','sisyphus'],nord:['dark','slate'],oled:['dark','default']},t=(localStorage.getItem('sidekick-theme')||'dark').toLowerCase(),s=(localStorage.getItem('sidekick-skin')||'').toLowerCase(),m=legacy[t],theme=m?m[0]:(themes[t]?t:'dark'),skin=skins[s]?s:(m?m[1]:'default');try{localStorage.setItem('sidekick-theme',theme);localStorage.setItem('sidekick-skin',skin);}catch(e){}if(theme==='system')theme=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';if(theme==='dark')document.documentElement.classList.add('dark');if(skin!=='default')document.documentElement.dataset.skin=skin;})()</script>
 <script>(function(){var fs=localStorage.getItem('sidekick-font-size');if(fs&&fs!=='default')document.documentElement.dataset.fontSize=fs;})()</script>
 <!-- theme-color: surfaces the active theme's background to native chrome (Safari status bar, PWA, native WKWebView wrappers). Updated dynamically by boot.js when theme/skin changes. The light/dark default values match style.css :root --bg-1 / :root.dark --bg-1. -->
@@ -38,8 +33,9 @@
   <link rel="stylesheet" href="/static/agents-dashboard.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="/static/spaces.css?v=__WEBUI_VERSION__">
   <link rel="stylesheet" href="/static/swarm.css?v=__WEBUI_VERSION__">
-  <!-- KaTeX math rendering CSS (loaded eagerly to prevent layout shift) -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css" integrity="sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP" crossorigin="anonymous">
+  <!-- KaTeX math rendering CSS (loaded eagerly to prevent layout shift).
+       Self-hosted from npm:katex@0.16.22 (backlog item 14) — no CDN dependency. -->
+  <link rel="stylesheet" href="/static/vendor/katex/katex.min.css?v=__WEBUI_VERSION__">
   <!-- streaming-markdown: incremental DOM-building markdown parser for live streams -->
   <!-- Self-hosted from npm:streaming-markdown@0.2.15 — no CDN dependency.           -->
   <!-- sha384 of smd.min.js @0.2.15: sha384-T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa -->
@@ -51,19 +47,20 @@
     // sha384 of smd.min.js @0.2.15: sha384-T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa
     window.smd = smd;
   </script>
-  <!-- Prism.js syntax highlighting (loaded async, non-blocking) -->
-  <!-- SRI removed from prism-tomorrow.min.css — jsdelivr serves different digests across
-       edge nodes causing intermittent integrity failures that block syntax highlighting (#1100).
-       Version is pinned to @1.29.0 which is sufficient for supply-chain assurance. -->
-  <link id="prism-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css" crossorigin="anonymous">
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-core.min.js" integrity="sha384-MXybTpajaBV0AkcBaCPT4KIvo0FzoCiWXgcihYsw4FUkEz0Pv3JGV6tk2G8vJtDc" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/autoloader/prism-autoloader.min.js" integrity="sha384-Uq05+JLko69eOiPr39ta9bh7kld5PKZoU+fF7g0EXTAriEollhZ+DrN8Q/Oi8J2Q" crossorigin="anonymous" defer></script>
+  <!-- Prism.js syntax highlighting (loaded async, non-blocking).
+       Self-hosted from npm:prismjs@1.29.0 (backlog item 14): the autoloader
+       resolves language files from its own directory, so /static/vendor/prism/
+       components/ serves them locally instead of cdn.jsdelivr.net. -->
+  <link id="prism-theme" rel="stylesheet" href="/static/vendor/prism/prism-tomorrow.min.css?v=__WEBUI_VERSION__">
+  <script src="/static/vendor/prism/prism-core.min.js?v=__WEBUI_VERSION__" defer></script>
+  <script src="/static/vendor/prism/prism-autoloader.min.js?v=__WEBUI_VERSION__" defer></script>
   <!-- Prism line-numbers plugin (loaded after autoloader) -->
-  <link id="prism-line-numbers-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.css" crossorigin="anonymous">
-  <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/plugins/line-numbers/prism-line-numbers.min.js" integrity="sha384-6QJu8apxMmB9TiPVWzYKF5pRgKcz7snO0/QU+MrWmgBLECQjoa6erxX2VQ5t41Jd" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js" integrity="sha384-/nfmYPUzWMS6v2atn8hbljz7NE0EI1iGx34lJaNzyVjWGDzMv+ciUZUeJpKA3Glc" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js" integrity="sha384-AQLWHRKAgdTxkolJcLOELg4E9rE89CPE2xMy3tIRFn08NcGKPTsELdvKomqji+DL" crossorigin="anonymous" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js" integrity="sha384-U4fBROT3kCM582gaYiNaOSQiJbXPzd9SfR1598Y7yeGSYVBzikXrNg0XyuU+mOnl" crossorigin="anonymous" defer></script>
+  <link id="prism-line-numbers-theme" rel="stylesheet" href="/static/vendor/prism/prism-line-numbers.min.css?v=__WEBUI_VERSION__">
+  <script src="/static/vendor/prism/prism-line-numbers.min.js?v=__WEBUI_VERSION__" defer></script>
+  <!-- xterm terminal — self-hosted from npm:xterm@5.3.0 / xterm-addon-* (backlog item 14) -->
+  <script src="/static/vendor/xterm/xterm.js?v=__WEBUI_VERSION__" defer></script>
+  <script src="/static/vendor/xterm/xterm-addon-fit.js?v=__WEBUI_VERSION__" defer></script>
+  <script src="/static/vendor/xterm/xterm-addon-web-links.js?v=__WEBUI_VERSION__" defer></script>
   <!-- PWA service worker registration -->
   <script>
     if ('serviceWorker' in navigator) {

@@ -29,16 +29,18 @@ def test_dashboard_frontend_contract() -> None:
     check_dashboard_frontend_contract()
 
 
-def test_index_preconnects_to_the_cdn_before_the_cdn_tags() -> None:
-    """The CDN connection hint must precede the assets it warms."""
+def test_index_has_no_cdn_connection_hint() -> None:
+    """The CDN is gone (item 14), so the preconnect hint must be gone too.
+
+    Item 15 added the hint to warm the cdn.jsdelivr.net connection. Once the
+    assets became self-hosted the hint would only open a useless socket.
+    """
     index_html = INDEX_HTML.read_text(encoding="utf-8")
 
-    preconnect = '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>'
-    dns_prefetch = '<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">'
-    assert preconnect in index_html
-    assert dns_prefetch in index_html
-
-    first_cdn_asset = index_html.index("https://cdn.jsdelivr.net/npm/")
-    assert index_html.index(preconnect) < first_cdn_asset
-    assert index_html.index(dns_prefetch) < first_cdn_asset
+    assert 'rel="preconnect" href="https://cdn.jsdelivr.net"' not in index_html
+    assert 'rel="dns-prefetch" href="https://cdn.jsdelivr.net"' not in index_html
+    # And the assets it used to warm are served locally.
+    assert "/static/vendor/prism/prism-core.min.js" in index_html
+    assert "/static/vendor/xterm/xterm.js" in index_html
+    assert "/static/vendor/katex/katex.min.css" in index_html
 
