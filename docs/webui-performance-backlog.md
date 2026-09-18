@@ -77,9 +77,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** Drei Caches: `load_settings()` keyed `(settings.json mtime_ns/size, resolved workspace)` und liefert Kopien; `resolve_default_workspace()` memoised (war mit 2,4 ms der eigentliche Kostentreiber) mit `is_dir()`-Revalidierung; `_state_dir()` memoised (`Path.resolve()` = realpath-Syscall). `save_settings()` refresht den Cache in place. Messung (100 warme Calls): `load_settings()` 2,02 → **0,14 ms**, `is_auth_enabled()` 3,25 → **0,13 ms**, `get_password_hash()` 2,83 → **0,11 ms**. Verifiziert: save_settings sofort sichtbar, externe Datei-Änderung via mtime erkannt, Caller-Mutation vergiftet den Cache nicht. Tests: `tests/test_settings_cache.py` (5).
 
 ## 6. PBKDF2-Falle entschärfen (600k-Iterationen pro Request) · S · Risiko: mittel
-- [ ] Mit gesetztem `SIDEKICK_PASSWORD`-Env hasht `get_password_hash()` bei jedem `is_auth_enabled()` 600k PBKDF2-Iterationen (web/api/auth.py). Gemessen: 223 ms pro Hash.
+- [x] Mit gesetztem `SIDEKICK_PASSWORD`-Env hasht `get_password_hash()` bei jedem `is_auth_enabled()` 600k PBKDF2-Iterationen (web/api/auth.py). Gemessen: 223 ms pro Hash. → **PR #68**
 - **Fix:** Env-Hash einmal berechnen + cachen (Invalidierung bei Env-/Settings-Änderung).
 - **Akzeptanz:** `is_auth_enabled()` warm < 1 ms bei gesetztem Env-Passwort.
+- **Ergebnis:** Env-Hash-Cache keyed `(env-Wert, signing key als Salt)`; zusätzlich `_signing_key()` memoised (las die Key-Datei pro Aufruf). Messung mit `SIDEKICK_WEBUI_PASSWORD`: `get_password_hash()` 245,3 → **0,61 ms**, `is_auth_enabled()` 255,5 → **0,98 ms** (−99,6 %). Verifiziert: richtiges Passwort verifiziert, falsches abgelehnt; Env-Wechsel invalidiert (altes Passwort danach abgelehnt); Cache-Hash == frisch berechneter Hash; ohne Env Fallback auf settings.json. Tests: `tests/test_auth_password_cache.py` (4).
 
 ## 15. `<link rel="preconnect">` für cdn.jsdelivr.net · S · Risiko: niedrig
 - [x] 0 preconnect/dns-prefetch in index.html; 9 CDN-Refs (Prism, xterm, KaTeX). → **PR #69**

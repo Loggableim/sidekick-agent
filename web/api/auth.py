@@ -241,14 +241,28 @@ def _record_login_attempt(ip: str) -> None:
     _save_login_attempts(_login_attempts)
 
 
+_SIGNING_KEY_CACHE: dict = {"path": None, "key": None}
+
+
 def _signing_key():
-    """Return a random signing key, generating and persisting one on first call."""
+    """Return a random signing key, generating and persisting one on first call.
+
+    Memoised per key-file path: the key is immutable for the lifetime of the
+    state dir, and this runs on every ``get_password_hash()`` call (i.e. every
+    API request via ``is_auth_enabled``).
+    """
     key_file = _state_dir() / '.signing_key'
+    cache = _SIGNING_KEY_CACHE
+    if cache["key"] is not None and cache["path"] == str(key_file):
+        return cache["key"]
     try:
         if key_file.exists():
             raw = key_file.read_bytes()
             if len(raw) >= 32:
-                return raw[:32]
+                key = raw[:32]
+                cache["path"] = str(key_file)
+                cache["key"] = key
+                return key
     except Exception:
         logger.debug("Failed to read or access signing key file, using in-memory key")
     # Generate a new random key
@@ -259,6 +273,8 @@ def _signing_key():
         key_file.chmod(0o600)
     except Exception:
         logger.debug("Failed to persist signing key, using in-memory key only")
+    cache["path"] = str(key_file)
+    cache["key"] = key
     return key
 
 
@@ -345,13 +361,34 @@ def _hash_password(password):
     return dk.hex()
 
 
+_ENV_PASSWORD_HASH_CACHE: dict = {"env": None, "salt": None, "hash": None}
+
+
 def get_password_hash() -> str | None:
     """Return the active password hash, or None if auth is disabled.
-    Priority: env var > settings.json."""
+    Priority: env var > settings.json.
+
+    The env-var hash is cached: PBKDF2 with 600k iterations costs ~240 ms and
+    this runs on every API request via ``is_auth_enabled()``. The cache is
+    keyed on the env value and the signing key (the salt), so a changed
+    password or a switched state dir re-hashes.
+    """
     _refresh_state_paths()
     env_pw = _get_password_env_value()
     if env_pw:
-        return _hash_password(env_pw)
+        salt = _signing_key()
+        cache = _ENV_PASSWORD_HASH_CACHE
+        if (
+            cache["hash"] is not None
+            and cache["env"] == env_pw
+            and cache["salt"] == salt
+        ):
+            return cache["hash"]
+        digest = _hash_password(env_pw)
+        cache["env"] = env_pw
+        cache["salt"] = salt
+        cache["hash"] = digest
+        return digest
     settings = load_settings()
     return settings.get('password_hash') or None
 
