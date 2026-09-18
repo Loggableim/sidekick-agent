@@ -2506,6 +2506,39 @@ function _apiWithTimeout(path, options, ms, label){
   });
 }
 
+// ── Generic in-flight dedupe (backlog item 27) ───────────────────────────────
+// Several polls (context usage, streaming session list, health) can overlap
+// with each other and with user actions. Without a guard each tick fires its
+// own request, so a slow endpoint accumulates parallel calls that all resolve
+// out of order. `_dedupeInFlight` keeps one promise per key and hands the same
+// promise to every caller until it settles.
+const _inFlightByKey = new Map();
+
+function _dedupeInFlight(key, factory) {
+  const existing = _inFlightByKey.get(key);
+  if (existing) return existing;
+  let promise;
+  try {
+    promise = Promise.resolve(factory());
+  } catch (e) {
+    promise = Promise.reject(e);
+  }
+  _inFlightByKey.set(key, promise);
+  const release = () => {
+    // Only clear the entry if it is still ours (a later call may have replaced it).
+    if (_inFlightByKey.get(key) === promise) _inFlightByKey.delete(key);
+  };
+  promise.then(release, release);
+  return promise;
+}
+
+function _inFlightCount() {
+  return _inFlightByKey.size;
+}
+
+window._dedupeInFlight = _dedupeInFlight;
+window._inFlightCount = _inFlightCount;
+
 async function renderSessionList(){
   const options = arguments[0] || {};
   const deferProjects = options.deferProjects === true;
@@ -2660,11 +2693,13 @@ const _sessionTimeRefreshMs = 60000;
 let _streamingPollTimer = null;
 let _sessionTimeRefreshTimer = null;
 
-function startStreamingPoll(){
+function startStreamingPoll() {
   if(_streamingPollTimer) return;
   _streamingPollTimer = setInterval(() => {
     if(_sessionListInFlight) return;  // don't pile up
-    void renderSessionList();
+    // Dedupe (backlog item 27): a user-triggered refresh of the same list must
+    // share this request instead of racing it.
+    void _dedupeInFlight('session-list', () => renderSessionList());
   }, _streamingPollMs);
 }
 

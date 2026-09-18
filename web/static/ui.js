@@ -5051,7 +5051,17 @@ function startCtxPolling(){
   _ctxPollTimer=setInterval(async function(){
     if(!S.session||!S.busy){stopCtxPolling();return;}
     try{
-      const d=await api('/api/session?session_id='+encodeURIComponent(S.session.session_id));
+      // Dedupe (backlog item 27): a slow session read must not stack up with
+      // the next tick or with a user-triggered refresh of the same session.
+      // _dedupeInFlight lives in sessions.js, which loads after ui.js; the poll
+      // only runs at runtime, but guard anyway so a load-order change is safe.
+      const sid=S.session.session_id;
+      const fetchSession=function(){
+        return api('/api/session?session_id='+encodeURIComponent(sid));
+      };
+      const d=await (typeof _dedupeInFlight==='function'
+        ? _dedupeInFlight('ctx:'+sid, fetchSession)
+        : fetchSession());
       if(d&&d.session){
         const msgs=d.session.messages||[];
         const msgCount=msgs.filter(function(m){return m&&m.role!=='tool';}).length;

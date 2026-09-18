@@ -181,9 +181,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** `API_DEFAULT_TIMEOUT_MS = 30000`; `api()` legt einen `AbortController` an, wenn der Aufrufer kein eigenes `signal` mitgibt (Caller-Signal gewinnt). Überschreibbar per `opts.timeoutMs`, abschaltbar mit `0`. Abort wird **nicht** retried (sonst dreifache Wartezeit) und als `TimeoutError` mit `Request timed out after <ms> ms` plus `timeoutMs`/`url` geworfen; Timer wird im `finally` immer geräumt. Browser-Verifikation (Playwright): hängender Request bricht nach **801 ms** bei `timeoutMs: 800` ab (`name: 'TimeoutError'`, klare Meldung), normale Requests laufen unverändert, Caller-Signal wird respektiert. Tests: `tests/test_api_default_timeout.py` (5).
 
 ## 27. In-Flight-Dedupe ausweiten · S–M · Risiko: niedrig
-- [ ] ctx-Poll (5 s, ui.js:5051) und Streaming-Poll (5 s, sessions.js:2663) können sich mit Nutzeraktionen überlappen; `_sessionListInFlight`-Guard existiert nur für die Session-Liste.
+- [x] ctx-Poll (5 s, ui.js:5051) und Streaming-Poll (5 s, sessions.js:2663) können sich mit Nutzeraktionen überlappen; `_sessionListInFlight`-Guard existiert nur für die Session-Liste.
 - **Fix:** Generischer In-Flight-Guard pro Endpoint (Promise-Map).
 - **Akzeptanz:** Keine doppelten parallelen Requests desselben Endpoints (Netzwerk-Panel).
+- **Ergebnis:** `_dedupeInFlight(key, factory)` in sessions.js: Promise-Map pro Key, identische Promise für alle überlappenden Aufrufer, Freigabe bei Settle (nur wenn der Eintrag noch der eigene ist — ein späterer Aufruf wird nicht gelöscht), synchrone Throws werden zu einer Rejection statt zu einem hängenden Eintrag. Angewendet auf den **ctx-Poll** (`ctx:<sid>`, mit `typeof`-Guard weil ui.js vor sessions.js lädt) und den **Streaming-Poll** (`session-list`). Browser-Verifikation (Playwright, Requests über Resource-Timing gezählt): **5 parallele Aufrufe mit gleichem Key → 1 Netzwerk-Request**, alle Aufrufer bekommen dieselbe Promise-Instanz, Eintrag nach Abschluss freigegeben, verschiedene Keys unabhängig (2 Requests), Rejection propagiert und gibt frei. Tests: `tests/test_in_flight_dedupe.py` (5).
 
 ## 28. /api/sessions-Cache TTL erhöhen + ETag · S · Risiko: niedrig
 - [ ] `_SESSION_LIST_CACHE_TTL = 2.0` (web/api/models.py:1562) bei 5-s-Poll.
