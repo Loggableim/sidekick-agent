@@ -173,12 +173,30 @@ class _ResponseWriter:
         self._chunks.put(_END)
 
     async def stream(self) -> AsyncIterator[bytes]:
+        """Yield queued chunks, draining whatever is already buffered.
+
+        Each ``asyncio.to_thread`` call occupies a thread from anyio's default
+        limiter (40 threads), so one call per chunk lets a busy stream consume
+        the whole limiter. After the first blocking ``get`` we drain the queue
+        without blocking and yield the batch as one item, so a burst of chunks
+        costs a single thread hop.
+        """
         try:
             while True:
                 item = await asyncio.to_thread(self._chunks.get)
                 if item is _END:
                     break
-                yield item  # type: ignore[misc]
+                batch = bytearray(item)
+                while True:
+                    try:
+                        nxt = self._chunks.get_nowait()
+                    except queue.Empty:
+                        break
+                    if nxt is _END:
+                        self._chunks.put(_END)  # keep the sentinel for the next loop
+                        break
+                    batch.extend(nxt)
+                yield bytes(batch)
         finally:
             self.close()
 

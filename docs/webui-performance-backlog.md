@@ -125,9 +125,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** Bounded `ThreadPoolExecutor` (16 Worker) für normale Bridge-Requests; **SSE-Pfade behalten dedizierte Threads**, weil ein Stream-Handler seinen Worker bis `wfile.finish()` hält und ein Pool sonst von wenigen offenen Streams ausgehungert würde (SSE-Liste lokal dupliziert, da `cli.web_server` dieses Modul importiert → Zirkularität; ein Test prüft Listen-Gleichheit). Backpressure: 503 + `Retry-After: 1` ab `_BRIDGE_POOL_QUEUE_LIMIT = 256` anstehenden Requests. Lasttest: **100 parallele Bridge-Requests → 16 Threads statt 100**, 100/100 OK, `_bridge_pool_pending` nach dem Lauf 0. Tests: `tests/test_bridge_pool.py` (4).
 
 ## 9. SSE-Chunk-Reads batchen · M · Risiko: mittel
-- [ ] `await asyncio.to_thread(self._chunks.get)` pro Chunk (web/api/fastapi_bridge.py:114); anyio-Default-Limiter = 40 Threads.
+- [x] `await asyncio.to_thread(self._chunks.get)` pro Chunk (web/api/fastapi_bridge.py:114); anyio-Default-Limiter = 40 Threads.
 - **Fix:** Mehrere Chunks pro Thread-Aufruf drainen (z. B. `get_nowait`-Schleife nach erstem `get`).
 - **Akzeptanz:** SSE-Streams unter Last blockieren den Limiter nicht mehr (Messung).
+- **Ergebnis:** `_ResponseWriter.stream()` drainet nach dem ersten blockierenden `get` die Queue per `get_nowait`-Schleife und yieldet den Batch als ein Item; das `_END`-Sentinel wird für die nächste Runde zurückgelegt. Messung: **20-Chunk-Burst → 2 Thread-Hops statt 21**; 10-Chunk-Burst → 1 Yield; Live-Chunks weiterhin in Reihenfolge und vollständig; `finish()` terminiert ohne Hänger. Tests: `tests/test_sse_chunk_batching.py` (4).
 
 ## 10. Top-Assets beim Start prekomprimieren · S · Risiko: niedrig
 - [ ] ui.js/i18n.js/panels.js/style.css/index.html ≈ 350 KB gzip; Kompression kostet pro Request CPU (Item 4).
