@@ -49,9 +49,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 # P0 — Sofort (klein, risikoarm, großer Effekt)
 
 ## 1. index.html gzipen · S · Risiko: niedrig
-- [ ] `_serve_index` (cli/web_server.py:6305) liefert 274 KB ohne gzip; curl bestätigt kein `content-encoding`. Gzip wäre ~47 KB (−83 %).
+- [x] `_serve_index` (cli/web_server.py:6305) liefert 274 KB ohne gzip; curl bestätigt kein `content-encoding`. Gzip wäre ~47 KB (−83 %). → **PR #62**
 - **Fix:** gzip in `_serve_index` analog `serve_spa` (web_server.py:6410) + `Vary: Accept-Encoding`.
 - **Akzeptanz:** `curl -H 'Accept-Encoding: gzip' -D - -o /dev/null http://127.0.0.1:9119/` → `content-encoding: gzip`, ~47 KB.
+- **Ergebnis:** 274.246 B → 48.228 B (−82,4 %); `content-encoding: gzip` + `vary: Accept-Encoding` gesetzt; dekomprimierter Body byte-identisch (`diff` leer). Browser-Smoke `load_within_budget` 1015 ms → 407 ms. `_serve_index` bekam einen optionalen `request`-Parameter, damit der bestehende Call-Site in `serve_spa` ihn durchreicht.
 
 ## 2. index.html mit ETag/304 statt `no-store` · S · Risiko: niedrig
 - [ ] `_serve_index` sendet `Cache-Control: no-store, no-cache, must-revalidate` (web_server.py:6332); kein ETag. Jeder Reload lädt 274 KB neu.
