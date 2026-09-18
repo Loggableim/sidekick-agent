@@ -2867,55 +2867,6 @@ let _approvalCurrentId = null;  // approval_id of the card currently shown
 let _approvalPendingBySession = new Map();
 
 // ── Global cross-session approval polling ─────────────────────────────────
-// Polls ALL sessions for pending approvals every 3s, so badges and toasts
-// appear even when the user is looking at a different session/space/panel.
-let _globalApprovalPollTimer = null;
-let _globalApprovalSessionsSeen = new Set();
-
-function _startGlobalApprovalPoll() {
-  _stopGlobalApprovalPoll();
-  _globalApprovalPollTimer = setInterval(async () => {
-    try {
-      const data = await api("/api/approval/pending-all");
-      if (!data || !data.sessions) return;
-      for (const [sid, entry] of Object.entries(data.sessions)) {
-        if (entry && entry.pending) {
-          entry.pending._session_id = sid;
-          _approvalPendingBySession.set(sid, {pending: entry.pending, pendingCount: entry.pending_count || 1});
-          if (!_approvalPromptBelongsToActiveSession(sid)) {
-            if (!_globalApprovalSessionsSeen.has(sid)) {
-              _globalApprovalSessionsSeen.add(sid);
-              let title = sid.slice(0, 8) + '…';
-              const el = document.querySelector('.session-item[data-sid="' + sid.replace(/"/g,'') + '"] .session-title');
-              if (el) title = el.textContent || title;
-              const desc = entry.pending.description || entry.pending.command || '';
-              showToast('🔴 ' + (t('approval_needed') || 'Approval needed') + ': "' + title + '" — ' + (desc.length > 60 ? desc.slice(0,60)+'…' : desc), 10000);
-            }
-          }
-        } else {
-          _approvalPendingBySession.delete(sid);
-          _globalApprovalSessionsSeen.delete(sid);
-        }
-      }
-      for (const sid of _approvalPendingBySession.keys()) {
-        if (!data.sessions[sid]) {
-          _approvalPendingBySession.delete(sid);
-          _globalApprovalSessionsSeen.delete(sid);
-        }
-      }
-      // Refresh sidebar badges
-      if (typeof renderSessionListFromCache === 'function') renderSessionListFromCache();
-    } catch (_) {}
-  }, 3000);
-}
-
-function _stopGlobalApprovalPoll() {
-  if (_globalApprovalPollTimer) {
-    clearInterval(_globalApprovalPollTimer);
-    _globalApprovalPollTimer = null;
-  }
-}
-
 function _promptActiveSessionId() {
   return (S.session && S.session.session_id) || null;
 }
@@ -2936,7 +2887,6 @@ function _rememberApprovalPending(pending, pendingCount) {
 function _clearApprovalPendingForSession(sid) {
   if (sid) {
     _approvalPendingBySession.delete(sid);
-    _globalApprovalSessionsSeen.delete(sid);
   }
 }
 
