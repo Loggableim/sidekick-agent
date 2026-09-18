@@ -61,7 +61,7 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** Schwacher ETag (`W/"<sha256[:32]>"`) über das gerenderte HTML + RFC-7232-Vergleich (`If-None-Match`, auch Listen/`*`/Strong-Form). `Cache-Control` von `no-store` → `private, no-cache, must-revalidate` (sonst würde der Browser nie revalidieren). curl: 48.229 B/283 ms → 304/0 B/25 ms; echter Chromium: Reload überträgt 201 B statt 48.507 B. Test: `tests/test_paths.py::test_web_server_root_revalidates_with_etag`.
 
 ## 3. index.html + Version-Token in-memory cachen (mtime-keyed) · S · Risiko: niedrig
-- [x] `_index_path.read_text` + replace pro Request (web_server.py:6311); `_webui_version_token()` macht bei `-dirty` ein `rglob` über WEB_DIST pro Request (web_server.py:1003-1020). Aktuell ist der Token `-dirty` → rglob aktiv. → **PR #64**
+- [x] `_index_path.read_text` + replace pro Request (web_server.py:6311); `_webui_version_token()` macht bei `-dirty` ein `rglob` über WEB_DIST pro Request (web_server.py:1003-1020). Aktuell ist der Token `-dirty` → rglob aktiv. → **PR #65**
 - **Fix:** Gerenderte HTML + Token cachen, invalidieren über mtime von index.html.
 - **Akzeptanz:** Kein `rglob`/`read_text` mehr pro Request (Messung/Log).
 - **Ergebnis:** Zwei Caches: Version-Token (keyed auf `WEBUI_VERSION` + newest-mtime) und gerenderte HTML (keyed auf `(path, mtime_ns, size, prefix, token)`, LRU-Cap 8). Zusätzlich `rglob`+`stat` (~17 ms) durch `os.scandir`-Walk (~0,8 ms) ersetzt. Messung über 30 warme Requests bei dirty tree: `read_text(index.html)` 30 → **0**, `rglob` 30 → **0**, warm GET / 28,10 ms → **8,95 ms** (−68 %). Tests: `test_web_server_root_does_not_re_read_index_per_request`, `test_web_server_root_render_cache_invalidates_on_index_change`.
