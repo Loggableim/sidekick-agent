@@ -350,6 +350,7 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
     entity_state = _read_json(nova_root / "nova_data" / "entity" / "entity_state.json")
     presence = _public_presence_state(entity_state)
     managed_spaces = _managed_space_summaries(spaces_root)
+    enrollment_diagnostics = [] if managed_spaces else _enrollment_diagnostics(spaces_root)
     ledger_path = resolved_home / "state" / "nova-space-supervisor.sqlite"
     pending_actions, pending_signals = _pending_actions_for(ledger_path, managed_spaces)
     marker_bindings = _managed_space_marker_bindings(spaces_root)
@@ -422,6 +423,7 @@ def build_presence_card(*, home: Path | None = None) -> dict[str, Any]:
         "blockers": blockers,
         "activity": activity,
         "decision_feed": decision_feed,
+        "enrollment_diagnostics": enrollment_diagnostics,
         "pending_actions": pending_actions,
         "pending_signals": pending_signals,
         "release_slot": release_slot,
@@ -766,6 +768,74 @@ def _managed_space_summaries(spaces_root: Path) -> list[dict[str, Any]]:
         if len(summaries) >= _MAX_SPACES:
             break
     return summaries
+
+
+_ENROLLMENT_DIAGNOSTIC_CODES = frozenset(
+    {
+        "audit_invalid",
+        "project_dir_untrusted",
+        "root_fingerprint_mismatch",
+        "revision_mismatch",
+        "duplicate_binding",
+    }
+)
+
+
+def _enrollment_diagnostics(spaces_root: Path) -> list[dict[str, str]]:
+    """Explain enrolled-but-unbound Spaces without leaking paths or secrets.
+
+    The binding gate fails closed and silently omits a Space whose governance
+    evidence no longer matches the current trusted root.  A silently empty
+    managed list is indistinguishable from "nothing is enrolled", which cost a
+    real operator session when a portable checkout moved between drives.  This
+    projection reports only the stable slug and a bounded reason code; it never
+    returns project paths, fingerprints, or audit actor identities.
+    """
+    try:
+        children = sorted(spaces_root.iterdir(), key=lambda item: item.name.lower())
+    except OSError:
+        return []
+    diagnostics: list[dict[str, str]] = []
+    for child in children:
+        slug = child.name.lower()
+        if not child.is_dir() or slug == _NOVA_SLUG or not _SPACE_SLUG_RE.fullmatch(slug):
+            continue
+        config = _read_space_config(child / "space.yaml")
+        management = config.get("nova_management") if isinstance(config, Mapping) else None
+        if not _is_enrolled_yolo_management(management):
+            continue
+        diagnostics.append(
+            {"space": slug, "code": _enrollment_failure_code(config, management)}
+        )
+        if len(diagnostics) >= _MAX_SPACES:
+            break
+    return diagnostics
+
+
+def _enrollment_failure_code(
+    config: Mapping[str, Any], management: Mapping[str, Any]
+) -> str:
+    """Classify why an enrolled Space failed the binding gate without leaking data."""
+    space_id = _marker_space_id(config.get("space_id"))
+    event = _validated_marker_audit_event(
+        config.get("nova_management_audit"),
+        space_id=space_id,
+        management=management,
+    )
+    if event is None:
+        return "audit_invalid"
+    current_root_fingerprint = _trusted_marker_root_fingerprint(config.get("project_dir"))
+    if not current_root_fingerprint:
+        return "project_dir_untrusted"
+    root_fingerprint = event.get("root_fingerprint")
+    if not _valid_marker_digest(root_fingerprint) or root_fingerprint != current_root_fingerprint:
+        return "root_fingerprint_mismatch"
+    if event.get("governance_revision") != management["revision"]:
+        return "revision_mismatch"
+    # Every per-Space check passes, so the gate rejected this Space only via
+    # the cross-Space dedup (same space id or trusted root as an earlier
+    # binding). Report that instead of a misleading audit failure.
+    return "duplicate_binding"
 
 
 def _pending_actions_for(

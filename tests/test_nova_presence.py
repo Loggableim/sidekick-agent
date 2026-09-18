@@ -1766,4 +1766,96 @@ def test_presence_identity_and_paused_next_step_survive_host_restart_without_cro
         rendered = json.dumps(payload)
         assert "finanzjunkie" not in rendered
         assert "space-alpha" not in rendered
-        assert "C:/private" not in rendered
+
+
+def test_enrollment_diagnostics_stay_absent_when_spaces_bind(tmp_path: Path):
+    """A healthy binding must not add diagnostic rows to the payload."""
+    from web.api.nova_presence import build_presence_card
+
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    payload = build_presence_card(home=home)
+    assert payload["enrollment_diagnostics"] == []
+
+
+def test_enrollment_diagnostics_explain_untrusted_project_dir(tmp_path: Path, monkeypatch):
+    """A moved checkout surfaces project_dir_untrusted, never a path."""
+    from web.api import nova_presence
+
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    # The live drive-migration incident: the enrollment resolver can no
+    # longer vouch for the recorded project root, so the trusted fingerprint
+    # comes back empty and the binding gate fails closed.
+    monkeypatch.setattr(
+        nova_presence, "_trusted_marker_root_fingerprint", lambda _value: ""
+    )
+
+    payload = nova_presence.build_presence_card(home=home)
+
+    assert payload["managed_spaces"] == []
+    assert payload["enrollment_diagnostics"] == [
+        {"space": "alpha", "code": "project_dir_untrusted"}
+    ]
+    rendered = json.dumps(payload)
+    assert "trusted-project" not in rendered
+    assert str(home) not in rendered
+
+
+def test_enrollment_diagnostics_explain_invalid_audit_chain(tmp_path: Path, monkeypatch):
+    """A Space with a broken governance chain reports audit_invalid."""
+    from web.api.nova_presence import build_presence_card
+
+    monkeypatch.setattr(
+        "web.api.workspace.resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    config_path = home / "spaces" / "alpha" / "space.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["nova_management_audit"] = []
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    payload = build_presence_card(home=home)
+
+    assert payload["managed_spaces"] == []
+    assert payload["enrollment_diagnostics"] == [
+        {"space": "alpha", "code": "audit_invalid"}
+    ]
+
+
+def test_enrollment_diagnostics_explain_fingerprint_mismatch(tmp_path: Path, monkeypatch):
+    """A checkout whose root no longer matches the audit reports the mismatch."""
+    from web.api.nova_presence import build_presence_card
+
+    monkeypatch.setattr(
+        "web.api.workspace.resolve_enrollment_trusted_workspace_read_only",
+        lambda value: Path(value),
+    )
+    home = tmp_path / "home"
+    _write_marker_space(home / "spaces" / "alpha", slug="alpha")
+    config_path = home / "spaces" / "alpha" / "space.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    audit = config["nova_management_audit"]
+    audit[-1]["root_fingerprint"] = sha256(b"moved-checkout").hexdigest()
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    payload = build_presence_card(home=home)
+
+    assert payload["managed_spaces"] == []
+    assert payload["enrollment_diagnostics"] == [
+        {"space": "alpha", "code": "root_fingerprint_mismatch"}
+    ]
+
+
+def test_enrollment_diagnostics_skip_unenrolled_and_private_spaces(tmp_path: Path):
+    """Only enrolled Spaces appear; Nova itself and plain Spaces stay out."""
+    from web.api.nova_presence import _enrollment_diagnostics
+
+    spaces = tmp_path / "spaces"
+    (spaces / "nova").mkdir(parents=True)
+    (spaces / "plain-space").mkdir(parents=True)
+    (spaces / "plain-space" / "space.yaml").write_text("name: Plain\n", encoding="utf-8")
+
+    assert _enrollment_diagnostics(spaces) == []

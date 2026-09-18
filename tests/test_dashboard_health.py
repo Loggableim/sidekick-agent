@@ -290,6 +290,38 @@ if(rows.join(' ').includes('TOKEN')||rows.join(' ').includes('secret')||rows.joi
     result = _run_node_script(node_program)
     assert result.returncode == 0, result.stderr or result.stdout
 
+def test_nova_presence_renders_enrollment_diagnostics_when_no_space_binds():
+    """Stale enrollments surface a bounded reason instead of a silent empty list."""
+    ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
+    start = ui_js.index("const _NOVA_CARD_SPACE_RE=")
+    end = ui_js.index("\nfunction renderMessages(", start)
+    presence_code = ui_js[start:end]
+    node_program = r"""
+const vm = require('node:vm');
+const elements = {};
+function element(){return {children:[],hidden:false,style:{display:''},textContent:'',dataset:{},replaceChildren(){this.children=[]},appendChild(c){this.children.push(c);return c}};}
+for(const id of ['novaPresenceState','novaPresenceFocus','novaPresenceSupervision','novaPresencePending','novaPresenceUnread','novaPresenceOffline','novaPresenceSlot','novaPresenceReleaseSlot','novaUnreadEvents','novaManagedSpaces','novaAuditedResults','novaBlockers','novaActivity','novaTickerEvents']) elements[id]=element();
+const context={window:{_activeSpace:'nova'},document:{createElement:()=>element()},$:id=>elements[id]||null,Promise,Set,String,Object,Array,Error,Math};
+vm.runInNewContext(__PRESENCE_CODE__,context,{filename:'ui.js'});
+context._renderNovaPresenceCard({state:'available', managed_spaces:[], enrollment_diagnostics:[
+  {space:'aquarium-zentrum',code:'project_dir_untrusted'},
+  {space:'../evil',code:'project_dir_untrusted'},
+  {space:'finanzjunkie',code:'unknown_code'},
+  {space:'alpha',code:'root_fingerprint_mismatch'}
+]});
+const rows=elements.novaManagedSpaces.children.map(item=>item.children.map(child=>child.textContent).join(' | '));
+if(rows.length!==2) throw new Error('diagnostics rows were not bounded/validated: '+rows.join(' || '));
+if(!rows[0].includes('Aquarium Zentrum') || !rows[0].includes('Projektpfad nicht mehr vertrauensw\u00fcrdig')) throw new Error('untrusted diagnostic was not rendered: '+rows[0]);
+if(!rows[1].includes('Alpha') || !rows[1].includes('Projektroot ge\u00e4ndert')) throw new Error('mismatch diagnostic was not rendered: '+rows[1]);
+if(rows.join(' ').includes('evil') || rows.join(' ').includes('unknown_code')) throw new Error('invalid diagnostic leaked into managed list');
+// A healthy binding list must not gain diagnostic rows.
+context._renderNovaPresenceCard({state:'available', managed_spaces:[{space:'aquarium-zentrum',state:'active'}], enrollment_diagnostics:[{space:'aquarium-zentrum',code:'project_dir_untrusted'}]});
+const healthy=elements.novaManagedSpaces.children.map(item=>item.children.map(child=>child.textContent).join(' | '));
+if(healthy.length!==1 || !healthy[0].includes('aktiv')) throw new Error('diagnostics leaked into a healthy binding list: '+healthy.join(' || '));
+""".replace("__PRESENCE_CODE__", json.dumps(presence_code))
+    result = _run_node_script(node_program)
+    assert result.returncode == 0, result.stderr or result.stdout
+
 def test_nova_entity_browser_smoke_identity_managed_space_degraded_next_step_and_offline():
     """Render the public Nova card contract entirely in a Node browser harness."""
     ui_js = Path("web/static/ui.js").read_text(encoding="utf-8")
