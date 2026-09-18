@@ -32,6 +32,7 @@
 
 | Dokument | Beschreibung |
 |----------|--------------|
+| [`webui-performance-backlog.md`](webui-performance-backlog.md) | WebUI Performance & Stability — 50 Items, Agent-Arbeitsliste (ein Item = ein PR) |
 | [`roadmap-v0.6.0.md`](roadmap-v0.6.0.md) | Aktuelle Planung (nächster Release) |
 | [`archive/roadmap-v0.3.0.md`](archive/roadmap-v0.3.0.md) | Historisch (abgeschlossen) |
 | [`archive/roadmap-v0.4.0.md`](archive/roadmap-v0.4.0.md) | Historisch (abgeschlossen) |
