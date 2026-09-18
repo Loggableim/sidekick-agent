@@ -1,3 +1,10 @@
+// Default timeout for api() calls (backlog item 26). Without one, a request
+// that never answers (half-open socket, stalled provider stream) leaves the
+// caller's promise pending forever and the UI stuck on its loading state.
+// Callers can override per request with opts.timeoutMs, or disable it with
+// opts.timeoutMs = 0.
+const API_DEFAULT_TIMEOUT_MS = 30000;
+
 async function api(path,opts={}){
   // Strip leading slash so URL resolves relative to location.href (supports subpath mounts)
   const rel = path.startsWith('/') ? path.slice(1) : path;
@@ -5,9 +12,20 @@ async function api(path,opts={}){
   const fetchOpts=Object.assign({},opts||{});
   const logApiError=fetchOpts.logError!==false;
   delete fetchOpts.logError;
+  // A caller-supplied signal wins; otherwise apply the default timeout.
+  const timeoutMs = fetchOpts.timeoutMs === undefined ? API_DEFAULT_TIMEOUT_MS : fetchOpts.timeoutMs;
+  delete fetchOpts.timeoutMs;
+  let timeoutTimer=null;
+  let timeoutController=null;
+  if(timeoutMs>0 && !fetchOpts.signal){
+    timeoutController=new AbortController();
+    fetchOpts.signal=timeoutController.signal;
+    timeoutTimer=setTimeout(()=>timeoutController.abort(),timeoutMs);
+  }
   // Retry up to 2 times on network errors (e.g. stale keep-alive after long idle).
   // Server errors (4xx/5xx) are NOT retried — only connection failures.
   let lastErr;
+  try{
   for(let attempt=0;attempt<3;attempt++){
     try{
       const headers = _headersWithWorkspace(fetchOpts.headers, url, {defaultJson:true});
@@ -77,6 +95,15 @@ async function api(path,opts={}){
       return ct.includes('application/json')?res.json():res.text();
     }catch(e){
       lastErr=e;
+      // A timeout abort must not be retried: the request already had its full
+      // budget, and retrying would triple the wait before the caller sees it.
+      if(e && e.name==='AbortError'){
+        const timeoutErr=new Error(`Request timed out after ${timeoutMs} ms`);
+        timeoutErr.name='TimeoutError';
+        timeoutErr.timeoutMs=timeoutMs;
+        timeoutErr.url=path;
+        throw timeoutErr;
+      }
       // Only retry on network errors (TypeError from fetch), not on HTTP errors
       // that were already thrown above. Re-throw 401 redirects immediately.
       if(e.message&&/401/.test(e.message)) throw e;
@@ -85,6 +112,9 @@ async function api(path,opts={}){
     }
   }
   throw lastErr;
+  }finally{
+    if(timeoutTimer) clearTimeout(timeoutTimer);
+  }
 }
 
 // Persist/restore expanded directory state per workspace in localStorage

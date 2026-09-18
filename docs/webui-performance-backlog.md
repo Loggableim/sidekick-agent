@@ -175,9 +175,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Einschränkung (nicht erreicht):** Das Akzeptanzkriterium „Install-Precache < 1 MB" ist **nicht erfüllt** — erreicht wurden 1,99 MB raw / **0,47 MB gzip** (vorher 2,08 MB / 0,49 MB). Die verbleibenden ~94 KB Ersparnis sind das Maximum, ohne die Boot-Kette zu beschädigen: `ui.js` (139 KB gz) und `style.css` (93 KB gz) sind render- bzw. boot-kritisch und müssen im Precache bleiben. Eine echte <1-MB-Grenze wäre nur über Item 16 (Minify) oder Item 18 (style.css splitten) erreichbar. Gemessen wird hier gzip (der Precache lädt über HTTP mit gzip), das Kriterium im Backlog ist unklar auf raw oder gzip bezogen.
 
 ## 26. `api()`: Default-Timeout (AbortSignal.timeout) · S–M · Risiko: niedrig
-- [ ] `api()` (web/static/workspace.js:1) hat keinen Default-Timeout; nur `_workspaceApiWithTimeout` für Workspace-Pfade. Hängende Requests stapeln sich.
+- [x] `api()` (web/static/workspace.js:1) hat keinen Default-Timeout; nur `_workspaceApiWithTimeout` für Workspace-Pfade. Hängende Requests stapeln sich.
 - **Fix:** Default-Timeout (z. B. 30 s) via `AbortSignal.timeout`, überschreibbar per Option; Timeout-Fehler klar melden.
 - **Akzeptanz:** Hängender Request bricht nach 30 s ab; UI bleibt bedienbar.
+- **Ergebnis:** `API_DEFAULT_TIMEOUT_MS = 30000`; `api()` legt einen `AbortController` an, wenn der Aufrufer kein eigenes `signal` mitgibt (Caller-Signal gewinnt). Überschreibbar per `opts.timeoutMs`, abschaltbar mit `0`. Abort wird **nicht** retried (sonst dreifache Wartezeit) und als `TimeoutError` mit `Request timed out after <ms> ms` plus `timeoutMs`/`url` geworfen; Timer wird im `finally` immer geräumt. Browser-Verifikation (Playwright): hängender Request bricht nach **801 ms** bei `timeoutMs: 800` ab (`name: 'TimeoutError'`, klare Meldung), normale Requests laufen unverändert, Caller-Signal wird respektiert. Tests: `tests/test_api_default_timeout.py` (5).
 
 ## 27. In-Flight-Dedupe ausweiten · S–M · Risiko: niedrig
 - [ ] ctx-Poll (5 s, ui.js:5051) und Streaming-Poll (5 s, sessions.js:2663) können sich mit Nutzeraktionen überlappen; `_sessionListInFlight`-Guard existiert nur für die Session-Liste.
