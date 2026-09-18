@@ -113,9 +113,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 # P1 — Nächste Welle (mittlerer Aufwand, hoher Nutzen)
 
 ## 7. `_prune_expired_sessions()` nicht bei jedem verify · S · Risiko: niedrig
-- [ ] `verify_session()` ruft prune bei jedem Verify (web/api/auth.py:378-382); prune schreibt die Session-Datei bei abgelaufenen Einträgen.
+- [x] `verify_session()` ruft prune bei jedem Verify (web/api/auth.py:378-382); prune schreibt die Session-Datei bei abgelaufenen Einträgen.
 - **Fix:** Zeitgesteuert (z. B. max. 1×/60 s) statt pro Request.
 - **Akzeptanz:** Verify-Pfad ohne Datei-Write im Normalfall.
+- **Ergebnis:** `_prune_expired_sessions(force=False)` mit `_PRUNE_INTERVAL_SECONDS = 60`; `force=True` umgeht den Throttle für explizite Aufrufe. Verifiziert: 20 Verifies ohne abgelaufene Einträge → **0 Writes**; mit abgelaufenem Eintrag innerhalb des Fensters → 0 Writes (Eintrag bleibt); nach Ablauf des Fensters → 1 Write + Eintrag entfernt. Tests: `tests/test_session_prune_throttle.py` (3).
 
 ## 8. fastapi_bridge: Thread pro Request → bounded ThreadPoolExecutor · M · Risiko: mittel
 - [ ] `threading.Thread(target=self._run, daemon=True)` pro API-Call (web/api/fastapi_bridge.py:169-170). Unbegrenzt viele Threads bei Last.

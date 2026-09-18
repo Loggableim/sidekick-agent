@@ -418,9 +418,23 @@ def create_session() -> str:
     return f"{token}.{sig}"
 
 
-def _prune_expired_sessions():
-    """Remove all expired session entries to prevent unbounded memory growth."""
+_PRUNE_INTERVAL_SECONDS = 60.0
+_last_prune_at: float = 0.0
+
+
+def _prune_expired_sessions(*, force: bool = False) -> None:
+    """Remove all expired session entries to prevent unbounded memory growth.
+
+    Throttled to at most one pass per ``_PRUNE_INTERVAL_SECONDS``: this runs on
+    every ``verify_session`` (i.e. every authenticated request) and used to
+    write the session file whenever any entry had expired. A throttled pass
+    keeps the cleanup bounded without a file write per request.
+    """
+    global _last_prune_at
     now = time.time()
+    if not force and now - _last_prune_at < _PRUNE_INTERVAL_SECONDS:
+        return
+    _last_prune_at = now
     expired = [t for t, exp in _sessions.items() if now > exp]
     if expired:
         for token in expired:
