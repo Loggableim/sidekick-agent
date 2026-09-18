@@ -70,9 +70,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** Zweiter Request desselben Assets komprimiert nicht erneut (Messung).
 
 ## 5. `load_settings()` cachen (mtime-check) · S · Risiko: niedrig
-- [ ] Läuft via `check_auth → is_auth_enabled → get_password_hash → load_settings` bei **jedem** API-Request (web/api/auth.py:417, web/api/config.py:4464). Gemessen: 2,1 ms Disk-Read pro `is_auth_enabled()`.
+- [x] Läuft via `check_auth → is_auth_enabled → get_password_hash → load_settings` bei **jedem** API-Request (web/api/auth.py:417, web/api/config.py:4464). Gemessen: 2,1 ms Disk-Read pro `is_auth_enabled()`. → **PR #67**
 - **Fix:** In-Memory-Cache mit mtime-Vergleich auf settings.json; Schreibpfade invalidieren.
 - **Akzeptanz:** `is_auth_enabled()` warm < 0,1 ms; Settings-Änderung wirkt sofort.
+- **Ergebnis:** Drei Caches: `load_settings()` keyed `(settings.json mtime_ns/size, resolved workspace)` und liefert Kopien; `resolve_default_workspace()` memoised (war mit 2,4 ms der eigentliche Kostentreiber) mit `is_dir()`-Revalidierung; `_state_dir()` memoised (`Path.resolve()` = realpath-Syscall). `save_settings()` refresht den Cache in place. Messung (100 warme Calls): `load_settings()` 2,02 → **0,14 ms**, `is_auth_enabled()` 3,25 → **0,13 ms**, `get_password_hash()` 2,83 → **0,11 ms**. Verifiziert: save_settings sofort sichtbar, externe Datei-Änderung via mtime erkannt, Caller-Mutation vergiftet den Cache nicht. Tests: `tests/test_settings_cache.py` (5).
 
 ## 6. PBKDF2-Falle entschärfen (600k-Iterationen pro Request) · S · Risiko: mittel
 - [ ] Mit gesetztem `SIDEKICK_PASSWORD`-Env hasht `get_password_hash()` bei jedem `is_auth_enabled()` 600k PBKDF2-Iterationen (web/api/auth.py). Gemessen: 223 ms pro Hash.
