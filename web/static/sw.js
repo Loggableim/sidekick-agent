@@ -30,8 +30,8 @@ const SHELL_ASSETS = [
   './static/sessions.js' + VQ,
   './static/spaces.js' + VQ,
   './static/spaces.css' + VQ,
-  './static/swarm.js' + VQ,
   './static/panels-loader.js' + VQ,
+  './static/feature-loader.js' + VQ,
   './static/swarm.css' + VQ,
   './static/commands.js' + VQ,
   './static/icons.js' + VQ,
@@ -39,7 +39,6 @@ const SHELL_ASSETS = [
   './static/workspace.js' + VQ,
   './static/terminal.js' + VQ,
   './static/enhancements.js' + VQ,
-  './static/onboarding.js' + VQ,
   // Panels loaded by index.html but previously missing from the pre-cache —
   // they fell through to network on first visit (CSS is render-blocking).
   './static/agents.css' + VQ,
@@ -48,9 +47,6 @@ const SHELL_ASSETS = [
   './static/discord-panel.css' + VQ,
   './static/discord-chat.css' + VQ,
   './static/xterm.css' + VQ,
-  './static/browser.js' + VQ,
-  './static/discord.js' + VQ,
-  './static/gmail.js' + VQ,
   './static/power.js' + VQ,
   './static/favicon.svg',
   './static/favicon-32.png',

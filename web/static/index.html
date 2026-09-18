@@ -2650,19 +2650,17 @@
     };
   })();
 </script>
-<script src="/static/browser.js?v=__WEBUI_VERSION__&split=70" defer></script>
+<!-- Non-critical feature scripts (~553 KB) load on demand via feature-loader.js
+     (backlog item 13): browser.js, gmail.js, discord.js, discord-chat.js,
+     agents.js, swarm.js and onboarding.js are fetched when their panel opens.
+     enhancements.js stays eager because it registers a DOMContentLoaded handler. -->
+<script src="/static/feature-loader.js?v=__WEBUI_VERSION__" defer></script>
 <!-- panels.js (~517 KB) is loaded on demand by panels-loader.js (backlog item 12). -->
 <script src="/static/panels-loader.js?v=__WEBUI_VERSION__" defer></script>
-<script src="/static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/spaces.js?v=__WEBUI_VERSION__" defer></script>
-<script src="/static/swarm.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/boot.js?v=__WEBUI_VERSION__" defer></script>
-<script src="/static/gmail.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/enhancements.js?v=__WEBUI_VERSION__" defer></script>
 <script src="/static/power.js?v=__WEBUI_VERSION__" defer></script>
-<script src="/static/discord.js?v=__WEBUI_VERSION__" defer></script>
-<script src="/static/discord-chat.js?v=__WEBUI_VERSION__" defer></script>
-<script src="/static/agents.js?v=__WEBUI_VERSION__" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">

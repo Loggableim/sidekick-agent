@@ -30,9 +30,15 @@ def test_browser_qa_header_menu_uses_rendered_stale_scope():
 
 
 def test_browser_js_cache_key_bumped_for_qa_gate_contract():
+    """browser.js is lazy-loaded now, so the version token lives in the loader."""
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
+    loader = Path("web/static/feature-loader.js").read_text(encoding="utf-8")
 
-    assert 'static/browser.js?v=__WEBUI_VERSION__&split=70' in index_html
+    # The static tag is gone (backlog item 13) ...
+    assert 'static/browser.js?v=__WEBUI_VERSION__&split=70' not in index_html
+    # ... and the loader carries the cache-busting token instead.
+    assert "browser.js" in loader
+    assert "__WEBUI_VERSION__" in loader
 
 
 def test_browser_webui_smoke_action_surfaces_report_and_visual_evidence():

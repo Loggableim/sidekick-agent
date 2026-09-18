@@ -23,9 +23,12 @@ def test_swarm_panel_is_reachable_from_both_navigation_surfaces_and_shell_cache(
     assert 'id="panelSwarm"' in index_html
     assert 'id="mainSwarm"' in index_html
     assert 'href="/static/swarm.css?v=__WEBUI_VERSION__"' in index_html
-    assert 'src="/static/swarm.js?v=__WEBUI_VERSION__"' in index_html
+    # swarm.js is lazy-loaded (backlog item 13): the loader must know it, and
+    # the panel must still be reachable from both navigation surfaces.
+    feature_loader = Path("web/static/feature-loader.js").read_text(encoding="utf-8")
+    assert "swarm.js" in feature_loader
+    assert "swarm: ['swarm.js']" in feature_loader
     assert "'./static/swarm.css' + VQ" in service_worker
-    assert "'./static/swarm.js' + VQ" in service_worker
 
 
 def test_swarm_client_uses_explicit_project_paths_and_stops_its_stream_on_panel_exit():

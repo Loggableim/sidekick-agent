@@ -391,14 +391,16 @@ async function switchPanel(name, opts = {}) {
     if (chatMain) chatMain.style.display = 'none';
     if (agentsMain) agentsMain.style.display = '';
     document.body.classList.add('showing-agents');
-    startDashboardRefresh();
+    // agents.js is loaded on demand (backlog item 13), so guard the call.
+    if (typeof startDashboardRefresh === 'function') startDashboardRefresh();
   } else if (prevPanel === 'agents') {
     // Deactivate dashboard view
     if (typeof restoreAgentChatHome === 'function') restoreAgentChatHome();
     if (agentsMain) agentsMain.style.display = 'none';
     if (chatMain) chatMain.style.display = '';
     document.body.classList.remove('showing-agents');
-    stopDashboardRefresh();
+    // agents.js is loaded on demand (backlog item 13), so guard the call.
+    if (typeof stopDashboardRefresh === 'function') stopDashboardRefresh();
   }
   // ── Appstore full view lifecycle: swap #mainChat ↔ #mainAppstore ──
   const appstoreMain = document.getElementById('mainAppstore');
@@ -439,14 +441,19 @@ async function switchPanel(name, opts = {}) {
   if (nextPanel === 'todos') loadTodos();
   if (nextPanel === 'insights') await loadInsights();
   if (nextPanel === 'logs') await loadLogs();
-  if (nextPanel === 'gmail') loadGmailPanel();
+  if (nextPanel === 'gmail') {
+    // gmail.js is loaded on demand (backlog item 13); the feature loader has
+    // already fetched it by the time this runs, but guard for direct callers.
+    if (typeof loadGmailPanel === 'function') loadGmailPanel();
+  }
   if (nextPanel === 'discord') setTimeout(function() {
     if (typeof discordChatInit === 'function') discordChatInit();
     if (typeof loadDiscordPanel === 'function') loadDiscordPanel();
   }, 100);
   if (nextPanel === 'agents') {
     if (typeof loadAgents === 'function') loadAgents();
-    loadAgentsDashboard();
+    // agents.js is loaded on demand (backlog item 13), so guard the call.
+    if (typeof loadAgentsDashboard === 'function') loadAgentsDashboard();
   }
   _syncLogsAutoRefresh();
   if (typeof _syncSystemHealthMonitorVisibility === 'function') _syncSystemHealthMonitorVisibility();
