@@ -75,9 +75,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Akzeptanz:** `is_auth_enabled()` warm < 0,1 ms; Settings-Änderung wirkt sofort.
 
 ## 6. PBKDF2-Falle entschärfen (600k-Iterationen pro Request) · S · Risiko: mittel
-- [ ] Mit gesetztem `SIDEKICK_PASSWORD`-Env hasht `get_password_hash()` bei jedem `is_auth_enabled()` 600k PBKDF2-Iterationen (web/api/auth.py). Gemessen: 223 ms pro Hash.
+- [x] Mit gesetztem `SIDEKICK_PASSWORD`-Env hasht `get_password_hash()` bei jedem `is_auth_enabled()` 600k PBKDF2-Iterationen (web/api/auth.py). Gemessen: 223 ms pro Hash. → **PR #68**
 - **Fix:** Env-Hash einmal berechnen + cachen (Invalidierung bei Env-/Settings-Änderung).
 - **Akzeptanz:** `is_auth_enabled()` warm < 1 ms bei gesetztem Env-Passwort.
+- **Ergebnis:** Env-Hash-Cache keyed `(env-Wert, signing key als Salt)`; zusätzlich `_signing_key()` memoised (las die Key-Datei pro Aufruf). Messung mit `SIDEKICK_WEBUI_PASSWORD`: `get_password_hash()` 245,3 → **0,61 ms**, `is_auth_enabled()` 255,5 → **0,98 ms** (−99,6 %). Verifiziert: richtiges Passwort verifiziert, falsches abgelehnt; Env-Wechsel invalidiert (altes Passwort danach abgelehnt); Cache-Hash == frisch berechneter Hash; ohne Env Fallback auf settings.json. Tests: `tests/test_auth_password_cache.py` (4).
 
 ## 15. `<link rel="preconnect">` für cdn.jsdelivr.net · S · Risiko: niedrig
 - [ ] 0 preconnect/dns-prefetch in index.html; 9 CDN-Refs (Prism, xterm, KaTeX).
