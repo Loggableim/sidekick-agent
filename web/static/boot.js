@@ -127,6 +127,14 @@ function _hasWorkspacePreviewVisible(){
   return !!(preview&&preview.classList.contains('visible'));
 }
 
+function _safeBootStorageSet(key, value) {
+  try { localStorage.setItem(key, value); } catch (_) {
+    // Browser storage is optional. A full Firefox/Zen origin must never make
+    // panel state changes throw out of an async UI flow.
+    try { localStorage.removeItem('sidekick-inflight-state'); } catch (_) {}
+  }
+}
+
 function _setWorkspacePanelMode(mode){
   const {layout,panel}= _workspacePanelEls();
   if(!layout||!panel)return;
@@ -136,7 +144,7 @@ function _setWorkspacePanelMode(mode){
   // Persist open/closed across refreshes (browse/preview → open; closed → closed)
   // Do NOT overwrite the user's "keep open" preference — only track runtime state
   // so that toggleWorkspacePanel(false) from the toolbar doesn't clear the setting.
-  localStorage.setItem('sidekick-webui-workspace-panel', open ? 'open' : 'closed');
+  _safeBootStorageSet('sidekick-webui-workspace-panel', open ? 'open' : 'closed');
   layout.classList.toggle('workspace-panel-collapsed',!open);
   if(_isCompactWorkspaceViewport()){
     if(open&&typeof closeMobileSidebar==='function') closeMobileSidebar();
