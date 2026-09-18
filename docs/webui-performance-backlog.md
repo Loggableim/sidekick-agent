@@ -36,6 +36,64 @@ Dieses Backlog ist die Arbeitsliste für Agenten, die die Sidekick WebUI schritt
 Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item pro PR, in Dokumentreihenfolge (P0 zuerst). Pro Item: Branch perf/webui-<nr>-<slug> von origin/master, kleinster sinnvoller Fix, Verifikation (node --check auf geänderte JS-Dateien, python -m pytest tests/ -x -q, python tests/smoke_all.py), Commit, Push, PR gegen master mit Vorher/Nachher-Evidenz. Checkbox im Backlog-Doc im selben PR abhaken. Keine Sammel-PRs, keine Beifang-Refactors. Blockierte Items im Doc notieren und zum nächsten wechseln.
 ```
 
+## Vorbereitungs-Prompt (Follow-up für den nächsten Agenten)
+
+Diesen Prompt **vor** dem `/goal` in die neue Session geben. Er richtet den Agenten auf die richtige Spezialrichtung ein (Stack, Skills, Umgebung, Fallen).
+
+```
+Du arbeitest am Sidekick-Repo (C:\sidekick\sidekick, GitHub: Loggableim/sidekick-agent).
+Deine Aufgabe: das WebUI-Performance-Backlog in docs/webui-performance-backlog.md abarbeiten.
+
+STACK & SPEZIALRICHTUNG
+- Backend: Python 3.11 (venv: C:\sidekick\sidekick\.venv\Scripts\python.exe), FastAPI + uvicorn.
+  API-Routen liegen in web/api/routes.py (Legacy-BaseHTTPRequestHandler-Stil, 15k Zeilen) und
+  cli/web_server.py (FastAPI-App, Static-Serving, Middleware). Beide lesen, bevor du änderst.
+- Frontend: Vanilla JS (kein Framework, kein Build-Step, kein package.json).
+  21 Script-Tags in web/static/index.html, alles globale Funktionen über Dateien hinweg.
+  Wichtigste Dateien: ui.js (Rendering/Boot), messages.js (Chat/SSE), sessions.js (Session-Liste),
+  panels.js (alle Panels), boot.js (Init-Sequenz), sw.js (Service Worker).
+- CSS: web/static/style.css (475 KB, monolithisch). Kein Preprocessor.
+- Shell: git-bash (MSYS) auf Windows. POSIX-Syntax in terminal-Calls, KEINE PowerShell-Builtins.
+  Achtung: '&' im Commit-Text triggert den Shell-Guard -> Commit-Message in Datei schreiben und
+  mit `git commit -F <datei>` committen.
+
+PFLICHT-SKILLS (vor der ersten Änderung laden)
+- skill_view('webui-js-parse-failure-triage')  -> EIN SyntaxError killt die ganze UI; node --check ist Pflicht
+- skill_view('sidekick-webui-feature-audit')   -> Full-Stack-Audit-Muster, Smoke-Tests, DOM-Probes
+- skill_view('lazy-load-panels')               -> nur für Item 12 (panels.js lazy laden)
+- skill_view('sidekick-agent')                 -> falls du Sidekick-CLI/Config/Gateway anfassen musst
+
+VERIFIKATIONS-KETTE (nach jeder Änderung, in dieser Reihenfolge)
+1. node --check web/static/<geänderte-datei>.js        (bei JEDER JS-Änderung)
+2. .venv/Scripts/python.exe -m pytest tests/ -x -q     (relevante Tests; Master-CI ist aktuell rot,
+   test_fastapi_route_bridge + test_log_rotation_bound sind vorbestehende Fehler — nicht deine)
+3. .venv/Scripts/python.exe tests/smoke_all.py
+4. Bei UI-Änderungen: .venv/Scripts/python.exe scripts/browser_webui_smoke.py
+5. Vorher/Nachher-Messung: curl -H 'Accept-Encoding: gzip' -D - -o /dev/null http://127.0.0.1:9119/...
+
+LAUFENDES SYSTEM
+- Dashboard läuft auf 127.0.0.1:9119 (uvicorn, log_level=warning). curl-Timings gegen den
+  laufenden Server sind die schnellste Evidenz.
+- Nach Backend-Änderungen (web_server.py, web/api/*): Dashboard-Neustart nötig, damit sie greifen.
+  Es gibt scripts/restart_dashboard.ps1 (detached, 90s Delay, killt + startet + health-check).
+  Frontend-Änderungen (web/static/*) greifen nach Browser-Reload (SW ist network-first).
+- Der Dashboard-Prozess serviert die Session, in der du läufst — nicht mitten im Turn killen.
+
+ARBEITSWEISE
+- Ein Item = ein Branch (perf/webui-<nr>-<slug> von origin/master) = ein PR gegen master.
+- Kleinster sinnvoller Fix. Keine Beifang-Refactors, keine Sammel-PRs.
+- Checkbox im Backlog-Doc im selben PR abhaken ([x] + PR-Nummer).
+- Blockiert? Im Item notieren, zum nächsten wechseln. Nicht raten.
+- Vor dem PR: git fetch origin && Rebase auf origin/master (parallele Agenten committen laufend).
+- PR-Beschreibung mit Evidenz: Messung vorher/nachher + Testausgabe.
+
+START
+1. Backlog lesen: docs/webui-performance-backlog.md
+2. Erstes offenes P0-Item nehmen (aktuell: Item 1 — index.html gzipen)
+3. Skills laden (s.o.), dann implementieren.
+```
+
+
 ## Status
 
 | Prio | Items | erledigt |
