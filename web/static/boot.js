@@ -235,7 +235,7 @@ function _applyFileTreePanelPref(){
   }else if(!pref && !panel.classList.contains('file-tree-panel--minimized')){
     const root = document.documentElement;
     const curW = parseInt(root.style.getPropertyValue('--file-tree-width')) || panel.getBoundingClientRect().width || 260;
-    if(curW > 0) localStorage.setItem('sidekick-file-tree-w', curW);
+    if(curW > 0) _safeBootStorageSet('sidekick-file-tree-w', curW);
     root.style.setProperty('--file-tree-width', '0px');
     panel.classList.add('file-tree-panel--minimized');
   }
@@ -1627,7 +1627,7 @@ function _applySyntaxTheme(override){
 }
 
 function _pickSyntaxTheme(name){
-  localStorage.setItem('sidekick-syntax-theme', name);
+  _safeBootStorageSet('sidekick-syntax-theme', name);
   _applySyntaxTheme(name);
   _syncSyntaxThemePicker(name);
   // Sync settings hidden input if the settings panel is open
@@ -1681,8 +1681,8 @@ function toggleThemeMode(){
 function _pickTheme(name){
   const currentSkin=localStorage.getItem('sidekick-skin');
   const appearance=_normalizeAppearance(name,currentSkin);
-  localStorage.setItem('sidekick-theme',appearance.theme);
-  localStorage.setItem('sidekick-skin',appearance.skin);
+  _safeBootStorageSet('sidekick-theme', appearance.theme);
+  _safeBootStorageSet('sidekick-skin', appearance.skin);
   _applyTheme(appearance.theme);
   _applySkin(appearance.skin);
   _syncThemePicker(appearance.theme);
@@ -1696,8 +1696,8 @@ function _pickTheme(name){
 
 function _pickSkin(name){
   const appearance=_normalizeAppearance(localStorage.getItem('sidekick-theme'),name);
-  localStorage.setItem('sidekick-theme',appearance.theme);
-  localStorage.setItem('sidekick-skin',appearance.skin);
+  _safeBootStorageSet('sidekick-theme', appearance.theme);
+  _safeBootStorageSet('sidekick-skin', appearance.skin);
   _applyTheme(appearance.theme);
   _applySkin(appearance.skin);
   _syncThemePicker(appearance.theme);
@@ -1734,7 +1734,7 @@ function _applyFontSize(size){
 }
 
 function _pickFontSize(size){
-  localStorage.setItem('sidekick-font-size',size);
+  _safeBootStorageSet('sidekick-font-size', size);
   _applyFontSize(size);
   _syncFontSizePicker(size);
   const hidden=$('settingsFontSize');
