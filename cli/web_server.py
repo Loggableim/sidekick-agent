@@ -6415,6 +6415,74 @@ def _gzip_cached(file_path: Path, stat_result: os.stat_result) -> bytes:
     return raw
 
 
+# The assets a cold shell load pulls, mirroring ``web/static/sw.js``'s
+# SHELL_ASSETS. Precompressing them at startup moves the ~80 ms of
+# compression work off the first request.
+_PRECOMPRESS_ASSETS: tuple[str, ...] = (
+    "style.css",
+    "api-auth.js",
+    "boot.js",
+    "ui.js",
+    "messages.js",
+    "sessions.js",
+    "spaces.js",
+    "spaces.css",
+    "swarm.js",
+    "panels.js",
+    "swarm.css",
+    "commands.js",
+    "icons.js",
+    "i18n.js",
+    "workspace.js",
+    "terminal.js",
+    "enhancements.js",
+    "onboarding.js",
+    "agents.css",
+    "agents-dashboard.css",
+    "gmail-panel.css",
+    "discord-panel.css",
+    "discord-chat.css",
+    "xterm.css",
+    "browser.js",
+    "discord.js",
+    "gmail.js",
+    "power.js",
+)
+
+
+def _precompress_shell_assets() -> None:
+    """Warm the gzip cache for the shell assets at startup.
+
+    Runs in a background thread so a slow disk cannot delay the server coming
+    up; failures are logged and ignored (the cache fills lazily on request).
+    """
+    import time as _time
+
+    started = _time.perf_counter()
+    warmed = 0
+    for name in _PRECOMPRESS_ASSETS:
+        path = WEB_DIST / name
+        try:
+            if not path.is_file():
+                continue
+            _gzip_cached(path, path.stat())
+            warmed += 1
+        except Exception:
+            _log.debug("Precompress failed for %s", name, exc_info=True)
+    _log.info(
+        "Precompressed %d shell asset(s) in %.0f ms",
+        warmed,
+        (_time.perf_counter() - started) * 1000,
+    )
+
+
+def _start_shell_precompress() -> None:
+    """Kick off the shell precompression in a daemon thread."""
+    threading.Thread(
+        target=_precompress_shell_assets, daemon=True, name="shell-precompress"
+    ).start()
+
+
 def mount_spa(application: FastAPI):
     """Mount the built SPA. Falls back to index.html for client-side routing.
 
@@ -7613,6 +7681,10 @@ async def api_route_bridge(request: Request, path: str):
 
 
 mount_spa(app)
+
+# Registered here (not with the other startup hooks above) because
+# ``_start_shell_precompress`` is defined further down in this module.
+app.router.on_startup.append(_start_shell_precompress)
 
 
 def start_server(

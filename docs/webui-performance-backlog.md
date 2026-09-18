@@ -131,9 +131,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Ergebnis:** `_ResponseWriter.stream()` drainet nach dem ersten blockierenden `get` die Queue per `get_nowait`-Schleife und yieldet den Batch als ein Item; das `_END`-Sentinel wird für die nächste Runde zurückgelegt. Messung: **20-Chunk-Burst → 2 Thread-Hops statt 21**; 10-Chunk-Burst → 1 Yield; Live-Chunks weiterhin in Reihenfolge und vollständig; `finish()` terminiert ohne Hänger. Tests: `tests/test_sse_chunk_batching.py` (4).
 
 ## 10. Top-Assets beim Start prekomprimieren · S · Risiko: niedrig
-- [ ] ui.js/i18n.js/panels.js/style.css/index.html ≈ 350 KB gzip; Kompression kostet pro Request CPU (Item 4).
+- [x] ui.js/i18n.js/panels.js/style.css/index.html ≈ 350 KB gzip; Kompression kostet pro Request CPU (Item 4).
 - **Fix:** Beim Serverstart einmal komprimieren, im RAM halten (keyed mtime).
 - **Akzeptanz:** Erster Request nach Start liefert gzip ohne Kompressions-Spike.
+- **Ergebnis:** `_precompress_shell_assets()` läuft als Daemon-Thread beim Startup (`on_startup`-Hook, am Dateiende registriert weil die Funktion dort definiert ist) und wärmt den Gzip-Cache für die 28 Shell-Assets aus `sw.js` SHELL_ASSETS. Messung: Kalt-Pass über 28 Assets **74,2 ms** → Warm-Pass **2,2 ms** (72 ms Kompressionsarbeit vom Request-Pfad entfernt), Cache danach 28 Einträge / 894 KB. Fehlende Assets werden übersprungen, Fehler geloggt statt zu crashen. Tests: `tests/test_shell_precompress.py` (4, inkl. Abgleich mit sw.js-Liste und Startup-Hook-Registrierung).
 
 ## 11. i18n splitten · M · Risiko: mittel
 - [ ] i18n.js = 663 KB, 9 Locales (en, it, ja, ru, es, de, zh, pt, ko) in einer Datei; pro Session wird 1 Locale gebraucht.
