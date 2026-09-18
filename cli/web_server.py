@@ -16,6 +16,7 @@ import importlib.util
 import json
 import logging
 import math
+import mimetypes
 import os
 import secrets
 import subprocess
@@ -6400,6 +6401,20 @@ def mount_spa(application: FastAPI):
                         else "no-cache"
                     )
                 }
+                # Compress the large legacy JS/CSS payloads in the active
+                # FastAPI static path. Do this only for text assets; the
+                # handler never serves SSE, so streaming responses are not
+                # buffered or delayed by compression.
+                content_type = mimetypes.guess_type(str(file_path))[0] or ""
+                accepts_gzip = "gzip" in request.headers.get("accept-encoding", "").lower()
+                if accepts_gzip and file_path.suffix.lower() in {
+                    ".js", ".css", ".json", ".svg", ".txt"
+                }:
+                    import gzip
+                    raw = gzip.compress(file_path.read_bytes(), compresslevel=5)
+                    headers["Content-Encoding"] = "gzip"
+                    headers["Vary"] = "Accept-Encoding"
+                    return Response(content=raw, media_type=content_type or None, headers=headers)
                 return FileResponse(file_path, headers=headers)
         return _serve_index(prefix)
 
