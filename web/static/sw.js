@@ -155,22 +155,38 @@ self.addEventListener('fetch', (event) => {
   const shellPath = './' + relPath.replace(/^\/+/, '') + url.search;
   if (!SHELL_ASSETS.includes(shellPath)) return;
 
-  // Shell assets: network-first with cache fallback. This keeps offline support
-  // but avoids executing stale JS/CSS after a local hotfix when WEBUI_VERSION
-  // has not changed yet (e.g. before a guarded restart updates the ?v token).
+  // Shell assets: stale-while-revalidate (backlog item 19).
+  //
+  // A cached shell asset is served immediately and refreshed in the
+  // background, so a repeat load never waits on the network. This is safe
+  // because every shell asset URL carries `?v=<webui-version>`: a changed
+  // file gets a new token (the token includes the newest mtime for a dirty
+  // worktree), so the new URL is a cache miss and the fresh file is fetched
+  // on the first request for it. The stale entry can only ever be served for
+  // the exact URL it was cached under.
+  //
+  // The fallback keeps offline support: with no network and no cache entry we
+  // answer 503 instead of failing the request.
   event.respondWith(
-    fetch(event.request).then((response) => {
-      if (
-        event.request.method === 'GET' &&
-        response.status === 200
-      ) {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+    caches.match(event.request).then((cached) => {
+      const network = fetch(event.request).then((response) => {
+        if (event.request.method === 'GET' && response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      }).catch(() => null);
+
+      if (cached) {
+        // Serve the cached copy now; the fetch above refreshes it for next time.
+        event.waitUntil(network);
+        return cached;
       }
-      return response;
-    }).catch(() => caches.match(event.request).then((cached) => cached || new Response('Offline', {
-      status: 503,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-    })))
+
+      return network.then((response) => response || new Response('Offline', {
+        status: 503,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      }));
+    })
   );
 });
