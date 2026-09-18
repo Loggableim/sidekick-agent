@@ -6302,11 +6302,15 @@ def mount_spa(application: FastAPI):
 
     _index_path = WEB_DIST / "index.html"
 
-    def _serve_index(prefix: str = ""):
+    def _serve_index(prefix: str = "", request: Request | None = None):
         """Return index.html with the session token + base-path injected.
 
         ``prefix`` is the normalised ``X-Forwarded-Prefix`` (e.g. ``/sidekick``)
         or empty string when served at root.
+
+        ``request`` is optional so existing callers keep working; when given,
+        the rendered HTML is gzip-compressed for clients that accept it (the
+        shell is ~274 KB uncompressed, ~47 KB gzipped).
         """
         html = _index_path.read_text(encoding="utf-8").replace(
             "__WEBUI_VERSION__", _webui_version_token()
@@ -6327,10 +6331,24 @@ def mount_spa(application: FastAPI):
             html = html.replace('href="/ds-assets/', f'href="{prefix}/ds-assets/')
             html = html.replace('src="/ds-assets/', f'src="{prefix}/ds-assets/')
         html = html.replace("</head>", f"{token_script}</head>", 1)
-        return HTMLResponse(
-            html,
-            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
-        )
+        headers = {"Cache-Control": "no-store, no-cache, must-revalidate"}
+        # Compress the shell like the other static assets (serve_spa). The
+        # document is ~274 KB raw and ~47 KB gzipped, and it is re-fetched on
+        # every reload because it must not be cached.
+        if request is not None and "gzip" in request.headers.get(
+            "accept-encoding", ""
+        ).lower():
+            import gzip
+
+            raw = gzip.compress(html.encode("utf-8"), compresslevel=5)
+            headers["Content-Encoding"] = "gzip"
+            headers["Vary"] = "Accept-Encoding"
+            return Response(
+                content=raw,
+                media_type="text/html; charset=utf-8",
+                headers=headers,
+            )
+        return HTMLResponse(html, headers=headers)
 
     # When served behind a path-prefix proxy, the built CSS contains
     # absolute ``url(/fonts/...)`` and ``url(/ds-assets/...)`` references.
@@ -6417,7 +6435,7 @@ def mount_spa(application: FastAPI):
                     headers["Vary"] = "Accept-Encoding"
                     return Response(content=raw, media_type=content_type or None, headers=headers)
                 return FileResponse(file_path, headers=headers)
-        return _serve_index(prefix)
+        return _serve_index(prefix, request)
 
 
 # ---------------------------------------------------------------------------
