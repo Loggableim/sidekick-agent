@@ -1894,6 +1894,9 @@ async function _syncGameModeStateFromServer() {
   let _bootSettings={};
   const _bootSettingsReady = (async()=>{
   try{
+    // Game mode status is independent of the settings payload, so start it in
+    // parallel instead of awaiting it after the settings work (backlog item 45).
+    const _gameModeSync = _syncGameModeStateFromServer();
     // Settings can be slow during startup on cold/backlogged instances.
     const s=await _bootTimeout(api('/api/settings'),20000,'settings');
     _bootSettings=s;
@@ -1935,7 +1938,9 @@ async function _syncGameModeStateFromServer() {
       else setLocale(_lang);
       if(typeof applyLocaleToDOM==='function')applyLocaleToDOM();
     }
-    await _syncGameModeStateFromServer();
+    // The game-mode sync ran in parallel with the settings work above; wait
+    // for it now so the button reflects the server state before boot finishes.
+    await _gameModeSync;
     applyBotName();
     if(typeof syncGameModeButton==='function')syncGameModeButton();
     // TTS: apply enabled state on boot so buttons show/hide correctly (#499)
