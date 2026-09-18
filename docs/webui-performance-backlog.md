@@ -144,9 +144,10 @@ Arbeite das 50-Punkte-Backlog in docs/webui-performance-backlog.md ab: ein Item 
 - **Hinweis:** Zwei deutsche Strings trugen bereits vorher Mojibake in der Quelle (`Bereich auswÃ¤hlen`, `Ãœberschreibungen`) — unverändert übernommen, in den Tests als Ist-Zustand dokumentiert.
 
 ## 12. panels.js lazy laden · M · Risiko: mittel
-- [ ] panels.js = 517 KB, lädt immer, obwohl Panels selten geöffnet werden. Skill `lazy-load-panels` existiert; Revert d1f6060 wegen Parse-Kollision.
+- [x] panels.js = 517 KB, lädt immer, obwohl Panels selten geöffnet werden. Skill `lazy-load-panels` existiert; Revert d1f6060 wegen Parse-Kollision.
 - **Fix:** Dynamischer Import beim ersten Panel-Wechsel; vorher `node --check`-Gate (Item 39) sicherstellen; IIFE-Wrap beachten.
 - **Akzeptanz:** panels.js wird erst beim ersten Panel-Öffnen geladen (Netzwerk-Panel); alle Panels funktionieren.
+- **Ergebnis:** Neuer `web/static/panels-loader.js` ersetzt das statische `<script src="/static/panels.js">`. Er installiert einen Platzhalter-`switchPanel`, der beim ersten Aufruf ein `<script>`-Tag injiziert (kein `import()`, weil panels.js ein klassisches Skript mit Top-Level-Funktionen ist) und dann an die echte Implementierung delegiert; Promise wird gecacht (kein Re-Fetch), Fehlschlag ist retrybar, Version-Token bleibt erhalten. **Skill-Voraussetzung erfüllt:** `node --check`-Sweep grün (24 Dateien) **und** in CI erzwungen (Item 39). Browser-Verifikation (Playwright, SW blockiert): **0 panels.js-Requests beim Laden**, 1 nach `switchPanel('settings')`, Panel-Wechsel in beide Richtungen korrekt, zweiter Wechsel lädt **nicht** erneut, 0 JS-Fehler. Payload-Ersparnis: **517 KB** weniger beim Kalt-Load. Tests: `tests/test_lazy_panels_loader.py` (4).
 
 ## 13. Nicht-kritische Scripts on-demand laden · M · Risiko: mittel
 - [ ] browser.js (246 KB), gmail.js (62 KB), discord.js (17 KB), discord-chat.js (45 KB), agents.js (58 KB), swarm.js (28 KB), onboarding.js (45 KB), enhancements.js (52 KB) laden upfront ≈ 550 KB.

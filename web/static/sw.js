@@ -31,7 +31,7 @@ const SHELL_ASSETS = [
   './static/spaces.js' + VQ,
   './static/spaces.css' + VQ,
   './static/swarm.js' + VQ,
-  './static/panels.js' + VQ,
+  './static/panels-loader.js' + VQ,
   './static/swarm.css' + VQ,
   './static/commands.js' + VQ,
   './static/icons.js' + VQ,

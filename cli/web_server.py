@@ -6428,7 +6428,7 @@ _PRECOMPRESS_ASSETS: tuple[str, ...] = (
     "spaces.js",
     "spaces.css",
     "swarm.js",
-    "panels.js",
+    "panels-loader.js",
     "swarm.css",
     "commands.js",
     "icons.js",
