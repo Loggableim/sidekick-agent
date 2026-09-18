@@ -1166,14 +1166,34 @@ _PUBLIC_API_PATHS: frozenset = frozenset({
 
 @app.get("/health")
 async def health():
-    """Lightweight readiness probe for launchers and installers."""
-    return {
+    """Lightweight readiness probe for launchers and installers.
+
+    Also reports the live agent-worker counters so supervisors (e.g. the
+    detached dashboard-restart script) can tell an idle server from one that
+    is mid-turn. ``active_runs`` tracks worker lifecycle (registered when the
+    agent thread starts, removed in its outer ``finally``), which is exactly
+    the signal a restart must wait for; ``active_streams`` tracks SSE
+    subscribers and can differ during cancel/reconnect windows.
+    """
+    payload = {
         "ok": True,
         "service": "sidekick-dashboard",
         "version": __version__,
         "web_dist": str(WEB_DIST),
         "web_dist_ready": (WEB_DIST / "index.html").exists(),
     }
+    try:
+        from web.api import config as _live_config
+
+        with _live_config.ACTIVE_RUNS_LOCK:
+            payload["active_runs"] = len(_live_config.ACTIVE_RUNS or {})
+        with _live_config.STREAMS_LOCK:
+            payload["active_streams"] = len(_live_config.STREAMS or {})
+    except Exception:
+        # A health probe must never fail because the counters are unavailable;
+        # callers treat a missing counter as "unknown" and fall back.
+        pass
+    return payload
 
 
 def _has_valid_session_token(request: Request) -> bool:

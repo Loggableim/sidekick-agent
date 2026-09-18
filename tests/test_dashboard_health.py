@@ -52,6 +52,36 @@ def test_dashboard_health_endpoint_returns_readiness(monkeypatch, tmp_path):
     assert "web_dist_ready" in payload
 
 
+def test_dashboard_health_reports_live_worker_counters(monkeypatch, tmp_path):
+    """Supervisors (the restart script) need to tell idle from mid-turn.
+
+    ``active_runs`` tracks worker lifecycle and must be present so the
+    detached restart script can wait for a real idle window instead of
+    sleeping a fixed delay and killing in-flight turns.
+    """
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli.web_server import app
+    from web.api import config as live_config
+
+    client = TestClient(app)
+    payload = client.get("/health").json()
+    assert "active_runs" in payload
+    assert "active_streams" in payload
+    assert payload["active_runs"] == 0
+    assert payload["active_streams"] == 0
+
+    # A registered worker must be visible in the probe.
+    with live_config.ACTIVE_RUNS_LOCK:
+        live_config.ACTIVE_RUNS["test-stream"] = {"started_at": 0.0}
+    try:
+        payload = client.get("/health").json()
+        assert payload["active_runs"] == 1
+    finally:
+        with live_config.ACTIVE_RUNS_LOCK:
+            live_config.ACTIVE_RUNS.pop("test-stream", None)
+
+
 def test_nova_presence_empty_state_contract_keeps_the_composer_and_other_spaces_generic():
     """Catches Nova's entity card leaking into normal Space empty states."""
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
