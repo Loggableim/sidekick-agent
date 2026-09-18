@@ -65,7 +65,41 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('/sw.js?v=__WEBUI_VERSION__').catch(function(err) {
+        navigator.serviceWorker.register('/sw.js?v=__WEBUI_VERSION__').then(function(reg) {
+          // Update prompt (backlog item 20): when a new service worker is
+          // installed and waiting, offer a reload instead of silently serving
+          // the old shell until the user happens to restart the browser.
+          function offerUpdate(worker) {
+            if (!worker) return;
+            worker.addEventListener('statechange', function() {
+              if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                window.__sidekickServiceWorkerUpdateReady = true;
+                // The dialog helper lives in ui.js, which loads after this
+                // inline script; wait for it and fall back to a plain reload
+                // prompt if it never arrives.
+                var prompt = function() {
+                  if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({
+                      title: 'Update available',
+                      message: 'A new version of the WebUI is ready. Reload now?',
+                      confirmLabel: 'Reload',
+                      cancelLabel: 'Later',
+                    }).then(function(ok) { if (ok) window.location.reload(); });
+                  } else if (window.confirm('A new version is ready. Reload now?')) {
+                    window.location.reload();
+                  }
+                };
+                if (document.readyState === 'complete') prompt();
+                else window.addEventListener('load', prompt, { once: true });
+              }
+            });
+          }
+          if (reg.waiting && navigator.serviceWorker.controller) {
+            window.__sidekickServiceWorkerUpdateReady = true;
+          }
+          offerUpdate(reg.installing);
+          reg.addEventListener('updatefound', function() { offerUpdate(reg.installing); });
+        }).catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });

@@ -20,34 +20,35 @@ const CACHE_NAME = 'sidekick-shell-__WEBUI_VERSION__';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
+//
+// Scope (backlog item 20): only what the first paint and boot actually need.
+// Panel CSS and the on-demand feature scripts are NOT pre-cached — they are
+// fetched when their panel opens and cached then (the fetch handler stores
+// every successful shell-asset response). This keeps the install payload at
+// ~0.4 MB gzipped instead of ~0.5 MB with assets most sessions never use.
 const VQ = '?v=__WEBUI_VERSION__';
 const SHELL_ASSETS = [
+  // Render-blocking CSS for the initial view.
   './static/style.css' + VQ,
-  './static/api-auth.js' + VQ,
-  './static/boot.js' + VQ,
-  './static/ui.js' + VQ,
-  './static/messages.js' + VQ,
-  './static/sessions.js' + VQ,
-  './static/spaces.js' + VQ,
   './static/spaces.css' + VQ,
-  './static/panels-loader.js' + VQ,
-  './static/feature-loader.js' + VQ,
-  './static/swarm.css' + VQ,
-  './static/commands.js' + VQ,
-  './static/icons.js' + VQ,
+  // Boot chain: everything index.html loads eagerly.
+  './static/api-auth.js' + VQ,
   './static/i18n.js' + VQ,
+  './static/icons.js' + VQ,
+  './static/ui.js' + VQ,
   './static/workspace.js' + VQ,
   './static/terminal.js' + VQ,
+  './static/sessions.js' + VQ,
+  './static/commands.js' + VQ,
+  './static/messages.js' + VQ,
+  './static/spaces.js' + VQ,
+  './static/boot.js' + VQ,
   './static/enhancements.js' + VQ,
-  // Panels loaded by index.html but previously missing from the pre-cache —
-  // they fell through to network on first visit (CSS is render-blocking).
-  './static/agents.css' + VQ,
-  './static/agents-dashboard.css' + VQ,
-  './static/gmail-panel.css' + VQ,
-  './static/discord-panel.css' + VQ,
-  './static/discord-chat.css' + VQ,
-  './static/xterm.css' + VQ,
   './static/power.js' + VQ,
+  // Loader shims: without them a panel switch cannot fetch its own scripts.
+  './static/panels-loader.js' + VQ,
+  './static/feature-loader.js' + VQ,
+  // Icons.
   './static/favicon.svg',
   './static/favicon-32.png',
   './manifest.json',
