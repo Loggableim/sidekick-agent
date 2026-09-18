@@ -45,6 +45,11 @@ _PATCH_PATTERN = re.compile(
 
 _SAVE_PATTERN = re.compile(r"\.save_config\(|\bsave_config\(")
 
+
+def _code_only(line: str) -> str:
+    """Strip trailing comments so comment text cannot satisfy the patterns."""
+    return line.split("#", 1)[0]
+
 # Helpers that redirect the root on the caller's behalf (e.g. _reset_spaces).
 _HELPER_DEF_PATTERN = re.compile(r"def (_[a-z0-9_]+)\(monkeypatch")
 
@@ -100,11 +105,12 @@ def test_space_saving_tests_patch_root_before_first_save_config(relative: str) -
     helper_names = _helper_names_with_root_patch(source)
 
     for name, body in _test_functions(source):
-        if not any(_SAVE_PATTERN.search(line) for line in body):
+        code_lines = [_code_only(line) for line in body]
+        if not any(_SAVE_PATTERN.search(line) for line in code_lines):
             continue
         save_offset = None
         patch_offset = None
-        for offset, line in enumerate(body):
+        for offset, line in enumerate(code_lines):
             if save_offset is None and _SAVE_PATTERN.search(line):
                 save_offset = offset
             if patch_offset is None and (
