@@ -27,3 +27,18 @@ def check_dashboard_frontend_contract() -> None:
 
 def test_dashboard_frontend_contract() -> None:
     check_dashboard_frontend_contract()
+
+
+def test_index_preconnects_to_the_cdn_before_the_cdn_tags() -> None:
+    """The CDN connection hint must precede the assets it warms."""
+    index_html = INDEX_HTML.read_text(encoding="utf-8")
+
+    preconnect = '<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>'
+    dns_prefetch = '<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">'
+    assert preconnect in index_html
+    assert dns_prefetch in index_html
+
+    first_cdn_asset = index_html.index("https://cdn.jsdelivr.net/npm/")
+    assert index_html.index(preconnect) < first_cdn_asset
+    assert index_html.index(dns_prefetch) < first_cdn_asset
+
