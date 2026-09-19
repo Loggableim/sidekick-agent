@@ -99,6 +99,17 @@ sidekick dashboard        # WebUI at http://127.0.0.1:9119
 | `sidekick gateway` | Messaging gateway management |
 | `sidekick --help` | Full command reference (38+ subcommands) |
 
+### Launcher flags (Windows)
+
+`Sidekick-Launcher.ps1` starts the gateway and opens the WebUI:
+
+| Flag | Description |
+|------|-------------|
+| `-AppMode` | Open the WebUI as an Edge/Chrome **app window** (window-controls-overlay titlebar, dedicated browser profile) instead of a normal tab |
+| `-NoBrowser` | Start the backend without opening a browser |
+| `-NoGateway` | Skip the messaging gateway |
+| `-ForceRestart` | Restart even if a dashboard instance is already running |
+
 ## Installation
 
 ### Windows (Portable mode — no admin)
@@ -225,6 +236,7 @@ sidekick/
 | **WebUI** | ✅ `/health`, session CRUD, SSE streaming |
 | **Runtime** | ✅ AIAgent (15K LOC), 76 registered tools, provider integrations |
 | **Cron** | ✅ Scheduler + job management |
+| **Swarm** | ✅ Multi-agent core: policy gates, model routing, learning/packs, CLI + API |
 | **Gateway** | ✅ Messaging platform runner (0 import warnings) |
 | **Smoke** | ✅ Full suite + WebUI HTTP smoke, all green |
 | **CI** | ✅ Linux full + macOS/Windows smoke, Python 3.12–3.14 on Linux |
@@ -249,6 +261,8 @@ See [`docs/known-issues.md`](docs/known-issues.md) for the full list. Key items:
 | v0.8.2 | `v0.8.2` | Windows installer portable mode finalization |
 | v0.8.4 | `v0.8.4` | WebUI first-run onboarding fix: FastAPI routes, path detection, frontend field name |
 | v0.8.5 | `v0.8.5` | WebUI API bridge: FastAPI routes invoke established handlers in-process |
+| v0.8.83 | `v0.8.83` | WebUI reliability and CI stabilization |
+| v0.8.84 | `v0.8.84` | Live-stream reliability fix, WebUI overhaul, Swarm core, Skills panel |
 
 ## Troubleshooting
 
