@@ -1949,10 +1949,11 @@ def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp
 
     monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace(sessions_dir) if slug == "color" else None)
     monkeypatch.setattr(web_server.time, "time", lambda: old_ts + 1000)
-    def _fail_stream_status_check(stream_id, slug):
-        raise AssertionError("space session listing must not synchronously check stream status")
-
-    monkeypatch.setattr(web_server, "_stream_is_active_for_space", _fail_stream_status_check)
+    # The stream is genuinely dead (not in this process's STREAMS registry),
+    # so the listing may clear the stale markers.  The liveness check itself
+    # must be an in-process lookup — the old blocking HTTP round-trip that
+    # motivated removing it (91331a0) no longer exists.
+    monkeypatch.setattr(web_server, "_stream_is_active_for_space", lambda stream_id, slug: False)
 
     response = TestClient(web_server.app).get(
         "/api/sessions?workspace=color",
@@ -1972,6 +1973,88 @@ def test_space_sessions_listing_clears_old_stale_stream_markers(monkeypatch, tmp
     assert stored["messages"][-1]["_recovered"] is True
     assert stored["active_stream_id"] is None
     assert stored["pending_user_message"] is None
+
+
+def test_space_sessions_listing_preserves_live_stream_markers(monkeypatch, tmp_path):
+    """A stream still alive in this process must keep its markers.
+
+    Regression guard for the 2026-09-19 bug: Session.save() writes index rows
+    via compact() without runtime info, so is_streaming is False even while a
+    stream runs.  The listing repair treated that as stale and stripped
+    active_stream_id/pending_user_message from the Space store — the store the
+    WebUI reads for ?workspace= requests — so a refresh or Space switch
+    rendered an actively streaming chat as idle.
+    """
+    monkeypatch.setenv("SIDEKICK_HOME", str(tmp_path / "home"))
+
+    from cli import web_server
+
+    sessions_dir = tmp_path / "home" / "spaces" / "color" / "sessions"
+    sessions_dir.mkdir(parents=True)
+    session_path = sessions_dir / "live.json"
+    live_ts = 2000.0
+    session_path.write_text(
+        json.dumps(
+            {
+                "session_id": "live",
+                "title": "Live stream",
+                "workspace_slug": "color",
+                "active_stream_id": "live-stream",
+                "pending_user_message": "keep me streaming",
+                "pending_started_at": live_ts,
+                "messages": [{"role": "assistant", "content": "ready", "timestamp": 1}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (sessions_dir / "_index.json").write_text(
+        json.dumps(
+            [
+                {
+                    "session_id": "live",
+                    "title": "Live stream",
+                    "workspace_slug": "color",
+                    "active_stream_id": "live-stream",
+                    "pending_user_message": "keep me streaming",
+                    "pending_started_at": live_ts,
+                    # compact() without runtime info persists this as False
+                    # even while the stream is running.
+                    "is_streaming": False,
+                    "message_count": 1,
+                    "updated_at": live_ts,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    class _FakeSpace:
+        def __init__(self, sessions_dir):
+            self.slug = "color"
+            self.sessions_dir = sessions_dir
+
+    monkeypatch.setattr("web.api.space_engine.get_workspace", lambda slug: _FakeSpace(sessions_dir) if slug == "color" else None)
+    monkeypatch.setattr(web_server, "_stream_is_active_for_space", lambda stream_id, slug: stream_id == "live-stream")
+
+    response = TestClient(web_server.app).get(
+        "/api/sessions?workspace=color",
+        headers={web_server._SESSION_HEADER_NAME: web_server._SESSION_TOKEN},
+    )
+
+    assert response.status_code == 200
+    row = response.json()["sessions"][0]
+    assert row["active_stream_id"] == "live-stream"
+    assert row["pending_user_message"] == "keep me streaming"
+
+    stored = json.loads(session_path.read_text(encoding="utf-8"))
+    assert stored["active_stream_id"] == "live-stream"
+    assert stored["pending_user_message"] == "keep me streaming"
+    assert stored["messages"][-1]["role"] == "assistant"
+
+    index = json.loads((sessions_dir / "_index.json").read_text(encoding="utf-8"))
+    assert index[0]["active_stream_id"] == "live-stream"
+    assert index[0]["pending_user_message"] == "keep me streaming"
 
 
 def test_workspace_api_wrapper_sends_dashboard_session_token():

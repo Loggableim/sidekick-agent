@@ -2488,7 +2488,9 @@ def _load_space_sessions(slug: str) -> list[dict[str, Any]]:
             continue
         if not row.get("active_stream_id"):
             continue
-        if bool(row.get("is_streaming")):
+        # Never strip markers for a stream that is still alive in this
+        # process — see _repair_stale_space_index for the full rationale.
+        if _stream_is_active_for_space(str(row.get("active_stream_id") or ""), slug):
             continue
         row["active_stream_id"] = None
         row["pending_user_message"] = None
@@ -2543,7 +2545,16 @@ def _repair_stale_space_index(slug: str, sessions_dir: Path) -> int:
             continue
         if not row.get("active_stream_id"):
             continue
-        if bool(row.get("is_streaming")):
+        # Liveness is the ground truth — NOT the persisted is_streaming flag.
+        # Session.save() writes index rows through compact() without runtime
+        # info, so is_streaming is False even while a stream is running.  A
+        # stream that is still registered in this process must never be
+        # treated as stale: stripping its markers makes the WebUI render an
+        # actively streaming chat as idle after a refresh or Space switch
+        # (verified 2026-09-19).  This check is an in-process dict lookup, so
+        # it is safe on the listing hot path — the blocking HTTP round-trip
+        # that motivated its removal in 91331a0 no longer exists.
+        if _stream_is_active_for_space(str(row.get("active_stream_id") or ""), slug):
             continue
         sid = str(row.get("session_id") or "").strip()
         path = sessions_dir / f"{sid}.json" if sid else None

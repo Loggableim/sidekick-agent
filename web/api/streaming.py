@@ -2547,6 +2547,7 @@ def _run_agent_streaming(
         # subsequent Session.save() and Session.load() calls use the
         # correct workspace-specific session directory.
         _ws_slug = getattr(s, 'workspace_slug', None)
+        _ws_sessions_dir = None
         if _ws_slug:
             try:
                 from web.api.space_engine import get_or_create_space as _goc_ws
@@ -2558,6 +2559,7 @@ def _run_agent_streaming(
                 _set_sd(str(_ws_obj.sessions_dir))
                 _set_wk(str(_ws_obj.root))
                 _set_active_space(_ws_slug)
+                _ws_sessions_dir = str(_ws_obj.sessions_dir)
             except Exception:
                 pass
         s.workspace = str(Path(workspace).expanduser().resolve())
@@ -3550,8 +3552,36 @@ def _run_agent_streaming(
                     try:
                         cur = _checkpoint_activity[0]
                         if cur > last_saved_activity:
-                            with _agent_lock:
-                                s.save(skip_index=True)
+                            # This is a fresh thread: it does NOT inherit the
+                            # worker thread's thread-local session-dir override,
+                            # so get_session_dir() would fall back to the global
+                            # default store.  That made the Space store (which
+                            # the WebUI reads for ?workspace= requests) diverge
+                            # from the live session for the whole stream — the
+                            # sidebar then showed an active chat as idle
+                            # (verified 2026-09-19).  Bind the checkpoint thread
+                            # to the same store as the worker.
+                            _sd_prev = None
+                            if _ws_sessions_dir:
+                                try:
+                                    from web.api.config import (
+                                        get_session_dir as _get_sd,
+                                        set_session_dir as _set_sd,
+                                    )
+                                    _sd_prev = str(_get_sd())
+                                    _set_sd(_ws_sessions_dir)
+                                except Exception:
+                                    _sd_prev = None
+                            try:
+                                with _agent_lock:
+                                    s.save(skip_index=True)
+                            finally:
+                                if _ws_sessions_dir:
+                                    try:
+                                        from web.api.config import set_session_dir as _set_sd2
+                                        _set_sd2(_sd_prev)
+                                    except Exception:
+                                        pass
                             last_saved_activity = cur
                     except Exception as e:
                         logger.debug("Periodic checkpoint save failed: %s", e)

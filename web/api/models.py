@@ -197,6 +197,13 @@ def _write_session_index(updates=None):
         if _needs_full_rebuild:
             _cleanup_stale_tmp_files()
             _recover_stale_tmp_files()
+            # Snapshot the live stream registry once so index rows carry a
+            # truthful is_streaming flag.  compact() defaults to
+            # include_runtime=False, which made every row claim
+            # is_streaming=False even while a stream was running; the WebUI
+            # sidebar then hid the streaming indicator and purged its inflight
+            # cache for genuinely active chats (verified 2026-09-19).
+            _live_stream_ids = _active_stream_ids()
             disk_entries = []
             for p in get_session_dir().glob('*.json'):
                 if p.name.startswith('_'):
@@ -204,7 +211,7 @@ def _write_session_index(updates=None):
                 try:
                     s = Session.load(p.stem)
                     if s:
-                        disk_entries.append(s.compact())
+                        disk_entries.append(s.compact(include_runtime=True, active_stream_ids=_live_stream_ids))
                 except Exception:
                     logger.debug("Failed to load session from %s", p)
 
@@ -213,7 +220,7 @@ def _write_session_index(updates=None):
                 existing_ids = {e.get('session_id') for e in disk_entries}
                 for s in SESSIONS.values():
                     if s.session_id not in existing_ids:
-                        disk_entries.append(s.compact())
+                        disk_entries.append(s.compact(include_runtime=True, active_stream_ids=_live_stream_ids))
                 # Snapshot for sorting outside lock
                 _entries = list(disk_entries)
 
@@ -256,13 +263,17 @@ def _write_session_index(updates=None):
         }
 
         # Fast LOCK: only dict operations
+        _live_stream_ids = _active_stream_ids()
         with LOCK:
             in_memory_ids = set(SESSIONS.keys())
             existing = [
                 e for e in existing
                 if (e.get('session_id') in in_memory_ids or e.get('session_id') in on_disk_ids)
             ]
-            updated_map = {s.session_id: s.compact() for s in updates}
+            updated_map = {
+                s.session_id: s.compact(include_runtime=True, active_stream_ids=_live_stream_ids)
+                for s in updates
+            }
             existing_ids = {e.get('session_id') for e in existing}
             for sid, entry in updated_map.items():
                 if sid not in existing_ids:
