@@ -6445,8 +6445,10 @@ function syncTopbar(){
     // Update profile chip even when no session is active (e.g. right after profile switch)
     const _profileLabel=$('profileChipLabel');
     if(_profileLabel) _profileLabel.textContent=S.activeProfile||'default';
+    _maybeReapplyRightpanelWidthForSpace();
     return;
   }
+  _maybeReapplyRightpanelWidthForSpace();
   const rawTitle=String(S.session.title||'').trim();
   const sessionTitle=rawTitle && rawTitle!=='Untitled'
     ? rawTitle
@@ -11054,12 +11056,51 @@ async function uploadPendingFiles(){
 
 /* ── Split pane resize (Codex-style: resizable chat + workspace) ─────── */
 
+/* Per-space rightpanel width persistence (2026-09-19). Each space remembers
+   its own panel width; the legacy global key stays as a fallback. */
+function _rightpanelSpaceSlug(){
+  try{
+    if(typeof S!=='undefined'&&S&&S.session&&S.session.workspace){
+      return String(S.session.workspace).trim().toLowerCase()||'default';
+    }
+    const slug=(localStorage.getItem('sidekick-active-workspace')||'').trim().toLowerCase();
+    return slug||'default';
+  }catch(_){ return 'default'; }
+}
+function _rightpanelWidthKeyForSpace(){
+  return 'sidekick-rightpanel-width:'+_rightpanelSpaceSlug();
+}
+
 function syncWorkspaceRightpanelWidth(){
   const root=document.documentElement;
   if(!root) return;
   const panel=document.querySelector('.rightpanel');
   const width=panel ? Math.max(0,Math.round(panel.getBoundingClientRect().width)) : 0;
   root.style.setProperty('--workspace-rightpanel-width',width+'px');
+}
+
+function applyRightpanelWidthForSpace(){
+  // Re-apply the stored width for the CURRENT space (called on space switch).
+  const handle=document.getElementById('chatSplitResize');
+  const panel=document.querySelector('.rightpanel');
+  if(!handle||!panel) return;
+  try{
+    const perSpace=localStorage.getItem(_rightpanelWidthKeyForSpace());
+    const legacy=localStorage.getItem('sidekick-rightpanel-width');
+    const saved=perSpace||legacy;
+    if(saved) panel.style.flex=saved;
+  }catch(_){}
+  syncWorkspaceRightpanelWidth();
+}
+window.applyRightpanelWidthForSpace=applyRightpanelWidthForSpace;
+let _rightpanelLastAppliedSpace=null;
+function _maybeReapplyRightpanelWidthForSpace(){
+  // Idempotent: only re-applies when the active space actually changed since
+  // the last application (initSplitPane sets the baseline).
+  const slug=_rightpanelSpaceSlug();
+  if(_rightpanelLastAppliedSpace===null||_rightpanelLastAppliedSpace===slug) return;
+  _rightpanelLastAppliedSpace=slug;
+  applyRightpanelWidthForSpace();
 }
 
 function initSplitPane(){
@@ -11106,7 +11147,11 @@ function initSplitPane(){
       document.body.classList.remove('resizing');
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
-      try{localStorage.setItem('sidekick-rightpanel-width',panel.style.flex);}catch(_){}
+      try{
+        // Per-space key first; legacy global key kept for backward compat.
+        localStorage.setItem(_rightpanelWidthKeyForSpace(),panel.style.flex);
+        localStorage.setItem('sidekick-rightpanel-width',panel.style.flex);
+      }catch(_){}
       syncWorkspaceRightpanelWidth();
     };
     document.addEventListener('mousemove',onMove);
@@ -11114,9 +11159,12 @@ function initSplitPane(){
     e.preventDefault();
   });
   try{
-    const saved=localStorage.getItem('sidekick-rightpanel-width');
+    const perSpace=localStorage.getItem(_rightpanelWidthKeyForSpace());
+    const legacy=localStorage.getItem('sidekick-rightpanel-width');
+    const saved=perSpace||legacy;
     if(saved) panel.style.flex=saved;
   }catch(_){}
+  _rightpanelLastAppliedSpace=_rightpanelSpaceSlug();
   syncWorkspaceRightpanelWidth();
 }
 

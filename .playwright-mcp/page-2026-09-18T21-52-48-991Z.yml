@@ -1,0 +1,134 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: Sidekick
+    - generic "Global actions" [ref=e6]:
+      - button "Language" [ref=e8] [cursor=pointer]:
+        - generic [ref=e9]: 🇬🇧
+      - button "Hub Cast nicht konfiguriert" [ref=e10] [cursor=pointer]:
+        - generic [ref=e11]: 📺
+      - button "Enable Nova legacy source mode" [ref=e12] [cursor=pointer]:
+        - generic [aria-hidden] [ref=e13]: ⚡
+        - generic [ref=e14]: Nova legacy source mode
+    - radiogroup "Composer mode" [ref=e16]:
+      - button "Action" [pressed] [ref=e17] [cursor=pointer]
+      - button "🧠 Plan" [ref=e18] [cursor=pointer]
+    - button "Switch space (Nova)" [ref=e21] [cursor=pointer]:
+      - generic [ref=e22]: 📁
+      - generic [ref=e23]: Nova
+    - generic [ref=e26]:
+      - button "Game Mode" [ref=e27] [cursor=pointer]
+      - button "Runtime neu starten" [ref=e30] [cursor=pointer]
+      - button "Tag-/Nachtmodus umschalten" [ref=e34] [cursor=pointer]
+      - button "Herunterfahren" [ref=e37] [cursor=pointer]
+  - generic [ref=e41]:
+    - navigation "Primary navigation" [ref=e42]:
+      - button "Chat" [ref=e43] [cursor=pointer]
+      - button "Tasks" [ref=e46] [cursor=pointer]
+      - button "Kanban" [ref=e49] [cursor=pointer]
+      - button "Swarm" [ref=e52] [cursor=pointer]
+      - button "Skills" [ref=e58] [cursor=pointer]
+      - button "Agents" [ref=e63] [cursor=pointer]
+      - button "Memory" [ref=e67] [cursor=pointer]
+      - button "Spaces" [ref=e70] [cursor=pointer]
+      - button "Agent profiles" [ref=e73] [cursor=pointer]
+      - button "Todos" [ref=e77] [cursor=pointer]
+      - button "Insights" [ref=e81] [cursor=pointer]
+      - button "Logs" [ref=e83] [cursor=pointer]
+      - button "Gmail" [ref=e87] [cursor=pointer]
+      - button "Websearch" [ref=e91] [cursor=pointer]
+      - button "Discord" [ref=e98] [cursor=pointer]
+      - button "Appstore" [ref=e103] [cursor=pointer]
+      - button "Sidebar ein-/ausklappen" [ref=e107] [cursor=pointer]
+      - button "Settings" [ref=e110] [cursor=pointer]
+    - generic [ref=e115]:
+      - complementary [ref=e116]:
+        - generic [ref=e117]:
+          - generic [ref=e118]: Chat
+          - button "New chat" [ref=e121] [cursor=pointer]
+          - textbox "Filter conversations..." [ref=e125]
+          - generic [ref=e126]:
+            - button "Favorites" [ref=e127] [cursor=pointer]
+            - button "Select" [ref=e131] [cursor=pointer]
+          - status [ref=e136]: Loading conversations...
+      - main [ref=e140]:
+        - generic [ref=e143]:
+          - region [ref=e146]:
+            - generic [ref=e147]:
+              - generic [aria-hidden] [ref=e148]: "N"
+              - generic [ref=e149]:
+                - generic [ref=e150]: Nova · Space-Entität
+                - heading "Nova" [level=2] [ref=e151]
+                - paragraph [ref=e152]: Direkt, neugierig, verantwortungsvoll.
+              - status [ref=e153]: available
+            - paragraph [ref=e154]: Ich ordne meinen nächsten Fokus ein.
+            - paragraph [ref=e155]: Ticker inaktiv - keine autonome Arbeit · globale YOLO bleibt Quellmodus
+            - paragraph [ref=e156]: Keine aktive Betreuung
+            - list
+            - status [ref=e157]:
+              - heading "Supervisor-Slot" [level=3] [ref=e158]
+              - text: Kein manueller Slot-Handoff erforderlich.
+            - region [ref=e159]:
+              - heading "Space-Inventur" [level=3] [ref=e160]
+              - list
+              - paragraph [ref=e161]: Nur redigierte Statusdaten; YOLO und Betreuung werden hier nicht aktiviert.
+            - generic [ref=e162]:
+              - region [ref=e163]:
+                - heading "Betreute YOLO-Spaces" [level=3] [ref=e164]
+                - list
+              - region [ref=e165]:
+                - heading "Letzte auditierte Ergebnisse" [level=3] [ref=e166]
+                - list
+            - region [ref=e167]:
+              - heading "Offene Blocker" [level=3] [ref=e168]
+              - list
+            - region [ref=e169]:
+              - heading "Entscheidungsfeed" [level=3] [ref=e170]
+              - list
+            - region [ref=e171]:
+              - heading "Entitätsfeed" [level=3] [ref=e172]
+              - list
+            - paragraph [ref=e173]:
+              - text: Nova betreut nur Spaces, in denen YOLO und Nova-Betreuung getrennt aktiviert wurden. Der globale Nova-Schalter bleibt Legacy-Quellmodus und enrollt keinen Space.
+              - button "Space-Einstellungen öffnen" [ref=e174] [cursor=pointer]
+          - generic [ref=e176]:
+            - generic:
+              - region "Queued messages"
+            - generic [ref=e177]:
+              - generic [ref=e178]:
+                - generic [ref=e179]:
+                  - button "Review current state" [ref=e180] [cursor=pointer]: Review
+                  - button "Run tests" [ref=e181] [cursor=pointer]: Test
+                  - button "Install packages" [ref=e182] [cursor=pointer]: Install
+                  - button "Deploy to production" [ref=e183] [cursor=pointer]: Deploy
+                - generic [ref=e184]:
+                  - button "Browser drawer" [ref=e185] [cursor=pointer]
+                  - 'button "Workflow: approval manual, reasoning default, quick search, mcp unknown, Web auto, local review ready, subagents, model GPT-5.4 Mini, browser closed · locked. Click to show workflow status. Cmd/Ctrl+K opens the palette." [ref=e191] [cursor=pointer]':
+                    - generic [ref=e193]: manual · default
+              - textbox "Message Nova…" [ref=e194]
+              - generic:
+                - button "Expand editor": Expand
+              - generic [ref=e195]:
+                - generic [ref=e196]:
+                  - button "Choose File" [ref=e197]
+                  - button "Attach files" [ref=e198] [cursor=pointer]
+                  - button "Dictate" [ref=e201] [cursor=pointer]
+                  - button "Set a persistent goal" [ref=e205] [cursor=pointer]
+                  - button "Switch profile" [ref=e211] [cursor=pointer]
+                  - generic [ref=e219]:
+                    - button "Conversation model" [ref=e220] [cursor=pointer]
+                    - combobox [aria-hidden]
+                - generic [ref=e225]:
+                  - button "Show context info" [ref=e226] [cursor=pointer]
+                  - button [disabled] [ref=e229]
+    - complementary [ref=e233]:
+      - generic [ref=e234]:
+        - generic [ref=e235]:
+          - generic "No workspace" [ref=e236]: Workspace
+          - generic [ref=e237]:
+            - button [ref=e238] [cursor=pointer]
+            - button [disabled] [ref=e241]
+            - button [disabled] [ref=e243]
+            - button [disabled] [ref=e246]
+            - button [ref=e251] [cursor=pointer]
+            - button "Close workspace panel" [ref=e256] [cursor=pointer]: ×
+        - generic [ref=e257]: No workspace selected. Set a workspace in Settings → Workspace to browse files.

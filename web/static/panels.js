@@ -4603,30 +4603,12 @@ function _renderHybridResults(data, query) {
 }
 
 // ── File Tree Panel ──
-/**
- * Toggle the file tree panel in the chat layout between open and minimized.
- * When minimized, the panel collapses to 0px width and a tab icon is shown.
- * Width is restored to the last saved width or default 260px.
- */
-window.toggleFileTreePanel = function(){
-  const panel = $('chatFileTreePanel');
-  if(!panel) return;
-  const root = document.documentElement;
-  const minimized = panel.classList.contains('file-tree-panel--minimized');
-  if(minimized){
-    // Restore — read saved width from localStorage
-    const saved = parseInt(localStorage.getItem('sidekick-file-tree-w')) || 260;
-    root.style.setProperty('--file-tree-width', saved + 'px');
-    panel.classList.remove('file-tree-panel--minimized');
-    if(typeof flushPendingWorkspaceTreeRefresh === 'function') setTimeout(flushPendingWorkspaceTreeRefresh, 0);
-  }else{
-    // Save current width before collapsing
-    const curW = parseInt(root.style.getPropertyValue('--file-tree-width')) || panel.getBoundingClientRect().width || 260;
-    if(curW > 0) localStorage.setItem('sidekick-file-tree-w', curW);
-    root.style.setProperty('--file-tree-width', '0px');
-    panel.classList.add('file-tree-panel--minimized');
-  }
-};
+// window.toggleFileTreePanel is defined in boot.js (delegates to
+// toggleWorkspacePanel, which drives the shared .rightpanel). Do NOT
+// re-define it here: the legacy chatFileTreePanel implementation was removed
+// with the element itself (commit 7b14a06) and silently no-op'ed the composer
+// toggle after panels.js lazy-loaded, making a closed workspace panel
+// impossible to reopen.
 
 // ── Workspace management ──
 let _workspaceList = [];  // cached from /api/workspaces

@@ -426,7 +426,12 @@ async function openFile(path){
 
   $('previewPathText').textContent=path;
   $('previewArea').classList.add('visible');
-  $('fileTree').style.display='none';
+  // 2026-09-19: the file tree stays visible — tree and preview now share a
+  // vertical split (see initRightpanelVSplit). Hiding the tree here broke the
+  // split layout and made the tree vanish until clearPreview().
+  if($('fileTree')) $('fileTree').style.display='';
+  const _rpContent=$('previewArea')&&$('previewArea').closest('.rightpanel-content--workspace');
+  if(_rpContent) _rpContent.classList.add('has-visible-preview');
 
   _previewCurrentPath = path;
   renderFileBreadcrumb(path);
@@ -774,3 +779,109 @@ function _addPreviewCopyBtn(){
     }
   };
 })();
+
+
+// ── Rightpanel inner split + section collapse (2026-09-19) ──────────────────
+// File-Tree and preview share the workspace panel as a vertical split with a
+// draggable handle. Section collapse states persist per localStorage.
+const _RP_VSPLIT_KEY='sidekick-rightpanel-vsplit';
+const _RP_TREE_COLLAPSE_KEY='sidekick-rightpanel-tree-collapsed';
+const _RP_PREVIEW_COLLAPSE_KEY='sidekick-rightpanel-preview-collapsed';
+
+function _rpSetTreeFlex(v){
+  const clamped=Math.min(0.9,Math.max(0.1,v));
+  const content=document.querySelector('.rightpanel-content--workspace');
+  const root=content||document.documentElement;
+  root.style.setProperty('--rightpanel-tree-flex',clamped.toFixed(3));
+  return clamped;
+}
+
+function initRightpanelVSplit(){
+  const handle=document.getElementById('rightpanelVSplitHandle');
+  const tree=document.getElementById('fileTree');
+  const preview=document.getElementById('previewArea');
+  if(!handle||!tree||!preview) return;
+  if(handle.dataset.rpVSplitBound==='1') return;
+  handle.dataset.rpVSplitBound='1';
+  const saved=parseFloat(localStorage.getItem(_RP_VSPLIT_KEY));
+  if(!Number.isNaN(saved)) _rpSetTreeFlex(saved);
+  let dragging=false;
+  handle.addEventListener('mousedown',e=>{
+    e.preventDefault();
+    dragging=true;
+    document.body.classList.add('rp-vsplit-resizing');
+    const onMove=ev=>{
+      if(!dragging) return;
+      const content=handle.parentElement;
+      if(!content) return;
+      const rect=content.getBoundingClientRect();
+      const headerH=(content.querySelector('.panel-header')||{}).offsetHeight||0;
+      const crumbH=(content.querySelector('.breadcrumb-bar')||{}).offsetHeight||0;
+      const usable=rect.height-headerH-crumbH;
+      if(usable<=0) return;
+      const frac=(ev.clientY-rect.top-headerH-crumbH)/usable;
+      _rpSetTreeFlex(frac);
+    };
+    const onUp=()=>{
+      dragging=false;
+      document.body.classList.remove('rp-vsplit-resizing');
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+      const content=document.querySelector('.rightpanel-content--workspace');
+      const cur=parseFloat((content||document.documentElement).style.getPropertyValue('--rightpanel-tree-flex'));
+      if(!Number.isNaN(cur)){
+        try{localStorage.setItem(_RP_VSPLIT_KEY,cur.toFixed(3));}catch(_){}
+      }
+    };
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+  handle.addEventListener('keydown',e=>{
+    if(e.key!=='ArrowUp'&&e.key!=='ArrowDown') return;
+    e.preventDefault();
+    const content=document.querySelector('.rightpanel-content--workspace');
+    const cur=parseFloat((content||document.documentElement).style.getPropertyValue('--rightpanel-tree-flex'))||0.45;
+    const next=_rpSetTreeFlex(cur+(e.key==='ArrowUp'?-0.05:0.05));
+    try{localStorage.setItem(_RP_VSPLIT_KEY,next.toFixed(3));}catch(_){}
+  });
+}
+
+function toggleRightpanelSectionCollapse(sectionId){
+  const el=document.getElementById(sectionId);
+  if(!el) return;
+  const collapsed=el.classList.toggle('section-collapsed');
+  const key=sectionId==='fileTree'?_RP_TREE_COLLAPSE_KEY:_RP_PREVIEW_COLLAPSE_KEY;
+  try{localStorage.setItem(key,collapsed?'1':'0');}catch(_){}
+  const btnId=sectionId==='fileTree'?'btnTreeCollapse':'btnPreviewCollapse';
+  const btn=document.getElementById(btnId);
+  if(btn){
+    btn.setAttribute('aria-expanded',collapsed?'false':'true');
+    btn.classList.toggle('is-collapsed',collapsed);
+  }
+}
+
+function restoreRightpanelSectionState(){
+  const tree=document.getElementById('fileTree');
+  const preview=document.getElementById('previewArea');
+  try{
+    if(localStorage.getItem(_RP_TREE_COLLAPSE_KEY)==='1'&&tree){
+      tree.classList.add('section-collapsed');
+      const btn=document.getElementById('btnTreeCollapse');
+      if(btn){btn.setAttribute('aria-expanded','false');btn.classList.add('is-collapsed');}
+    }
+    if(localStorage.getItem(_RP_PREVIEW_COLLAPSE_KEY)==='1'&&preview){
+      preview.classList.add('section-collapsed');
+      const btn=document.getElementById('btnPreviewCollapse');
+      if(btn){btn.setAttribute('aria-expanded','false');btn.classList.add('is-collapsed');}
+    }
+  }catch(_){}
+  initRightpanelVSplit();
+}
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',restoreRightpanelSectionState,{once:true});
+}else{
+  restoreRightpanelSectionState();
+}
+window.toggleRightpanelSectionCollapse=toggleRightpanelSectionCollapse;
+window.initRightpanelVSplit=initRightpanelVSplit;

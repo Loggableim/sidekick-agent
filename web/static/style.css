@@ -54,6 +54,40 @@
   :root[data-font-size="small"] .msg-body table { font-size: 11px; }
 :root[data-font-size="large"] .msg-body table { font-size: 14px; }
 
+  /* ── 6-step chat font scale (titlebar + cycler) ──
+     The cycler uses named steps: default → small → large → x-small → x-large → xx-large.
+     These rules scale the CHAT presentation (messages + composer input); the
+     small/large rules above keep working for sidebar/settings compatibility. */
+  :root[data-font-size="x-small"] .msg-body { font-size: 11px; }
+  :root[data-font-size="x-small"] .msg-body h1 { font-size: 18px; }
+  :root[data-font-size="x-small"] .msg-body h2 { font-size: 15px; }
+  :root[data-font-size="x-small"] .msg-body h3 { font-size: 13.5px; }
+  :root[data-font-size="x-small"] .msg-body code { font-size: 10px; }
+  :root[data-font-size="x-small"] .msg-body pre code { font-size: 10px; }
+  :root[data-font-size="x-small"] #msg { font-size: 12px; }
+  :root[data-font-size="x-small"] .session-item { font-size: 10px; }
+  :root[data-font-size="x-large"] .msg-body { font-size: 18px; }
+  :root[data-font-size="x-large"] .msg-body h1 { font-size: 30px; }
+  :root[data-font-size="x-large"] .msg-body h2 { font-size: 25px; }
+  :root[data-font-size="x-large"] .msg-body h3 { font-size: 22px; }
+  :root[data-font-size="x-large"] .msg-body h4 { font-size: 19px; }
+  :root[data-font-size="x-large"] .msg-body code { font-size: 16px; }
+  :root[data-font-size="x-large"] .msg-body pre code { font-size: 16.5px; }
+  :root[data-font-size="x-large"] .msg-body table { font-size: 16px; }
+  :root[data-font-size="x-large"] #msg { font-size: 17px; }
+  :root[data-font-size="x-large"] .session-item { font-size: 16px; }
+  :root[data-font-size="xx-large"] .msg-body { font-size: 21px; }
+  :root[data-font-size="xx-large"] .msg-body h1 { font-size: 35px; }
+  :root[data-font-size="xx-large"] .msg-body h2 { font-size: 29px; }
+  :root[data-font-size="xx-large"] .msg-body h3 { font-size: 26px; }
+  :root[data-font-size="xx-large"] .msg-body h4 { font-size: 23px; }
+  :root[data-font-size="xx-large"] .msg-body code { font-size: 18.5px; }
+  :root[data-font-size="xx-large"] .msg-body pre code { font-size: 19px; }
+  :root[data-font-size="xx-large"] .msg-body table { font-size: 18.5px; }
+  :root[data-font-size="xx-large"] #msg { font-size: 20px; }
+  :root[data-font-size="xx-large"] .session-item { font-size: 18px; }
+  :root[data-font-size="xx-large"] .session-meta { font-size: 15px; }
+
 .large-message-preview {
   margin-top: 12px;
   padding: 10px 12px;
@@ -6170,6 +6204,12 @@ main.main.showing-insights > #mainInsights{display:flex;overflow-y:auto;}
     opacity:0!important;
     pointer-events:none!important;
   }
+  /* Hide the split handle together with the panel — a visible handle next to a
+     0px panel reads as a dead resize slider. */
+  html[data-workspace-panel="closed"] .split-resize-handle,
+  .layout.workspace-panel-collapsed .split-resize-handle{
+    display:none!important;
+  }
 }
 .kanban-card-assignee{color:var(--accent)}
 .kanban-card-unassigned{opacity:.75}
@@ -9599,3 +9639,60 @@ body.browser-maximized .browser-drawer .browser-frame-image {
 .thinking-steer-nudges{display:flex;gap:4px;flex-wrap:wrap;}
 .thinking-nudge-chip{font-size:10px;padding:3px 8px;border-radius:999px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:background .15s,color .15s;}
 .thinking-nudge-chip:hover{background:var(--accent-bg);color:var(--accent-text);}
+
+/* ── Composer overflow menu (⋯) + unified chip language (2026-09-19) ─────── */
+/* The ⋯ button sits after the send button; its menu opens above the footer. */
+.composer-overflow-wrap{position:relative;flex-shrink:0;display:inline-flex;}
+.composer-overflow-btn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border:none;border-radius:8px;background:transparent;color:var(--muted);cursor:pointer;transition:background-color .15s,color .15s;}
+.composer-overflow-btn:hover{background:var(--hover-bg);color:var(--text);}
+.composer-overflow-btn[aria-expanded="true"]{background:var(--hover-bg);color:var(--text);}
+.composer-overflow-menu{position:absolute;bottom:calc(100% + 8px);right:0;min-width:230px;max-width:min(300px,calc(100vw - 32px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -4px 24px rgba(0,0,0,.4);z-index:300;padding:4px;display:flex;flex-direction:column;gap:1px;overflow:hidden;}
+.composer-overflow-menu[hidden]{display:none;}
+.composer-overflow-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--text);user-select:none;transition:background-color .12s;}
+.composer-overflow-item:hover{background:var(--hover-bg);}
+.composer-overflow-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.composer-overflow-pin{flex-shrink:0;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;border-radius:6px;cursor:pointer;font-size:12px;line-height:1;padding:0;transition:background-color .12s,opacity .12s;}
+.composer-overflow-pin:hover{background:var(--accent-bg);}
+/* Unified chip language: one base, three variants. Existing composer chips
+   keep their IDs/classes; these rules layer the shared visual contract on top
+   via the .chip classes applied to them in index.html. */
+.chip{display:inline-flex;align-items:center;gap:6px;max-width:220px;padding:6px 10px;border-radius:999px;border:1px solid transparent;background-color:transparent;color:var(--muted);font-weight:500;font-size:12px;line-height:1.2;cursor:pointer;transition:color .15s,background-color .15s,border-color .15s;white-space:nowrap;}
+.chip:hover{color:var(--text);background:var(--hover-bg);}
+.chip:focus-visible{outline:1px solid var(--accent);outline-offset:1px;}
+.chip--toggle.active{color:var(--accent-text);background:var(--accent-bg);border-color:var(--accent-bg-strong);}
+.chip--status{cursor:default;}
+.chip--menu{gap:8px;}
+.chip--menu .chip-chevron{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+.chip-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chip--disabled,.chip:disabled{opacity:.45;cursor:not-allowed;}
+/* Icon-only compact variant used when the footer container is narrow. */
+.chip--icon{padding:6px;gap:0;}
+
+/* ── Rightpanel inner split: file-tree ↔ preview (2026-09-19) ─────────────── */
+/* The workspace panel content is a column: header, breadcrumb, tree (flex A),
+   handle, preview (flex B). Without a visible preview the tree takes all space
+   and the handle is hidden. */
+.rightpanel-content--workspace{--rightpanel-tree-flex:0.45;display:flex;flex-direction:column;height:100%;overflow:hidden;}
+.rightpanel-content--workspace .panel-header{flex-shrink:0;}
+.rightpanel-content--workspace .breadcrumb-bar{flex-shrink:0;}
+.rightpanel-content--workspace .file-tree{flex:var(--rightpanel-tree-flex,0.45) 1 0;min-height:60px;}
+.rightpanel-content--workspace .preview-area{flex:calc(1 - var(--rightpanel-tree-flex,0.45)) 1 0;min-height:60px;}
+.rightpanel-content--workspace .preview-area:not(.visible){display:none;flex-grow:0;}
+.rightpanel-vsplit-handle{height:6px;flex:0 0 6px;cursor:row-resize;background:transparent;position:relative;z-index:5;transition:background .15s;}
+.rightpanel-vsplit-handle::after{content:'';position:absolute;left:8px;right:8px;top:2px;height:2px;border-radius:1px;background:var(--border2);transition:background .15s;}
+.rightpanel-vsplit-handle:hover::after,.rightpanel-vsplit-handle:focus-visible::after{background:var(--accent);}
+.rightpanel-vsplit-handle:focus-visible{outline:1px solid var(--accent);outline-offset:-1px;}
+.rightpanel-content--workspace .preview-area:not(.visible) ~ .rightpanel-vsplit-handle,
+.rightpanel-content--workspace .rightpanel-vsplit-handle{display:block;}
+/* When no preview is open, hide the handle (nothing to split). */
+.rightpanel-content--workspace:not(.has-visible-preview) .rightpanel-vsplit-handle{display:none;}
+.rightpanel-content--workspace.has-visible-preview .rightpanel-vsplit-handle{display:block;}
+body.rp-vsplit-resizing{cursor:row-resize;user-select:none;}
+body.rp-vsplit-resizing .rightpanel-content--workspace .file-tree,
+body.rp-vsplit-resizing .rightpanel-content--workspace .preview-area{transition:none!important;}
+/* Section collapse: max-height 0 + overflow hidden; flex-grow 0 so the sibling
+   takes the freed space. */
+.rightpanel-content--workspace .file-tree.section-collapsed,
+.rightpanel-content--workspace .preview-area.section-collapsed{max-height:0!important;overflow:hidden;flex-grow:0!important;flex-basis:0!important;min-height:0!important;padding-top:0;padding-bottom:0;}
+.panel-icon-btn.is-collapsed svg{transform:rotate(180deg);}
+.panel-icon-btn svg{transition:transform .15s;}

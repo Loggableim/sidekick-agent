@@ -2896,6 +2896,7 @@ def test_browser_drawer_open_renders_as_fixed_bottom_sheet():
 def test_workspace_files_toggle_uses_current_rightpanel_contract():
     index_html = Path("web/static/index.html").read_text(encoding="utf-8")
     boot_js = Path("web/static/boot.js").read_text(encoding="utf-8")
+    panels_js = Path("web/static/panels.js").read_text(encoding="utf-8")
 
     assert 'onclick="toggleFileTreePanel()"' in index_html
     assert 'class="rightpanel"' in index_html
@@ -2911,6 +2912,12 @@ def test_workspace_files_toggle_uses_current_rightpanel_contract():
     assert "fileTree.style.display='none';" in boot_js
     assert "openWorkspacePanel(nextMode,{force:true});" in boot_js
     assert "window.toggleFileTreePanel=function(force){return toggleWorkspacePanel(force);};" in boot_js
+    # 2026-09-19 regression guard: panels.js must NOT re-define toggleFileTreePanel.
+    # The legacy chatFileTreePanel implementation silently no-op'ed the composer
+    # toggle after panels.js lazy-loaded, making a closed panel impossible to
+    # reopen (the user-reported "workspace cannot be reopened" bug).
+    assert "window.toggleFileTreePanel = function(){" not in panels_js
+    assert "window.toggleFileTreePanel=function(){" not in panels_js
 
 
 def test_workspace_load_errors_render_panel_error_state():

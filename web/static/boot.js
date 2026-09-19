@@ -135,6 +135,24 @@ function _safeBootStorageSet(key, value) {
   }
 }
 
+function _bootSpaceSlugForState(){
+  try{
+    if(typeof S!=='undefined'&&S&&S.session&&S.session.workspace){
+      return String(S.session.workspace).trim().toLowerCase()||'default';
+    }
+    const slug=(localStorage.getItem('sidekick-active-workspace')||'').trim().toLowerCase();
+    return slug||'default';
+  }catch(_){ return 'default'; }
+}
+function _workspacePanelPrefForSpace(){
+  // Per-space open/closed preference first; fall back to the global key.
+  try{
+    const perSpace=localStorage.getItem('sidekick-webui-workspace-panel:'+_bootSpaceSlugForState());
+    if(perSpace!==null) return perSpace;
+  }catch(_){}
+  try{ return localStorage.getItem('sidekick-webui-workspace-panel'); }catch(_){ return null; }
+}
+
 function _setWorkspacePanelMode(mode){
   const {layout,panel}= _workspacePanelEls();
   if(!layout||!panel)return;
@@ -144,7 +162,10 @@ function _setWorkspacePanelMode(mode){
   // Persist open/closed across refreshes (browse/preview → open; closed → closed)
   // Do NOT overwrite the user's "keep open" preference — only track runtime state
   // so that toggleWorkspacePanel(false) from the toolbar doesn't clear the setting.
+  // 2026-09-19: additionally persisted per space so each space restores its own
+  // panel state (global key kept for backward compat).
   _safeBootStorageSet('sidekick-webui-workspace-panel', open ? 'open' : 'closed');
+  _safeBootStorageSet('sidekick-webui-workspace-panel:'+_bootSpaceSlugForState(), open ? 'open' : 'closed');
   layout.classList.toggle('workspace-panel-collapsed',!open);
   if(_isCompactWorkspaceViewport()){
     if(open&&typeof closeMobileSidebar==='function') closeMobileSidebar();
@@ -223,7 +244,7 @@ window.syncWorkspacePanelForActivePanel=syncWorkspacePanelForActivePanel;
  */
 function _applyFileTreePanelPref(){
   const pref = localStorage.getItem('sidekick-webui-workspace-panel-pref') !== 'closed'
-    || localStorage.getItem('sidekick-webui-workspace-panel') === 'open';
+    || _workspacePanelPrefForSpace() === 'open';
   const panel = $('chatFileTreePanel');
   if(!panel){
     if(pref&&_workspacePanelMode==='closed') _workspacePanelMode='browse';
@@ -1148,6 +1169,8 @@ function clearPreview(opts={}){
   if(typeof renderBreadcrumb==='function') renderBreadcrumb();
   const closePanelAfter=_workspacePanelMode==='preview'&&!keepPanelOpen;
   const pa=$('previewArea');if(pa)pa.classList.remove('visible');
+  const _rpContent=pa&&pa.closest('.rightpanel-content--workspace');
+  if(_rpContent) _rpContent.classList.remove('has-visible-preview');
   const pi=$('previewImg');if(pi){pi.onerror=null;pi.src='';}
   const pdf=$('previewPdfFrame');if(pdf)pdf.src='';
   const html=$('previewHtmlIframe');if(html)html.src='';
@@ -1753,6 +1776,157 @@ function _syncFontSizePicker(active){
   });
 }
 
+// ── Chat font-size cycler (titlebar + button, 6 steps) ──────────────────────
+// Cycles the chat font scale through 6 named steps. Reuses the existing
+// _pickFontSize persistence path (localStorage 'sidekick-font-size' +
+// settings autosave) so the settings picker stays in sync.
+const _FONT_SIZE_STEPS=['default','small','large','x-small','x-large','xx-large'];
+function cycleChatFontSize(){
+  const current=document.documentElement.dataset.fontSize||'default';
+  const idx=_FONT_SIZE_STEPS.indexOf(current);
+  const next=_FONT_SIZE_STEPS[(idx+1)%_FONT_SIZE_STEPS.length];
+  _pickFontSize(next);
+  const labels={ 'default':'Standard','small':'Klein','large':'Groß','x-small':'Sehr klein','x-large':'Sehr groß','xx-large':'Maximal' };
+  if(typeof showToast==='function') showToast('Schriftgröße: '+(labels[next]||next),1800);
+}
+window.cycleChatFontSize=cycleChatFontSize;
+
+// ── Composer overflow menu (⋯) with per-item pins ───────────────────────────
+// Moves low-priority composer controls into a ⋯ menu so the footer shows only
+// the core row (attach/goal/profile/model/reasoning … send). Pinned items are
+// pulled back into the footer; the pin state persists per localStorage.
+const _COMPOSER_OVERFLOW_KEY='sidekick-composer-overflow-pins';
+function _composerOverflowPins(){
+  try{ return JSON.parse(localStorage.getItem(_COMPOSER_OVERFLOW_KEY)||'{}')||{}; }
+  catch(_){ return {}; }
+}
+function _setComposerOverflowPin(id,pinned){
+  const pins=_composerOverflowPins();
+  if(pinned) pins[id]=1; else delete pins[id];
+  try{ localStorage.setItem(_COMPOSER_OVERFLOW_KEY,JSON.stringify(pins)); }catch(_){}
+  _applyComposerOverflowLayout();
+}
+window._setComposerOverflowPin=_setComposerOverflowPin;
+
+// Overflow registry: id → label. Order defines menu order.
+const _COMPOSER_OVERFLOW_ITEMS=[
+  {id:'btnMic',label:'Diktieren'},
+  {id:'btnVoiceMode',label:'Voice-Modus'},
+  {id:'btnBrowserDrawerToggle',label:'Browser-Drawer'},
+  {id:'sandboxToggleLabel',label:'Sandbox'},
+  {id:'btnTerminalToggle',label:'Terminal'},
+  {id:'composerToolsetsWrap',label:'Toolsets'},
+  {id:'composerModeWrap',label:'Wartemodus (Queue/Steer/BG)'},
+  {id:'btnContextInfo',label:'Kontext-Info'},
+];
+let _composerOverflowOpen=false;
+
+function _composerOverflowMenuEl(){ return document.getElementById('composerOverflowMenu'); }
+
+function _renderComposerOverflowMenu(){
+  const menu=_composerOverflowMenuEl();
+  if(!menu) return;
+  const pins=_composerOverflowPins();
+  const frag=document.createDocumentFragment();
+  _COMPOSER_OVERFLOW_ITEMS.forEach(item=>{
+    const src=document.getElementById(item.id);
+    if(!src) return;
+    const pinned=!!pins[item.id];
+    const row=document.createElement('div');
+    row.className='composer-overflow-item';
+    row.setAttribute('role','menuitem');
+    row.dataset.overflowFor=item.id;
+    const labelSpan=document.createElement('span');
+    labelSpan.className='composer-overflow-label';
+    labelSpan.textContent=item.label;
+    const pinBtn=document.createElement('button');
+    pinBtn.type='button';
+    pinBtn.className='composer-overflow-pin'+(pinned?' pinned':'');
+    pinBtn.setAttribute('aria-pressed',pinned?'true':'false');
+    pinBtn.title=pinned?'Nicht mehr immer anzeigen':'Immer anzeigen';
+    pinBtn.setAttribute('aria-label',(pinned?'Nicht mehr immer anzeigen: ':'Immer anzeigen: ')+item.label);
+    pinBtn.textContent=pinned?'📌':'📌';
+    pinBtn.style.opacity=pinned?'1':'.35';
+    pinBtn.addEventListener('click',e=>{
+      e.stopPropagation();
+      _setComposerOverflowPin(item.id,!pinned);
+    });
+    // Clicking the row activates the source control (if it's a button).
+    row.addEventListener('click',()=>{
+      const el=document.getElementById(item.id);
+      if(!el) return;
+      const target=el.querySelector?el.querySelector('button'):null;
+      const clickTarget=(el.tagName==='BUTTON'||el.tagName==='LABEL')?el:(target||el);
+      if(typeof clickTarget.click==='function') clickTarget.click();
+      _toggleComposerOverflowMenu(false);
+    });
+    row.appendChild(labelSpan);
+    row.appendChild(pinBtn);
+    frag.appendChild(row);
+  });
+  menu.innerHTML='';
+  menu.appendChild(frag);
+}
+
+function _toggleComposerOverflowMenu(force){
+  const menu=_composerOverflowMenuEl();
+  const btn=document.getElementById('composerOverflowBtn');
+  if(!menu||!btn) return;
+  const open=typeof force==='boolean'?force:!_composerOverflowOpen;
+  _composerOverflowOpen=open;
+  menu.hidden=!open;
+  btn.setAttribute('aria-expanded',open?'true':'false');
+  if(open) _renderComposerOverflowMenu();
+}
+window._toggleComposerOverflowMenu=_toggleComposerOverflowMenu;
+
+function _applyComposerOverflowLayout(){
+  // Move non-pinned overflow items into the menu zone; pinned ones stay put.
+  // The menu itself renders label rows that proxy-click the real controls, so
+  // the original elements can stay in the DOM (hidden) without breaking the
+  // ~20 JS references to their IDs.
+  const pins=_composerOverflowPins();
+  const menu=_composerOverflowMenuEl();
+  _COMPOSER_OVERFLOW_ITEMS.forEach(item=>{
+    const el=document.getElementById(item.id);
+    if(!el) return;
+    const pinned=!!pins[item.id];
+    // Hide the in-footer original when it lives in the overflow menu.
+    el.style.setProperty('--composer-overflow-hidden',pinned?'':'none');
+    el.style.display=pinned?'':'none';
+  });
+  if(_composerOverflowOpen) _renderComposerOverflowMenu();
+  // Show the ⋯ button only when at least one item is overflowed.
+  const anyOverflowed=_COMPOSER_OVERFLOW_ITEMS.some(item=>{
+    const el=document.getElementById(item.id);
+    return el && !pins[item.id];
+  });
+  const wrap=document.getElementById('composerOverflowWrap');
+  if(wrap) wrap.style.display=anyOverflowed?'':'none';
+}
+
+function _initComposerOverflow(){
+  const btn=document.getElementById('composerOverflowBtn');
+  if(!btn||btn.dataset.overflowBound==='1') return;
+  btn.dataset.overflowBound='1';
+  btn.addEventListener('click',e=>{
+    e.stopPropagation();
+    _toggleComposerOverflowMenu();
+  });
+  document.addEventListener('click',e=>{
+    if(!_composerOverflowOpen) return;
+    const wrap=document.getElementById('composerOverflowWrap');
+    if(wrap&&!wrap.contains(e.target)) _toggleComposerOverflowMenu(false);
+  });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&_composerOverflowOpen) _toggleComposerOverflowMenu(false);
+  });
+  _applyComposerOverflowLayout();
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',_initComposerOverflow,{once:true});
+else _initComposerOverflow();
+window._initComposerOverflow=_initComposerOverflow;
+
 function _syncSyntaxThemePicker(active){
   document.querySelectorAll('#syntaxThemePickerGrid .syntax-theme-pick-btn').forEach(btn=>{
     btn.classList.toggle('active',btn.dataset.syntaxThemeVal===active);
@@ -2189,7 +2363,7 @@ async function _syncGameModeStateFromServer() {
         // Restore panel pref before syncing so the workspace panel stays visible
         // even though there is no active session (#workspace-persist).
         const _ephPanelPref=localStorage.getItem('sidekick-webui-workspace-panel-pref')==='open'
-          || localStorage.getItem('sidekick-webui-workspace-panel')==='open';
+          || _workspacePanelPrefForSpace()==='open';
         if(_ephPanelPref) _workspacePanelMode='browse';
         // Sync file tree panel state in chat layout
         _applyFileTreePanelPref();
@@ -2203,7 +2377,7 @@ async function _syncGameModeStateFromServer() {
       // Preference key takes priority over runtime state so that closing
       // the panel via toolbar X doesn't suppress the "keep open" setting.
       const panelPref=localStorage.getItem('sidekick-webui-workspace-panel-pref')==='open'
-        || localStorage.getItem('sidekick-webui-workspace-panel')==='open';
+        || _workspacePanelPrefForSpace()==='open';
       if(S.session&&S.session.workspace&&panelPref){
         _workspacePanelMode='browse';
       }
@@ -2227,7 +2401,7 @@ async function _syncGameModeStateFromServer() {
   // Restore panel pref so the workspace panel stays visible on a fresh load if the
   // user had it open during their last session (#workspace-persist).
   const _freshPanelPref=localStorage.getItem('sidekick-webui-workspace-panel-pref')==='open'
-    || localStorage.getItem('sidekick-webui-workspace-panel')==='open';
+    || _workspacePanelPrefForSpace()==='open';
   if(_freshPanelPref) _workspacePanelMode='browse';
   // Sync file tree panel state in chat layout
   _applyFileTreePanelPref();

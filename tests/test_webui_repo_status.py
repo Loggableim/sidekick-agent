@@ -110,10 +110,27 @@ def test_titlebar_status_controls_are_relocated_into_the_composer_strip() -> Non
     index_html = INDEX_HTML.read_text(encoding="utf-8")
 
     assert 'id="composerStatusStrip" class="composer-status-strip"' in index_html
+    # 2026-09-19: the status cluster is now STATIC markup inside the strip.
+    # The runtime mover was retired (it was the source of repeated merge
+    # casualties); the function remains only as a stale-deployment safety net.
     assert "function relocateHeaderControlsToComposer()" in index_html
-    assert "cluster.id = 'composerStatusStripCluster';" in index_html
-    assert "move(document.getElementById('btnBrowserDrawerToggle'));" in index_html
-    assert "move(document.querySelector('.titlebar-workflow-group'));" in index_html
+    assert 'id="composerStatusStripCluster"' in index_html
+    # The moved controls live inside the strip cluster, exactly once.
+    strip_start = index_html.index('id="composerStatusStrip"')
+    strip_end = index_html.index('class="action-chips" id="actionChips"', strip_start)
+    strip_block = index_html[strip_start:strip_end]
+    for control_id in (
+        "btnBrowserDrawerToggle",
+        "approvalModeBadge",
+        "approvalModeValue",
+        "workflowStatusBadge",
+        "workflowStatusValue",
+        "workflowStatusMenu",
+    ):
+        assert f'id="{control_id}"' in strip_block, control_id
+        # Unique across the whole document (no duplicated titlebar copy).
+        assert index_html.count(f'id="{control_id}"') == 1, control_id
+    # The titlebar no longer carries its own copies of the moved controls.
     assert "topbarCluster.hidden = true;" in index_html
     assert 'id="titlebarUtilityActions"' in index_html
     assert 'id="titlebarLangSelector"' in index_html
@@ -366,7 +383,9 @@ def test_composer_action_chips_are_pulled_closer_to_the_top_edge() -> None:
     index_html = INDEX_HTML.read_text(encoding="utf-8")
     style_css = STYLE_CSS.read_text(encoding="utf-8")
 
-    assert "strip.insertBefore(actionChips, cluster);" in index_html
+    # 2026-09-19: actionChips is now a static child of the strip (no runtime
+    # insertBefore needed); the grid placement rules are unchanged.
+    assert '<div class="action-chips" id="actionChips">' in index_html
     assert ".composer-status-strip > .action-chips{\n  grid-column: 1;\n  justify-self: start;\n  align-self: start;" in style_css
     assert ".composer-status-strip > .action-chips{\n  grid-column: 1;\n  justify-self: start;\n  align-self: start;\n  width: max-content;\n  max-width: 100%;\n  flex-wrap: nowrap;\n  justify-content: flex-start;\n}" in style_css
     assert ".composer-status-strip > .action-chips .action-chip{white-space:nowrap;}" in style_css
